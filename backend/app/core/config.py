@@ -1,0 +1,102 @@
+from typing import List
+from pydantic_settings import BaseSettings
+from pydantic import ConfigDict
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2].absolute()
+
+
+class Settings(BaseSettings):
+    # Project Basic Info
+    PROJECT_NAME: str = "天枢智投"
+    PROJECT_VERSION: str = "v1.0.0"
+    API_V1_STR: str = "/api/v1"
+
+    # Security Config
+    SECRET_KEY: str = "your-secret-key-here"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    APP_RELOAD: bool = True
+
+    # Initial Superuser
+    FIRST_SUPERUSER: str = "tradeuser"
+    FIRST_SUPERUSER_EMAIL: str = "tradeuser@example.com"
+    FIRST_SUPERUSER_PASSWORD: str = "tradepassword"
+
+    # Database Config
+    DATABASE_URL: str = "postgresql://tradeuser:tradepassword@postgres:5432/trading"
+
+    # Redis Config
+    REDIS_URL: str = "redis://redis:6379"
+
+    # LiteLLM Gateway Config
+    LLM_PROVIDER: str = "litellm"
+    LLM_BASE_URL: str = "http://litellm:4000/v1"
+    LLM_API_KEY: str = "sk-litellm-gateway-key"
+    LLM_MODEL: str = "backend"
+    LLM_THINKING_MODEL: str = "backend-thinking"
+    DEBATE_AGENT_PARALLEL_ENABLED: bool = True
+    ENABLE_AUTO_TRADE: bool = True
+    ASYNC_TASK_MAX_CONCURRENT: int = 8
+    PY_SANDBOX_ENABLED: bool = True
+    PY_SANDBOX_DENO_EXECUTABLE: str = "deno"
+    PY_SANDBOX_RUNNER_PATH: str = str(PROJECT_ROOT / "app/ai/agentic/tooling/pyodide_runner.ts")
+    PY_SANDBOX_PYODIDE_ROOT: str = str(Path.home() / "pyodide")
+    PY_SANDBOX_TIMEOUT_SECONDS: int = 30
+    PY_SANDBOX_STDOUT_MAX_BYTES: int = 32768
+    PY_SANDBOX_STDERR_MAX_BYTES: int = 16384
+    AGENTIC_DEPENDENCY_INSTALL_TIMEOUT_SECONDS: int = 600
+    AGENTIC_DEPENDENCY_INSTALL_MAX_REQUIREMENTS: int = 50
+    ENABLE_RUNTIME_EXTENSIONS: bool = True
+    ENABLE_MAINTENANCE_ENDPOINTS: bool = True
+    ENABLE_OPENAPI_DOCS: bool = True
+    BACKEND_CORS_ORIGINS: List[str] = []
+    CLOAKBROWSER_MAX_PAGES: int = 10
+    MARKET_WATCH_RECENT_DEBATE_LAUNCH_LOOKBACK_HOURS: int = 24
+
+    # Core Indices Config
+    CORE_INDICES: List[str] = [
+        "000300.SH",  # 沪深300: 核心资产, 沪深两市市值最大、流动性最好的300只。 / CSI 300: Core assets, top 300 large cap and high liquidity.
+        "000016.SH",  # 上证50: 蓝筹/大盘, 仅限上交所市值最大、流动性最好的50只。 / SSE 50: Blue chips, top 50 strictly in SSE.
+        "399006.SZ",  # 创业板指: 科技/创新, 深交所创业板核心股，波动大，成长性强。 / ChiNext: Tech/Innovation, high growth and volatility.
+        "000688.SH",  # 科创50: 硬科技, 仅限科创板公司，半导体、生物医药权重高。 / STAR 50: Hard tech, heavy in semi & biotech.
+    ]
+
+    # Data Source Config
+    TUSHARE_TOKEN: str = ""
+    TUSHARE_API: str = ""
+    TAVILY_API_KEY: str = ""
+    NEWS_API_KEY: str = ""
+    DEFAULT_DATA_SOURCE: str = "tushare"
+    DEFAULT_HTTP_TIMEOUT: int = 120
+    ENABLE_DATA_SOURCE_FAILOVER: bool = False
+
+    # Memory Service Config
+    MEMORY_SERVICE_ENABLED: bool = True
+    MEMORY_SERVICE_BASE_URL: str = "http://memoflux:8020"
+    MEMORY_SERVICE_TIMEOUT_SECONDS: float = 10.0
+
+    # Experience Cleanup Config
+    EXPERIENCE_CLEANUP_ENABLED: bool = True
+    EXPERIENCE_INDEX_RETENTION_DAYS: int = 7
+    EXPERIENCE_REVIEW_EVENT_RETENTION_DAYS: int = 30
+    EXPERIENCE_CLEANUP_SCHEDULE_HOUR: int = 3
+    EXPERIENCE_CLEANUP_SCHEDULE_MINUTE: int = 30
+    ASYNC_TASK_CLEANUP_ENABLED: bool = True
+    ASYNC_TASK_RETENTION_DAYS: int = 30
+    ASYNC_TASK_CLEANUP_SCHEDULE_HOUR: int = 4
+    ASYNC_TASK_CLEANUP_SCHEDULE_MINUTE: int = 0
+
+    # System Language (zh/en)
+    SYSTEM_LANGUAGE: str = "zh"
+
+    model_config = ConfigDict(
+        case_sensitive=True,
+        extra="ignore",
+        env_file=[
+            str(PROJECT_ROOT / ".env"),
+        ]
+    )
+
+
+settings = Settings()

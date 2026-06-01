@@ -1,0 +1,10 @@
+# Runtime-installed skills are managed through the settings page and should not be committed.
+*
+!.gitignore
+!.gitkeep
+
+# Keep the built-in skill bundled with the application.
+!tushare-data/
+!tushare-data/**
+tushare-data/references/*.md
+__pycache__/

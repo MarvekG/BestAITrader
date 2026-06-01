@@ -1,0 +1,209 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: best_ai_trader_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tradeuser
+      POSTGRES_PASSWORD: tradepassword
+      POSTGRES_DB: trading
+      TZ: Asia/Shanghai
+    volumes:
+      - postgres17_data:/var/lib/postgresql/data
+      - ./litellm/01-create-litellm-database.sql:/docker-entrypoint-initdb.d/01-create-litellm-database.sql:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U tradeuser -d trading" ]
+      interval: 1m
+      start_interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - best_ai_trader_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: best_ai_trader_redis
+    restart: unless-stopped
+
+    volumes:
+      - redis_data:/data
+    environment:
+      - TZ=Asia/Shanghai
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 1m
+      start_interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - best_ai_trader_network
+
+  memo-postgres:
+    image: pgvector/pgvector:pg17
+    container_name: best_ai_trader_memo_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tradeuser
+      POSTGRES_PASSWORD: tradepassword
+      POSTGRES_DB: memory
+      TZ: Asia/Shanghai
+    volumes:
+      - memo_pgvector17_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U tradeuser -d memory" ]
+      interval: 1m
+      start_interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - best_ai_trader_network
+
+  litellm:
+    image: docker.litellm.ai/berriai/litellm-non_root:latest
+    container_name: best_ai_trader_litellm
+    restart: unless-stopped
+    command: ["--config", "/run/secrets/litellm_config", "--port", "4000"]
+    secrets:
+      - litellm_config
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=5).read()\"",
+        ]
+      interval: 1m
+      start_interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - best_ai_trader_network
+
+  memoflux:
+    image: ghcr.io/marvekg/memoflux:latest
+    container_name: best_ai_trader_memoflux
+    restart: unless-stopped
+    env_file:
+      - ./memo/.env
+    environment:
+      TZ: Asia/Shanghai
+    volumes:
+      - memo_runtime_data:/home/memo/.memoflux/data
+    depends_on:
+      memo-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://127.0.0.1:8020/v1/health" ]
+      interval: 1m
+      start_interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - best_ai_trader_network
+
+  backend:
+    image: ghcr.io/marvekg/bestaitrader-backend:latest
+    container_name: best_ai_trader_backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      TZ: Asia/Shanghai
+      DATABASE_URL: postgresql://tradeuser:tradepassword@postgres:5432/trading
+      CLOAKBROWSER_CACHE_DIR: /app/runtime/cloakbrowser/cache
+      MEMORY_SERVICE_BASE_URL: http://memoflux:8020
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      memoflux:
+        condition: service_healthy
+    volumes:
+    #   - ./backend:/app # FOR DEBUG
+      - backend_runtime_data:/app/runtime
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://127.0.0.1:8000/health" ]
+      interval: 1m
+      start_interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 80s
+    networks:
+      - best_ai_trader_network
+
+  frontend:
+    image: ghcr.io/marvekg/bestaitrader-frontend:latest
+    container_name: best_ai_trader_frontend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - TZ=Asia/Shanghai
+    volumes:
+      # - ./frontend:/app # FOR DEBUG
+      - /app/node_modules
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5173/" ]
+      interval: 1m
+      start_interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - best_ai_trader_network
+
+  nginx:
+    image: nginxinc/nginx-unprivileged:alpine
+    container_name: best_ai_trader_nginx
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    ports:
+      - "80:8080"
+      - "8080:8080"
+      # LiteLLM OpenAI-compatible API and Admin UI (/ui), exposed through nginx.
+      - "4000:4000"
+    healthcheck:
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/" ]
+      interval: 1m
+      start_interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    secrets:
+      - source: nginx_config
+        target: /etc/nginx/conf.d/default.conf
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - best_ai_trader_network
+
+volumes:
+  postgres17_data:
+  redis_data:
+  memo_pgvector17_data:
+  memo_runtime_data:
+  backend_runtime_data:
+
+
+secrets:
+  litellm_config:
+    file: ./litellm/config.yaml
+  nginx_config:
+    file: ./nginx.conf
+
+networks:
+  best_ai_trader_network:
+    driver: bridge

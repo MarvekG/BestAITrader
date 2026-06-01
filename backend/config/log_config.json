@@ -1,0 +1,85 @@
+{
+    "version": 1,
+    "disable_existing_loggers": false,
+    "formatters": {
+        "json": {
+            "()": "app.core.logger.JsonFormatter",
+            "datefmt": "%Y-%m-%d %H:%M:%S"
+        },
+        "standard": {
+            "format": "[%(asctime)s %(process)d %(filename)s:%(lineno)d %(funcName)s %(levelname)s %(request_id)s] - %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S"
+        },
+        "default": {
+            "()": "uvicorn.logging.DefaultFormatter",
+            "fmt": "[%(levelprefix)s %(request_id)s] %(message)s",
+            "use_colors": null
+        },
+        "access": {
+            "()": "uvicorn.logging.AccessFormatter",
+            "fmt": "[%(levelprefix)s %(client_addr)s] - \"%(request_line)s\" %(status_code)s"
+        }
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+            "stream": "ext://sys.stdout"
+        },
+        "backend_file": {
+            "class": "concurrent_log_handler.ConcurrentRotatingFileHandler",
+            "formatter": "standard",
+            "filename": "/app/runtime/logs/backend.log",
+            "maxBytes": 10485760,
+            "backupCount": 5,
+            "encoding": "utf-8",
+            "delay": false
+        }
+    },
+    "loggers": {
+        "uvicorn": {
+            "level": "INFO",
+            "handlers": [
+                "console",
+                "backend_file"
+            ],
+            "propagate": false
+        },
+        "uvicorn.error": {
+            "level": "INFO",
+            "handlers": [
+                "console",
+                "backend_file"
+            ],
+            "propagate": false
+        },
+        "uvicorn.access": {
+            "level": "WARNING",
+            "handlers": [],
+            "propagate": false
+        },
+        "apscheduler": {
+            "level": "WARNING",
+            "handlers": [
+                "console",
+                "backend_file"
+            ],
+            "propagate": false
+        },
+        "trading_system": {
+            "level": "INFO",
+            "handlers": [
+                "console",
+                "backend_file"
+            ],
+            "propagate": false
+        },
+        "root": {
+            "level": "INFO",
+            "handlers": [
+                "console",
+                "backend_file"
+            ]
+        }
+    }
+}

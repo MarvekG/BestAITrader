@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+.env.local
+.env.*.local
+.codex
+
+# Node.js
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Testing
+coverage/
+htmlcov/
+.pytest_cache/
+
+# IDEs and editors
+.vscode/*
+.idea
+
+# Logs
+logs
+*.log
+
+# Docker
+*.dockerfile
+
+# Misc
+backend/logs
+backend/runtime/snapshots/
+docs/superpowers/
+litellm/config.yaml
+
+pyodide-*.tar.bz2
+reload-trigger.json

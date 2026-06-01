@@ -1,0 +1,4 @@
+[submodule "memo"]
+	path = memo
+	url = git@github.com:MarvekG/MemoFlux.git
+	branch = main

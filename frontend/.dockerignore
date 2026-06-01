@@ -1,0 +1,29 @@
+# Node modules
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Build output
+dist/
+build/
+public/locales/
+
+# Git
+.git/
+.gitignore
+
+# Environment
+.env
+.env.local
+
+# Tests
+coverage/
+__tests__/
+
+# IDE/Misc
+.idea/
+.vscode/
+*.swp
+*.bak
+.DS_Store

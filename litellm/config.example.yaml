@@ -1,0 +1,51 @@
+model_list:
+  # LiteLLM UI Ask AI defaults to gpt-4o-mini. Keep this compatibility alias
+  # pointed at the same non-thinking backend model so the built-in UI works
+  # without requiring a real OpenAI key.
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: deepseek/deepseek-v4-flash
+      api_key: sk-your-provider-key
+      api_base: https://api.deepseek.com
+      temperature: 0.2
+      extra_body:
+        thinking:
+          type: disabled
+
+  - model_name: backend
+    litellm_params:
+      model: deepseek/deepseek-v4-flash
+      api_key: sk-your-provider-key
+      api_base: https://api.deepseek.com
+      temperature: 0.2
+      extra_body:
+        thinking:
+          type: disabled
+
+  - model_name: backend-thinking
+    litellm_params:
+      model: deepseek/deepseek-v4-flash
+      api_key: sk-your-provider-key
+      api_base: https://api.deepseek.com
+      reasoning_effort: high
+      extra_body:
+        thinking:
+          type: enabled
+
+  - model_name: memory
+    litellm_params:
+      model: deepseek/deepseek-v4-flash
+      api_key: sk-your-provider-key
+      api_base: https://api.deepseek.com
+      temperature: 0.1
+      extra_body:
+        thinking:
+          type: disabled
+
+general_settings:
+  master_key: sk-litellm-gateway-key
+  database_url: postgresql://tradeuser:tradepassword@postgres:5432/litellm
+
+environment_variables:
+  OPENAI_API_KEY: sk-litellm-gateway-key
+  OPENAI_API_BASE: http://127.0.0.1:4000/v1

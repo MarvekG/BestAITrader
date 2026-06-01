@@ -1,0 +1,558 @@
+from datetime import date, datetime
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+from app.crud.user import create_user
+from app.models.async_task import AsyncTask
+from app.models.data_storage import FinancialIndicator, StockBasic
+from app.schemas.user import UserCreate
+
+
+def _seed_stock_basic(
+    db_session,
+    *,
+    stock_code: str,
+    name: str,
+    industry: str = "Banking",
+    market: str = "SZSE",
+):
+    record = StockBasic(
+        stock_code=stock_code,
+        name=name,
+        industry=industry,
+        market=market,
+        data_source="test",
+    )
+    db_session.add(record)
+    db_session.commit()
+    return record
+
+
+def _session_payload(stock_code: str) -> dict:
+    return {
+        "stock_code": stock_code,
+        "trading_frequency": "swing",
+        "trading_strategy": "trend_following",
+    }
+
+
+def _create_session(client, auth_headers, stock_code: str) -> str:
+    response = client.post(
+        "/api/v1/sessions/",
+        json=_session_payload(stock_code),
+        headers=auth_headers,
+    )
+    assert response.status_code == 201
+    return response.json()["session_id"]
+
+
+def _create_user(db_session, *, username: str, password: str) -> None:
+    create_user(
+        db_session,
+        UserCreate(
+            username=username,
+            email=f"{username}@example.com",
+            password=password,
+        ),
+    )
+
+
+def _create_authenticated_user(client, db_session, *, username: str):
+    password = "password123"
+    create_user(
+        db_session,
+        UserCreate(
+            username=username,
+            email=f"{username}@example.com",
+            password=password,
+        ),
+    )
+    response = client.post(
+        "/api/v1/auth/login",
+        data={"username": username, "password": password},
+    )
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+class TestAuthAPI:
+    def test_register(self, client):
+        response = client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "register_user",
+                "email": "register_user@example.com",
+                "password": "password123",
+            },
+        )
+        assert response.status_code == 403
+        assert response.json()["detail"] == "User registration is disabled"
+
+    def test_login(self, client, db_session):
+        _create_user(db_session, username="login_user", password="password123")
+        response = client.post(
+            "/api/v1/auth/login",
+            data={
+                "username": "login_user",
+                "password": "password123",
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["token_type"] == "bearer"
+
+
+class TestStockWarehouseAPI:
+    def test_get_warehouse_list(self, client, auth_headers):
+        response = client.get("/api/v1/stock-warehouse/", headers=auth_headers)
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_add_stock(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="600519.SH", name="Kweichow Moutai", industry="Liquor", market="SSE")
+
+        response = client.post(
+            "/api/v1/stock-warehouse/",
+            json={"stock_code": "600519.SH"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 201
+        assert response.json()["stock_code"] == "600519.SH"
+        assert response.json()["auto_analysis_enabled"] is False
+        assert response.json()["auto_analysis_frequency"] == "daily"
+
+    def test_update_stock_auto_analysis_config(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="600519.SH", name="Kweichow Moutai", industry="Liquor", market="SSE")
+        client.post(
+            "/api/v1/stock-warehouse/",
+            json={"stock_code": "600519.SH"},
+            headers=auth_headers,
+        )
+
+        response = client.put(
+            "/api/v1/stock-warehouse/600519.SH",
+            json={
+                "auto_analysis_enabled": True,
+                "auto_analysis_frequency": "weekly",
+                "auto_analysis_time": "09:40",
+                "auto_analysis_trading_frequency": "Swing Trading",
+                "auto_analysis_trading_strategy": "Trend Following",
+                "auto_analysis_run_immediately": True,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["auto_analysis_enabled"] is True
+        assert payload["auto_analysis_frequency"] == "weekly"
+        assert payload["auto_analysis_time"] == "09:40"
+        assert payload["auto_analysis_trading_frequency"] == "Swing Trading"
+        assert payload["auto_analysis_run_immediately"] is True
+
+    def test_update_stock_auto_analysis_rejects_null_config(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="600519.SH", name="Kweichow Moutai", industry="Liquor", market="SSE")
+        client.post(
+            "/api/v1/stock-warehouse/",
+            json={"stock_code": "600519.SH"},
+            headers=auth_headers,
+        )
+
+        response = client.put(
+            "/api/v1/stock-warehouse/600519.SH",
+            json={"auto_analysis_frequency": None},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 422
+
+    def test_stock_warehouse_entries_are_isolated_by_user(self, client, db_session):
+        _seed_stock_basic(db_session, stock_code="600519.SH", name="Kweichow Moutai", industry="Liquor", market="SSE")
+        owner_headers = _create_authenticated_user(client, db_session, username="warehouse_owner")
+        other_headers = _create_authenticated_user(client, db_session, username="warehouse_other")
+
+        create_response = client.post(
+            "/api/v1/stock-warehouse/",
+            json={"stock_code": "600519.SH"},
+            headers=owner_headers,
+        )
+        other_get_response = client.get("/api/v1/stock-warehouse/600519.SH", headers=other_headers)
+        other_list_response = client.get("/api/v1/stock-warehouse/", headers=other_headers)
+
+        assert create_response.status_code == 201
+        assert other_get_response.status_code == 404
+        assert other_list_response.status_code == 200
+        assert other_list_response.json() == []
+
+
+class TestPromptAPI:
+    def test_get_templates(self, client, auth_headers):
+        response = client.get("/api/v1/prompt/", headers=auth_headers)
+        assert response.status_code == 200
+        assert isinstance(response.json(), dict)
+        assert response.json()
+
+    def test_prompt_templates_are_read_only(self, client, auth_headers):
+        response = client.post(
+            "/api/v1/prompt/FUNDAMENTAL",
+            json={"content": "prompt override is disabled"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 405
+
+    def test_generate_prompt_endpoint_removed(self, client, auth_headers):
+        response = client.post(
+            "/api/v1/prompt/generate",
+            json={"content": "unused"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 405
+
+
+class TestSourcesAPI:
+    def test_list_sources(self, client, auth_headers):
+        response = client.get("/api/v1/sources/", headers=auth_headers)
+        assert response.status_code == 200
+        payload = response.json()
+        assert "sources" in payload
+        assert "default_source" in payload
+
+
+class TestSessionAPI:
+    def test_create_session(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+
+        response = client.post(
+            "/api/v1/sessions/",
+            json=_session_payload("000001.SZ"),
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 201
+        payload = response.json()
+        assert payload["stock_code"] == "000001.SZ"
+        assert payload["stock_name"] == "Ping An Bank"
+
+    def test_get_sessions(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+        session_id = _create_session(client, auth_headers, "000001.SZ")
+        db_session.add(
+            AsyncTask(
+                task_id="task-1",
+                task_name="AI Analysis - 000001.SZ",
+                task_type="ai_analysis",
+                status="completed",
+                parameters={"session_id": session_id},
+                completed_at=datetime(2024, 1, 2, 3, 4, 5),
+            )
+        )
+        db_session.commit()
+
+        response = client.get("/api/v1/sessions/", headers=auth_headers)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert len(payload) == 1
+        assert payload[0]["ended_at"] == "2024-01-02T03:04:05"
+
+
+class TestDataAPI:
+    def test_get_stock_data(self, client, auth_headers):
+        with patch(
+            "app.api.endpoints.data.data_storage_service.get_stock_data_from_db",
+            return_value={"stock_code": "000001.SZ", "name": "Ping An Bank"},
+        ):
+            response = client.get("/api/v1/data/stocks/000001", headers=auth_headers)
+
+        assert response.status_code == 200
+        assert response.json()["stock_code"] == "000001.SZ"
+
+    def test_get_financial_data(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="600519.SH", name="Kweichow Moutai", industry="Liquor", market="SSE")
+        db_session.add(
+            FinancialIndicator(
+                stock_code="600519.SH",
+                report_date=date(2023, 12, 31),
+                data={"roe": 0.25, "net_profit": 50000000000.0},
+                data_source="test",
+            )
+        )
+        db_session.commit()
+
+        response = client.get(
+            "/api/v1/data/db/data/financial",
+            params={"stock_code": "600519.SH"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["total"] == 1
+        item = payload["items"][0]
+        assert item["financial_indicator.stock_code"] == "600519.SH"
+        assert item["financial_indicator.report_date"] == "2023-12-31"
+        assert item["financial_indicator.data_source"] == "test"
+
+    def test_get_stock_name(self, client, auth_headers):
+        with patch(
+            "app.api.endpoints.data.data_storage_service.get_stock_basic",
+            return_value={"stock_code": "000001.SZ", "name": "Ping An Bank"},
+        ):
+            response = client.get("/api/v1/data/stock/name/000001", headers=auth_headers)
+
+        assert response.status_code == 200
+        assert response.json()["stock_name"] == "Ping An Bank"
+
+
+class TestTradingAPI:
+    def test_get_my_orders_initializes_missing_account(self, client, auth_headers):
+        response = client.get("/api/v1/trading/my-orders", headers=auth_headers)
+
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_place_order(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+        session_id = _create_session(client, auth_headers, "000001.SZ")
+
+        mocked_trade_result = {
+            "success": True,
+            "message": "order accepted",
+            "order": SimpleNamespace(order_id="order-1"),
+            "trade_result": {
+                "message": "order accepted",
+                "trade_record": {
+                    "id": "trade-1",
+                    "price": 10.0,
+                    "shares": 100,
+                    "turnover": 1000.0,
+                    "commission": 1.0,
+                    "stamp_duty": 0.0,
+                    "transfer_fee": 0.0,
+                    "total_fee": 1.0,
+                },
+            },
+        }
+
+        with patch(
+            "app.trading.service.trading_service.execute_order_and_update_db",
+            new=AsyncMock(return_value=mocked_trade_result),
+        ):
+            response = client.post(
+                "/api/v1/trading/orders",
+                json={
+                    "session_id": session_id,
+                    "stock_code": "000001",
+                    "stock_name": "Ping An Bank",
+                    "action": "buy",
+                    "order_type": "market",
+                    "price": 10.0,
+                    "shares": 100,
+                    "stop_loss": 9.5,
+                },
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 201
+        assert response.json()["success"] is True
+
+    def test_place_order_rejects_invalid_stop_loss(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+        session_id = _create_session(client, auth_headers, "000001.SZ")
+
+        response = client.post(
+            "/api/v1/trading/orders",
+            json={
+                "session_id": session_id,
+                "stock_code": "000001",
+                "stock_name": "Ping An Bank",
+                "action": "buy",
+                "order_type": "market",
+                "price": 10.0,
+                "shares": 100,
+                "stop_loss": 0,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "stop_loss must be greater than 0"
+
+    def test_place_order_rejects_missing_stop_loss_by_risk_control(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+        session_id = _create_session(client, auth_headers, "000001.SZ")
+
+        response = client.post(
+            "/api/v1/trading/orders",
+            json={
+                "session_id": session_id,
+                "stock_code": "000001",
+                "stock_name": "Ping An Bank",
+                "action": "buy",
+                "order_type": "market",
+                "price": 10.0,
+                "shares": 100,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["reason"] == "risk_control_blocked"
+        assert response.json()["detail"]["blocks"][0]["rule"] == "require_stop_loss"
+
+
+class TestAccountAPI:
+    def test_trading_page_account_reads_initialize_missing_account(self, client, auth_headers):
+        assets_response = client.get("/api/v1/accounts/my-assets", headers=auth_headers)
+        positions_response = client.get("/api/v1/accounts/my-positions", headers=auth_headers)
+
+        assert assets_response.status_code == 200
+        assert positions_response.status_code == 200
+        assert float(assets_response.json()["cash_balance"]) == 1000000.0
+        assert positions_response.json() == []
+
+    def test_get_my_account_assets(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+        _create_session(client, auth_headers, "000001.SZ")
+
+        response = client.get("/api/v1/accounts/my-assets", headers=auth_headers)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert "cash_balance" in payload
+        assert "user_id" in payload
+
+    def test_my_total_funds(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+        _create_session(client, auth_headers, "000001.SZ")
+
+        get_response = client.get("/api/v1/accounts/my-total-funds", headers=auth_headers)
+        assert get_response.status_code == 200
+
+        put_response = client.put(
+            "/api/v1/accounts/my-total-funds",
+            json={"total_funds": 200000.0},
+            headers=auth_headers,
+        )
+
+        assert put_response.status_code == 200
+        assert float(put_response.json()["total_funds"]) == 200000.0
+
+
+class TestTaskAPI:
+    def test_sync_stock_basic_async(self, client, auth_headers):
+        with patch("app.tasks.async_task_runner.async_task_runner.submit_task", return_value=True):
+            response = client.post("/api/v1/data/db/sync/stock-basic", headers=auth_headers)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "pending"
+        assert "task_id" in payload
+
+    def test_sync_stock_basic_concurrent_control(self, client, auth_headers):
+        with patch("app.tasks.async_task_runner.async_task_runner.submit_task", return_value=True):
+            first = client.post("/api/v1/data/db/sync/stock-basic", headers=auth_headers)
+            second = client.post("/api/v1/data/db/sync/stock-basic", headers=auth_headers)
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json()["task_id"] == second.json()["task_id"]
+
+    def test_sync_dragon_tiger_data(self, client, auth_headers):
+        with patch("app.tasks.async_task_runner.async_task_runner.submit_task", return_value=True):
+            response = client.post(
+                "/api/v1/data/db/sync/dragon-tiger",
+                params={"date": "2024-01-01"},
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "pending"
+        assert "2024-01-01" in payload["task_name"]
+
+    def test_get_task_status(self, client, auth_headers, db_session):
+        with patch("app.tasks.async_task_runner.async_task_runner.submit_task", return_value=True):
+            create_response = client.post("/api/v1/data/db/sync/stock-basic", headers=auth_headers)
+
+        task_id = create_response.json()["task_id"]
+        response = client.get(f"/api/v1/tasks/{task_id}", headers=auth_headers)
+
+        assert response.status_code == 200
+        assert response.json()["task_id"] == task_id
+
+    def test_get_task_list(self, client, auth_headers, db_session):
+        with patch("app.tasks.async_task_runner.async_task_runner.submit_task", return_value=True):
+            create_response = client.post("/api/v1/data/db/sync/stock-basic", headers=auth_headers)
+
+        assert create_response.status_code == 200
+
+        response = client.get(
+            "/api/v1/tasks",
+            params={"status": "pending", "task_type": "stock_basic_sync", "limit": 10, "skip": 0},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["total"] == 1
+        assert payload["limit"] == 10
+        assert payload["skip"] == 0
+
+    def test_get_task_not_found(self, client, auth_headers):
+        response = client.get("/api/v1/tasks/non-existent-task-id", headers=auth_headers)
+        assert response.status_code == 404
+
+
+class TestLLMAPI:
+    def test_llm_health_check(self, client, auth_headers):
+        response = client.get("/api/v1/llm/health", headers=auth_headers)
+        assert response.status_code == 200
+        assert response.json()["status"] == "healthy"
+
+    def test_get_llm_models(self, client, auth_headers):
+        response = client.get("/api/v1/llm/models", headers=auth_headers)
+        assert response.status_code == 200
+        payload = response.json()
+        assert "current_model" in payload
+        assert isinstance(payload["available_models"], list)
+        assert payload["available_models"]
+
+    def test_llm_test_call(self, client, auth_headers):
+        response = client.post(
+            "/api/v1/llm/test",
+            json={
+                "prompt": "Say OK",
+                "temperature": 0.7,
+                "max_tokens": 50,
+            },
+            headers=auth_headers,
+        )
+        assert response.status_code == 200
+        assert response.json()["success"] is True
+
+    def test_llm_probe_runs_without_client_input(self, client, auth_headers):
+        probe_result = {
+            "status": "success",
+            "checks": {},
+        }
+
+        with patch("app.api.endpoints.llm.run_llm_probe", new=AsyncMock(return_value=probe_result)) as mock_probe:
+            response = client.get(
+                "/api/v1/llm/probe",
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 200
+        assert response.json() == probe_result
+        mock_probe.assert_awaited_once_with()
+
+    def test_llm_probe_rejects_client_input(self, client, auth_headers):
+        response = client.post(
+            "/api/v1/llm/probe",
+            json={"prompt": "unused"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 405
