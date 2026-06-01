@@ -1,5 +1,7 @@
 # 天枢智投 (Best-AI-Trader)
 
+[系统示例：v0.1.0 Release](https://github.com/MarvekG/BestAITrader/releases/tag/v0.1.0)
+
 天枢智投（Best-AI-Trader）是一个面向 A 股投研、AI 多智能体决策、模拟交易、长期记忆和经验复盘的下一代智能交易系统。
 
 它基于 LLM、Agentic Workflow、工具调用、Skills、长期记忆和后验经验复盘等先进 AI 技术，构建可执行、可审计、可持续进化的智能投研闭环。
