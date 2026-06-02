@@ -1596,13 +1596,13 @@ class ExperienceService:
                 continue
             result = entry.get("result") if isinstance(entry.get("result"), dict) else {}
             stock_code = str(args.get("stock_code") or result.get("stock_code") or "").strip() or None
-            memory_scope = str(result.get("memory_scope") or "").strip().lower()
-            if memory_scope not in {"stock", "general"}:
-                memory_scope = "stock" if stock_code else "general"
+            memo_session = str(result.get("memo_session") or "").strip().lower()
+            if memo_session not in {"stock", "general"}:
+                memo_session = "stock" if stock_code else "general"
             item: Dict[str, Any] = {
                 "content": content,
                 "importance": _normalize_memory_importance(args.get("importance")),
-                "memory_scope": memory_scope,
+                "memo_session": memo_session,
                 "stock_code": stock_code,
             }
             for key in ("status", "observation_id", "source_id", "error"):
@@ -1627,13 +1627,13 @@ class ExperienceService:
             if not content:
                 continue
             stock_code = str(item.get("stock_code") or "").strip() or None
-            memory_scope = str(item.get("memory_scope") or "").strip().lower()
-            if memory_scope not in {"stock", "general"}:
-                memory_scope = "stock" if stock_code else "general"
+            memo_session = str(item.get("memo_session") or "").strip().lower()
+            if memo_session not in {"stock", "general"}:
+                memo_session = "stock" if stock_code else "general"
             normalized_item: Dict[str, Any] = {
                 "content": content,
                 "importance": _normalize_memory_importance(item.get("importance")),
-                "memory_scope": memory_scope,
+                "memo_session": memo_session,
                 "stock_code": stock_code,
             }
             for key in ("status", "observation_id", "source_id", "error"):

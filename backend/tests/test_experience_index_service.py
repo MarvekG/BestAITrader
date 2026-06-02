@@ -83,7 +83,7 @@ def _review_result(session, *, review_run_id="review-1"):
                 {
                     "content": "行业强势但回撤扩大会降低加仓胜率，应等待成交确认后再提高仓位。",
                     "importance": "high",
-                    "memory_scope": "stock",
+                    "memo_session": "stock",
                     "stock_code": session.stock_code,
                     "status": "success",
                     "observation_id": "obs-memory-1",

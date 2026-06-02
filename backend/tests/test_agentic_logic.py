@@ -769,13 +769,13 @@ async def test_recall_memory_tool_surfaces_memory_backend_failure():
 
     assert result["data"] == {}
     assert result["count"] == 0
-    assert result["memory_scope"] == "stock"
+    assert result["memo_session"] == "stock"
     assert result["stock_code"] == "000001.SZ"
     assert result["error"] == "memory backend timeout"
 
 
 @pytest.mark.asyncio
-async def test_write_memory_tool_passes_minimal_scope_inputs():
+async def test_write_memory_tool_passes_minimal_session_inputs():
     tools = build_memory_tools(
         state={
             "user_id": 7,
@@ -802,7 +802,7 @@ async def test_write_memory_tool_passes_minimal_scope_inputs():
     assert payload["user_id"] == 7
     assert payload["stock_code"] == "000001.SZ"
     assert payload["content"] == "This breakout only works when northbound inflow confirms within 2 sessions."
-    assert result["memory_scope"] == "stock"
+    assert result["memo_session"] == "stock"
     assert result["stock_code"] == "000001.SZ"
 
 
@@ -857,7 +857,7 @@ async def test_write_memory_tool_uses_state_stock_code_without_tool_args():
     payload = mock_write.await_args.kwargs
     assert payload["stock_code"] == "000001.SZ"
     assert payload["content"] == "通用规则：先看证据质量，再决定是否扩大仓位。"
-    assert result["memory_scope"] == "stock"
+    assert result["memo_session"] == "stock"
     assert result["stock_code"] == "000001.SZ"
 
 
@@ -893,7 +893,7 @@ async def test_recall_memory_tool_returns_memoflux_data_shape():
         result = await recall_tool.ainvoke({"query": "之前的通用规则是什么？"})
 
     assert result["count"] == 1
-    assert result["memory_scope"] == "stock"
+    assert result["memo_session"] == "stock"
     assert result["stock_code"] == "000001.SZ"
     assert result["data"]["answer"] == "通用规则：先看证据质量，再决定是否扩大仓位。"
     assert result["data"]["references"][0]["memory_id"] == "mem_1"
@@ -928,7 +928,7 @@ async def test_write_memory_tool_uses_memory_client_request_adapter():
         })
 
     assert result["success"] is True
-    assert result["memory_scope"] == "stock"
+    assert result["memo_session"] == "stock"
     assert result["stock_code"] == "000001.SZ"
     payload = mock_post.await_args.args[1]
     assert mock_post.await_args.args[0] == "/v1/ingest"

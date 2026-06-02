@@ -233,7 +233,7 @@ async def test_recall_uses_general_scope_sentinel_when_stock_code_missing(monkey
 
 
 @pytest.mark.asyncio
-async def test_preview_memories_uses_stock_memory_scope_when_user_and_stock_are_present(monkeypatch):
+async def test_preview_memories_uses_stock_session_when_user_and_stock_are_present(monkeypatch):
     client = MemoryServiceClient()
     mock_get = AsyncMock(return_value={"data": {"items": [], "next_cursor": None}, "error": None})
     monkeypatch.setattr(client, "_get", mock_get)
@@ -256,7 +256,7 @@ async def test_preview_memories_uses_stock_memory_scope_when_user_and_stock_are_
 
 
 @pytest.mark.asyncio
-async def test_preview_memories_uses_user_scope_prefix_when_stock_is_missing(monkeypatch):
+async def test_preview_memories_uses_user_session_prefix_when_stock_is_missing(monkeypatch):
     client = MemoryServiceClient()
     mock_get = AsyncMock(return_value={"data": {"items": [], "next_cursor": None}, "error": None})
     monkeypatch.setattr(client, "_get", mock_get)

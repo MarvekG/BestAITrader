@@ -243,6 +243,38 @@ async def test_memory_recall_audits_testing_endpoint_defaults_to_probe_session()
 
 
 @pytest.mark.asyncio
+async def test_memory_recall_audits_testing_endpoint_adds_stable_audit_id():
+    mock_audits = AsyncMock(
+        return_value={
+            "data": {
+                "items": [
+                    {"audit_type": "query", "query_id": "query-1", "status": "ok"},
+                    {"audit_type": "delete", "delete_id": "delete-1", "status": "ok"},
+                ],
+                "next_cursor": None,
+            },
+            "error": None,
+        }
+    )
+
+    with patch("app.api.endpoints.testing.memory_client.preview_recall_audits", mock_audits), \
+         patch("app.api.endpoints.testing.memory_client.get_last_error", return_value=None), \
+         patch.object(type(memory_client), "enabled", new_callable=PropertyMock, return_value=True):
+        result = await run_memory_recall_audits_endpoint(
+            user_id=MEMORY_TEST_USER_ID,
+            stock_code=MEMORY_TEST_STOCK_CODE,
+            status=None,
+            error_code=None,
+            limit=20,
+            offset=0,
+        )
+
+    assert result["status"] == "success"
+    assert result["data"]["items"][0]["audit_id"] == "query-1"
+    assert result["data"]["items"][1]["audit_id"] == "delete-1"
+
+
+@pytest.mark.asyncio
 async def test_memory_preview_testing_endpoint_returns_error_when_disabled():
     with patch.object(type(memory_client), "enabled", new_callable=PropertyMock, return_value=False):
         result = await run_memory_preview_endpoint(

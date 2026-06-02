@@ -293,7 +293,7 @@ async def test_review_records_write_memory_result_metadata(monkeypatch):
                 "success": True,
                 "status": "accepted",
                 "observation_id": "obs_1",
-                "memory_scope": "stock",
+                "memo_session": "stock",
                 "stock_code": "601888.SH",
             }
 
@@ -342,11 +342,11 @@ async def test_review_records_write_memory_result_metadata(monkeypatch):
     written_memory = result["analysis_payload"]["written_memories"][0]
     assert "event_id" not in trace_result
     assert trace_result["observation_id"] == "obs_1"
-    assert trace_result["memory_scope"] == "stock"
+    assert trace_result["memo_session"] == "stock"
     assert trace_result["stock_code"] == "601888.SH"
     assert "event_id" not in written_memory
     assert written_memory["observation_id"] == "obs_1"
-    assert written_memory["memory_scope"] == "stock"
+    assert written_memory["memo_session"] == "stock"
     assert written_memory["stock_code"] == "601888.SH"
 
 

@@ -216,11 +216,11 @@ export const ExperiencePage: React.FC = () => {
     (value: string) => t(`experience.correctness_statuses.${value}`),
     [t],
   );
-  const getMemoryScopeLabel = React.useCallback((value?: string) => {
+  const getMemoSessionLabel = React.useCallback((value?: string) => {
     if (value === 'stock') {
-      return t('experience.memory_scope_stock');
+      return t('experience.memo_session_stock');
     }
-    return t('experience.memory_scope_general');
+    return t('experience.memo_session_general');
   }, [t]);
   const getMemoryImportanceLabel = React.useCallback((value?: string) => {
     if (value === 'low') {
@@ -786,7 +786,7 @@ export const ExperiencePage: React.FC = () => {
               <ReviewTriadCards triads={analyzeResult.analysis_payload?.review_triads} />
               <WrittenMemoryCards
                 memories={analyzeResult.analysis_payload?.written_memories || []}
-                getMemoryScopeLabel={getMemoryScopeLabel}
+                getMemoSessionLabel={getMemoSessionLabel}
                 getMemoryImportanceLabel={getMemoryImportanceLabel}
               />
             </Space>
@@ -853,8 +853,8 @@ export const ExperiencePage: React.FC = () => {
                         <Space key={`${item.content || 'memory'}-${index}`} direction="vertical" size={4} style={{ width: '100%' }}>
                           <Space wrap>
                             <Text strong>{`${index + 1}.`}</Text>
-                            <Tag color={item.memory_scope === 'stock' ? 'blue' : 'default'}>
-                              {getMemoryScopeLabel(item.memory_scope)}
+                            <Tag color={item.memo_session === 'stock' ? 'blue' : 'default'}>
+                              {getMemoSessionLabel(item.memo_session)}
                             </Tag>
                             <Tag>{getMemoryImportanceLabel(item.importance)}</Tag>
                             {item.stock_code ? <Tag>{item.stock_code}</Tag> : null}
