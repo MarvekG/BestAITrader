@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -563,6 +564,56 @@ class TestAccountAPI:
 
         assert put_response.status_code == 200
         assert float(put_response.json()["total_funds"]) == 200000.0
+
+    def test_my_total_funds_uses_dynamic_portfolio_valuation(self, client, auth_headers, db_session):
+        from datetime import datetime
+
+        from app.models.account import Account
+        from app.models.data_storage import StockRealtimeMarket
+        from app.models.position import Position
+        from app.models.user import User
+
+        user = db_session.query(User).filter(User.username.like("test_%")).first()
+        account = Account(
+            user_id=user.id,
+            total_assets=Decimal("1000000.0000"),
+            available_cash=Decimal("300000.0000"),
+            frozen_cash=Decimal("10000.0000"),
+            market_value=Decimal("100000.0000"),
+            initial_capital=Decimal("1000000.0000"),
+            total_profit_loss=Decimal("0.0000"),
+        )
+        db_session.add(account)
+        db_session.flush()
+        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+        db_session.add_all([
+            StockRealtimeMarket(
+                stock_code="000001.SZ",
+                current_price=Decimal("12.0000"),
+                timestamp=datetime(2026, 6, 2, 10, 0, 0),
+            ),
+            Position(
+                account_id=account.account_id,
+                stock_code="000001.SZ",
+                total_shares=10000,
+                available_shares=10000,
+                frozen_shares=0,
+                avg_cost=Decimal("10.0000"),
+                current_price=Decimal("10.0000"),
+                market_value=Decimal("100000.0000"),
+                profit_loss=Decimal("0.0000"),
+                profit_loss_pct=Decimal("0.0000"),
+                purchase_details={"ledger": []},
+            ),
+        ])
+        db_session.commit()
+
+        response = client.get("/api/v1/accounts/my-total-funds", headers=auth_headers)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert float(payload["market_value"]) == 120000.0
+        assert float(payload["total_funds"]) == 430000.0
 
 
 class TestTaskAPI:

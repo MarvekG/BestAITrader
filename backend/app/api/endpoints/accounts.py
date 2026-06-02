@@ -107,13 +107,15 @@ async def get_my_total_funds(
     """
     try:
         account = ensure_user_account(db, current_user)
+        valuation = build_portfolio_valuation(db, account)
+        summary = valuation["summary"]
 
         return {
             "user_id": current_user.id,
-            "total_funds": account.total_assets,
-            "cash_balance": account.available_cash,
-            "frozen_cash": account.frozen_cash,
-            "market_value": account.market_value
+            "total_funds": summary["total_assets_decimal"],
+            "cash_balance": summary["available_cash_decimal"],
+            "frozen_cash": summary["frozen_cash_decimal"],
+            "market_value": summary["market_value_decimal"],
         }
     except HTTPException:
         raise
