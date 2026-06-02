@@ -11,6 +11,7 @@ from app.api.ownership import (
 )
 from app.crud.order import crud_order
 from app.models.order import Order
+from app.schemas.order import OrderUpdate, PlaceOrderRequest
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.trade_record import TradeRecord
@@ -37,23 +38,22 @@ trading_engine = TradingEngine()
 
 @router.post("/orders", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
 async def place_order(
-    order: Dict[str, Any],
+    order: PlaceOrderRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Place order"""
     try:
-        session_id_str = order.get("session_id")
-        session_id = UUID(session_id_str) if session_id_str else None
-        stock_code = order.get("stock_code")
-        action = order.get("action")
-        stop_loss = order.get("stop_loss")
+        session_id = order.session_id
+        stock_code = order.stock_code
+        action = order.action.value
+        stop_loss = order.stop_loss
 
         # Standardize stock code using existing utility
         if stock_code:
             stock_code = StockCodeStandardizer.standardize(stock_code)
 
-        stock_name = order.get("stock_name")
+        stock_name = order.stock_name
 
         # [FEATURE] If stock_name is missing, try to fetch it from database
         if not stock_name and stock_code:
@@ -71,18 +71,7 @@ async def place_order(
         if session_id:
             get_owned_session(db, session_id, current_user)
 
-        if action == "buy":
-            if stop_loss in (None, ""):
-                stop_loss = None
-            else:
-                try:
-                    stop_loss = float(stop_loss)
-                except (TypeError, ValueError):
-                    raise HTTPException(status_code=400, detail="Invalid stop_loss")
-
-                if stop_loss <= 0:
-                    raise HTTPException(status_code=400, detail="stop_loss must be greater than 0")
-        else:
+        if action != "buy":
             stop_loss = None
 
         risk_result = portfolio_risk_control_service.evaluate_order(
@@ -90,9 +79,9 @@ async def place_order(
             account=account,
             stock_code=stock_code,
             action=action,
-            shares=int(order.get("shares") or 0),
-            price=float(order.get("price") or 0),
-            order_type=order.get("order_type", "market"),
+            shares=order.shares,
+            price=order.price,
+            order_type=order.order_type.value,
             stop_loss=stop_loss,
         )
         if risk_result["blocks"]:
@@ -117,11 +106,17 @@ async def place_order(
             account=account,
             stock_code=stock_code,
             action=action,
-            shares=order.get("shares"),
-            price=order.get("price"),
-            order_type=order.get("order_type", "market"),
+            shares=order.shares,
+            price=order.price,
+            order_type=order.order_type.value,
             stop_loss=stop_loss,
         )
+
+        order_payload = order.model_dump(mode="json")
+        order_payload["stock_code"] = stock_code
+        order_payload["action"] = action
+        order_payload["order_type"] = order.order_type.value
+        order_payload["stop_loss"] = stop_loss
 
         if order_result["success"]:
             logger.info("[AUTO_TRADE] Order processed via TradingService")
@@ -133,7 +128,7 @@ async def place_order(
             return {
                 "success": False,
                 "message": order_result["message"],
-                "order": order
+                "order": order_payload
             }
 
         # 返回前端期望的格式 (Maintain backward compatibility for return schema)
@@ -142,7 +137,7 @@ async def place_order(
         return {
             "success": True,
             "message": order_result["trade_result"]["message"],
-            "order": order,
+            "order": order_payload,
             "risk_control": risk_result,
             "trade_record": {
                 "id": str(trade_data["id"]),
@@ -327,7 +322,7 @@ async def get_order(
 @router.put("/orders/{order_id}", response_model=Dict[str, Any])
 async def update_order(
     order_id: UUID,
-    order_update: Dict[str, Any],
+    order_update: OrderUpdate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -345,7 +340,8 @@ async def update_order(
             }
 
         # Update order
-        updated_order = crud_order.update(db, db_obj=order, obj_in=order_update)
+        update_data = order_update.model_dump(exclude_unset=True)
+        updated_order = crud_order.update(db, db_obj=order, obj_in=update_data)
 
         # Convert to response format
         s_name = db.query(StockBasic.name).filter(StockBasic.stock_code ==
