@@ -390,7 +390,7 @@ class TestTradingAPI:
                 "stock_code": "000001",
                 "stock_name": "Ping An Bank",
                 "action": "buy",
-                "order_type": "market",
+                "order_type": "limit",
                 "price": 10.0,
                 "shares": 100,
             },
@@ -400,6 +400,51 @@ class TestTradingAPI:
         assert response.status_code == 400
         assert response.json()["detail"]["reason"] == "risk_control_blocked"
         assert response.json()["detail"]["blocks"][0]["rule"] == "require_stop_loss"
+
+    def test_place_order_returns_400_when_service_risk_control_blocks(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+        session_id = _create_session(client, auth_headers, "000001.SZ")
+        risk_result = {
+            "enabled": True,
+            "passed": False,
+            "severity": "block",
+            "accepted": [],
+            "blocks": [{"rule": "require_stop_loss", "message": "blocked"}],
+            "metrics": {},
+        }
+
+        mocked_trade_result = {
+            "success": False,
+            "reason": "risk_control_blocked",
+            "message": "Order blocked by portfolio risk control",
+            "risk_control": risk_result,
+        }
+
+        with patch(
+            "app.risk_control.service.portfolio_risk_control_service.evaluate_order",
+        ) as mock_precheck, patch(
+            "app.trading.service.trading_service.execute_order_and_update_db",
+            new=AsyncMock(return_value=mocked_trade_result),
+        ):
+            response = client.post(
+                "/api/v1/trading/orders",
+                json={
+                    "session_id": session_id,
+                    "stock_code": "000001",
+                    "stock_name": "Ping An Bank",
+                    "action": "buy",
+                    "order_type": "market",
+                    "price": 10.0,
+                    "shares": 100,
+                    "stop_loss": 9.5,
+                },
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["reason"] == "risk_control_blocked"
+        assert response.json()["detail"]["risk_control"] == risk_result
+        mock_precheck.assert_not_called()
 
     def test_place_order_rejects_invalid_action_schema(self, client, auth_headers, db_session):
         _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")

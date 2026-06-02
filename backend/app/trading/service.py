@@ -12,6 +12,8 @@ from app.models.trade_record import TradeRecord
 from app.models.debate_message import DebateMessage
 from app.websocket.manager import ws_manager
 from app.ai.llm_engine.roles import AGENT_ROLE_PORTFOLIO_MANAGER
+from app.data.storage import data_storage_service
+from app.risk_control.service import portfolio_risk_control_service
 
 logger = get_logger(__name__)
 
@@ -57,6 +59,73 @@ def _merge_purchase_details_with_stop_loss(purchase_details: Any, stop_loss: Dec
     return details
 
 
+def _resolve_order_price(stock_code: str, order_type: str, price: float) -> float | None:
+    """
+    解析最终用于风控和交易执行的订单价格。
+
+    Args:
+        stock_code: 股票代码。
+        order_type: 订单类型。
+        price: 请求价格。
+
+    Returns:
+        可执行价格；市价单行情不可用时返回 None。
+    """
+    if order_type != "market":
+        return float(price)
+
+    try:
+        realtime_data = data_storage_service.get_stock_realtime_market(stock_code)
+        latest_price = realtime_data.get("latest_price") if realtime_data else None
+        if latest_price:
+            return float(latest_price)
+    except Exception as exc:
+        logger.error("Failed to obtain market price for stock", extra={"stock_code": stock_code, "error": str(exc)})
+    return None
+
+
+def _evaluate_order_risk_with_execution_cost(
+    db: Session,
+    engine: TradingEngine,
+    account: Account,
+    stock_code: str,
+    action: str,
+    shares: int,
+    resolved_price: float,
+    order_type: str,
+    stop_loss: Decimal | None,
+) -> dict[str, Any]:
+    """
+    使用实际执行价格和交易费用执行组合风控评估。
+
+    Args:
+        db: 数据库会话。
+        engine: 交易引擎实例。
+        account: 已加锁的账户对象。
+        stock_code: 股票代码。
+        action: 交易方向。
+        shares: 交易股数。
+        resolved_price: 已解析的实际执行价格。
+        order_type: 订单类型。
+        stop_loss: 买入止损价。
+
+    Returns:
+        组合风控评估结果。
+    """
+    estimated_fee = engine.calculate_fee(resolved_price, shares, action == "buy")["total_fee"]
+    return portfolio_risk_control_service.evaluate_order(
+        db,
+        account=account,
+        stock_code=stock_code,
+        action=action,
+        shares=shares,
+        price=resolved_price,
+        order_type=order_type,
+        stop_loss=float(stop_loss) if stop_loss is not None else None,
+        estimated_fee=estimated_fee,
+    )
+
+
 class TradingService:
     def __init__(self):
         self.engine = TradingEngine()
@@ -74,32 +143,30 @@ class TradingService:
         stop_loss: float | None = None,
     ) -> Dict[str, Any]:
         """
-        执行订单并同步更新数据库中的账户和持仓信息
-        Execute order and sync update Account and Position in DB
+        在账户和持仓锁内完成最终风控、撮合执行和数据库同步。
+
+        Args:
+            db: 数据库会话。
+            session_id: 关联的投研会话 ID；手动下单可为空。
+            account: 当前用户账户。
+            stock_code: 股票代码。
+            action: 交易方向。
+            shares: 交易股数。
+            price: 请求价格。
+            order_type: 订单类型。
+            stop_loss: 买入止损价。
+
+        Returns:
+            交易执行结果；风控阻断时包含 `reason=risk_control_blocked` 和风控详情。
+
+        Raises:
+            ValueError: 加锁后无法找到目标账户时抛出。
         """
         locked_account = db.query(Account).filter(
             Account.account_id == account.account_id
         ).with_for_update().first()
         if not locked_account:
             raise ValueError(f"Account {account.account_id} not found during trade execution")
-
-        # 1. 构造初始订单记录
-        order = Order(
-            session_id=session_id,
-            account_id=locked_account.account_id,
-            stock_code=stock_code,
-            action=action,
-            order_type=order_type,
-            price=price,
-            shares=shares,
-            status="pending",
-            # 记录订单来源：AI自动交易包含session_id，否则为手动下单
-            # Record order source: AI auto-trade includes session_id, otherwise manual
-            source=f"ai:{session_id}" if session_id else "manual"
-        )
-        db.add(order)
-        db.flush()
-        db.refresh(order)
 
         # 2. 准备交易引擎所需的字典数据
         account_dict = {
@@ -118,13 +185,57 @@ class TradingService:
             session_stop_loss = _extract_session_stop_loss(db, session_id)
 
         position_dict = self.engine.build_position_snapshot(position) if position else None
+        resolved_price = _resolve_order_price(stock_code, order_type, price)
+        if resolved_price is None or resolved_price <= 0:
+            return {
+                "success": False,
+                "message": "Market price unavailable, cannot execute market order",
+                "reason": "market_price_unavailable",
+            }
+
+        risk_result = _evaluate_order_risk_with_execution_cost(
+            db,
+            self.engine,
+            locked_account,
+            stock_code,
+            action,
+            shares,
+            resolved_price,
+            order_type,
+            session_stop_loss,
+        )
+        if risk_result["blocks"]:
+            return {
+                "success": False,
+                "message": "Order blocked by portfolio risk control",
+                "reason": "risk_control_blocked",
+                "risk_control": risk_result,
+            }
+
+        # 1. 构造初始订单记录
+        order = Order(
+            session_id=session_id,
+            account_id=locked_account.account_id,
+            stock_code=stock_code,
+            action=action,
+            order_type=order_type,
+            price=resolved_price if order_type == "market" else price,
+            shares=shares,
+            status="pending",
+            # 记录订单来源：AI自动交易包含session_id，否则为手动下单
+            # Record order source: AI auto-trade includes session_id, otherwise manual
+            source=f"ai:{session_id}" if session_id else "manual"
+        )
+        db.add(order)
+        db.flush()
+        db.refresh(order)
 
         order_params = {
             "id": order.order_id,
             "session_id": session_id,
             "action": action,
             "shares": shares,
-            "price": price,
+            "price": resolved_price,
             "order_type": order_type,
             "stock_code": stock_code
         }
@@ -329,7 +440,7 @@ class TradingService:
                 "trade_time": datetime.now().isoformat()
             })
 
-            return {"success": True, "order": order, "trade_result": trade_result}
+            return {"success": True, "order": order, "trade_result": trade_result, "risk_control": risk_result}
         else:
             logger.warning(f"❌ [TradingService] Order execution failed: {trade_result['message']}")
             order.status = "rejected"

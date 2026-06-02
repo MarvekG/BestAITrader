@@ -25,7 +25,6 @@ from datetime import datetime
 from app.core.database import get_db
 from app.core.logger import get_logger
 from app.crud.account import ensure_user_account
-from app.risk_control.service import portfolio_risk_control_service
 
 # Get logger
 logger = get_logger(__name__)
@@ -74,28 +73,6 @@ async def place_order(
         if action != "buy":
             stop_loss = None
 
-        risk_result = portfolio_risk_control_service.evaluate_order(
-            db,
-            account=account,
-            stock_code=stock_code,
-            action=action,
-            shares=order.shares,
-            price=order.price,
-            order_type=order.order_type.value,
-            stop_loss=stop_loss,
-        )
-        if risk_result["blocks"]:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "reason": "risk_control_blocked",
-                    "message": "Order blocked by portfolio risk control",
-                    "blocks": risk_result["blocks"],
-                    "accepted": risk_result["accepted"],
-                    "metrics": risk_result["metrics"],
-                },
-            )
-
         from app.trading.service import trading_service
 
         # 使用 TradingService 统一处理订单执行和数据库更新
@@ -125,6 +102,18 @@ async def place_order(
             logger.warning(f"❌ [AUTO_TRADE] Order service execution failed: {msg}")
 
         if not order_result["success"]:
+            if order_result.get("reason") == "risk_control_blocked":
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "reason": "risk_control_blocked",
+                        "message": order_result["message"],
+                        "risk_control": order_result["risk_control"],
+                        "blocks": order_result["risk_control"].get("blocks", []),
+                        "accepted": order_result["risk_control"].get("accepted", []),
+                        "metrics": order_result["risk_control"].get("metrics", {}),
+                    },
+                )
             return {
                 "success": False,
                 "message": order_result["message"],
@@ -138,7 +127,7 @@ async def place_order(
             "success": True,
             "message": order_result["trade_result"]["message"],
             "order": order_payload,
-            "risk_control": risk_result,
+            "risk_control": order_result.get("risk_control"),
             "trade_record": {
                 "id": str(trade_data["id"]),
                 "order_id": str(order_result["order"].order_id),
