@@ -36,6 +36,7 @@ import { getApiErrorMessage } from '../../utils/errorUtils';
 const STOCK_ANALYSIS_TASK_TYPE = 'stock_analysis';
 const FINISHED_TASK_STATUS = new Set(['completed', 'failed', 'cancelled']);
 const STOCK_ANALYSIS_HISTORY_PAGE_SIZE = 10;
+const DEBATE_SESSIONS_REFRESH_EVENT = 'debate-sessions-refresh';
 
 interface StockOption {
   value: string;
@@ -126,6 +127,16 @@ export const DebateManagementPanel: React.FC = () => {
 
   useEffect(() => {
     fetchSessions();
+  }, [fetchSessions]);
+
+  useEffect(() => {
+    const handleDebateSessionsRefresh = () => {
+      void fetchSessions();
+    };
+    window.addEventListener(DEBATE_SESSIONS_REFRESH_EVENT, handleDebateSessionsRefresh);
+    return () => {
+      window.removeEventListener(DEBATE_SESSIONS_REFRESH_EVENT, handleDebateSessionsRefresh);
+    };
   }, [fetchSessions]);
 
   const handleResume = (session: Session) => {
