@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -304,3 +304,94 @@ async def test_memory_observability_uses_memoflux_endpoints(monkeypatch):
     assert mock_get.await_args_list[1].args[0] == "/v1/usage/stats"
     assert "params" not in mock_get.await_args_list[1].kwargs
     assert mock_delete.await_args.args[0] == "/v1/usage/stats"
+
+
+@pytest.mark.asyncio
+async def test_memory_client_reuses_async_client_between_requests(monkeypatch):
+    client = MemoryServiceClient()
+    created_clients = []
+
+    class _ReusableAsyncClient:
+        def __init__(self, *args, **kwargs):
+            created_clients.append(self)
+
+        async def post(self, url, json, headers=None, timeout=None):
+            del url, json, headers, timeout
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", "http://memoflux/v1/recall"),
+                json={"data": {"answer": "ok", "references": []}},
+            )
+
+    monkeypatch.setattr("app.ai.memory_client.httpx.AsyncClient", _ReusableAsyncClient)
+    with patch("app.ai.memory_client.settings.MEMORY_SERVICE_ENABLED", True), \
+         patch("app.ai.memory_client.settings.MEMORY_SERVICE_BASE_URL", "http://memoflux"):
+        await client.recall(user_id=7, stock_code="000001.SZ", query="first query")
+        await client.recall(user_id=7, stock_code="000001.SZ", query="second query")
+
+    assert len(created_clients) == 1
+
+
+@pytest.mark.asyncio
+async def test_memory_client_passes_per_request_timeout_to_reused_client(monkeypatch):
+    client = MemoryServiceClient()
+    request_timeouts = []
+
+    class _TimeoutRecordingAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def post(self, url, json, headers=None, timeout=None):
+            del url, json, headers
+            request_timeouts.append(timeout)
+            return httpx.Response(
+                200,
+                request=httpx.Request("POST", "http://memoflux/v1/recall"),
+                json={"data": {"answer": "ok", "references": []}},
+            )
+
+    monkeypatch.setattr("app.ai.memory_client.httpx.AsyncClient", _TimeoutRecordingAsyncClient)
+    with patch("app.ai.memory_client.settings.MEMORY_SERVICE_ENABLED", True), \
+         patch("app.ai.memory_client.settings.MEMORY_SERVICE_BASE_URL", "http://memoflux"), \
+         patch("app.ai.memory_client.settings.MEMORY_SERVICE_TIMEOUT_SECONDS", 5.0):
+        await client.write_memory(user_id=7, stock_code="000001.SZ", content="risk lesson")
+        await client.recall(user_id=7, stock_code="000001.SZ", query="risk lesson")
+
+    assert request_timeouts == [5.0, 30.0]
+
+
+@pytest.mark.asyncio
+async def test_memory_client_close_resets_reused_async_client(monkeypatch):
+    client = MemoryServiceClient()
+    closed_clients = []
+
+    class _ClosableAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def aclose(self):
+            closed_clients.append(self)
+
+    monkeypatch.setattr("app.ai.memory_client.httpx.AsyncClient", _ClosableAsyncClient)
+
+    created_client = client._get_client()
+    await client.close()
+
+    assert closed_clients == [created_client]
+    assert client._client is None
+
+
+def test_record_error_uses_stable_http_status_message():
+    client = MemoryServiceClient()
+    request = httpx.Request("POST", "http://memoflux/v1/recall")
+    response = httpx.Response(503, request=request, json={"detail": "backend warming up"})
+
+    client._record_error("recall", "/v1/recall", httpx.HTTPStatusError("raw upstream text", request=request, response=response))
+
+    assert client.get_last_error("recall") == {
+        "operation": "recall",
+        "path": "/v1/recall",
+        "message": "Memory service HTTP 503: backend warming up",
+        "error_type": "HTTPStatusError",
+        "status_code": 503,
+    }

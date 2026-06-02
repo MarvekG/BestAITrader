@@ -61,7 +61,10 @@ def _utc_now_iso() -> str:
 
 class MemoryServiceClient:
     def __init__(self) -> None:
+        """初始化 MemoFlux 客户端状态。"""
+
         self._last_errors: dict[str, dict[str, Any]] = {}
+        self._client: httpx.AsyncClient | None = None
 
     @property
     def enabled(self) -> bool:
@@ -73,6 +76,25 @@ class MemoryServiceClient:
 
     def clear_last_error(self, operation: str) -> None:
         self._last_errors.pop(operation, None)
+
+    def _get_client(self) -> httpx.AsyncClient:
+        """获取复用的 MemoFlux HTTP 客户端。
+
+        Returns:
+            可复用的异步 HTTP 客户端。
+        """
+
+        if self._client is None:
+            self._client = httpx.AsyncClient(timeout=settings.MEMORY_SERVICE_TIMEOUT_SECONDS)
+        return self._client
+
+    async def close(self) -> None:
+        """关闭复用的 MemoFlux HTTP 客户端连接池。"""
+
+        if self._client is None:
+            return
+        await self._client.aclose()
+        self._client = None
 
     async def check_embedding_health(self) -> dict[str, Any]:
         if not self.enabled:
@@ -333,20 +355,25 @@ class MemoryServiceClient:
             self._summarize_payload(payload),
         )
         try:
-            async with httpx.AsyncClient(timeout=timeout_seconds or settings.MEMORY_SERVICE_TIMEOUT_SECONDS) as client:
-                response = await client.post(url, json=payload, headers={"x-request-id": request_id})
-                response.raise_for_status()
-                body = response.json()
-                logger.info(
-                    "Memory service request succeeded: operation=%s path=%s status_code=%s elapsed_ms=%s response=%s",
-                    operation,
-                    path,
-                    response.status_code,
-                    round((perf_counter() - started) * 1000, 2),
-                    self._summarize_response(body),
-                )
-                self.clear_last_error(operation)
-                return body
+            client = self._get_client()
+            response = await client.post(
+                url,
+                json=payload,
+                headers={"x-request-id": request_id},
+                timeout=timeout_seconds or settings.MEMORY_SERVICE_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            body = response.json()
+            logger.info(
+                "Memory service request succeeded: operation=%s path=%s status_code=%s elapsed_ms=%s response=%s",
+                operation,
+                path,
+                response.status_code,
+                round((perf_counter() - started) * 1000, 2),
+                self._summarize_response(body),
+            )
+            self.clear_last_error(operation)
+            return body
         except Exception as exc:
             self._record_error(operation, path, exc)
             logger.warning(
@@ -372,20 +399,25 @@ class MemoryServiceClient:
         request_id = get_or_create_request_id()
         logger.info("Memory service request started: operation=%s path=%s params=%s", operation, path, params or {})
         try:
-            async with httpx.AsyncClient(timeout=timeout_seconds or settings.MEMORY_SERVICE_TIMEOUT_SECONDS) as client:
-                response = await client.get(url, params=params, headers={"x-request-id": request_id})
-                response.raise_for_status()
-                body = response.json()
-                logger.info(
-                    "Memory service request succeeded: operation=%s path=%s status_code=%s elapsed_ms=%s response=%s",
-                    operation,
-                    path,
-                    response.status_code,
-                    round((perf_counter() - started) * 1000, 2),
-                    self._summarize_response(body),
-                )
-                self.clear_last_error(operation)
-                return body
+            client = self._get_client()
+            response = await client.get(
+                url,
+                params=params,
+                headers={"x-request-id": request_id},
+                timeout=timeout_seconds or settings.MEMORY_SERVICE_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            body = response.json()
+            logger.info(
+                "Memory service request succeeded: operation=%s path=%s status_code=%s elapsed_ms=%s response=%s",
+                operation,
+                path,
+                response.status_code,
+                round((perf_counter() - started) * 1000, 2),
+                self._summarize_response(body),
+            )
+            self.clear_last_error(operation)
+            return body
         except Exception as exc:
             self._record_error(operation, path, exc)
             logger.warning(
@@ -409,20 +441,24 @@ class MemoryServiceClient:
         request_id = get_or_create_request_id()
         logger.info("Memory service request started: operation=%s path=%s", operation, path)
         try:
-            async with httpx.AsyncClient(timeout=timeout_seconds or settings.MEMORY_SERVICE_TIMEOUT_SECONDS) as client:
-                response = await client.delete(url, headers={"x-request-id": request_id})
-                response.raise_for_status()
-                body = response.json()
-                logger.info(
-                    "Memory service request succeeded: operation=%s path=%s status_code=%s elapsed_ms=%s response=%s",
-                    operation,
-                    path,
-                    response.status_code,
-                    round((perf_counter() - started) * 1000, 2),
-                    self._summarize_response(body),
-                )
-                self.clear_last_error(operation)
-                return body
+            client = self._get_client()
+            response = await client.delete(
+                url,
+                headers={"x-request-id": request_id},
+                timeout=timeout_seconds or settings.MEMORY_SERVICE_TIMEOUT_SECONDS,
+            )
+            response.raise_for_status()
+            body = response.json()
+            logger.info(
+                "Memory service request succeeded: operation=%s path=%s status_code=%s elapsed_ms=%s response=%s",
+                operation,
+                path,
+                response.status_code,
+                round((perf_counter() - started) * 1000, 2),
+                self._summarize_response(body),
+            )
+            self.clear_last_error(operation)
+            return body
         except Exception as exc:
             self._record_error(operation, path, exc)
             logger.warning(
@@ -435,13 +471,49 @@ class MemoryServiceClient:
             return {}
 
     def _record_error(self, operation: str, path: str, exc: Exception) -> None:
-        message = str(exc).strip() or type(exc).__name__
-        self._last_errors[operation] = {
+        """记录最近一次 MemoFlux 调用错误。
+
+        Args:
+            operation: 业务操作名称。
+            path: MemoFlux API 路径。
+            exc: 请求过程中捕获的异常。
+        """
+
+        status_code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+        if status_code is not None:
+            message = f"Memory service HTTP {status_code}: {self._response_error_detail(exc.response)}"
+        else:
+            message = str(exc).strip() or type(exc).__name__
+        error = {
             "operation": operation,
             "path": path,
             "message": message,
             "error_type": type(exc).__name__,
         }
+        if status_code is not None:
+            error["status_code"] = status_code
+        self._last_errors[operation] = error
+
+    @staticmethod
+    def _response_error_detail(response: httpx.Response) -> str:
+        """提取 HTTP 错误响应中的可读错误详情。
+
+        Args:
+            response: MemoFlux 返回的错误响应。
+
+        Returns:
+            可用于日志和工具提示的错误说明。
+        """
+
+        try:
+            body = response.json()
+        except ValueError:
+            return response.text.strip() or "unexpected response"
+        if isinstance(body, dict):
+            detail = body.get("detail") or body.get("message") or body.get("error")
+            if detail:
+                return str(detail)
+        return str(body)[:200]
 
     def _summarize_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         summary: dict[str, Any] = {}
