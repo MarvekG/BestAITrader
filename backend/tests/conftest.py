@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import sys
 from importlib import import_module
@@ -9,6 +10,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import JSON, create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+
+# 必须在导入 app 任何模块之前设置，避免 Settings 校验失败。
+os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest")
+os.environ.setdefault("FIRST_SUPERUSER_PASSWORD", "test-password-for-pytest")
 
 
 sys.modules.setdefault("tushare", MagicMock())
