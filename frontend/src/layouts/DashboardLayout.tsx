@@ -17,6 +17,7 @@ import {
 } from '@ant-design/icons';
 import { useSessionStore } from '../store/useSessionStore';
 import { TaskCompletedMessage, WebSocketMessage, wsManager } from '../services/websocket';
+import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
 import { useTranslation } from 'react-i18next';
 import { apiHistory } from '../utils/apiHistory';
 import { getApiErrorResponseData } from '../utils/errorUtils';
@@ -123,32 +124,23 @@ export const DashboardLayout: React.FC = () => {
 
     wsManager.connect(sessionIdRef.current);
 
-    // 订阅 task_completed 消息以更新 API 历史记录 | Subscribe to task_completed to update API history
-    const handleTaskCompleted = (msg: WebSocketMessage) => {
-      const data = (msg as TaskCompletedMessage).data;
-      const taskId = data?.task_id;
-      if (data && taskId) {
-        // 更新 API 历史记录 | Update API history record
-        const rawStatus = data.status;
-        const status = (rawStatus === 'completed' || rawStatus === 'success') ? 'completed' : 'failed';
-        const error = data.error_message || data.error;
-        apiHistory.updateResponse(taskId, status, data, error);
-      }
-    };
-
-    wsManager.subscribe('task_completed', handleTaskCompleted);
-
-    // Cleanup: unsubscribe on unmount
-    return () => {
-      wsManager.unsubscribe('task_completed', handleTaskCompleted);
-    };
-
     // Note: We do NOT disconnect on cleanup to avoid React StrictMode double-mount issues
     // The wsManager handles reconnection and connection reuse internally
     // return () => {
     //   wsManager.disconnect();
     // };
   }, []);
+
+  useWebSocketSubscription('task_completed', (msg: WebSocketMessage) => {
+    const data = (msg as TaskCompletedMessage).data;
+    const taskId = data?.task_id;
+    if (data && taskId) {
+      const rawStatus = data.status;
+      const status = (rawStatus === 'completed' || rawStatus === 'success') ? 'completed' : 'failed';
+      const error = data.error_message || data.error;
+      apiHistory.updateResponse(taskId, status, data, error);
+    }
+  });
 
   return (
     <Layout style={{ minHeight: '100vh' }}>

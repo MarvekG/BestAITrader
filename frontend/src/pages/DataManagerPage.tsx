@@ -3,7 +3,8 @@ import { Table, Tabs, Input, Button, Card, Space, Tag, Typography, DatePicker, A
 import { useTranslation } from 'react-i18next';
 import { SyncOutlined, SearchOutlined, DatabaseOutlined, LineChartOutlined, DollarOutlined, ReadOutlined, TransactionOutlined, FireOutlined, FundViewOutlined, FundOutlined, DeleteOutlined, ExclamationCircleOutlined, UserOutlined, SettingOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { marketApi } from '../api/market';
-import { wsManager } from '../services/websocket';
+import { TaskCompletedMessage, WebSocketMessage } from '../services/websocket';
+import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
 import dayjs from 'dayjs';
 import ReactMarkdown from 'react-markdown';
 
@@ -345,10 +346,11 @@ export const DataManagerPage: React.FC = () => {
         fetchData(activeTab, stockCode, paginationCurrent, paginationPageSize);
     }, [activeTab, fetchData, paginationCurrent, paginationPageSize, stockCode]);
 
-    // Subscribe to WebSocket task completion notifications
-    useEffect(() => {
-        const handleTaskCompleted = (msg: any) => {
-            const { data } = msg;
+    useWebSocketSubscription('task_completed', (msg: WebSocketMessage) => {
+            const data = (msg as TaskCompletedMessage).data;
+            if (!data) {
+                return;
+            }
             if (data.status === 'completed' || data.status === 'success') {
                 // 如果是股票基础信息或全量基础信息同步任务，释放 loading 状态
                 if (basicSyncTaskIdRef.current === data.task_id) {
@@ -374,19 +376,10 @@ export const DataManagerPage: React.FC = () => {
 
                 // Handle Bulk Sync task updates
                 if (data.task_type === 'bulk_data_sync') {
-                    if (data.status === 'completed' || data.status === 'failed') {
-                        setBulkSyncing(false);
-                    }
+                    setBulkSyncing(false);
                 }
             }
-        };
-
-        wsManager.subscribe('task_completed', handleTaskCompleted);
-
-        return () => {
-            wsManager.unsubscribe('task_completed', handleTaskCompleted);
-        };
-    }, [activeTab, fetchData, paginationCurrent, paginationPageSize, stockCode]);
+    });
 
     const handleSearch = () => {
         setPagination({ ...pagination, current: 1 });

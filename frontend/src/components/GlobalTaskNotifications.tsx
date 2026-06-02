@@ -1,14 +1,14 @@
 import React from 'react';
 import { App } from 'antd';
 import { useTranslation } from 'react-i18next';
-import { TaskCompletedMessage, WebSocketMessage, wsManager } from '../services/websocket';
+import { TaskCompletedMessage, WebSocketMessage } from '../services/websocket';
+import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
 
 export const GlobalTaskNotifications: React.FC = () => {
   const { t } = useTranslation();
   const { message, notification } = App.useApp();
 
-  React.useEffect(() => {
-    const handleTaskCompleted = (msg: WebSocketMessage) => {
+  useWebSocketSubscription('task_completed', (msg: WebSocketMessage) => {
       const data = (msg as TaskCompletedMessage).data;
       if (!data) {
         return;
@@ -56,14 +56,7 @@ export const GlobalTaskNotifications: React.FC = () => {
           duration: 5,
         });
       }
-    };
-
-    wsManager.subscribe('task_completed', handleTaskCompleted);
-
-    return () => {
-      wsManager.unsubscribe('task_completed', handleTaskCompleted);
-    };
-  }, [message, notification, t]);
+  });
 
   return null;
 };
