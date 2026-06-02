@@ -42,7 +42,7 @@ import {
 import { warehouseApi } from '../api/warehouse';
 import { StockPickerUpdateMessage, TaskCompletedMessage, WebSocketMessage } from '../services/websocket';
 import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
-import { formatErrorMessage, getApiErrorResponseData } from '../utils/errorUtils';
+import { formatErrorMessage, getApiErrorDetail } from '../utils/errorUtils';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -96,11 +96,6 @@ const researchLimitCaps: Record<'warehouse' | 'core' | 'all', number> = {
   warehouse: 12,
   core: 15,
   all: 18,
-};
-
-const getApiErrorDetail = (error: unknown) => {
-  const responseData = getApiErrorResponseData(error) as { detail?: unknown } | null | undefined;
-  return responseData?.detail;
 };
 
 const isFormValidationError = (error: unknown) =>

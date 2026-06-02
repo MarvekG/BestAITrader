@@ -44,7 +44,7 @@ import { ReviewTriadCards } from './experience/ReviewTriadCards';
 import { WrittenMemoryCards } from './experience/WrittenMemoryCards';
 import { WebSocketMessage } from '../services/websocket';
 import { useResourceSubscription } from '../hooks/useWebSocketSubscription';
-import { formatErrorMessage, getApiErrorMessage, getApiErrorResponseData } from '../utils/errorUtils';
+import { formatErrorMessage, getApiErrorDetail, getApiErrorMessage } from '../utils/errorUtils';
 
 const { Text, Title, Paragraph } = Typography;
 
@@ -80,11 +80,6 @@ type ExperienceReviewUpdateData = Partial<ExperienceReviewEvent> & {
 
 type ExperienceReviewUpdateMessage = WebSocketMessage & {
   data?: ExperienceReviewUpdateData;
-};
-
-const getApiErrorDetail = (error: unknown) => {
-  const responseData = getApiErrorResponseData(error) as { detail?: unknown } | null | undefined;
-  return responseData?.detail;
 };
 
 const getToolName = (payload?: Record<string, unknown> | null) => {

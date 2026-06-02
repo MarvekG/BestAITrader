@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import LanguageSwitcher from '../../components/LanguageSwitcher';
 import ThemeSwitcher from '../../components/ThemeSwitcher';
+import { getApiErrorStatus } from '../../utils/errorUtils';
 
 const { Title, Text } = Typography;
 
@@ -41,9 +42,9 @@ export const Login: React.FC = () => {
 
       let errorMsg = t('auth.login_failed');
 
-      if (axios.isAxiosError(error) && error.response) {
+      const status = getApiErrorStatus(error);
+      if (status !== undefined) {
         // 请求已发出，且服务器响应了状态码
-        const status = error.response.status;
         if (status === 401) {
           errorMsg = t('auth.login_failed_401');
         } else if (status >= 500) {

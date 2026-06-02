@@ -45,6 +45,19 @@ export const getApiErrorResponseData = (error: unknown): unknown => {
     return error.response.data;
 };
 
+export const getApiErrorDetail = (error: unknown): unknown => {
+    const responseData = getApiErrorResponseData(error);
+    return isRecord(responseData) ? responseData.detail : undefined;
+};
+
+export const getApiErrorStatus = (error: unknown): number | undefined => {
+    if (!isRecord(error) || !isRecord(error.response)) {
+        return undefined;
+    }
+    const status = error.response.status;
+    return typeof status === 'number' ? status : undefined;
+};
+
 export const getApiErrorMessage = (error: unknown, fallback: string = 'Unknown error occurred'): string => {
     const responseData = getApiErrorResponseData(error);
     if (isRecord(responseData) && responseData.detail) {

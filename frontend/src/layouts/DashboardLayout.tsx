@@ -19,7 +19,7 @@ import { TaskCompletedMessage, WebSocketMessage, wsManager } from '../services/w
 import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
 import { useTranslation } from 'react-i18next';
 import { apiHistory } from '../utils/apiHistory';
-import { getApiErrorResponseData } from '../utils/errorUtils';
+import { getApiErrorDetail } from '../utils/errorUtils';
 import { Modal, Form, Input, message } from 'antd';
 import { authApi } from '../api/auth';
 import { GlobalTaskNotifications } from '../components/GlobalTaskNotifications';
@@ -77,8 +77,8 @@ export const DashboardLayout: React.FC = () => {
       // Force logout after password change
       handleLogout();
     } catch (error) {
-      const responseData = getApiErrorResponseData(error) as { detail?: unknown } | null | undefined;
-      const detail = typeof responseData?.detail === 'string' ? responseData.detail : undefined;
+      const errorDetail = getApiErrorDetail(error);
+      const detail = typeof errorDetail === 'string' ? errorDetail : undefined;
       if (detail) {
         message.error(detail);
       } else if (!(error && typeof error === 'object' && 'errorFields' in error)) {

@@ -27,7 +27,7 @@ import {
   ExperienceLibraryItem,
   ExperienceReviewHorizon,
 } from '../../api/experience';
-import { formatErrorMessage, getApiErrorResponseData } from '../../utils/errorUtils';
+import { formatErrorMessage, getApiErrorDetail } from '../../utils/errorUtils';
 import { ReviewTriadCards } from './ReviewTriadCards';
 
 const { Paragraph, Text, Title } = Typography;
@@ -89,8 +89,7 @@ export const ExperienceLibraryPanel: React.FC<ExperienceLibraryPanelProps> = ({ 
       setPage(data.page || nextPage);
       setPageSize(data.page_size || nextPageSize);
     } catch (error) {
-      const responseData = getApiErrorResponseData(error) as { detail?: unknown } | null | undefined;
-      message.error(formatErrorMessage(responseData?.detail) || t('common.error'));
+      message.error(formatErrorMessage(getApiErrorDetail(error)) || t('common.error'));
     } finally {
       setLoading(false);
     }
@@ -106,8 +105,7 @@ export const ExperienceLibraryPanel: React.FC<ExperienceLibraryPanelProps> = ({ 
       const data = await experienceApi.getLibraryDetail(item.id);
       setDetail(data);
     } catch (error) {
-      const responseData = getApiErrorResponseData(error) as { detail?: unknown } | null | undefined;
-      message.error(formatErrorMessage(responseData?.detail) || t('common.error'));
+      message.error(formatErrorMessage(getApiErrorDetail(error)) || t('common.error'));
     } finally {
       setDetailLoading(false);
     }
@@ -127,8 +125,7 @@ export const ExperienceLibraryPanel: React.FC<ExperienceLibraryPanelProps> = ({ 
       );
       await loadLibrary(1, pageSize);
     } catch (error) {
-      const responseData = getApiErrorResponseData(error) as { detail?: unknown } | null | undefined;
-      message.error(formatErrorMessage(responseData?.detail) || t('common.error'));
+      message.error(formatErrorMessage(getApiErrorDetail(error)) || t('common.error'));
     } finally {
       setRebuilding(false);
     }
