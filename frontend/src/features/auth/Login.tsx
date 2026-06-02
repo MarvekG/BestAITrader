@@ -3,7 +3,7 @@ import { Card, Form, Input, Button, Typography, App as AntdApp, theme } from 'an
 import { UserOutlined, LockOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { authApi } from '../../api/auth';
-import { useSessionStore } from '../../store/useSessionStore';
+import { setAuthToken } from '../../services/authSession';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import LanguageSwitcher from '../../components/LanguageSwitcher';
@@ -23,7 +23,6 @@ export const Login: React.FC = () => {
   } = theme.useToken();
   const [loading, setLoading] = React.useState(false);
   const { message } = AntdApp.useApp();
-  const { setLoggedIn, setToken } = useSessionStore();
   const navigate = useNavigate();
 
   const handleSubmit = async (values: LoginFormValues) => {
@@ -34,9 +33,7 @@ export const Login: React.FC = () => {
         password: values.password
       }));
 
-      localStorage.setItem('token', response.access_token);
-      setToken(response.access_token);
-      setLoggedIn(true);
+      setAuthToken(response.access_token);
       message.success(t('auth.welcome'));
       navigate('/dashboard');
     } catch (error) {

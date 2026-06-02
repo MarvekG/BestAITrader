@@ -2,6 +2,7 @@ import axios, { AxiosInstance, AxiosRequestConfig } from 'axios';
 import { logger } from '../utils/logger';
 import { apiHistory } from '../utils/apiHistory';
 import { formatErrorMessage } from '../utils/errorUtils';
+import { clearAuthSession, getAuthToken } from '../services/authSession';
 
 const axiosInstance = axios.create({
   baseURL: '/api/v1',
@@ -20,7 +21,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 axiosInstance.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('token');
+    const token = getAuthToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -124,7 +125,7 @@ axiosInstance.interceptors.response.use(
     }
 
     if (error.response?.status === 401) {
-      localStorage.removeItem('token');
+      clearAuthSession();
       // 如果当前不在登录页，才跳转到登录页，避免登录失败时的循环干扰
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';

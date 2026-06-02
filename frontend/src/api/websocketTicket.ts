@@ -1,10 +1,12 @@
+import { getAuthToken } from '../services/authSession';
+
 type WebSocketTicketResponse = {
   ticket: string;
   expires_in: number;
 };
 
 const postRootTicket = async (path: string): Promise<WebSocketTicketResponse> => {
-  const token = localStorage.getItem('token') || '';
+  const token = getAuthToken() || '';
   const response = await fetch(path, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,

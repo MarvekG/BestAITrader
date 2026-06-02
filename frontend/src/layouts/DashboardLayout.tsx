@@ -15,7 +15,6 @@ import {
   ExperimentOutlined,
   ReadOutlined,
 } from '@ant-design/icons';
-import { useSessionStore } from '../store/useSessionStore';
 import { TaskCompletedMessage, WebSocketMessage, wsManager } from '../services/websocket';
 import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
 import { useTranslation } from 'react-i18next';
@@ -27,6 +26,7 @@ import { GlobalTaskNotifications } from '../components/GlobalTaskNotifications';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import ThemeSwitcher from '../components/ThemeSwitcher';
 import { useThemeMode } from '../theme/useThemeMode';
+import { clearAuthSession } from '../services/authSession';
 
 const { Sider, Content } = Layout;
 
@@ -34,7 +34,6 @@ const { Sider, Content } = Layout;
 export const DashboardLayout: React.FC = () => {
   const { t } = useTranslation();
   const { mode } = useThemeMode();
-  const { clearSession, setLoggedIn } = useSessionStore();
   const navigate = useNavigate();
   const location = useLocation();
   const {
@@ -60,9 +59,7 @@ export const DashboardLayout: React.FC = () => {
   const [resetForm] = Form.useForm();
 
   const handleLogout = () => {
-    clearSession();
-    setLoggedIn(false);
-    localStorage.removeItem('token');
+    clearAuthSession();
     navigate('/login');
   };
 
