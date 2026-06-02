@@ -299,6 +299,78 @@ async def test_service_persists_filled_status_and_real_trade_id(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_service_keeps_success_when_post_commit_order_notification_fails(monkeypatch):
+    service = TradingService()
+    session_id = uuid4()
+
+    account = Account(
+        account_id=uuid4(),
+        user_id=7,
+        available_cash=Decimal("100000"),
+        total_assets=Decimal("100000"),
+        market_value=Decimal("0"),
+        total_profit_loss=Decimal("0"),
+    )
+    db = _FakeSession(account=account, position_results=[None, None], total_mv=Decimal("5000"))
+
+    service.engine.execute_order = AsyncMock(return_value={
+        "success": True,
+        "message": "Order executed successfully",
+        "trade_record": {
+            "id": uuid4(),
+            "price": 10.0,
+            "shares": 1000,
+            "turnover": 10000.0,
+            "commission": 5.0,
+            "stamp_duty": 0.0,
+            "transfer_fee": 0.2,
+            "total_fee": 5.2,
+            "net_amount": 10005.2,
+        },
+        "updated_account": {
+            "cash_balance": 89994.8,
+            "total_assets": 99994.8,
+            "market_value": 10000.0,
+            "total_profit_loss": 0.0,
+        },
+        "updated_position": {
+            "current_shares": 1000,
+            "available_shares": 0,
+            "frozen_shares": 1000,
+            "avg_cost": 10.0052,
+            "market_value": 10000.0,
+            "unrealized_pnl": -5.2,
+            "purchase_details": {"ledger": [{"time": datetime.now().isoformat(), "shares": 1000, "price": 10.0}]},
+        },
+        "executed_shares": 1000,
+        "remaining_shares": 0,
+        "realized_pnl": Decimal("0.00"),
+        "order_status": "filled",
+    })
+
+    async def _raise_notification_error(*_args, **_kwargs):
+        raise RuntimeError("websocket unavailable")
+
+    monkeypatch.setattr("app.trading.service.ws_manager.send_order_status", _raise_notification_error)
+    monkeypatch.setattr("app.trading.service.ws_manager.send_position_update", AsyncMock())
+    monkeypatch.setattr("app.trading.service.ws_manager.send_trade_executed", AsyncMock())
+
+    result = await service.execute_order_and_update_db(
+        db=db,
+        session_id=session_id,
+        account=account,
+        stock_code="000001.SZ",
+        action="buy",
+        shares=1000,
+        price=10.0,
+        order_type="limit",
+    )
+
+    assert result["success"] is True
+    assert db.committed is True
+
+
+@pytest.mark.asyncio
 async def test_service_sends_position_removed_event_when_sell_clears_position(monkeypatch):
     service = TradingService()
 
