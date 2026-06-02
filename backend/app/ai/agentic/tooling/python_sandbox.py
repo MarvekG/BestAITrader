@@ -3,6 +3,7 @@ import ast
 import json
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
@@ -11,6 +12,9 @@ from app.core.config import PROJECT_ROOT, settings
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
+
+_ASYNC_SANDBOX_LIMITER: Optional[asyncio.Semaphore] = None
+_SYNC_SANDBOX_LIMITER: Optional[threading.BoundedSemaphore] = None
 
 
 BLOCKED_IMPORTS = {
@@ -139,6 +143,36 @@ def _resolve_executable(command: str) -> Optional[str]:
     return shutil.which(command)
 
 
+def _get_async_sandbox_limiter() -> asyncio.Semaphore:
+    """
+    获取异步沙箱执行限流器，超过上限的请求会等待。
+
+    Returns:
+        用于限制异步沙箱子进程数量的信号量。
+    """
+    global _ASYNC_SANDBOX_LIMITER
+
+    if _ASYNC_SANDBOX_LIMITER is None:
+        limit = max(1, int(settings.PY_SANDBOX_MAX_CONCURRENT_EXECUTIONS or 1))
+        _ASYNC_SANDBOX_LIMITER = asyncio.Semaphore(limit)
+    return _ASYNC_SANDBOX_LIMITER
+
+
+def _get_sync_sandbox_limiter() -> threading.BoundedSemaphore:
+    """
+    获取同步沙箱执行限流器，超过上限的请求会等待。
+
+    Returns:
+        用于限制同步沙箱子进程数量的有界信号量。
+    """
+    global _SYNC_SANDBOX_LIMITER
+
+    if _SYNC_SANDBOX_LIMITER is None:
+        limit = max(1, int(settings.PY_SANDBOX_MAX_CONCURRENT_EXECUTIONS or 1))
+        _SYNC_SANDBOX_LIMITER = threading.BoundedSemaphore(limit)
+    return _SYNC_SANDBOX_LIMITER
+
+
 def _build_request(code: str) -> Dict[str, Any]:
     return {
         "code": code,
@@ -260,46 +294,47 @@ async def execute_python_in_sandbox(code: str) -> Dict[str, Any]:
     if early_response is not None:
         return early_response
 
-    try:
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(PROJECT_ROOT),
-        )
-    except OSError as exc:
-        logger.error("python sandbox failed to start: %s", exc)
-        return _normalize_response(
-            {
-                "success": False,
-                "error": f"Python sandbox failed to start: {exc}",
-                "metadata": {"error_type": "sandbox_boot_error"},
-            },
-            started_at,
-        )
-
-    try:
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(
-            process.communicate(request_json.encode("utf-8")),
-            timeout=settings.PY_SANDBOX_TIMEOUT_SECONDS + 1,
-        )
-    except asyncio.TimeoutError:
-        logger.warning("python sandbox timed out")
+    async with _get_async_sandbox_limiter():
         try:
-            process.kill()
-        except ProcessLookupError:
-            pass
-        await process.communicate()
-        return _normalize_response(
-            {
-                "success": False,
-                "error": "Python sandbox execution timed out",
-                "timed_out": True,
-                "metadata": {"error_type": "timeout_error"},
-            },
-            started_at,
-        )
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(PROJECT_ROOT),
+            )
+        except OSError as exc:
+            logger.error("python sandbox failed to start: %s", exc)
+            return _normalize_response(
+                {
+                    "success": False,
+                    "error": f"Python sandbox failed to start: {exc}",
+                    "metadata": {"error_type": "sandbox_boot_error"},
+                },
+                started_at,
+            )
+
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                process.communicate(request_json.encode("utf-8")),
+                timeout=settings.PY_SANDBOX_TIMEOUT_SECONDS + 1,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("python sandbox timed out")
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            await process.communicate()
+            return _normalize_response(
+                {
+                    "success": False,
+                    "error": "Python sandbox execution timed out",
+                    "timed_out": True,
+                    "metadata": {"error_type": "timeout_error"},
+                },
+                started_at,
+            )
 
     stdout = stdout_bytes.decode("utf-8", errors="replace")
     stderr = stderr_bytes.decode("utf-8", errors="replace")
@@ -312,36 +347,37 @@ def execute_python_in_sandbox_sync(code: str) -> Dict[str, Any]:
     if early_response is not None:
         return early_response
 
-    try:
-        completed = subprocess.run(
-            command,
-            input=request_json,
-            text=True,
-            capture_output=True,
-            timeout=settings.PY_SANDBOX_TIMEOUT_SECONDS + 1,
-            cwd=str(PROJECT_ROOT),
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        logger.warning("python sandbox timed out")
-        return _normalize_response(
-            {
-                "success": False,
-                "error": "Python sandbox execution timed out",
-                "timed_out": True,
-                "metadata": {"error_type": "timeout_error"},
-            },
-            started_at,
-        )
-    except OSError as exc:
-        logger.error("python sandbox failed to start: %s", exc)
-        return _normalize_response(
-            {
-                "success": False,
-                "error": f"Python sandbox failed to start: {exc}",
-                "metadata": {"error_type": "sandbox_boot_error"},
-            },
-            started_at,
-        )
+    with _get_sync_sandbox_limiter():
+        try:
+            completed = subprocess.run(
+                command,
+                input=request_json,
+                text=True,
+                capture_output=True,
+                timeout=settings.PY_SANDBOX_TIMEOUT_SECONDS + 1,
+                cwd=str(PROJECT_ROOT),
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("python sandbox timed out")
+            return _normalize_response(
+                {
+                    "success": False,
+                    "error": "Python sandbox execution timed out",
+                    "timed_out": True,
+                    "metadata": {"error_type": "timeout_error"},
+                },
+                started_at,
+            )
+        except OSError as exc:
+            logger.error("python sandbox failed to start: %s", exc)
+            return _normalize_response(
+                {
+                    "success": False,
+                    "error": f"Python sandbox failed to start: {exc}",
+                    "metadata": {"error_type": "sandbox_boot_error"},
+                },
+                started_at,
+            )
 
     return _parse_process_result(completed.stdout, completed.stderr, completed.returncode, started_at)

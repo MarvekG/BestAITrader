@@ -1,7 +1,9 @@
-from typing import List
-from pydantic_settings import BaseSettings
-from pydantic import ConfigDict
+import os
 from pathlib import Path
+from typing import List
+
+from pydantic import ConfigDict
+from pydantic_settings import BaseSettings
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2].absolute()
 
@@ -45,6 +47,7 @@ class Settings(BaseSettings):
     PY_SANDBOX_TIMEOUT_SECONDS: int = 30
     PY_SANDBOX_STDOUT_MAX_BYTES: int = 32768
     PY_SANDBOX_STDERR_MAX_BYTES: int = 16384
+    PY_SANDBOX_MAX_CONCURRENT_EXECUTIONS: int = os.cpu_count() or 1
     AGENTIC_DEPENDENCY_INSTALL_TIMEOUT_SECONDS: int = 600
     AGENTIC_DEPENDENCY_INSTALL_MAX_REQUIREMENTS: int = 50
     ENABLE_RUNTIME_EXTENSIONS: bool = True

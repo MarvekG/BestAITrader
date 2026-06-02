@@ -1,10 +1,17 @@
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.ai.agentic.tooling.python_sandbox import execute_python_in_sandbox, execute_python_in_sandbox_sync, validate_python_code
+from app.ai.agentic.tooling.python_sandbox import (
+    _get_async_sandbox_limiter,
+    _get_sync_sandbox_limiter,
+    execute_python_in_sandbox,
+    execute_python_in_sandbox_sync,
+    validate_python_code,
+)
 from app.ai.agentic.tools import execute_python_sandboxed, get_all_tools
 from app.core.config import settings
 
@@ -91,6 +98,23 @@ def test_validate_python_code_rejects_dangerous_patterns(code, error_fragment):
     with pytest.raises(Exception) as exc_info:
         validate_python_code(code)
     assert error_fragment in str(exc_info.value)
+
+
+def test_get_sync_sandbox_limiter_initializes_lazily():
+    with patch.object(settings, "PY_SANDBOX_MAX_CONCURRENT_EXECUTIONS", 1), \
+         patch("app.ai.agentic.tooling.python_sandbox._SYNC_SANDBOX_LIMITER", None):
+        limiter = _get_sync_sandbox_limiter()
+
+    assert isinstance(limiter, __import__("threading").BoundedSemaphore)
+
+
+@pytest.mark.asyncio
+async def test_get_async_sandbox_limiter_initializes_lazily():
+    with patch.object(settings, "PY_SANDBOX_MAX_CONCURRENT_EXECUTIONS", 1), \
+         patch("app.ai.agentic.tooling.python_sandbox._ASYNC_SANDBOX_LIMITER", None):
+        limiter = _get_async_sandbox_limiter()
+
+    assert isinstance(limiter, asyncio.Semaphore)
 
 
 @pytest.mark.asyncio
@@ -233,6 +257,49 @@ def test_execute_python_in_sandbox_sync_success_with_mocked_runner():
     run_mock.assert_called_once()
 
 
+def test_execute_python_in_sandbox_sync_uses_concurrency_limiter():
+    mocked_payload = {
+        "success": True,
+        "result": 42,
+        "stdout": "ok",
+        "stderr": "",
+        "error": None,
+        "execution_time_ms": 12,
+        "timed_out": False,
+        "truncated": False,
+        "metadata": {"result_type": "int"},
+    }
+    completed = SimpleNamespace(
+        returncode=0,
+        stdout="boot log\n" + json.dumps(mocked_payload) + "\n",
+        stderr="",
+    )
+
+    class RecordingLimiter:
+        def __init__(self):
+            self.entered = False
+            self.exited = False
+
+        def __enter__(self):
+            self.entered = True
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            self.exited = True
+            return False
+
+    limiter = RecordingLimiter()
+
+    with patch("app.ai.agentic.tooling.python_sandbox._get_sync_sandbox_limiter", return_value=limiter), \
+         patch("app.ai.agentic.tooling.python_sandbox._resolve_executable", return_value="/usr/bin/deno"), \
+         patch("app.ai.agentic.tooling.python_sandbox.subprocess.run", return_value=completed):
+        response = execute_python_in_sandbox_sync("result = 40 + 2")
+
+    assert response["success"] is True
+    assert limiter.entered is True
+    assert limiter.exited is True
+
+
 @pytest.mark.asyncio
 async def test_execute_python_in_sandbox_async_uses_subprocess_exec():
     mocked_payload = {
@@ -259,6 +326,62 @@ async def test_execute_python_in_sandbox_async_uses_subprocess_exec():
     assert response["metadata"]["result_type"] == "int"
     create_mock.assert_called_once()
     process.communicate.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_execute_python_in_sandbox_waits_for_async_concurrency_slot():
+    mocked_payload = {
+        "success": True,
+        "result": 42,
+        "stdout": "ok",
+        "stderr": "",
+        "error": None,
+        "execution_time_ms": 12,
+        "timed_out": False,
+        "truncated": False,
+        "metadata": {"result_type": "int"},
+    }
+    release_first = asyncio.Event()
+    first_started = asyncio.Event()
+    running_count = 0
+    max_running_count = 0
+
+    async def communicate(_request_json):
+        nonlocal running_count, max_running_count
+        running_count += 1
+        max_running_count = max(max_running_count, running_count)
+        first_started.set()
+        try:
+            await release_first.wait()
+            return json.dumps(mocked_payload).encode("utf-8"), b""
+        finally:
+            running_count -= 1
+
+    def create_process(*_args, **_kwargs):
+        process = AsyncMock()
+        process.communicate = AsyncMock(side_effect=communicate)
+        process.returncode = 0
+        return process
+
+    limiter = asyncio.Semaphore(1)
+
+    with patch("app.ai.agentic.tooling.python_sandbox._get_async_sandbox_limiter", return_value=limiter), \
+         patch("app.ai.agentic.tooling.python_sandbox._resolve_executable", return_value="/usr/bin/deno"), \
+         patch("app.ai.agentic.tooling.python_sandbox.asyncio.create_subprocess_exec", side_effect=create_process):
+        first_task = asyncio.create_task(execute_python_in_sandbox("result = 1"))
+        await first_started.wait()
+        second_task = asyncio.create_task(execute_python_in_sandbox("result = 2"))
+        await asyncio.sleep(0)
+
+        assert max_running_count == 1
+        assert second_task.done() is False
+
+        release_first.set()
+        first_response, second_response = await asyncio.gather(first_task, second_task)
+
+    assert first_response["success"] is True
+    assert second_response["success"] is True
+    assert max_running_count == 1
 
 
 @pytest.mark.asyncio
