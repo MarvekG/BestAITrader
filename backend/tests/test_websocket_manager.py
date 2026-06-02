@@ -68,3 +68,11 @@ def test_disconnect_is_idempotent_for_already_pruned_socket():
     manager.disconnect(socket, "session")
 
     assert "session" not in manager.active_connections
+
+
+def test_pubsub_redis_options_disable_read_timeout():
+    options = WebSocketManager._redis_pubsub_options()
+
+    assert options["socket_timeout"] is None
+    assert options["socket_connect_timeout"] == 5
+    assert options["health_check_interval"] == 30
