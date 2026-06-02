@@ -11,6 +11,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { getApiErrorMessage } from '../utils/errorUtils';
 
+const debateProgressMessageKey = 'dashboard_debate_progress';
+const debateSessionsRefreshEvent = 'debate-sessions-refresh';
+
 export const DashboardPage: React.FC = () => {
   const { t } = useTranslation();
   const {
@@ -88,6 +91,19 @@ export const DashboardPage: React.FC = () => {
     setIsDebateCompleted(false);
   }, [activeSessionId]);
 
+  const refreshActiveSession = React.useCallback(async () => {
+    if (!activeSessionId) {
+      return;
+    }
+    try {
+      const session = await sessionApi.get(activeSessionId);
+      setActiveSession(session);
+      window.dispatchEvent(new CustomEvent(debateSessionsRefreshEvent));
+    } catch (error) {
+      console.error('Failed to refresh active session:', error);
+    }
+  }, [activeSessionId, setActiveSession]);
+
   // WebSocket连接（增强版：支持自动重连和心跳）
   useEffect(() => {
     if (!isRouteSessionActive || !activeSessionId) return;
@@ -154,16 +170,18 @@ export const DashboardPage: React.FC = () => {
             if (data.status === 'started') {
               setLoading(true);
               setIsDebateCompleted(false);
-              message.info(t('dashboard.messages.debate_started'));
+              message.loading({ content: t('dashboard.messages.debate_started'), key: debateProgressMessageKey, duration: 0 });
               setDebateMessages([]);
               setMessageCount(0);
             } else if (data.status === 'completed') {
-              message.success(t('dashboard.messages.debate_completed'));
+              message.success({ content: t('dashboard.messages.debate_completed'), key: debateProgressMessageKey });
               setLoading(false);
               setIsDebateCompleted(true);
+              void refreshActiveSession();
             } else if (data.status === 'error') {
-              message.error(t('dashboard.messages.debate_error'));
+              message.error({ content: t('dashboard.messages.debate_error'), key: debateProgressMessageKey });
               setLoading(false);
+              void refreshActiveSession();
             }
           } else if (data.type === 'connection') {
             console.log('Connection established:', data.message);
@@ -225,7 +243,7 @@ export const DashboardPage: React.FC = () => {
         ws.close();
       }
     };
-  }, [activeSessionId, isRouteSessionActive, message, t]);
+  }, [activeSessionId, isRouteSessionActive, message, refreshActiveSession, t]);
 
   // Check if debate is already completed when session changes
   useEffect(() => {
@@ -262,12 +280,12 @@ export const DashboardPage: React.FC = () => {
         trading_strategy: activeSession.trading_strategy,
       });
 
-      message.success(t('dashboard.messages.request_sent'));
+      message.loading({ content: t('dashboard.messages.request_sent'), key: debateProgressMessageKey, duration: 0 });
       // 注意: 这里不设置setLoading(false), 而是等待WebSocket通知完成
     } catch (error) {
       console.error(error);
       const errorMsg = getApiErrorMessage(error, t('common.error'));
-      message.error(errorMsg);
+      message.error({ content: errorMsg, key: debateProgressMessageKey });
       setLoading(false); // 只有API调用失败时才在这里重置
     }
   };
