@@ -21,6 +21,23 @@ class WebSocketManager:
         self.notification_task: Optional[asyncio.Task] = None
         self.market_watch_event_task: Optional[asyncio.Task] = None
 
+    @staticmethod
+    def _redis_pubsub_options() -> Dict[str, Any]:
+        """构建 Redis Pub/Sub 长连接参数。
+
+        Pub/Sub 监听需要长期阻塞等待消息，不能使用普通命令连接的短读取超时。
+
+        Returns:
+            Redis 连接参数字典。
+        """
+        return {
+            "encoding": "utf-8",
+            "decode_responses": True,
+            "socket_timeout": None,
+            "socket_connect_timeout": 5,
+            "health_check_interval": 30,
+        }
+
     async def connect(self, websocket: WebSocket, session_id: str):
         logger.info(f"WebSocket connect attempt: {session_id}")
         await websocket.accept()
@@ -241,8 +258,7 @@ class WebSocketManager:
                 # Create a dedicated Redis connection for subscription
                 redis_conn = redis.from_url(
                     settings.REDIS_URL,
-                    encoding="utf-8",
-                    decode_responses=True
+                    **self._redis_pubsub_options(),
                 )
                 pubsub = redis_conn.pubsub()
                 await pubsub.subscribe("task_notifications")
@@ -295,8 +311,7 @@ class WebSocketManager:
             try:
                 redis_conn = redis.from_url(
                     settings.REDIS_URL,
-                    encoding="utf-8",
-                    decode_responses=True,
+                    **self._redis_pubsub_options(),
                 )
                 pubsub = redis_conn.pubsub()
                 await pubsub.subscribe(MARKET_WATCH_EVENTS_CHANNEL, MARKET_WATCH_DOCUMENTS_CHANNEL)
