@@ -14,10 +14,6 @@
 > 风险说明：本项目用于研究、开发和模拟交易，不构成任何投资建议。真实交易前请自行验证数据、策略和风险。
 > 项目不附带任何第三方行情、新闻、搜索或金融数据授权；启用相关数据源前，请自行确认服务条款、缓存限制、再分发限制和非商业研究使用权限。
 
-> LLM API 支持说明：后端统一通过 LiteLLM Proxy 访问模型，并使用 `backend` 模型别名。
-> 记忆服务由 MemoFlux 提供，部署时通过 `memo/.env` 和 `MEMOFLUX_*` 配置连接 LiteLLM 与 pgvector。
-> 真实模型、真实 provider key 和供应商 base URL 只配置在 `litellm/config.yaml`。
-
 ## 致敬与来源说明
 
 天枢智投（Best-AI-Trader）在多智能体投研工作流的学习和设计过程中，受到
