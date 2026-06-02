@@ -188,14 +188,14 @@ def _extract_written_memories(tool_trace: List[Dict[str, Any]]) -> List[Dict[str
         if not content:
             continue
         stock_code = str(result.get("stock_code") or "").strip() or None
-        memory_scope = str(result.get("memory_scope") or "stock").strip() or "stock"
+        memo_session = str(result.get("memo_session") or "stock").strip() or "stock"
         importance = str(args.get("importance") or "medium").strip().lower()
         if importance not in {"low", "medium", "high"}:
             importance = "medium"
         item: dict[str, Any] = {
             "content": content,
             "importance": importance,
-            "memory_scope": memory_scope,
+            "memo_session": memo_session,
             "stock_code": stock_code,
         }
         for key in ("status", "observation_id", "source_id", "error"):
@@ -672,7 +672,7 @@ async def review_debate_conclusion(state: ExperienceWorkflowState) -> Dict[str, 
                                 "status": tool_result.get("status"),
                                 "observation_id": tool_result.get("observation_id"),
                                 "source_id": tool_result.get("source_id"),
-                                "memory_scope": tool_result.get("memory_scope"),
+                                "memo_session": tool_result.get("memo_session"),
                                 "stock_code": tool_result.get("stock_code"),
                                 "error": tool_result.get("error"),
                             }

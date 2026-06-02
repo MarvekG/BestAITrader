@@ -726,11 +726,12 @@ export const SettingsPage: React.FC = () => {
       ellipsis: true,
     },
     {
-      title: t('settings.memory_column_memory_scope'),
-      key: 'memory_scope',
+      title: t('settings.memory_column_session'),
+      dataIndex: 'session',
+      key: 'session',
       width: 260,
       ellipsis: true,
-      render: (_, record) => record.session || record.memory_scope || '-',
+      render: (value?: string) => value || '-',
     },
     {
       title: t('settings.memory_column_content'),
@@ -740,16 +741,16 @@ export const SettingsPage: React.FC = () => {
       render: (value: string) => renderCompactPreview(value, 132),
     },
     {
-      title: t('settings.memory_column_created_at'),
+      title: t('settings.memory_column_occurred_at'),
       dataIndex: 'occurred_at',
       key: 'occurred_at',
       width: 180,
       ellipsis: true,
     },
     {
-      title: t('settings.memory_column_updated_at'),
-      dataIndex: 'updated_at',
-      key: 'updated_at',
+      title: t('settings.memory_column_created_at'),
+      dataIndex: 'created_at',
+      key: 'created_at',
       width: 180,
       ellipsis: true,
     },
@@ -779,7 +780,7 @@ export const SettingsPage: React.FC = () => {
       render: (value?: string | null) => value || '-',
     },
     {
-      title: t('settings.memory_column_memory_scope'),
+      title: t('settings.memory_column_session'),
       dataIndex: 'session',
       key: 'session',
       width: 260,
@@ -814,22 +815,22 @@ export const SettingsPage: React.FC = () => {
       render: (value: unknown[]) => (Array.isArray(value) ? value.length : 0),
     },
     {
-      title: t('settings.memory_column_uncertainties'),
+      title: t('settings.memory_column_answerability'),
       dataIndex: 'answerability',
       key: 'answerability',
       width: 260,
       render: (value?: string) => (value ? <Tag>{value}</Tag> : '-'),
     },
     {
-      title: t('settings.memory_column_latency_ms'),
+      title: t('settings.memory_column_answerability_reason'),
       key: 'answerability_reason',
-      width: 100,
+      width: 360,
       render: (_, record) => renderCompactPreview(record.answerability_reason || '', 48),
     },
     {
       title: t('settings.memory_column_audit_id'),
-      dataIndex: 'query_id',
-      key: 'query_id',
+      dataIndex: 'audit_id',
+      key: 'audit_id',
       width: 220,
       ellipsis: true,
     },
@@ -2571,7 +2572,6 @@ const MEMORY_RECALL_AUDIT_STATUS_OPTIONS = [
 type MemoryPreviewItem = {
   memory_id: string;
   session?: string;
-  memory_scope?: string;
   content: string;
   occurred_at?: string;
   created_at: string;
@@ -2583,8 +2583,10 @@ type MemoryPreviewResultData = {
 };
 
 type MemoryRecallAuditItem = {
+  audit_id?: string;
   audit_type?: string;
   query_id?: string;
+  delete_id?: string;
   session: string;
   query: string;
   status: string;

@@ -611,6 +611,8 @@ async def test_memory_recall_audits(
         if isinstance(data, dict):
             result = _success_response("memory_recall_audits", elapsed, fallback_key="memory_preview")
             items = [item for item in data.get("items") or [] if isinstance(item, dict)]
+            for item in items:
+                item["audit_id"] = item.get("audit_id") or item.get("query_id") or item.get("delete_id") or ""
             result["data"] = data
             result["total"] = len(items)
             result["limit"] = int(data.get("limit") or limit)

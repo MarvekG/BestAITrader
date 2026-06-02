@@ -59,7 +59,7 @@ def build_memory_tools(
             result = {
                 "data": data if isinstance(data, dict) else {},
                 "count": reference_count,
-                "memory_scope": "stock",
+                "memo_session": "stock",
                 "stock_code": target_stock_code,
             }
             last_error = memory_client.get_last_error("recall")
@@ -109,7 +109,7 @@ def build_memory_tools(
             observation_id = response.get("observation_id") if isinstance(response, dict) else None
             result = {
                 "success": success,
-                "memory_scope": "stock",
+                "memo_session": "stock",
                 "stock_code": target_stock_code,
                 "status": response.get("status") if isinstance(response, dict) else "unknown",
                 "observation_id": observation_id,

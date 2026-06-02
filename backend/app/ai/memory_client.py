@@ -9,36 +9,44 @@ from app.core.logger import get_logger
 from app.core.request_context import get_or_create_request_id
 
 logger = get_logger(__name__)
-GENERAL_MEMORY_SCOPE = "general"
-STOCK_MEMORY_SCOPE = "stock"
+GENERAL_SESSION_TYPE = "general"
+STOCK_SESSION_TYPE = "stock"
 
 
-def _build_user_memory_scope(
+def _build_user_session(
     *,
     user_id: int,
     stock_code: str | None = None,
 ) -> str:
-    """
-    Build the memory scope used by the memory service for one user.
+    """构建 MemoFlux 会话标识。
 
     Args:
-        user_id: Current user id.
-        stock_code: Optional stock code for stock-specific memories.
+        user_id: 当前用户 ID。
+        stock_code: 可选股票代码；存在时构建股票维度会话。
 
     Returns:
-        Memory scope string understood by the memory service.
+        MemoFlux session 字符串。
     """
     normalized_stock_code = str(stock_code or "").strip()
     if normalized_stock_code:
-        return f"user:{user_id}:{STOCK_MEMORY_SCOPE}:{normalized_stock_code}"
+        return f"user:{user_id}:{STOCK_SESSION_TYPE}:{normalized_stock_code}"
     return f"user:{user_id}:general"
 
 
-def _resolve_scope_label(stock_code: str | None) -> tuple[str | None, str]:
+def _resolve_memo_session(stock_code: str | None) -> tuple[str | None, str]:
+    """根据股票代码解析记忆会话类型。
+
+    Args:
+        stock_code: 可选股票代码。
+
+    Returns:
+        标准化股票代码和 memo session 类型。
+    """
+
     normalized_stock_code = str(stock_code or "").strip() or None
     if normalized_stock_code:
-        return normalized_stock_code, STOCK_MEMORY_SCOPE
-    return None, GENERAL_MEMORY_SCOPE
+        return normalized_stock_code, STOCK_SESSION_TYPE
+    return None, GENERAL_SESSION_TYPE
 
 
 def _utc_now_iso() -> str:
@@ -102,25 +110,25 @@ class MemoryServiceClient:
     async def _ingest_scope(
         self,
         *,
-        memory_scope: str,
+        session: str,
         context: str,
         operation: str = "ingest",
     ) -> dict[str, Any]:
-        normalized_scope = str(memory_scope or "").strip()
+        normalized_session = str(session or "").strip()
         normalized_context = str(context or "").strip()
-        if not self.enabled or not normalized_scope or not normalized_context:
+        if not self.enabled or not normalized_session or not normalized_context:
             self.clear_last_error(operation)
             logger.info(
-                "Memory ingest skipped: enabled=%s memory_scope=%s has_content=%s",
+                "Memory ingest skipped: enabled=%s session=%s has_content=%s",
                 self.enabled,
-                normalized_scope,
+                normalized_session,
                 bool(normalized_context),
             )
             return {}
         return await self._post(
             "/v1/ingest",
             {
-                "session": normalized_scope,
+                "session": normalized_session,
                 "content": normalized_context,
                 "occurred_at": _utc_now_iso(),
             },
@@ -130,27 +138,27 @@ class MemoryServiceClient:
     async def _recall_scope(
         self,
         *,
-        memory_scope: str,
+        session: str,
         query: str,
         stock_code: str | None = None,
         operation: str = "recall",
     ) -> dict[str, Any]:
-        normalized_scope = str(memory_scope or "").strip()
+        normalized_session = str(session or "").strip()
         normalized_query = str(query or "").strip()
-        resolved_stock_code, _scope_label = _resolve_scope_label(stock_code)
-        if not self.enabled or not normalized_scope or not normalized_query:
+        resolved_stock_code, _memo_session = _resolve_memo_session(stock_code)
+        if not self.enabled or not normalized_session or not normalized_query:
             self.clear_last_error(operation)
             logger.info(
-                "Memory recall skipped: enabled=%s memory_scope=%s has_query=%s",
+                "Memory recall skipped: enabled=%s session=%s has_query=%s",
                 self.enabled,
-                normalized_scope,
+                normalized_session,
                 bool(normalized_query),
             )
             return {}
         response = await self._post(
             "/v1/recall",
             {
-                "session": normalized_scope,
+                "session": normalized_session,
                 "query": normalized_query,
             },
             timeout_seconds=max(30.0, settings.MEMORY_SERVICE_TIMEOUT_SECONDS),
@@ -161,7 +169,7 @@ class MemoryServiceClient:
         data = self._response_data(response)
         if not data:
             return {}
-        data.setdefault("session", normalized_scope)
+        data.setdefault("session", normalized_session)
         data.setdefault("stock_code", resolved_stock_code)
         return data
 
@@ -196,12 +204,12 @@ class MemoryServiceClient:
                 bool(str(query or "").strip()),
             )
             return {}
-        memory_scope = _build_user_memory_scope(
+        session = _build_user_session(
             user_id=user_id,
             stock_code=stock_code,
         )
         return await self._recall_scope(
-            memory_scope=memory_scope,
+            session=session,
             query=query,
             stock_code=stock_code,
             operation="recall",
@@ -224,12 +232,12 @@ class MemoryServiceClient:
                 bool(str(content or "").strip()),
             )
             return {}
-        memory_scope = _build_user_memory_scope(
+        session = _build_user_session(
             user_id=user_id,
             stock_code=stock_code,
         )
         return await self._ingest_scope(
-            memory_scope=memory_scope,
+            session=session,
             context=content,
             operation="ingest",
         )
@@ -254,7 +262,7 @@ class MemoryServiceClient:
         normalized_stock_code = str(stock_code or "").strip()
         if user_id is not None:
             if normalized_stock_code:
-                params["session"] = _build_user_memory_scope(
+                params["session"] = _build_user_session(
                     user_id=user_id,
                     stock_code=normalized_stock_code,
                 )
@@ -291,7 +299,7 @@ class MemoryServiceClient:
         normalized_stock_code = str(stock_code or "").strip()
         if user_id is not None:
             if normalized_stock_code:
-                params["session"] = _build_user_memory_scope(
+                params["session"] = _build_user_session(
                     user_id=user_id,
                     stock_code=normalized_stock_code,
                 )
@@ -437,9 +445,8 @@ class MemoryServiceClient:
 
     def _summarize_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         summary: dict[str, Any] = {}
-        for scope_key in ("memory_scope", "session"):
-            if scope_key in payload:
-                summary[scope_key] = payload.get(scope_key)
+        if "session" in payload:
+            summary["session"] = payload.get("session")
         if "query" in payload:
             query_text = str(payload.get("query") or "").replace("\n", " ").strip()
             summary["query_preview"] = query_text[:120]

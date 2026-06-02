@@ -304,7 +304,7 @@ def test_get_review_run_result_falls_back_from_completed_event_payload(db_sessio
         {
             "content": "平安银行复盘经验：上涨主因是估值修复和风险预期改善，追高前必须先确认基本面改善是否同步验证。",
             "importance": "high",
-            "memory_scope": "stock",
+            "memo_session": "stock",
             "stock_code": "000001.SZ",
         }
     ]

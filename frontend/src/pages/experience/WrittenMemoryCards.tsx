@@ -12,13 +12,13 @@ const isSuccessfulMemoryStatus = (status?: string) => !status || successfulMemor
 
 type Props = {
   memories?: ExperienceWrittenMemory[];
-  getMemoryScopeLabel: (value?: string) => string;
+  getMemoSessionLabel: (value?: string) => string;
   getMemoryImportanceLabel: (value?: string) => string;
 };
 
 export const WrittenMemoryCards: React.FC<Props> = ({
   memories = [],
-  getMemoryScopeLabel,
+  getMemoSessionLabel,
   getMemoryImportanceLabel,
 }) => {
   const { t } = useTranslation();
@@ -42,7 +42,7 @@ export const WrittenMemoryCards: React.FC<Props> = ({
                 <Space direction="vertical" size={8} style={{ width: '100%' }}>
                   <Space wrap>
                     <Text strong>{`${index + 1}.`}</Text>
-                    <Tag color={item.memory_scope === 'stock' ? 'blue' : 'default'}>{getMemoryScopeLabel(item.memory_scope)}</Tag>
+                    <Tag color={item.memo_session === 'stock' ? 'blue' : 'default'}>{getMemoSessionLabel(item.memo_session)}</Tag>
                     <Tag>{getMemoryImportanceLabel(item.importance)}</Tag>
                     {item.stock_code ? <Tag>{item.stock_code}</Tag> : null}
                     {item.status ? <Tag color={isSuccessfulMemoryStatus(item.status) ? 'green' : 'default'}>{item.status}</Tag> : null}

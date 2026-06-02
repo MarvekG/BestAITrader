@@ -46,7 +46,7 @@ export interface ExperienceDebateSession {
 
 export interface ExperienceWrittenMemory {
   content?: string;
-  memory_scope?: string;
+  memo_session?: string;
   importance?: string;
   stock_code?: string;
   stock_name?: string;
