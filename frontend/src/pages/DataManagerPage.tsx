@@ -3,7 +3,9 @@ import { Table, Tabs, Input, Button, Card, Space, Tag, Typography, DatePicker, A
 import { useTranslation } from 'react-i18next';
 import { SyncOutlined, SearchOutlined, DatabaseOutlined, LineChartOutlined, DollarOutlined, ReadOutlined, TransactionOutlined, FireOutlined, FundViewOutlined, FundOutlined, DeleteOutlined, ExclamationCircleOutlined, UserOutlined, SettingOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import { marketApi } from '../api/market';
-import { wsManager } from '../services/websocket';
+import { TaskCompletedMessage, WebSocketMessage } from '../services/websocket';
+import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
+import { getApiErrorMessage } from '../utils/errorUtils';
 import dayjs from 'dayjs';
 import ReactMarkdown from 'react-markdown';
 
@@ -136,8 +138,8 @@ export const DataManagerPage: React.FC = () => {
             setIsDataSourceModalVisible(false);
             // Refresh data from new source
             fetchData(activeTab, stockCode, pagination.current, pagination.pageSize);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Switch failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Switch failed'));
         }
     };
 
@@ -168,8 +170,8 @@ export const DataManagerPage: React.FC = () => {
             const res = await marketApi.syncDailyDbData(stockCode, start, end, dailySyncAdjust);
             message.success(res.message);
             setIsDailySyncModalVisible(false);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Daily sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Daily sync failed'));
         } finally {
             setDailySyncing(false);
         }
@@ -194,8 +196,8 @@ export const DataManagerPage: React.FC = () => {
             const res = await marketApi.syncIndexDaily(indexCode, start, end);
             message.success(res.message);
             setIsIndexDailySyncModalVisible(false);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Index daily sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Index daily sync failed'));
         } finally {
             setIndexDailySyncing(false);
         }
@@ -216,8 +218,8 @@ export const DataManagerPage: React.FC = () => {
                 setClearConfirmationText('');
                 // Refresh current view
                 fetchData(activeTab, stockCode, pagination.current, pagination.pageSize);
-            } catch (error: any) {
-                message.error(error.response?.data?.detail || 'Failed to clear table');
+            } catch (error) {
+                message.error(getApiErrorMessage(error, 'Failed to clear table'));
             } finally {
                 setClearingTable(false);
             }
@@ -345,10 +347,11 @@ export const DataManagerPage: React.FC = () => {
         fetchData(activeTab, stockCode, paginationCurrent, paginationPageSize);
     }, [activeTab, fetchData, paginationCurrent, paginationPageSize, stockCode]);
 
-    // Subscribe to WebSocket task completion notifications
-    useEffect(() => {
-        const handleTaskCompleted = (msg: any) => {
-            const { data } = msg;
+    useWebSocketSubscription('task_completed', (msg: WebSocketMessage) => {
+            const data = (msg as TaskCompletedMessage).data;
+            if (!data) {
+                return;
+            }
             if (data.status === 'completed' || data.status === 'success') {
                 // 如果是股票基础信息或全量基础信息同步任务，释放 loading 状态
                 if (basicSyncTaskIdRef.current === data.task_id) {
@@ -374,19 +377,10 @@ export const DataManagerPage: React.FC = () => {
 
                 // Handle Bulk Sync task updates
                 if (data.task_type === 'bulk_data_sync') {
-                    if (data.status === 'completed' || data.status === 'failed') {
-                        setBulkSyncing(false);
-                    }
+                    setBulkSyncing(false);
                 }
             }
-        };
-
-        wsManager.subscribe('task_completed', handleTaskCompleted);
-
-        return () => {
-            wsManager.unsubscribe('task_completed', handleTaskCompleted);
-        };
-    }, [activeTab, fetchData, paginationCurrent, paginationPageSize, stockCode]);
+    });
 
     const handleSearch = () => {
         setPagination({ ...pagination, current: 1 });
@@ -406,10 +400,8 @@ export const DataManagerPage: React.FC = () => {
             const res = await marketApi.syncDbData(targetCode, startDate, endDate);
             // Show tip message
             message.success(res.message);
-        } catch (error: any) {
-            const detail = error.response?.data?.detail;
-            const errorMsg = typeof detail === 'string' ? detail : (detail ? JSON.stringify(detail) : 'Sync failed');
-            message.error(errorMsg);
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Sync failed'));
         } finally {
             setSyncing(false);
         }
@@ -428,8 +420,8 @@ export const DataManagerPage: React.FC = () => {
 
             const res = await marketApi.syncDragonTiger(startDate, endDate);
             message.success(res.message);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Dragon Tiger sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Dragon Tiger sync failed'));
         } finally {
             setDragonTigerSyncing(false);
         }
@@ -441,8 +433,8 @@ export const DataManagerPage: React.FC = () => {
             const res = await marketApi.syncIndustryMarket();
             message.success(res.message);
             // WebSocket notification will handle completion
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Industry sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Industry sync failed'));
         } finally {
             setIndustrySyncing(false);
         }
@@ -459,8 +451,8 @@ export const DataManagerPage: React.FC = () => {
             const res = await marketApi.syncSectorMoneyFlow(stockCode);
             message.success(res.message);
             // WebSocket notification will handle completion
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Sector money flow sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Sector money flow sync failed'));
         } finally {
             setSectorMoneyFlowSyncing(false);
         }
@@ -471,8 +463,8 @@ export const DataManagerPage: React.FC = () => {
         try {
             const res = await marketApi.syncNorthboundData(stockCode || undefined);
             message.success(res.message);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Northbound sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Northbound sync failed'));
         } finally {
             setNorthboundSyncing(false);
         }
@@ -487,8 +479,8 @@ export const DataManagerPage: React.FC = () => {
         try {
             const res = await marketApi.syncGranularData(stockCode, 'money_flow');
             message.success(res.message);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Money Flow sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Money Flow sync failed'));
         } finally {
             setMoneyFlowSyncing(false);
         }
@@ -508,8 +500,8 @@ export const DataManagerPage: React.FC = () => {
             }
             const res = await marketApi.syncGranularData(stockCode || '', apiType, startDate, endDate);
             message.success(res.message);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Sync failed'));
         } finally {
             setLoadingState(false);
         }
@@ -521,8 +513,8 @@ export const DataManagerPage: React.FC = () => {
             const dateStr = limitUpDate?.format('YYYY-MM-DD');
             const res = await marketApi.syncLimitUpPool(dateStr);
             message.success(res.message);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Limit up sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Limit up sync failed'));
         } finally {
             setLimitUpSyncing(false);
         }
@@ -534,8 +526,8 @@ export const DataManagerPage: React.FC = () => {
             const dateStr = limitDownDate?.format('YYYY-MM-DD');
             const res = await marketApi.syncLimitDownPool(dateStr);
             message.success(res.message);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Limit down sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Limit down sync failed'));
         } finally {
             setLimitDownSyncing(false);
         }
@@ -547,8 +539,8 @@ export const DataManagerPage: React.FC = () => {
             const dateStr = zhabanDate?.format('YYYY-MM-DD');
             const res = await marketApi.syncZhabanPool(dateStr);
             message.success(res.message);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Zhaban sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Zhaban sync failed'));
         } finally {
             setZhabanSyncing(false);
         }
@@ -559,8 +551,8 @@ export const DataManagerPage: React.FC = () => {
         try {
             const res = await marketApi.syncPledgeSummary(stockCode);
             message.success(res.message);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Pledge summary sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Pledge summary sync failed'));
         } finally {
             setPledgeSummarySyncing(false);
         }
@@ -580,8 +572,8 @@ export const DataManagerPage: React.FC = () => {
                 setBasicSyncing(false);
             }
             message.success(res.message);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Stock basic sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Stock basic sync failed'));
             setBasicSyncing(false);
             basicSyncTaskIdRef.current = null;
         }
@@ -592,8 +584,8 @@ export const DataManagerPage: React.FC = () => {
         try {
             const res = await marketApi.syncIndicators(stockCode || undefined);
             message.success(res.message);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Calculation failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Calculation failed'));
         } finally {
             setIndicatorsSyncing(false);
         }
@@ -608,8 +600,8 @@ export const DataManagerPage: React.FC = () => {
         try {
             const res = await marketApi.syncInteractiveQA(stockCode);
             message.success(res.message);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Interactive QA sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Interactive QA sync failed'));
         } finally {
             setInteractiveQASyncing(false);
         }
@@ -687,17 +679,15 @@ export const DataManagerPage: React.FC = () => {
                         : await marketApi.syncCashflowStatementData(stockCode, startDate, endDate);
             message.success(res.message);
             setIsFinancialReportSyncModalVisible(false);
-        } catch (error: any) {
-            message.error(
-                error.response?.data?.detail ||
-                (financialReportSyncType === 'financial'
-                    ? 'Financial sync failed'
-                    : financialReportSyncType === 'income_statement'
-                        ? 'Income statement sync failed'
-                        : financialReportSyncType === 'balance_sheet'
-                            ? 'Balance sheet sync failed'
-                            : 'Cashflow statement sync failed')
-            );
+        } catch (error) {
+            const fallback = financialReportSyncType === 'financial'
+                ? 'Financial sync failed'
+                : financialReportSyncType === 'income_statement'
+                    ? 'Income statement sync failed'
+                    : financialReportSyncType === 'balance_sheet'
+                        ? 'Balance sheet sync failed'
+                        : 'Cashflow statement sync failed';
+            message.error(getApiErrorMessage(error, fallback));
         } finally {
             setSyncingState(false);
         }
@@ -708,8 +698,8 @@ export const DataManagerPage: React.FC = () => {
         try {
             const res = await marketApi.syncStockValuation(stockCode || undefined);
             message.success(res.message);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Valuation sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Valuation sync failed'));
         } finally {
             setValuationSyncing(false);
         }
@@ -724,8 +714,8 @@ export const DataManagerPage: React.FC = () => {
         try {
             const res = await marketApi.syncRealtimeMarket(stockCode);
             message.success(res.message);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Realtime sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Realtime sync failed'));
         } finally {
             setRealtimeSyncing(false);
         }
@@ -763,8 +753,8 @@ export const DataManagerPage: React.FC = () => {
                     } else {
                         message.success(res.message);
                     }
-                } catch (error: any) {
-                    message.error(error.response?.data?.detail || t('common.sync_failed'));
+                } catch (error) {
+                    message.error(getApiErrorMessage(error, t('common.sync_failed')));
                     setBaseInfoSyncing(false);
                     baseInfoSyncTaskIdRef.current = null;
                 }
@@ -785,8 +775,8 @@ export const DataManagerPage: React.FC = () => {
             message.success(`${t('market.data_manager.bulk_sync')} ${t('common.task_submitted')}: ${res.task_id}`);
             setIsBulkSyncModalVisible(false);
             setSelectedBulkTables([]);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || t('common.sync_failed'));
+        } catch (error) {
+            message.error(getApiErrorMessage(error, t('common.sync_failed')));
         } finally {
             setBulkSyncing(false);
         }
@@ -801,8 +791,8 @@ export const DataManagerPage: React.FC = () => {
         try {
             const res = await marketApi.syncTopHolders(stockCode);
             message.success(res.message);
-        } catch (error: any) {
-            message.error(error.response?.data?.detail || 'Top holders sync failed');
+        } catch (error) {
+            message.error(getApiErrorMessage(error, 'Top holders sync failed'));
         } finally {
             setTopHoldersSyncing(false);
         }
@@ -848,8 +838,8 @@ export const DataManagerPage: React.FC = () => {
 
                     // Refresh current list
                     fetchData(activeTab, stockCode, pagination.current, pagination.pageSize);
-                } catch (error: any) {
-                    message.error(error.response?.data?.detail || t('common.delete_failed'));
+                } catch (error) {
+                    message.error(getApiErrorMessage(error, t('common.delete_failed')));
                 } finally {
                     setLoading(false);
                 }

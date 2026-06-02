@@ -76,3 +76,17 @@ def test_pubsub_redis_options_disable_read_timeout():
     assert options["socket_timeout"] is None
     assert options["socket_connect_timeout"] == 5
     assert options["health_check_interval"] == 30
+
+
+@pytest.mark.asyncio
+async def test_trading_notification_methods_swallow_broadcast_errors(monkeypatch):
+    manager = WebSocketManager()
+
+    async def _raise_broadcast_error(*_args, **_kwargs):
+        raise RuntimeError("broadcast unavailable")
+
+    monkeypatch.setattr(manager, "broadcast_to_session", _raise_broadcast_error)
+
+    await manager.send_order_status("session", {"order_id": "order-1"})
+    await manager.send_position_update("session", {"stock_code": "000001.SZ"})
+    await manager.send_trade_executed("session", {"trade_id": "trade-1"})

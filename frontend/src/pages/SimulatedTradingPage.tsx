@@ -26,7 +26,8 @@ import { accountsApi, AccountAssets, Position } from '../api/accounts';
 import { tradingApi, OrderHistory, OrderRequest } from '../api/trading';
 import { riskControlApi, RiskControlConfigUpdate, RiskControlHit, RiskControlPolicy } from '../api/riskControl';
 import { marketApi } from '../api/market';
-import { WebSocketMessage, wsManager } from '../services/websocket';
+import { WebSocketMessage } from '../services/websocket';
+import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
 import { getApiErrorMessage } from '../utils/errorUtils';
 import { PerformanceTab } from '../features/trading/PerformanceTab';
 import { PortfolioOverviewTab } from '../features/trading/PortfolioOverviewTab';
@@ -132,31 +133,18 @@ export const SimulatedTradingPage: React.FC = () => {
         }
     }, [location.search, orderForm]);
 
-    // Websocket Listeners
-    useEffect(() => {
-        const handlePositionUpdate = (msg: WebSocketMessage) => {
-            console.log('Position update received:', msg);
-            loadData(false);
-        };
-        const handleOrderUpdate = (msg: WebSocketMessage) => {
-            console.log('Order update received:', msg);
-            loadData(false);
-        };
-        const handleTradeExecuted = (msg: WebSocketMessage) => {
-            console.log('Trade executed:', msg);
-            loadData(false);
-        };
-
-        wsManager.subscribe('position_update', handlePositionUpdate);
-        wsManager.subscribe('order_status', handleOrderUpdate);
-        wsManager.subscribe('trade_executed', handleTradeExecuted);
-
-        return () => {
-            wsManager.unsubscribe('position_update', handlePositionUpdate);
-            wsManager.unsubscribe('order_status', handleOrderUpdate);
-            wsManager.unsubscribe('trade_executed', handleTradeExecuted);
-        };
-    }, []);
+    useWebSocketSubscription('position_update', (msg: WebSocketMessage) => {
+        console.log('Position update received:', msg);
+        loadData(false);
+    });
+    useWebSocketSubscription('order_status', (msg: WebSocketMessage) => {
+        console.log('Order update received:', msg);
+        loadData(false);
+    });
+    useWebSocketSubscription('trade_executed', (msg: WebSocketMessage) => {
+        console.log('Trade executed:', msg);
+        loadData(false);
+    });
 
     // Order Modal Handler
     const resolveStopLossPrice = async (stockCode: string, stopLossPct?: number) => {

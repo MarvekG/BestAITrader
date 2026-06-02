@@ -16,10 +16,8 @@ async def test_execute_trading_order_buy_logic():
     # Mock dependencies
     with patch("app.core.config.settings.ENABLE_AUTO_TRADE", True), \
          patch("app.core.database.SessionLocal") as mock_session_local, \
-         patch("app.risk_control.service.portfolio_risk_control_service.evaluate_order") as mock_evaluate, \
          patch("app.trading.service.trading_service.execute_order_and_update_db", new_callable=AsyncMock) as mock_execute:
         mock_execute.return_value = {"success": True, "message": "ok"}
-        mock_evaluate.return_value = {"blocks": [], "accepted": [], "metrics": {}}
         mock_db = MagicMock()
         mock_session_local.return_value.__enter__.return_value = mock_db
         
@@ -76,10 +74,8 @@ async def test_execute_trading_order_sell_liquidation():
     # Mock dependencies
     with patch("app.core.config.settings.ENABLE_AUTO_TRADE", True), \
          patch("app.core.database.SessionLocal") as mock_session_local, \
-         patch("app.risk_control.service.portfolio_risk_control_service.evaluate_order") as mock_evaluate, \
          patch("app.trading.service.trading_service.execute_order_and_update_db", new_callable=AsyncMock) as mock_execute:
         mock_execute.return_value = {"success": True, "message": "ok"}
-        mock_evaluate.return_value = {"blocks": [], "accepted": [], "metrics": {}}
         mock_db = MagicMock()
         mock_session_local.return_value.__enter__.return_value = mock_db
         
@@ -130,10 +126,8 @@ async def test_execute_trading_order_sell_liquidation():
 async def test_execute_trading_order_sell_liquidation_rounds_down_to_lot_size():
     with patch("app.core.config.settings.ENABLE_AUTO_TRADE", True), \
          patch("app.core.database.SessionLocal") as mock_session_local, \
-         patch("app.risk_control.service.portfolio_risk_control_service.evaluate_order") as mock_evaluate, \
          patch("app.trading.service.trading_service.execute_order_and_update_db", new_callable=AsyncMock) as mock_execute:
         mock_execute.return_value = {"success": True, "message": "ok"}
-        mock_evaluate.return_value = {"blocks": [], "accepted": [], "metrics": {}}
         mock_db = MagicMock()
         mock_session_local.return_value.__enter__.return_value = mock_db
 
@@ -175,10 +169,8 @@ async def test_execute_trading_order_sell_liquidation_rounds_down_to_lot_size():
 async def test_execute_trading_order_buy_logic_accepts_decimal_account_assets():
     with patch("app.core.config.settings.ENABLE_AUTO_TRADE", True), \
          patch("app.core.database.SessionLocal") as mock_session_local, \
-         patch("app.risk_control.service.portfolio_risk_control_service.evaluate_order") as mock_evaluate, \
          patch("app.trading.service.trading_service.execute_order_and_update_db", new_callable=AsyncMock) as mock_execute:
         mock_execute.return_value = {"success": True, "message": "ok"}
-        mock_evaluate.return_value = {"blocks": [], "accepted": [], "metrics": {}}
         mock_db = MagicMock()
         mock_session_local.return_value.__enter__.return_value = mock_db
 
@@ -224,17 +216,22 @@ async def test_execute_trading_order_buy_logic_accepts_decimal_account_assets():
 async def test_execute_trading_order_skips_when_risk_control_blocks():
     with patch("app.core.config.settings.ENABLE_AUTO_TRADE", True), \
          patch("app.core.database.SessionLocal") as mock_session_local, \
-         patch("app.risk_control.service.portfolio_risk_control_service.evaluate_order") as mock_evaluate, \
          patch("app.trading.service.trading_service.execute_order_and_update_db", new_callable=AsyncMock) as mock_execute:
         mock_db = MagicMock()
         mock_session_local.return_value.__enter__.return_value = mock_db
-        mock_evaluate.return_value = {
+        risk_result = {
             "enabled": True,
             "passed": False,
             "severity": "block",
             "accepted": [],
             "blocks": [{"rule": "require_stop_loss", "message": "blocked"}],
             "metrics": {},
+        }
+        mock_execute.return_value = {
+            "success": False,
+            "message": "Order blocked by portfolio risk control",
+            "reason": "risk_control_blocked",
+            "risk_control": risk_result,
         }
 
         session_id = str(uuid4())
@@ -264,7 +261,7 @@ async def test_execute_trading_order_skips_when_risk_control_blocks():
             "stop_loss": 9.0,
         })
 
-        mock_execute.assert_not_called()
+        mock_execute.assert_called_once()
         assert result["success"] is False
         assert result["reason"] == "risk_control_blocked"
         assert result["risk_control"]["blocks"][0]["rule"] == "require_stop_loss"

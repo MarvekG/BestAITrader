@@ -40,8 +40,9 @@ import {
   StockPickerRun,
 } from '../api/stockPicker';
 import { warehouseApi } from '../api/warehouse';
-import { StockPickerUpdateMessage, TaskCompletedMessage, WebSocketMessage, wsManager } from '../services/websocket';
-import { formatErrorMessage, getApiErrorResponseData } from '../utils/errorUtils';
+import { StockPickerUpdateMessage, TaskCompletedMessage, WebSocketMessage } from '../services/websocket';
+import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
+import { formatErrorMessage, getApiErrorDetail } from '../utils/errorUtils';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -95,11 +96,6 @@ const researchLimitCaps: Record<'warehouse' | 'core' | 'all', number> = {
   warehouse: 12,
   core: 15,
   all: 18,
-};
-
-const getApiErrorDetail = (error: unknown) => {
-  const responseData = getApiErrorResponseData(error) as { detail?: unknown } | null | undefined;
-  return responseData?.detail;
 };
 
 const isFormValidationError = (error: unknown) =>
@@ -508,8 +504,7 @@ export const AIStockPickerPage: React.FC = () => {
     });
   }, [selectedRunId, loadRunDetails, message, t]);
 
-  React.useEffect(() => {
-    const handleStockPickerUpdate = (msg: WebSocketMessage) => {
+  useWebSocketSubscription('stock_picker_update', (msg: WebSocketMessage) => {
       const data = (msg as StockPickerUpdateMessage).data;
       const runId = data?.run_id;
       if (!runId) return;
@@ -517,16 +512,9 @@ export const AIStockPickerPage: React.FC = () => {
       if (runId === selectedRunId) {
         loadRunDetails(runId).catch(() => undefined);
       }
-    };
+  });
 
-    wsManager.subscribe('stock_picker_update', handleStockPickerUpdate);
-    return () => {
-      wsManager.unsubscribe('stock_picker_update', handleStockPickerUpdate);
-    };
-  }, [loadRunDetails, loadRuns, selectedRunId]);
-
-  React.useEffect(() => {
-    const handleTaskCompleted = (msg: WebSocketMessage) => {
+  useWebSocketSubscription('task_completed', (msg: WebSocketMessage) => {
       const data = (msg as TaskCompletedMessage).data;
       if (!data?.task_id || baseInfoSyncTaskIdRef.current !== data.task_id) return;
 
@@ -534,13 +522,7 @@ export const AIStockPickerPage: React.FC = () => {
         setBaseInfoSyncing(false);
         baseInfoSyncTaskIdRef.current = null;
       }
-    };
-
-    wsManager.subscribe('task_completed', handleTaskCompleted);
-    return () => {
-      wsManager.unsubscribe('task_completed', handleTaskCompleted);
-    };
-  }, []);
+  });
 
   const handleBaseInfoSync = React.useCallback(
     async (scope: 'all' | 'warehouse' | 'core') => {

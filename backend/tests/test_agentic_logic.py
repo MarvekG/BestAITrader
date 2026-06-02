@@ -728,8 +728,8 @@ async def test_memory_client_records_last_error_for_failed_requests():
         async def __aexit__(self, exc_type, exc, tb):
             return False
 
-        async def post(self, url, json, headers=None):
-            del headers
+        async def post(self, url, json, headers=None, timeout=None):
+            del headers, timeout
             raise httpx.ConnectTimeout("memory backend timeout")
 
     memory_client.clear_last_error("recall")

@@ -165,6 +165,7 @@ class PortfolioRiskControlService:
         price: float,
         order_type: str,
         stop_loss: float | None = None,
+        estimated_fee: float | None = None,
     ) -> dict[str, Any]:
         """
         评估订单执行后的组合风控结果。
@@ -178,6 +179,7 @@ class PortfolioRiskControlService:
             price: 交易价格。
             order_type: 订单类型。
             stop_loss: 止损价。
+            estimated_fee: 交易服务已按同一执行价格估算出的交易费用。
 
         Returns:
             风控评估结果，包含是否通过、拦截命中和关键指标。
@@ -199,6 +201,7 @@ class PortfolioRiskControlService:
             price_decimal = self._get_latest_price(db, stock_code)
         shares_decimal = _to_decimal(shares or 0)
         trade_value = price_decimal * shares_decimal
+        estimated_fee_decimal = _to_decimal(estimated_fee or 0)
         valuation = build_portfolio_valuation(db, account)
         total_assets = valuation["summary"]["total_assets_decimal"]
         available_cash = valuation["summary"]["available_cash_decimal"]
@@ -209,7 +212,7 @@ class PortfolioRiskControlService:
         if action == "buy":
             post_single_value = current_position_value + trade_value
             post_industry_value = current_industry_value + trade_value
-            post_cash = available_cash - trade_value
+            post_cash = available_cash - trade_value - estimated_fee_decimal
         elif action == "sell":
             post_single_value = max(current_position_value - trade_value, Decimal("0"))
             post_industry_value = max(current_industry_value - trade_value, Decimal("0"))
@@ -306,6 +309,7 @@ class PortfolioRiskControlService:
             "metrics": {
                 "total_assets": self._to_float(total_assets),
                 "trade_value": self._to_float(trade_value),
+                "estimated_fee": self._to_float(estimated_fee_decimal),
                 "current_single_position_value": self._to_float(current_position_value),
                 "current_industry_position_value": self._to_float(current_industry_value),
                 "post_single_position_pct": self._to_float(post_single_pct),

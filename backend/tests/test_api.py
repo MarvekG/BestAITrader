@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -376,8 +377,8 @@ class TestTradingAPI:
             headers=auth_headers,
         )
 
-        assert response.status_code == 400
-        assert response.json()["detail"] == "stop_loss must be greater than 0"
+        assert response.status_code == 422
+        assert response.json()["detail"][0]["loc"][-1] == "stop_loss"
 
     def test_place_order_rejects_missing_stop_loss_by_risk_control(self, client, auth_headers, db_session):
         _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
@@ -390,7 +391,7 @@ class TestTradingAPI:
                 "stock_code": "000001",
                 "stock_name": "Ping An Bank",
                 "action": "buy",
-                "order_type": "market",
+                "order_type": "limit",
                 "price": 10.0,
                 "shares": 100,
             },
@@ -400,6 +401,131 @@ class TestTradingAPI:
         assert response.status_code == 400
         assert response.json()["detail"]["reason"] == "risk_control_blocked"
         assert response.json()["detail"]["blocks"][0]["rule"] == "require_stop_loss"
+
+    def test_place_order_returns_400_when_service_risk_control_blocks(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+        session_id = _create_session(client, auth_headers, "000001.SZ")
+        risk_result = {
+            "enabled": True,
+            "passed": False,
+            "severity": "block",
+            "accepted": [],
+            "blocks": [{"rule": "require_stop_loss", "message": "blocked"}],
+            "metrics": {},
+        }
+
+        mocked_trade_result = {
+            "success": False,
+            "reason": "risk_control_blocked",
+            "message": "Order blocked by portfolio risk control",
+            "risk_control": risk_result,
+        }
+
+        with patch(
+            "app.risk_control.service.portfolio_risk_control_service.evaluate_order",
+        ) as mock_precheck, patch(
+            "app.trading.service.trading_service.execute_order_and_update_db",
+            new=AsyncMock(return_value=mocked_trade_result),
+        ):
+            response = client.post(
+                "/api/v1/trading/orders",
+                json={
+                    "session_id": session_id,
+                    "stock_code": "000001",
+                    "stock_name": "Ping An Bank",
+                    "action": "buy",
+                    "order_type": "market",
+                    "price": 10.0,
+                    "shares": 100,
+                    "stop_loss": 9.5,
+                },
+                headers=auth_headers,
+            )
+
+        assert response.status_code == 400
+        assert response.json()["detail"]["reason"] == "risk_control_blocked"
+        assert response.json()["detail"]["risk_control"] == risk_result
+        mock_precheck.assert_not_called()
+
+    def test_place_order_rejects_invalid_action_schema(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+        session_id = _create_session(client, auth_headers, "000001.SZ")
+
+        response = client.post(
+            "/api/v1/trading/orders",
+            json={
+                "session_id": session_id,
+                "stock_code": "000001",
+                "stock_name": "Ping An Bank",
+                "action": "hold",
+                "order_type": "market",
+                "price": 10.0,
+                "shares": 100,
+                "stop_loss": 9.5,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 422
+
+    def test_place_order_rejects_non_positive_shares_schema(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+        session_id = _create_session(client, auth_headers, "000001.SZ")
+
+        response = client.post(
+            "/api/v1/trading/orders",
+            json={
+                "session_id": session_id,
+                "stock_code": "000001",
+                "stock_name": "Ping An Bank",
+                "action": "buy",
+                "order_type": "market",
+                "price": 10.0,
+                "shares": 0,
+                "stop_loss": 9.5,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 422
+
+    def test_place_order_rejects_negative_price_schema(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+        session_id = _create_session(client, auth_headers, "000001.SZ")
+
+        response = client.post(
+            "/api/v1/trading/orders",
+            json={
+                "session_id": session_id,
+                "stock_code": "000001",
+                "stock_name": "Ping An Bank",
+                "action": "buy",
+                "order_type": "limit",
+                "price": -1.0,
+                "shares": 100,
+                "stop_loss": 9.5,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 422
+
+    def test_place_order_rejects_empty_stock_code_schema(self, client, auth_headers):
+        response = client.post(
+            "/api/v1/trading/orders",
+            json={
+                "stock_code": "",
+                "stock_name": "Ping An Bank",
+                "action": "buy",
+                "order_type": "market",
+                "price": 10.0,
+                "shares": 100,
+                "stop_loss": 9.5,
+            },
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 422
 
 
 class TestAccountAPI:
@@ -438,6 +564,56 @@ class TestAccountAPI:
 
         assert put_response.status_code == 200
         assert float(put_response.json()["total_funds"]) == 200000.0
+
+    def test_my_total_funds_uses_dynamic_portfolio_valuation(self, client, auth_headers, db_session):
+        from datetime import datetime
+
+        from app.models.account import Account
+        from app.models.data_storage import StockRealtimeMarket
+        from app.models.position import Position
+        from app.models.user import User
+
+        user = db_session.query(User).filter(User.username.like("test_%")).first()
+        account = Account(
+            user_id=user.id,
+            total_assets=Decimal("1000000.0000"),
+            available_cash=Decimal("300000.0000"),
+            frozen_cash=Decimal("10000.0000"),
+            market_value=Decimal("100000.0000"),
+            initial_capital=Decimal("1000000.0000"),
+            total_profit_loss=Decimal("0.0000"),
+        )
+        db_session.add(account)
+        db_session.flush()
+        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+        db_session.add_all([
+            StockRealtimeMarket(
+                stock_code="000001.SZ",
+                current_price=Decimal("12.0000"),
+                timestamp=datetime(2026, 6, 2, 10, 0, 0),
+            ),
+            Position(
+                account_id=account.account_id,
+                stock_code="000001.SZ",
+                total_shares=10000,
+                available_shares=10000,
+                frozen_shares=0,
+                avg_cost=Decimal("10.0000"),
+                current_price=Decimal("10.0000"),
+                market_value=Decimal("100000.0000"),
+                profit_loss=Decimal("0.0000"),
+                profit_loss_pct=Decimal("0.0000"),
+                purchase_details={"ledger": []},
+            ),
+        ])
+        db_session.commit()
+
+        response = client.get("/api/v1/accounts/my-total-funds", headers=auth_headers)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert float(payload["market_value"]) == 120000.0
+        assert float(payload["total_funds"]) == 430000.0
 
 
 class TestTaskAPI:

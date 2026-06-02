@@ -43,7 +43,8 @@ import type { SkillItem } from '../api/skills';
 import { useTranslation } from 'react-i18next';
 import { getApiErrorMessage, getApiErrorResponseData } from '../utils/errorUtils';
 import { useSearchParams } from 'react-router-dom';
-import { TaskCompletedMessage, WebSocketMessage, wsManager } from '../services/websocket';
+import { TaskCompletedMessage, WebSocketMessage } from '../services/websocket';
+import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
 
 const AI_FUNCTION_SCENARIOS: Array<{ key: AiFunctionScenario; titleKey: string; placeholderKey: string }> = [
   {
@@ -695,8 +696,7 @@ export const SettingsPage: React.FC = () => {
     }
   }, [message, t]);
 
-  useEffect(() => {
-    const handleAiFunctionTaskCompleted = (msg: WebSocketMessage) => {
+  useWebSocketSubscription('task_completed', (msg: WebSocketMessage) => {
       const data = (msg as TaskCompletedMessage).data;
       const taskId = data?.task_id;
       if (!taskId || !isAiFunctionTaskTerminal(data?.status)) {
@@ -709,13 +709,7 @@ export const SettingsPage: React.FC = () => {
       }
 
       void fetchAiFunctionTaskResult(taskId, tracker);
-    };
-
-    wsManager.subscribe('task_completed', handleAiFunctionTaskCompleted);
-    return () => {
-      wsManager.unsubscribe('task_completed', handleAiFunctionTaskCompleted);
-    };
-  }, [fetchAiFunctionTaskResult]);
+  });
 
   const memoryPreviewColumns: ColumnsType<MemoryPreviewItem> = [
     {

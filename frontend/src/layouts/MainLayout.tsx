@@ -4,6 +4,7 @@ import { ThunderboltOutlined, PlusOutlined, LogoutOutlined } from '@ant-design/i
 import { useSessionStore } from '../store/useSessionStore';
 import { Session } from '../api/session';
 import { wsManager } from '../services/websocket';
+import { clearAuthSession } from '../services/authSession';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import ThemeSwitcher from '../components/ThemeSwitcher';
 import { useThemeMode } from '../theme/useThemeMode';
@@ -65,7 +66,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
 
   const handleLogout = () => {
     wsManager.disconnect();
-    localStorage.removeItem('token');
+    clearAuthSession();
     // Reload page to reset state and return to login
     window.location.reload();
   };

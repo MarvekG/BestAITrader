@@ -199,6 +199,13 @@ async def lifespan(app: FastAPI):
         logger.error(f"Failed to close Redis connection: {e}")
 
     try:
+        from app.ai.memory_client import memory_client
+        await memory_client.close()
+        logger.info("Memory service HTTP client closed")
+    except Exception as e:
+        logger.error(f"Failed to close Memory service HTTP client: {e}")
+
+    try:
         from app.ai.agentic.tooling.browser_tool import close_browser_context
         await close_browser_context(reason="backend_shutdown")
         logger.info("CloakBrowser context closed")

@@ -49,7 +49,7 @@ export const tradeApi = {
     stock_code: string;
     stock_name: string;
     action: 'buy' | 'sell';
-    order_type: string;
+    order_type: 'market' | 'limit';
     price: number;
     shares: number;
     stop_loss?: number;

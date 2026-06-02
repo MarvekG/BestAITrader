@@ -42,8 +42,9 @@ import { ExperienceLibraryPanel } from './experience/ExperienceLibraryPanel';
 import { ReviewCandidatePanel } from './experience/ReviewCandidatePanel';
 import { ReviewTriadCards } from './experience/ReviewTriadCards';
 import { WrittenMemoryCards } from './experience/WrittenMemoryCards';
-import { ResourceSubscribedMessage, WebSocketMessage, wsManager } from '../services/websocket';
-import { formatErrorMessage, getApiErrorMessage, getApiErrorResponseData } from '../utils/errorUtils';
+import { WebSocketMessage } from '../services/websocket';
+import { useResourceSubscription } from '../hooks/useWebSocketSubscription';
+import { formatErrorMessage, getApiErrorDetail, getApiErrorMessage } from '../utils/errorUtils';
 
 const { Text, Title, Paragraph } = Typography;
 
@@ -79,11 +80,6 @@ type ExperienceReviewUpdateData = Partial<ExperienceReviewEvent> & {
 
 type ExperienceReviewUpdateMessage = WebSocketMessage & {
   data?: ExperienceReviewUpdateData;
-};
-
-const getApiErrorDetail = (error: unknown) => {
-  const responseData = getApiErrorResponseData(error) as { detail?: unknown } | null | undefined;
-  return responseData?.detail;
 };
 
 const getToolName = (payload?: Record<string, unknown> | null) => {
@@ -274,19 +270,6 @@ export const ExperiencePage: React.FC = () => {
     }
     return 'default';
   }, []);
-  const applyLiveReviewEvents = React.useCallback((events: ExperienceReviewEvent[]) => {
-    setLiveReviewRunId(events[0]?.review_run_id || null);
-    setLiveEvents(events);
-    setLiveToolTrace(
-      events
-        .filter((item) => item.stage === 'tool_call')
-        .map((item) => ({
-          name: getToolName(item.payload),
-          args: item.payload?.args || {},
-        })),
-    );
-  }, []);
-
   const loadDebateSessions = React.useCallback(async () => {
     setSessionsLoading(true);
     try {
@@ -379,12 +362,7 @@ export const ExperiencePage: React.FC = () => {
     void loadReviewEvents();
   }, [loading, selectedSessionId, viewedReviewRunId]);
 
-  React.useEffect(() => {
-    if (!selectedSessionId) {
-      return undefined;
-    }
-
-    const handleExperienceReviewUpdate = (msg: WebSocketMessage) => {
+  useResourceSubscription('experience_review_update', selectedSessionId, (msg: WebSocketMessage) => {
       const data = (msg as ExperienceReviewUpdateMessage).data;
       if (!data) return;
       const messageSessionId = data.debate_session_id;
@@ -415,41 +393,7 @@ export const ExperiencePage: React.FC = () => {
           },
         ]);
       }
-    };
-    const handleSubscribed = (msg: WebSocketMessage) => {
-      const subscribedMessage = msg as ResourceSubscribedMessage;
-      if (
-        subscribedMessage.event_type !== 'experience_review'
-        || subscribedMessage.resource_id !== selectedSessionId
-      ) {
-        return;
-      }
-      experienceApi.listReviewEvents(selectedSessionId)
-        .then((events) => {
-          setPersistedReviewEvents(events);
-          const fetchedRunId = events[0]?.review_run_id || null;
-          if (!fetchedRunId) {
-            return;
-          }
-          if (liveReviewRunId && fetchedRunId !== liveReviewRunId) {
-            return;
-          }
-          if (liveEvents.length > 0 && events.length < liveEvents.length) {
-            return;
-          }
-          applyLiveReviewEvents(events);
-          void loadReviewRuns();
-        })
-        .catch(() => undefined);
-    };
-
-    wsManager.subscribeResource('experience_review_update', selectedSessionId, handleExperienceReviewUpdate);
-    wsManager.subscribe('subscribed', handleSubscribed);
-    return () => {
-      wsManager.unsubscribeResource('experience_review_update', selectedSessionId, handleExperienceReviewUpdate);
-      wsManager.unsubscribe('subscribed', handleSubscribed);
-    };
-  }, [applyLiveReviewEvents, liveEvents.length, liveReviewRunId, loadReviewRuns, selectedSessionId]);
+  });
 
   const handleAnalyze = async (override?: { sessionId?: string; reviewHorizon?: ExperienceReviewHorizon }) => {
     const targetSessionId = override?.sessionId || selectedSessionId;

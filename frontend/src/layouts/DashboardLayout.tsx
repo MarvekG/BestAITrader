@@ -15,17 +15,18 @@ import {
   ExperimentOutlined,
   ReadOutlined,
 } from '@ant-design/icons';
-import { useSessionStore } from '../store/useSessionStore';
 import { TaskCompletedMessage, WebSocketMessage, wsManager } from '../services/websocket';
+import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
 import { useTranslation } from 'react-i18next';
 import { apiHistory } from '../utils/apiHistory';
-import { getApiErrorResponseData } from '../utils/errorUtils';
+import { getApiErrorDetail } from '../utils/errorUtils';
 import { Modal, Form, Input, message } from 'antd';
 import { authApi } from '../api/auth';
 import { GlobalTaskNotifications } from '../components/GlobalTaskNotifications';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import ThemeSwitcher from '../components/ThemeSwitcher';
 import { useThemeMode } from '../theme/useThemeMode';
+import { clearAuthSession } from '../services/authSession';
 
 const { Sider, Content } = Layout;
 
@@ -33,7 +34,6 @@ const { Sider, Content } = Layout;
 export const DashboardLayout: React.FC = () => {
   const { t } = useTranslation();
   const { mode } = useThemeMode();
-  const { clearSession, setLoggedIn } = useSessionStore();
   const navigate = useNavigate();
   const location = useLocation();
   const {
@@ -59,9 +59,7 @@ export const DashboardLayout: React.FC = () => {
   const [resetForm] = Form.useForm();
 
   const handleLogout = () => {
-    clearSession();
-    setLoggedIn(false);
-    localStorage.removeItem('token');
+    clearAuthSession();
     navigate('/login');
   };
 
@@ -79,8 +77,8 @@ export const DashboardLayout: React.FC = () => {
       // Force logout after password change
       handleLogout();
     } catch (error) {
-      const responseData = getApiErrorResponseData(error) as { detail?: unknown } | null | undefined;
-      const detail = typeof responseData?.detail === 'string' ? responseData.detail : undefined;
+      const errorDetail = getApiErrorDetail(error);
+      const detail = typeof errorDetail === 'string' ? errorDetail : undefined;
       if (detail) {
         message.error(detail);
       } else if (!(error && typeof error === 'object' && 'errorFields' in error)) {
@@ -123,32 +121,23 @@ export const DashboardLayout: React.FC = () => {
 
     wsManager.connect(sessionIdRef.current);
 
-    // 订阅 task_completed 消息以更新 API 历史记录 | Subscribe to task_completed to update API history
-    const handleTaskCompleted = (msg: WebSocketMessage) => {
-      const data = (msg as TaskCompletedMessage).data;
-      const taskId = data?.task_id;
-      if (data && taskId) {
-        // 更新 API 历史记录 | Update API history record
-        const rawStatus = data.status;
-        const status = (rawStatus === 'completed' || rawStatus === 'success') ? 'completed' : 'failed';
-        const error = data.error_message || data.error;
-        apiHistory.updateResponse(taskId, status, data, error);
-      }
-    };
-
-    wsManager.subscribe('task_completed', handleTaskCompleted);
-
-    // Cleanup: unsubscribe on unmount
-    return () => {
-      wsManager.unsubscribe('task_completed', handleTaskCompleted);
-    };
-
     // Note: We do NOT disconnect on cleanup to avoid React StrictMode double-mount issues
     // The wsManager handles reconnection and connection reuse internally
     // return () => {
     //   wsManager.disconnect();
     // };
   }, []);
+
+  useWebSocketSubscription('task_completed', (msg: WebSocketMessage) => {
+    const data = (msg as TaskCompletedMessage).data;
+    const taskId = data?.task_id;
+    if (data && taskId) {
+      const rawStatus = data.status;
+      const status = (rawStatus === 'completed' || rawStatus === 'success') ? 'completed' : 'failed';
+      const error = data.error_message || data.error;
+      apiHistory.updateResponse(taskId, status, data, error);
+    }
+  });
 
   return (
     <Layout style={{ minHeight: '100vh' }}>

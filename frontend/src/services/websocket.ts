@@ -37,12 +37,19 @@ export type StockPickerUpdateMessage = WebSocketMessage & {
   data?: StockPickerUpdateData;
 };
 
-export type ResourceSubscribedMessage = WebSocketMessage & {
-  event_type?: string;
-  resource_id?: string;
-};
-
 type MessageHandler = (message: WebSocketMessage) => void;
+
+export const BACKEND_EVENT_TYPES = {
+  task_completed: 'task_completed',
+  stock_picker_update: 'stock_picker',
+  price_update: 'price',
+  experience_review_update: 'experience_review',
+  position_update: 'position_update',
+  order_status: 'order_status',
+  trade_executed: 'trade_executed',
+} as const;
+
+export type WebSocketEventType = keyof typeof BACKEND_EVENT_TYPES;
 
 class WebSocketManager {
   private ws: WebSocket | null = null;
@@ -57,12 +64,8 @@ class WebSocketManager {
 
   constructor() { }
 
-  private getBackendEventType(type: string): string | null {
-    if (type === 'stock_picker_update') return 'stock_picker';
-    if (type === 'task_completed') return 'task_completed';
-    if (type === 'price_update') return 'price';
-    if (type === 'experience_review_update') return 'experience_review';
-    return null;
+  private getBackendEventType(type: WebSocketEventType): string {
+    return BACKEND_EVENT_TYPES[type];
   }
 
   private addHandler(type: string, handler: MessageHandler) {
@@ -175,13 +178,10 @@ class WebSocketManager {
     this.sessionId = '';
   }
 
-  subscribe(type: string, handler: MessageHandler) {
+  subscribe(type: WebSocketEventType, handler: MessageHandler) {
     this.addHandler(type, handler);
 
     const backendEventType = this.getBackendEventType(type);
-    if (!backendEventType) {
-      return;
-    }
     this.resubmitSubscriptions.add(backendEventType);
 
     if (this.isConnected()) {
@@ -189,11 +189,11 @@ class WebSocketManager {
     }
   }
 
-  subscribeResource(type: string, resourceId: string, handler: MessageHandler) {
+  subscribeResource(type: WebSocketEventType, resourceId: string, handler: MessageHandler) {
     this.addHandler(type, handler);
 
     const backendEventType = this.getBackendEventType(type);
-    if (!backendEventType || !resourceId) {
+    if (!resourceId) {
       return;
     }
     if (!this.resubmitResourceSubscriptions.has(backendEventType)) {
@@ -206,15 +206,15 @@ class WebSocketManager {
     }
   }
 
-  unsubscribe(type: string, handler: MessageHandler) {
+  unsubscribe(type: WebSocketEventType, handler: MessageHandler) {
     this.handlers.get(type)?.delete(handler);
   }
 
-  unsubscribeResource(type: string, resourceId: string, handler: MessageHandler) {
+  unsubscribeResource(type: WebSocketEventType, resourceId: string, handler: MessageHandler) {
     this.handlers.get(type)?.delete(handler);
 
     const backendEventType = this.getBackendEventType(type);
-    if (!backendEventType || !resourceId) {
+    if (!resourceId) {
       return;
     }
     const resourceIds = this.resubmitResourceSubscriptions.get(backendEventType);
@@ -233,8 +233,6 @@ class WebSocketManager {
     const handlers = this.handlers.get(message.type);
     handlers?.forEach(handler => handler(message));
 
-    // Also dispatch to 'all' for debugging or global logging
-    this.handlers.get('*')?.forEach(handler => handler(message));
   }
 
   private startHeartbeat() {

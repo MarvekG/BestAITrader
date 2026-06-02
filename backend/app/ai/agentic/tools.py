@@ -26,6 +26,15 @@ FINANCIAL_REPORT_QUERY_MODELS = {
 
 
 def _format_trade_execution_result(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    将交易服务结果整理为 Agent 工具可读的统一结构。
+
+    Args:
+        payload: 交易服务或前置校验返回的原始结果。
+
+    Returns:
+        包含执行状态、展示消息、机器可读原因和详情的工具返回值。
+    """
     if payload.get("success") is True:
         return {
             "success": True,
@@ -35,14 +44,17 @@ def _format_trade_execution_result(payload: Dict[str, Any]) -> Dict[str, Any]:
             "details": make_json_serializable(payload),
         }
 
-    reason = payload.get("message") or payload.get("error") or "Trade execution failed."
-    return {
+    message = payload.get("message") or payload.get("error") or "Trade execution failed."
+    result = {
         "success": False,
         "execution_status": "failed",
-        "message": reason,
-        "reason": reason,
+        "message": message,
+        "reason": payload.get("reason") or message,
         "details": make_json_serializable(payload),
     }
+    if "risk_control" in payload:
+        result["risk_control"] = make_json_serializable(payload["risk_control"])
+    return result
 
 STOCK_QUERY_HANDLERS = {
     "status": lambda stock_code, limit: StockTools.check_data_status(stock_code),
@@ -833,7 +845,6 @@ async def execute_trading_order(
        继续调用本工具，或停止交易并输出最终报告。
     """
     from app.trading.service import trading_service
-    from app.risk_control.service import portfolio_risk_control_service
     from app.models.session import Session as DbSession
     from app.models.user import User
     from app.models.position import Position
@@ -959,30 +970,6 @@ async def execute_trading_order(
                         "suggested_shares": suggested_shares,
                         "total_assets": total_assets
                     }
-                }
-
-            risk_result = portfolio_risk_control_service.evaluate_order(
-                db,
-                account=account,
-                stock_code=stock_code,
-                action=act,
-                shares=suggested_shares,
-                price=price,
-                order_type="market",
-                stop_loss=stop_loss,
-            )
-            if risk_result["blocks"]:
-                return {
-                    **_format_trade_execution_result({
-                        "success": False,
-                        "message": "Trade blocked by portfolio risk control.",
-                        "details": {
-                            "reason": "risk_control_blocked",
-                            "risk_control": risk_result,
-                        },
-                    }),
-                    "reason": "risk_control_blocked",
-                    "risk_control": risk_result,
                 }
 
             # 7. 调用交易服务
