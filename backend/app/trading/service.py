@@ -126,42 +126,6 @@ def _evaluate_order_risk_with_execution_cost(
     )
 
 
-async def _send_websocket_notification_best_effort(
-    notification_type: str,
-    session_id: UUID | None,
-    payload: dict[str, Any],
-) -> None:
-    """
-    尽力发送交易 WebSocket 通知，失败时仅记录日志。
-
-    Args:
-        notification_type: 通知类型。
-        session_id: 关联会话 ID。
-        payload: 通知载荷。
-    """
-    try:
-        if notification_type == "order_status":
-            await ws_manager.send_order_status(str(session_id), payload)
-        elif notification_type == "position_update":
-            await ws_manager.send_position_update(str(session_id), payload)
-        elif notification_type == "trade_executed":
-            await ws_manager.send_trade_executed(str(session_id), payload)
-        else:
-            logger.warning(
-                "Unknown websocket notification type",
-                extra={"notification_type": notification_type, "session_id": str(session_id)},
-            )
-    except Exception as exc:
-        logger.warning(
-            "WebSocket notification failed after trade persistence",
-            extra={
-                "notification_type": notification_type,
-                "session_id": str(session_id),
-                "error": str(exc),
-            },
-        )
-
-
 class TradingService:
     def __init__(self):
         self.engine = TradingEngine()
@@ -430,7 +394,7 @@ class TradingService:
 
             # 6. 推送 WebSocket 通知
             # Order status
-            await _send_websocket_notification_best_effort("order_status", session_id, {
+            await ws_manager.send_order_status(str(session_id), {
                 "order_id": str(order.order_id),
                 "status": order.status,
                 "stock_code": stock_code,
@@ -448,7 +412,7 @@ class TradingService:
                 Position.stock_code == stock_code
             ).first()
             if updated_pos:
-                await _send_websocket_notification_best_effort("position_update", session_id, {
+                await ws_manager.send_position_update(str(session_id), {
                     "position_id": str(updated_pos.position_id),
                     "stock_code": updated_pos.stock_code,
                     "current_shares": updated_pos.total_shares,
@@ -460,10 +424,10 @@ class TradingService:
                     "updated_at": updated_pos.updated_at.isoformat()
                 })
             elif deleted_position_event:
-                await _send_websocket_notification_best_effort("position_update", session_id, deleted_position_event)
+                await ws_manager.send_position_update(str(session_id), deleted_position_event)
 
             # Trade execution notification
-            await _send_websocket_notification_best_effort("trade_executed", session_id, {
+            await ws_manager.send_trade_executed(str(session_id), {
                 "trade_id": str(trade_result["trade_record"]["id"]),
                 "order_id": str(order.order_id),
                 "stock_code": stock_code,
@@ -484,7 +448,7 @@ class TradingService:
             db.commit()
 
             # 推送拒绝通知
-            await _send_websocket_notification_best_effort("order_status", session_id, {
+            await ws_manager.send_order_status(str(session_id), {
                 "order_id": str(order.order_id),
                 "status": "rejected",
                 "stock_code": stock_code,

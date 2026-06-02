@@ -433,13 +433,13 @@ class WebSocketManager:
                 await self.broadcast_to_session(message, session_id)
 
     async def send_trade_executed(self, session_id: str, trade_data: Dict[str, Any]):
-        """Send trade executed notification"""
+        """发送成交通知。"""
         message = {
             "type": "trade_executed",
             "data": trade_data,
             "timestamp": datetime.now().isoformat()
         }
-        await self.broadcast_to_session(message, session_id)
+        await self._send_trading_notification_best_effort(session_id, message)
 
     async def send_alert(self, session_id: str, alert_data: Dict[str, Any]):
         """Send alert notification"""
@@ -451,22 +451,42 @@ class WebSocketManager:
         await self.broadcast_to_session(message, session_id)
 
     async def send_order_status(self, session_id: str, order_status_data: Dict[str, Any]):
-        """Send order status update"""
+        """发送订单状态通知。"""
         message = {
             "type": "order_status",
             "data": order_status_data,
             "timestamp": datetime.now().isoformat()
         }
-        await self.broadcast_to_session(message, session_id)
+        await self._send_trading_notification_best_effort(session_id, message)
 
     async def send_position_update(self, session_id: str, position_data: Dict[str, Any]):
-        """Send position update"""
+        """发送持仓更新通知。"""
         message = {
             "type": "position_update",
             "data": position_data,
             "timestamp": datetime.now().isoformat()
         }
-        await self.broadcast_to_session(message, session_id)
+        await self._send_trading_notification_best_effort(session_id, message)
+
+    async def _send_trading_notification_best_effort(self, session_id: str, message: Dict[str, Any]) -> None:
+        """
+        尽力发送交易相关通知，失败时只记录日志。
+
+        Args:
+            session_id: 会话 ID。
+            message: WebSocket 通知消息。
+        """
+        try:
+            await self.broadcast_to_session(message, session_id)
+        except Exception as exc:
+            logger.warning(
+                "Trading WebSocket notification failed",
+                extra={
+                    "session_id": session_id,
+                    "notification_type": message.get("type"),
+                    "error": str(exc),
+                },
+            )
 
     async def send_session_update(self, session_id: str, session_data: Dict[str, Any]):
         """Send session update"""

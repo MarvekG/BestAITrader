@@ -351,9 +351,7 @@ async def test_service_keeps_success_when_post_commit_order_notification_fails(m
     async def _raise_notification_error(*_args, **_kwargs):
         raise RuntimeError("websocket unavailable")
 
-    monkeypatch.setattr("app.trading.service.ws_manager.send_order_status", _raise_notification_error)
-    monkeypatch.setattr("app.trading.service.ws_manager.send_position_update", AsyncMock())
-    monkeypatch.setattr("app.trading.service.ws_manager.send_trade_executed", AsyncMock())
+    monkeypatch.setattr("app.trading.service.ws_manager.broadcast_to_session", _raise_notification_error)
 
     result = await service.execute_order_and_update_db(
         db=db,
