@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import List
 
-from pydantic import ConfigDict
+from pydantic import ConfigDict, field_validator
 from pydantic_settings import BaseSettings
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2].absolute()
@@ -15,15 +15,17 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
 
     # Security Config
-    SECRET_KEY: str = "your-secret-key-here"
+    # 默认空字符串：启动时由 _require_secret_key 校验非空。
+    SECRET_KEY: str = ""
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     APP_RELOAD: bool = True
 
     # Initial Superuser
+    # FIRST_SUPERUSER_PASSWORD 默认空字符串：启动时由 _require_superuser_password 校验非空。
     FIRST_SUPERUSER: str = "tradeuser"
     FIRST_SUPERUSER_EMAIL: str = "tradeuser@example.com"
-    FIRST_SUPERUSER_PASSWORD: str = "tradepassword"
+    FIRST_SUPERUSER_PASSWORD: str = ""
 
     # Database Config
     DATABASE_URL: str = "postgresql://tradeuser:tradepassword@postgres:5432/trading"
@@ -54,6 +56,27 @@ class Settings(BaseSettings):
     ENABLE_MAINTENANCE_ENDPOINTS: bool = True
     ENABLE_OPENAPI_DOCS: bool = True
     BACKEND_CORS_ORIGINS: List[str] = []
+
+    @field_validator("SECRET_KEY")
+    @classmethod
+    def _require_secret_key(cls, value: str) -> str:
+        if not value:
+            raise ValueError(
+                "SECRET_KEY must be set in backend/.env. "
+                "Generate one with: "
+                "python -c 'import secrets; print(secrets.token_urlsafe(48))'"
+            )
+        return value
+
+    @field_validator("FIRST_SUPERUSER_PASSWORD")
+    @classmethod
+    def _require_superuser_password(cls, value: str) -> str:
+        if not value:
+            raise ValueError(
+                "FIRST_SUPERUSER_PASSWORD must be set in backend/.env. "
+                "Use a unique value (recommend 12+ characters)."
+            )
+        return value
     CLOAKBROWSER_MAX_PAGES: int = 10
     MARKET_WATCH_RECENT_DEBATE_LAUNCH_LOOKBACK_HOURS: int = 24
 

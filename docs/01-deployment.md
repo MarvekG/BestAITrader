@@ -44,14 +44,17 @@ cp memo/.env.example memo/.env
 ```env
 FIRST_SUPERUSER=tradeuser
 FIRST_SUPERUSER_EMAIL=tradeuser@example.com
-FIRST_SUPERUSER_PASSWORD=replace-with-your-admin-password
-SECRET_KEY=replace-with-a-random-secret
+FIRST_SUPERUSER_PASSWORD=<your-unique-password>
+SECRET_KEY=<random-secret>
 
 TUSHARE_API=http://api.waditu.com/dataapi
 TUSHARE_TOKEN=your-tushare-token
 TAVILY_API_KEY=your-tavily-api-key
 NEWS_API_KEY=your-newsapi-key
 ```
+
+> 上述 `FIRST_SUPERUSER_PASSWORD` 和 `SECRET_KEY` 不能留空；应用启动时由 Pydantic 校验。
+> 生成 SECRET_KEY 示例：`python -c "import secrets; print(secrets.token_urlsafe(48))"`。
 
 LiteLLM 是后端和记忆服务的统一 LLM 网关。后端 LLM 不再在 `backend/.env` 中配置 provider、模型、key 和
 base URL；真实模型、真实 provider key 和供应商 base URL 只写到本地 `litellm/config.yaml`。
