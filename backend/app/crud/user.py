@@ -1,28 +1,40 @@
-from sqlalchemy.orm import Session
 from typing import Optional
+
+from argon2 import PasswordHasher
+from argon2.exceptions import Argon2Error, InvalidHashError
+from sqlalchemy.orm import Session
+
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
-from passlib.context import CryptContext
 
-# 使用argon2算法，同时支持bcrypt和sha256作为后备，这样可以兼容旧的密码哈希
-pwd_context = CryptContext(schemes=["argon2", "bcrypt", "sha256_crypt"], deprecated="auto")
+pwd_hasher = PasswordHasher()
 
 def get_password_hash(password: str) -> str:
-    """生成密码哈希"""
-    return pwd_context.hash(password)
+    """
+    使用 Argon2 生成密码哈希。
+
+    Args:
+        password: 明文密码。
+
+    Returns:
+        Argon2 密码哈希字符串。
+    """
+    return pwd_hasher.hash(password)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """验证密码"""
+    """
+    验证明文密码是否匹配 Argon2 密码哈希。
+
+    Args:
+        plain_password: 待验证的明文密码。
+        hashed_password: 数据库存储的 Argon2 密码哈希。
+
+    Returns:
+        密码匹配时返回 True，否则返回 False。
+    """
     try:
-        # 先尝试使用Passlib验证
-        return pwd_context.verify(plain_password, hashed_password)
-    except Exception as e:
-        # 如果Passlib验证失败，检查是否是简单的SHA-256哈希
-        import hashlib
-        if len(hashed_password) == 64:
-            # 尝试直接比较SHA-256哈希
-            return hashlib.sha256(plain_password.encode()).hexdigest() == hashed_password
-        # 其他情况返回False
+        return pwd_hasher.verify(hashed_password, plain_password)
+    except (Argon2Error, InvalidHashError):
         return False
 
 def get_user_by_username(db: Session, username: str) -> Optional[User]:
