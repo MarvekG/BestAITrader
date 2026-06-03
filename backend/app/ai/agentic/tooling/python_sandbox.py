@@ -2,19 +2,17 @@ import asyncio
 import ast
 import json
 import shutil
-import subprocess
-import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
+from app.ai.agentic.tooling.python_sandbox_pool import PrewarmedSandboxAcquireTimeout, get_prewarmed_sandbox_pool
 from app.core.config import PROJECT_ROOT, settings
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
 
 _ASYNC_SANDBOX_LIMITER: Optional[asyncio.Semaphore] = None
-_SYNC_SANDBOX_LIMITER: Optional[threading.BoundedSemaphore] = None
 
 
 BLOCKED_IMPORTS = {
@@ -158,23 +156,10 @@ def _get_async_sandbox_limiter() -> asyncio.Semaphore:
     return _ASYNC_SANDBOX_LIMITER
 
 
-def _get_sync_sandbox_limiter() -> threading.BoundedSemaphore:
-    """
-    获取同步沙箱执行限流器，超过上限的请求会等待。
-
-    Returns:
-        用于限制同步沙箱子进程数量的有界信号量。
-    """
-    global _SYNC_SANDBOX_LIMITER
-
-    if _SYNC_SANDBOX_LIMITER is None:
-        limit = max(1, int(settings.PY_SANDBOX_MAX_CONCURRENT_EXECUTIONS or 1))
-        _SYNC_SANDBOX_LIMITER = threading.BoundedSemaphore(limit)
-    return _SYNC_SANDBOX_LIMITER
-
-
 def _build_request(code: str) -> Dict[str, Any]:
     return {
+        "type": "execute",
+        "id": str(time.time_ns()),
         "code": code,
         "limits": {
             "stdout_max_bytes": settings.PY_SANDBOX_STDOUT_MAX_BYTES,
@@ -213,7 +198,12 @@ def _normalize_response(payload: Dict[str, Any], started_at: float) -> Dict[str,
     }
     response["metadata"].setdefault("python_runtime", "pyodide")
     response["metadata"].setdefault("sandbox_runtime", "deno")
-    response["metadata"].setdefault("runner_path", settings.PY_SANDBOX_RUNNER_PATH)
+    response["metadata"].setdefault(
+        "runner_path",
+        settings.PY_SANDBOX_WORKER_RUNNER_PATH
+        if response["metadata"].get("sandbox_runtime") == "deno_prewarmed_worker"
+        else settings.PY_SANDBOX_RUNNER_PATH,
+    )
     return response
 
 
@@ -294,6 +284,41 @@ async def execute_python_in_sandbox(code: str) -> Dict[str, Any]:
     if early_response is not None:
         return early_response
 
+    if settings.PY_SANDBOX_PREWARM_POOL_ENABLED:
+        try:
+            payload = await get_prewarmed_sandbox_pool().execute(request_json, settings.PY_SANDBOX_TIMEOUT_SECONDS)
+            return _normalize_response(payload, started_at)
+        except PrewarmedSandboxAcquireTimeout:
+            logger.info("prewarmed sandbox pool unavailable; falling back to subprocess")
+        except asyncio.TimeoutError:
+            logger.warning("prewarmed sandbox worker timed out")
+            return _normalize_response(
+                {
+                    "success": False,
+                    "error": "Python sandbox execution timed out",
+                    "timed_out": True,
+                    "metadata": {"error_type": "timeout_error", "sandbox_runtime": "deno_prewarmed_worker"},
+                },
+                started_at,
+            )
+        except Exception as exc:
+            logger.warning("prewarmed sandbox worker failed; falling back to subprocess", extra={"error": str(exc)})
+
+    return await _execute_python_subprocess_once(request_json, command, started_at)
+
+
+async def _execute_python_subprocess_once(request_json: str, command: list[str], started_at: float) -> Dict[str, Any]:
+    """使用一次性 Deno 子进程执行沙箱请求，作为预热池 fallback。
+
+    Args:
+        request_json: 已序列化的沙箱请求。
+        command: Deno runner 启动命令。
+        started_at: 外层请求开始时间。
+
+    Returns:
+        标准沙箱执行响应。
+    """
+
     async with _get_async_sandbox_limiter():
         try:
             process = await asyncio.create_subprocess_exec(
@@ -339,45 +364,3 @@ async def execute_python_in_sandbox(code: str) -> Dict[str, Any]:
     stdout = stdout_bytes.decode("utf-8", errors="replace")
     stderr = stderr_bytes.decode("utf-8", errors="replace")
     return _parse_process_result(stdout, stderr, process.returncode, started_at)
-
-
-def execute_python_in_sandbox_sync(code: str) -> Dict[str, Any]:
-    started_at = time.monotonic()
-    early_response, request_json, command = _prepare_execution(code, started_at)
-    if early_response is not None:
-        return early_response
-
-    with _get_sync_sandbox_limiter():
-        try:
-            completed = subprocess.run(
-                command,
-                input=request_json,
-                text=True,
-                capture_output=True,
-                timeout=settings.PY_SANDBOX_TIMEOUT_SECONDS + 1,
-                cwd=str(PROJECT_ROOT),
-                check=False,
-            )
-        except subprocess.TimeoutExpired:
-            logger.warning("python sandbox timed out")
-            return _normalize_response(
-                {
-                    "success": False,
-                    "error": "Python sandbox execution timed out",
-                    "timed_out": True,
-                    "metadata": {"error_type": "timeout_error"},
-                },
-                started_at,
-            )
-        except OSError as exc:
-            logger.error("python sandbox failed to start: %s", exc)
-            return _normalize_response(
-                {
-                    "success": False,
-                    "error": f"Python sandbox failed to start: {exc}",
-                    "metadata": {"error_type": "sandbox_boot_error"},
-                },
-                started_at,
-            )
-
-    return _parse_process_result(completed.stdout, completed.stderr, completed.returncode, started_at)
