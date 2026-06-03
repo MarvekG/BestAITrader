@@ -1,6 +1,6 @@
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from typing import Any
 
 import pytz
@@ -28,6 +28,7 @@ DEFAULT_TRADING_FREQUENCY = "中长线持有 (Position Trading)"
 DEFAULT_TRADING_STRATEGY = "价值投资 (Value Investing)"
 AUTO_ANALYSIS_SOURCE = "stock_warehouse_auto_analysis"
 AUTO_ANALYSIS_MAX_LAUNCHES_PER_TICK = 3
+AUTO_ANALYSIS_TRIGGER_WINDOW_MINUTES = 5
 STOCK_AUTO_ANALYSIS_JOB_ID = "stock_warehouse_auto_analysis_scan"
 VALID_AUTO_ANALYSIS_FREQUENCIES = {"daily", "weekly", "monthly"}
 
@@ -82,7 +83,10 @@ def is_due_for_auto_analysis(stock: StockWarehouse, now: datetime | None = None)
     if stock.auto_analysis_run_immediately:
         return True
 
-    if current_time.time() < _parse_schedule_time(stock.auto_analysis_time):
+    schedule_time = _parse_schedule_time(stock.auto_analysis_time)
+    scheduled_at = datetime.combine(current_time.date(), schedule_time)
+    trigger_window_end = scheduled_at + timedelta(minutes=AUTO_ANALYSIS_TRIGGER_WINDOW_MINUTES)
+    if not scheduled_at <= current_time < trigger_window_end:
         return False
 
     last_run = stock.last_auto_analysis_at

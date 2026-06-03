@@ -25,6 +25,18 @@ def test_auto_analysis_waits_until_configured_time():
     assert is_due_for_auto_analysis(stock, datetime(2026, 5, 11, 9, 40)) is True
 
 
+def test_auto_analysis_does_not_catch_up_after_configured_time():
+    stock = _warehouse_stock(auto_analysis_time="09:40")
+
+    assert is_due_for_auto_analysis(stock, datetime(2026, 5, 11, 9, 45)) is False
+
+
+def test_auto_analysis_uses_short_trigger_window_after_configured_time():
+    stock = _warehouse_stock(auto_analysis_time="09:40")
+
+    assert is_due_for_auto_analysis(stock, datetime(2026, 5, 11, 9, 44)) is True
+
+
 def test_auto_analysis_daily_frequency_runs_once_per_day():
     stock = _warehouse_stock(last_auto_analysis_at=datetime(2026, 5, 11, 9, 45))
 
@@ -41,7 +53,7 @@ def test_auto_analysis_run_immediately_skips_time_gate():
     assert is_due_for_auto_analysis(stock, datetime(2026, 5, 11, 9, 39)) is True
 
 
-def test_auto_analysis_run_immediately_false_waits_for_time():
+def test_auto_analysis_run_immediately_false_requires_trigger_window():
     stock = _warehouse_stock(
         auto_analysis_time="09:40",
         auto_analysis_run_immediately=False,
@@ -49,6 +61,8 @@ def test_auto_analysis_run_immediately_false_waits_for_time():
 
     assert is_due_for_auto_analysis(stock, datetime(2026, 5, 11, 9, 39)) is False
     assert is_due_for_auto_analysis(stock, datetime(2026, 5, 11, 9, 40)) is True
+    assert is_due_for_auto_analysis(stock, datetime(2026, 5, 11, 9, 44)) is True
+    assert is_due_for_auto_analysis(stock, datetime(2026, 5, 11, 9, 45)) is False
 
 
 def test_auto_analysis_run_immediately_runs_even_if_already_run():
