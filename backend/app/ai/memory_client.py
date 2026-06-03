@@ -290,9 +290,6 @@ class MemoryServiceClient:
                 )
             else:
                 params["session"] = f"user:{user_id}:general"
-        else:
-            self.clear_last_error("preview")
-            return {}
         return await self._get(
             "/v1/preview",
             params=params,
@@ -327,9 +324,6 @@ class MemoryServiceClient:
                 )
             else:
                 params["session"] = f"user:{user_id}:general"
-        else:
-            self.clear_last_error("recall_audit_preview")
-            return {}
         return await self._get(
             "/v1/audits",
             params=params,

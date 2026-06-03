@@ -268,6 +268,31 @@ async def test_preview_memories_uses_user_session_prefix_when_stock_is_missing(m
 
 
 @pytest.mark.asyncio
+async def test_preview_memories_omits_session_when_user_is_missing(monkeypatch):
+    client = MemoryServiceClient()
+    mock_get = AsyncMock(return_value={"data": {"items": [], "next_cursor": None}, "error": None})
+    monkeypatch.setattr(client, "_get", mock_get)
+
+    await client.preview_memories(user_id=None, stock_code=None, limit=30, offset=5)
+
+    params = mock_get.await_args.kwargs["params"]
+    assert params == {"limit": 30, "offset": 5}
+
+
+@pytest.mark.asyncio
+async def test_preview_memories_passes_offset_to_memoflux(monkeypatch):
+    client = MemoryServiceClient()
+    mock_get = AsyncMock(return_value={"data": {"items": [], "next_cursor": None}, "error": None})
+    monkeypatch.setattr(client, "_get", mock_get)
+
+    await client.preview_memories(user_id=7, stock_code="000001.SZ", limit=25, offset=50)
+
+    params = mock_get.await_args.kwargs["params"]
+    assert params["limit"] == 25
+    assert params["offset"] == 50
+
+
+@pytest.mark.asyncio
 async def test_preview_recall_audits_uses_memoflux_audits_endpoint(monkeypatch):
     client = MemoryServiceClient()
     mock_get = AsyncMock(return_value={"data": {"items": [], "next_cursor": None}, "error": None})
@@ -286,6 +311,18 @@ async def test_preview_recall_audits_uses_memoflux_audits_endpoint(monkeypatch):
     assert mock_get.await_args.args[0] == "/v1/audits"
     params = mock_get.await_args.kwargs["params"]
     assert params == {"session": "user:7:stock:000001.SZ", "limit": 50, "offset": 10}
+
+
+@pytest.mark.asyncio
+async def test_preview_recall_audits_omits_session_when_user_is_missing(monkeypatch):
+    client = MemoryServiceClient()
+    mock_get = AsyncMock(return_value={"data": {"items": [], "next_cursor": None}, "error": None})
+    monkeypatch.setattr(client, "_get", mock_get)
+
+    await client.preview_recall_audits(user_id=None, stock_code=None, limit=30, offset=5)
+
+    params = mock_get.await_args.kwargs["params"]
+    assert params == {"limit": 30, "offset": 5}
 
 
 @pytest.mark.asyncio

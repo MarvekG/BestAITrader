@@ -553,11 +553,9 @@ async def test_memory_preview(
             return _error_response("memory_preview", "Memory service not enabled")
 
         start_time = time.time()
-        resolved_user_id = user_id if user_id is not None else MEMORY_TEST_USER_ID
-        resolved_stock_code = stock_code if user_id is not None else MEMORY_TEST_STOCK_CODE
         response = await memory_client.preview_memories(
-            user_id=resolved_user_id,
-            stock_code=resolved_stock_code,
+            user_id=user_id,
+            stock_code=stock_code,
             status=status,
             limit=limit,
             offset=offset,
@@ -568,7 +566,7 @@ async def test_memory_preview(
             result = _success_response("memory_preview", elapsed)
             items = [item for item in data.get("items") or [] if isinstance(item, dict)]
             result["data"] = data
-            result["total"] = len(items)
+            result["total"] = int(data.get("total") if isinstance(data.get("total"), int) else len(items))
             result["limit"] = int(data.get("limit") or limit)
             result["offset"] = int(data.get("offset") or offset)
             logger.info(f"Test memory preview result: total={result['total']} count={len(items)}")
@@ -596,11 +594,9 @@ async def test_memory_recall_audits(
             return _error_response("memory_recall_audits", "Memory service not enabled", fallback_key="memory_preview")
 
         start_time = time.time()
-        resolved_user_id = user_id if user_id is not None else MEMORY_TEST_USER_ID
-        resolved_stock_code = stock_code if user_id is not None else MEMORY_TEST_STOCK_CODE
         response = await memory_client.preview_recall_audits(
-            user_id=resolved_user_id,
-            stock_code=resolved_stock_code,
+            user_id=user_id,
+            stock_code=stock_code,
             status=status,
             error_code=error_code,
             limit=limit,
@@ -614,7 +610,7 @@ async def test_memory_recall_audits(
             for item in items:
                 item["audit_id"] = item.get("audit_id") or item.get("query_id") or item.get("delete_id") or ""
             result["data"] = data
-            result["total"] = len(items)
+            result["total"] = int(data.get("total") if isinstance(data.get("total"), int) else len(items))
             result["limit"] = int(data.get("limit") or limit)
             result["offset"] = int(data.get("offset") or offset)
             logger.info(
