@@ -39,6 +39,12 @@ TAVILY_API_KEY=your-tavily-api-key
 NEWS_API_KEY=your-newsapi-key
 ```
 
+申请地址：
+
+- Tushare：https://tushare.pro/
+- Tavily：https://www.tavily.com/
+- NewsAPI：https://newsapi.org/
+
 生成 `SECRET_KEY`：
 
 ```bash
