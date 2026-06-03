@@ -200,7 +200,7 @@ async def test_memory_preview_testing_endpoint_returns_preview_items():
 
 
 @pytest.mark.asyncio
-async def test_memory_preview_testing_endpoint_defaults_to_probe_session():
+async def test_memory_preview_testing_endpoint_uses_global_scope_when_filters_are_empty():
     mock_preview = AsyncMock(return_value={"data": {"items": [], "next_cursor": None}, "error": None})
 
     with patch("app.api.endpoints.testing.memory_client.preview_memories", mock_preview), \
@@ -216,12 +216,44 @@ async def test_memory_preview_testing_endpoint_defaults_to_probe_session():
 
     assert result["status"] == "success"
     payload = mock_preview.await_args.kwargs
-    assert payload["user_id"] == MEMORY_TEST_USER_ID
-    assert payload["stock_code"] == MEMORY_TEST_STOCK_CODE
+    assert payload["user_id"] is None
+    assert payload["stock_code"] is None
 
 
 @pytest.mark.asyncio
-async def test_memory_recall_audits_testing_endpoint_defaults_to_probe_session():
+async def test_memory_preview_testing_endpoint_uses_service_total_for_pagination():
+    mock_preview = AsyncMock(
+        return_value={
+            "data": {
+                "items": [{"memory_id": "mem-2", "session": "session:a"}],
+                "total": 3,
+                "limit": 1,
+                "offset": 1,
+                "next_cursor": None,
+            },
+            "error": None,
+        }
+    )
+
+    with patch("app.api.endpoints.testing.memory_client.preview_memories", mock_preview), \
+         patch("app.api.endpoints.testing.memory_client.get_last_error", return_value=None), \
+         patch.object(type(memory_client), "enabled", new_callable=PropertyMock, return_value=True):
+        result = await run_memory_preview_endpoint(
+            user_id=None,
+            stock_code=None,
+            status=None,
+            limit=1,
+            offset=1,
+        )
+
+    assert result["status"] == "success"
+    assert result["total"] == 3
+    assert result["limit"] == 1
+    assert result["offset"] == 1
+
+
+@pytest.mark.asyncio
+async def test_memory_recall_audits_testing_endpoint_uses_global_scope_when_filters_are_empty():
     mock_audits = AsyncMock(return_value={"data": {"items": [], "next_cursor": None}, "error": None})
 
     with patch("app.api.endpoints.testing.memory_client.preview_recall_audits", mock_audits), \
@@ -238,8 +270,41 @@ async def test_memory_recall_audits_testing_endpoint_defaults_to_probe_session()
 
     assert result["status"] == "success"
     payload = mock_audits.await_args.kwargs
-    assert payload["user_id"] == MEMORY_TEST_USER_ID
-    assert payload["stock_code"] == MEMORY_TEST_STOCK_CODE
+    assert payload["user_id"] is None
+    assert payload["stock_code"] is None
+
+
+@pytest.mark.asyncio
+async def test_memory_recall_audits_testing_endpoint_uses_service_total_for_pagination():
+    mock_audits = AsyncMock(
+        return_value={
+            "data": {
+                "items": [{"audit_type": "query", "query_id": "query-2", "status": "ok"}],
+                "total": 3,
+                "limit": 1,
+                "offset": 1,
+                "next_cursor": None,
+            },
+            "error": None,
+        }
+    )
+
+    with patch("app.api.endpoints.testing.memory_client.preview_recall_audits", mock_audits), \
+         patch("app.api.endpoints.testing.memory_client.get_last_error", return_value=None), \
+         patch.object(type(memory_client), "enabled", new_callable=PropertyMock, return_value=True):
+        result = await run_memory_recall_audits_endpoint(
+            user_id=None,
+            stock_code=None,
+            status=None,
+            error_code=None,
+            limit=1,
+            offset=1,
+        )
+
+    assert result["status"] == "success"
+    assert result["total"] == 3
+    assert result["limit"] == 1
+    assert result["offset"] == 1
 
 
 @pytest.mark.asyncio
