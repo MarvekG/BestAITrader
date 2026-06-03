@@ -133,8 +133,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      memo:
-        condition: service_healthy
     volumes:
       - ./backend:/app # FOR DEBUG
       - backend_runtime_data:/app/runtime
