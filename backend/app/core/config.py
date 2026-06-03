@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     PY_SANDBOX_STDOUT_MAX_BYTES: int = 32768
     PY_SANDBOX_STDERR_MAX_BYTES: int = 16384
     PY_SANDBOX_MAX_CONCURRENT_EXECUTIONS: int = os.cpu_count() or 1
+    PY_SANDBOX_PREWARM_POOL_ENABLED: bool = True
+    PY_SANDBOX_PREWARM_ON_STARTUP: bool = True
+    PY_SANDBOX_PREWARM_POOL_SIZE: int = max(1, (os.cpu_count() or 1) // 2)
+    PY_SANDBOX_PREWARM_MIN_READY: int = max(1, max(1, (os.cpu_count() or 1) // 2) // 2)
+    PY_SANDBOX_PREWARM_MAX_STARTING: int = max(1, (os.cpu_count() or 1) // 2)
+    PY_SANDBOX_WORKER_ACQUIRE_TIMEOUT_SECONDS: int = 3
+    PY_SANDBOX_WORKER_STARTUP_TIMEOUT_SECONDS: int = 30
+    PY_SANDBOX_WORKER_RUNNER_PATH: str = str(PROJECT_ROOT / "app/ai/agentic/tooling/pyodide_one_shot_worker.ts")
     AGENTIC_DEPENDENCY_INSTALL_TIMEOUT_SECONDS: int = 600
     AGENTIC_DEPENDENCY_INSTALL_MAX_REQUIREMENTS: int = 50
     ENABLE_RUNTIME_EXTENSIONS: bool = True

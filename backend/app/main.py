@@ -1,24 +1,16 @@
 import asyncio
 from contextlib import asynccontextmanager
 from time import perf_counter
+from typing import Any
 from urllib.parse import parse_qsl
 from urllib.parse import urlencode
 
-from fastapi import Depends, FastAPI
-from fastapi import Request
-from fastapi.middleware.cors import CORSMiddleware
-
-from app.api import api_router
 from app.core.config import settings
-from app.core.database import SessionLocal
-from app.core.init_db import init_db
 from app.core.logger import get_logger
 from app.core.request_context import clear_request_id
 from app.core.request_context import clear_current_user_id
 from app.core.request_context import get_or_create_request_id
 from app.core.request_context import set_request_id
-from app.core.security import get_current_user
-from app.websocket.routes import router as websocket_router
 
 # Get logger
 logger = get_logger(__name__)
@@ -75,7 +67,10 @@ def sanitize_query_string(query_string: str) -> str:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: Any):
+    from app.core.database import SessionLocal
+    from app.core.init_db import init_db
+
     # Startup logic
     logger.info("Application starting, initializing database and background tasks")
     with SessionLocal() as db:
@@ -157,10 +152,28 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to start async task scheduler: {e}")
 
+    try:
+        if settings.PY_SANDBOX_PREWARM_POOL_ENABLED and settings.PY_SANDBOX_PREWARM_ON_STARTUP:
+            from app.ai.agentic.tooling.python_sandbox_pool import get_prewarmed_sandbox_pool
+
+            await get_prewarmed_sandbox_pool().prewarm()
+            logger.info("Python sandbox prewarmed worker pool started")
+    except Exception as e:
+        logger.error("Failed to start Python sandbox prewarmed worker pool", extra={"error": str(e)})
+
     yield
 
     # Shutdown logic
     logger.info("Application shutting down, stopping background tasks")
+
+    try:
+        if settings.PY_SANDBOX_PREWARM_POOL_ENABLED:
+            from app.ai.agentic.tooling.python_sandbox_pool import get_prewarmed_sandbox_pool
+
+            await get_prewarmed_sandbox_pool().shutdown()
+            logger.info("Python sandbox prewarmed worker pool stopped")
+    except Exception as e:
+        logger.error("Failed to stop Python sandbox prewarmed worker pool", extra={"error": str(e)})
 
     # Stop data refresh scheduler
     try:
@@ -212,27 +225,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Failed to close CloakBrowser context: {e}")
 
-app = FastAPI(
-    title=settings.PROJECT_NAME,
-    version=settings.PROJECT_VERSION,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json" if settings.ENABLE_OPENAPI_DOCS else None,
-    docs_url=f"{settings.API_V1_STR}/docs" if settings.ENABLE_OPENAPI_DOCS else None,
-    redoc_url=f"{settings.API_V1_STR}/redoc" if settings.ENABLE_OPENAPI_DOCS else None,
-    lifespan=lifespan
-)
-
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Logging middleware
-@app.middleware("http")
-async def access_log_middleware(request: Request, call_next):
+async def access_log_middleware(request, call_next):
     started_at = perf_counter()
     request_id = get_or_create_request_id(request.headers.get("x-request-id"))
     request.state.request_id = request_id
@@ -279,17 +272,87 @@ async def access_log_middleware(request: Request, call_next):
     clear_current_user_id()
     return response
 
-# Register API router
-app.include_router(api_router, prefix=settings.API_V1_STR)
-
-# Register WebSocket router
-app.include_router(websocket_router)
-
-@app.get("/")
-def root(current_user=Depends(get_current_user)):
-    del current_user
+def root():
     return {"message": "天枢智投 API"}
 
-@app.get("/health")
+
 def health_check():
     return {"status": "ok"}
+
+
+def create_app():
+    """
+    创建并配置 FastAPI 应用实例。
+
+    Returns:
+        已注册中间件、HTTP 路由和 WebSocket 路由的 FastAPI 应用。
+    """
+    from fastapi import Depends, FastAPI
+    from fastapi.middleware.cors import CORSMiddleware
+
+    from app.core.security import get_current_user
+
+    app = FastAPI(
+        title=settings.PROJECT_NAME,
+        version=settings.PROJECT_VERSION,
+        openapi_url=f"{settings.API_V1_STR}/openapi.json" if settings.ENABLE_OPENAPI_DOCS else None,
+        docs_url=f"{settings.API_V1_STR}/docs" if settings.ENABLE_OPENAPI_DOCS else None,
+        redoc_url=f"{settings.API_V1_STR}/redoc" if settings.ENABLE_OPENAPI_DOCS else None,
+        lifespan=lifespan,
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.BACKEND_CORS_ORIGINS,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    app.middleware("http")(access_log_middleware)
+
+    from app.api import register_api_routes
+    from app.websocket.routes import router as websocket_router
+
+    register_api_routes(app)
+    app.include_router(websocket_router)
+    app.get("/", dependencies=[Depends(get_current_user)])(root)
+    app.get("/health")(health_check)
+    return app
+
+
+_app: Any | None = None
+
+
+def get_app():
+    """
+    获取兼容旧导入方式的单例应用实例。
+
+    Returns:
+        已创建的 FastAPI 应用实例。
+    """
+    global _app
+    if _app is None:
+        _app = create_app()
+    return _app
+
+
+def __getattr__(name: str):
+    """
+    按需提供历史 `app.main.app` 属性，避免模块导入时构建完整路由。
+
+    Args:
+        name: 被访问的模块属性名。
+
+    Returns:
+        当属性名为 `app` 时返回 FastAPI 应用实例。
+
+    Raises:
+        AttributeError: 访问未知属性时抛出。
+    """
+    if name == "app":
+        return get_app()
+    if name == "SessionLocal":
+        from app.core.database import SessionLocal
+
+        return SessionLocal
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
