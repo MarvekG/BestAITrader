@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     LLM_API_KEY: str = "sk-litellm-gateway-key"
     LLM_MODEL: str = "backend"
     LLM_THINKING_MODEL: str = "backend-thinking"
+    LLM_TIMEOUT_SECONDS: float = 240.0
+    LLM_MAX_RETRIES: int = 3
     DEBATE_AGENT_PARALLEL_ENABLED: bool = True
     ENABLE_AUTO_TRADE: bool = True
     ASYNC_TASK_MAX_CONCURRENT: int = 8

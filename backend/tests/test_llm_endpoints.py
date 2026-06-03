@@ -1,3 +1,4 @@
+from importlib import reload
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -6,6 +7,18 @@ from langchain_core.messages import AIMessage
 
 from app.api.endpoints import llm as llm_endpoint
 from app.api.endpoints.llm import _get_ai_function_test_tools, run_llm_probe
+
+
+class _FakeOpenAIMessage:
+    content = "ok"
+
+
+class _FakeOpenAIChoice:
+    message = _FakeOpenAIMessage()
+
+
+class _FakeOpenAIResponse:
+    choices = [_FakeOpenAIChoice()]
 
 
 class _FakeTestingLLM:
@@ -100,6 +113,53 @@ def test_ai_function_test_tools_are_real_tools_and_skills():
     assert "browse_web_page_html" in tool_names
     assert "list_skills" in tool_names
     assert "llm_probe_echo" not in tool_names
+
+
+@pytest.mark.asyncio
+async def test_llm_chat_completion_helper_uses_configured_timeout_and_retries():
+    captured = {}
+    patched_request_llm_completion = llm_endpoint._request_llm_completion
+    reloaded_llm_endpoint = reload(llm_endpoint)
+
+    class _FakeHttpClient:
+        def __init__(self, *, timeout):
+            captured["timeout"] = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+    class _FakeCompletions:
+        async def create(self, **kwargs):
+            captured["request_kwargs"] = kwargs
+            return _FakeOpenAIResponse()
+
+    class _FakeChat:
+        completions = _FakeCompletions()
+
+    class _FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            captured["client_kwargs"] = kwargs
+            self.chat = _FakeChat()
+
+    try:
+        with (
+            patch("app.api.endpoints.llm.httpx.AsyncClient", _FakeHttpClient),
+            patch("app.api.endpoints.llm.AsyncOpenAI", _FakeAsyncOpenAI),
+            patch("app.api.endpoints.llm.record_llm_usage"),
+        ):
+            result = await reloaded_llm_endpoint._request_llm_completion(
+                messages=[{"role": "user", "content": "hello"}],
+                model="backend",
+            )
+    finally:
+        llm_endpoint._request_llm_completion = patched_request_llm_completion
+
+    assert result["content"] == "ok"
+    assert captured["timeout"] == 240.0
+    assert captured["client_kwargs"]["max_retries"] == 3
 
 
 @pytest.mark.asyncio

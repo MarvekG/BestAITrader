@@ -442,11 +442,12 @@ async def _request_llm_completion(
         response_format=response_format,
         extra_body=extra_body,
     )
-    async with httpx.AsyncClient(timeout=120.0) as http_client:
+    async with httpx.AsyncClient(timeout=settings.LLM_TIMEOUT_SECONDS) as http_client:
         client = AsyncOpenAI(
             api_key=settings.LLM_API_KEY,
             base_url=settings.LLM_BASE_URL,
             http_client=http_client,
+            max_retries=settings.LLM_MAX_RETRIES,
         )
         response = await client.chat.completions.create(**request_kwargs)
     record_llm_usage(

@@ -1,9 +1,9 @@
 # Windows WSL2 Docker Engine 环境指南
 
-本文说明如何在 Windows 上不安装 Docker Desktop，改用 WSL2 Ubuntu 内的 Docker Engine 和 Docker Compose
+本文说明如何在 Windows 上使用 WSL2 Ubuntu 内的 Docker Engine 和 Docker Compose
 Plugin 准备天枢智投（Best-AI-Trader）的运行环境。
 
-这是 Windows 用户的推荐方案。它保留 Docker Compose 一体化部署的稳定性，同时避免 Docker Desktop 的桌面后台、
+这是 Windows 用户的推荐方案。它保留 Docker Compose 一体化部署的稳定性，同时减少桌面后台、
 许可证、GUI 和资源管理方式。应用配置和服务启动步骤不在本文维护，统一见 [部署指南](./01-deployment.md)。
 
 ## 1. 推荐环境结构
@@ -208,7 +208,7 @@ sudo timedatectl set-timezone Asia/Shanghai
 2. Docker Compose Plugin 不通过 apt 安装，改为从 Docker Compose GitHub Releases 拉取最新二进制，并校验
    `.sha256` 文件。
 
-不要安装 `docker.io`、`docker-compose` 旧包或 Docker Desktop。
+不要安装 `docker.io` 或 `docker-compose` 旧包。
 
 ### 7.1 清理可能存在的旧包
 
@@ -363,7 +363,7 @@ WSL 环境中这样配置。
 
 ## 9. 配置 WSL 资源限制
 
-Docker Desktop 的资源限制界面不可用时，可以通过 Windows 用户目录下的 `.wslconfig` 控制 WSL2 资源。
+可以通过 Windows 用户目录下的 `.wslconfig` 控制 WSL2 资源。
 
 在 WSL Ubuntu 中用 `vi` 编辑 Windows 用户目录下的 `.wslconfig`。先确认 Windows 用户目录：
 
