@@ -40,6 +40,19 @@ def test_build_chat_completion_kwargs_does_not_inject_thinking_default() -> None
     }
 
 
+def test_build_chat_model_uses_configured_timeout_and_retries() -> None:
+    provider = LiteLLMProvider()
+
+    llm = provider.build_chat_model(
+        model="backend",
+        api_key="sk-test",
+        base_url="http://litellm:4000/v1",
+    )
+
+    assert llm.request_timeout == 240.0
+    assert llm.max_retries == 3
+
+
 def test_litellm_chat_model_preserves_reasoning_content_from_response() -> None:
     llm = LiteLLMChatOpenAI(
         model="backend",

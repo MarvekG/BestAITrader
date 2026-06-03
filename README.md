@@ -62,7 +62,7 @@
 当前推荐并支持的完整启动方式是 Docker Compose。服务会启动 PostgreSQL、Redis、MemoFlux、Memory pgvector、FastAPI 后端、React 前端和 Nginx 统一入口。
 
 完整部署步骤、环境变量、启动停止、验证和排障见 [部署指南](./docs/01-deployment.md)。
-Windows 用户如果不想安装 Docker Desktop，建议使用
+Windows 用户建议使用
 [Windows WSL2 Docker Engine 部署指南](./docs/04-windows-wsl-docker-engine-deployment.md)。
 
 ## 为什么它不一样

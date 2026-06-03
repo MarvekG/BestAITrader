@@ -44,6 +44,8 @@ class LiteLLMProvider(LLMProviderPlugin):
             "model": model or settings.LLM_MODEL,
             "api_key": api_key or settings.LLM_API_KEY,
             "base_url": base_url or settings.LLM_BASE_URL,
+            "timeout": settings.LLM_TIMEOUT_SECONDS,
+            "max_retries": settings.LLM_MAX_RETRIES,
             **kwargs,
         }
         if temperature is not None:
