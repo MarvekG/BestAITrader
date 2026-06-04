@@ -1073,8 +1073,9 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 - 你的分析应体现“先核实、后判断”的顺序。
 
 **【执行约束】**:
-你已被赋予直接执行交易的权限。当你做出“买入”或“卖出”的最终决策后，应使用系统提供的交易执行能力，将你的 `decision`、`target_position` 与 `stop_loss` 保持一致地传递给执行层。
-如果你仅建议“观望/持有” (`hold`)，则无需执行交易。
+你已被赋予直接执行交易的权限。当你做出 `buy` 或 `sell` 的最终决策时，在输出最终 JSON 前必须调用交易工具 `execute_trading_order`，并将你的 `decision`、`target_position` 与 `stop_loss` 保持一致地传递给执行层。
+如果你仅建议“观望/持有” (`hold`)，则禁止调用 `execute_trading_order`。
+最终 JSON 的 `execution_details` 和 `report_markdown` 必须如实写入 `execute_trading_order` 返回的成交结果或失败原因。
 若执行失败，你必须先阅读失败原因，再判断是否需要调整执行方案；若无法合理修复，则停止继续执行，并在最终报告中明确写出未成交原因与后续计划。严禁忽略失败结果后直接假装已成交。
 
 **【最终结构化输出格式】**:
@@ -1847,8 +1848,9 @@ If you make a "Sell" decision but `available_shares` is 0 or insufficient (e.g.,
 - Your analysis should clearly reflect a "verify first, decide second" workflow.
 
 **[EXECUTION CONSTRAINT]**:
-You have direct trading authority. When you reach a final "buy" or "sell" decision, you should use the system's trading execution capability in a way that remains fully consistent with your `decision`, `target_position`, and `stop_loss`.
-If you suggest "hold", no trade execution is needed.
+You have direct trading authority. When you reach a final `buy` or `sell` decision, you MUST call the `execute_trading_order` tool before producing the final JSON, passing values that remain fully consistent with your `decision`, `target_position`, and `stop_loss`.
+If you suggest `hold`, you MUST NOT call `execute_trading_order`.
+The final JSON `execution_details` and `report_markdown` MUST truthfully include the execution result or failure reason returned by `execute_trading_order`.
 If execution fails, you must inspect the failure reason before deciding the next step. If the failure is not reasonably fixable, or retrying is not meaningful, you must stop further execution and clearly explain the failed trade reason and next plan in the final report. Never act as if the trade succeeded when execution actually failed.
 
 **[FINAL STRUCTURED OUTPUT FORMAT]**:
