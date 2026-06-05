@@ -1098,6 +1098,22 @@
     "description": "汇总股票仓、持仓和用户配置网页源转换得到的 Markdown 文档，由盯盘 AI 判断是否启动 AI 辩论交易。",
     "refresh": "刷新",
     "settings": "设置",
+    "source_config_action": "数据源配置",
+    "source_config_title": "数据源配置",
+    "source_config_preview_run": "开始获取",
+    "add_data_source": "添加数据源",
+    "add_news_source": "添加到新闻源",
+    "data_source_saved": "已保存到数据源配置",
+    "news_source_saved": "已保存到新闻源配置",
+    "source_config_needs_pair": "已添加到设置表单，请补齐数据源和新闻源后保存",
+    "source_config_preview_success": "可以获取数据",
+    "source_config_preview_empty": "请求成功但没有内容",
+    "source_config_preview_empty_desc": "请检查 URL 是否需要登录、页面是否为动态加载，或 selector 是否过窄。",
+    "source_config_preview_error": "获取失败",
+    "source_config_preview_failed": "获取测试失败",
+    "source_config_save_failed": "保存数据源配置失败",
+    "source_config_no_preview_result": "输入 URL 和 selector 后点击开始获取",
+    "source_config": "数据源配置",
     "load_failed": "加载盯盘数据失败",
     "settings_saved": "盯盘设置已保存",
     "settings_save_failed": "保存盯盘设置失败",
@@ -1195,13 +1211,15 @@
       "trading_strategy": "盯盘 AI 会按该交易策略判断当前行情和新闻是否值得启动交易分析。"
     },
     "validation": {
-      "source_urls_required": "请至少填写一个 URL"
+      "source_urls_required": "请至少填写一个 URL",
+      "source_url_required": "请输入 URL"
     },
     "units": {
       "hours": "小时"
     },
     "placeholders": {
       "source_urls": "每行一个网页配置，例如 https://example.com/page @@ body > div.main",
+      "source_config": "例如 https://example.com/page @@ body > div.main @@ .news-list",
       "markdown_cleanup_patterns": "输入正则后回车，例如 (?m)^[ \\t]*\\*[ \\t]*\\|[ \\t]*$"
     }
   },

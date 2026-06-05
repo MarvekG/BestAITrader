@@ -8,6 +8,8 @@ import {
   Drawer,
   Empty,
   Form,
+  Alert,
+  Input,
   InputNumber,
   List,
   Row,
@@ -20,7 +22,7 @@ import {
   Tooltip,
   Typography,
 } from 'antd';
-import { ExclamationCircleOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons';
+import { ExperimentOutlined, ExclamationCircleOutlined, ReloadOutlined, SettingOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
@@ -50,6 +52,10 @@ type MarketWatchSettingsFormValues = Omit<
   scan_end_time?: Dayjs | string | null;
 };
 
+type MarketWatchSourcePreviewFormValues = {
+  source_config: string;
+};
+
 const eventStatusColor: Record<string, string> = {
   success: 'green',
   skipped: 'gold',
@@ -62,6 +68,8 @@ const sourceDocumentMarkdownStyle: React.CSSProperties = {
   marginBottom: 0,
   lineHeight: 1.65,
   wordBreak: 'break-word',
+  WebkitOverflowScrolling: 'touch',
+  touchAction: 'pan-y',
 };
 const sourceDocumentRawStyle: React.CSSProperties = {
   ...sourceDocumentMarkdownStyle,
@@ -88,6 +96,17 @@ const marketWatchScrollablePanelStyle: React.CSSProperties = {
   minHeight: 0,
   overflowY: 'auto',
   paddingRight: 8,
+};
+const sourceConfigDrawerBodyStyle: React.CSSProperties = {
+  overflowY: 'auto',
+  paddingRight: 8,
+  WebkitOverflowScrolling: 'touch',
+  touchAction: 'pan-y',
+};
+const sourceConfigRawStyle: React.CSSProperties = {
+  ...sourceDocumentRawStyle,
+  maxHeight: 'calc(100vh - 360px)',
+  minHeight: 360,
 };
 const watchAiActionColor: Record<string, string> = {
   ignore: 'default',
@@ -186,12 +205,16 @@ export const MarketWatchPage: React.FC = () => {
   const { message } = AntdApp.useApp();
   const { t } = useTranslation();
   const [settingsForm] = Form.useForm<MarketWatchSettingsFormValues>();
+  const [sourcePreviewForm] = Form.useForm<MarketWatchSourcePreviewFormValues>();
   const [settings, setSettings] = React.useState<MarketWatchSettings | null>(null);
   const [sourceDocumentRounds, setSourceDocumentRounds] = React.useState<MarketWatchMarkdownDocument[][]>([]);
+  const [sourcePreviewDocument, setSourcePreviewDocument] = React.useState<MarketWatchMarkdownDocument | null>(null);
   const [events, setEvents] = React.useState<MarketWatchEvent[]>([]);
   const [eventsLoading, setEventsLoading] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [savingSettings, setSavingSettings] = React.useState(false);
+  const [sourcePreviewOpen, setSourcePreviewOpen] = React.useState(false);
+  const [sourcePreviewLoading, setSourcePreviewLoading] = React.useState(false);
   const [renderSourceMarkdown, setRenderSourceMarkdown] = React.useState(false);
   const socketRef = React.useRef<WebSocket | null>(null);
   const reconnectTimerRef = React.useRef<number | null>(null);
@@ -321,6 +344,69 @@ export const MarketWatchPage: React.FC = () => {
     }
   };
 
+  const handleSourcePreview = async () => {
+    try {
+      const values = await sourcePreviewForm.validateFields();
+      setSourcePreviewLoading(true);
+      setSourcePreviewDocument(null);
+      const document = await marketWatchApi.previewSource(values);
+      setSourcePreviewDocument(document);
+    } catch (error) {
+      message.error(formatErrorMessage(error) || t('market_watch.source_config_preview_failed'));
+    } finally {
+      setSourcePreviewLoading(false);
+    }
+  };
+
+  const handleAddSourceConfig = async (fieldName: 'data_source_urls' | 'news_source_urls') => {
+    try {
+      const { source_config: sourceConfig } = await sourcePreviewForm.validateFields(['source_config']);
+      setSavingSettings(true);
+      const currentSettings = await marketWatchApi.getSettings();
+      const baseFormValues = settingsToFormValues(currentSettings);
+      const currentValues: string[] = baseFormValues[fieldName] ?? [];
+      const nextValues = currentValues.includes(sourceConfig) ? currentValues : [...currentValues, sourceConfig];
+      const nextFormValues = {
+        ...baseFormValues,
+        [fieldName]: nextValues,
+      };
+      const nextPayload = settingsFormValuesToPayload(nextFormValues);
+      const updated = await marketWatchApi.updateSettings(nextPayload);
+      setSettings(updated);
+      settingsForm.setFieldsValue(settingsToFormValues(updated));
+      setSourcePreviewOpen(false);
+      message.success(t(`market_watch.${fieldName === 'data_source_urls' ? 'data_source_saved' : 'news_source_saved'}`));
+    } catch (error) {
+      message.error(formatErrorMessage(error) || t('market_watch.source_config_save_failed'));
+    } finally {
+      setSavingSettings(false);
+    }
+  };
+
+  const sourcePreviewStatus = React.useMemo(() => {
+    if (!sourcePreviewDocument) {
+      return null;
+    }
+    if (sourcePreviewDocument.error) {
+      return {
+        type: 'error' as const,
+        message: t('market_watch.source_config_preview_error'),
+        description: sourcePreviewDocument.error,
+      };
+    }
+    if (sourcePreviewDocument.markdown.trim()) {
+      return {
+        type: 'success' as const,
+        message: t('market_watch.source_config_preview_success'),
+      };
+    }
+    return {
+      type: 'warning' as const,
+      message: t('market_watch.source_config_preview_empty'),
+      description: t('market_watch.source_config_preview_empty_desc'),
+    };
+  }, [sourcePreviewDocument, t]);
+
   const eventColumns: ColumnsType<MarketWatchEvent> = [
     {
       title: t('market_watch.columns.time'),
@@ -359,6 +445,14 @@ export const MarketWatchPage: React.FC = () => {
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
+        <Button
+          icon={<ExperimentOutlined />}
+          onClick={() => {
+            setSourcePreviewOpen(true);
+          }}
+        >
+          {t('market_watch.source_config_action')}
+        </Button>
         <Button icon={<ReloadOutlined />} loading={eventsLoading} onClick={loadDashboard}>
           {t('market_watch.refresh')}
         </Button>
@@ -710,6 +804,76 @@ export const MarketWatchPage: React.FC = () => {
             </Select>
           </Form.Item>
         </Form>
+      </Drawer>
+
+      <Drawer
+        title={t('market_watch.source_config_title')}
+        width="min(960px, 92vw)"
+        open={sourcePreviewOpen}
+        onClose={() => setSourcePreviewOpen(false)}
+        styles={{ body: sourceConfigDrawerBodyStyle }}
+        footer={(
+          <Space size={8} wrap style={{ width: '100%', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setSourcePreviewOpen(false)}>{t('common.cancel')}</Button>
+            <Button type="primary" loading={sourcePreviewLoading} onClick={handleSourcePreview}>
+              {t('market_watch.source_config_preview_run')}
+            </Button>
+            <Button type="primary" ghost loading={savingSettings} onClick={() => void handleAddSourceConfig('data_source_urls')}>
+              {t('market_watch.add_data_source')}
+            </Button>
+            <Button
+              loading={savingSettings}
+              style={{ borderColor: '#52c41a', color: '#389e0d' }}
+              onClick={() => void handleAddSourceConfig('news_source_urls')}
+            >
+              {t('market_watch.add_news_source')}
+            </Button>
+          </Space>
+        )}
+      >
+        <Form form={sourcePreviewForm} layout="vertical">
+          <Form.Item
+            name="source_config"
+            label={t('market_watch.source_config')}
+            rules={[{ required: true, message: t('market_watch.validation.source_url_required') }]}
+          >
+            <Input.TextArea
+              autoSize={{ minRows: 2, maxRows: 4 }}
+              placeholder={t('market_watch.placeholders.source_config')}
+            />
+          </Form.Item>
+        </Form>
+
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          {sourcePreviewStatus ? (
+            <Alert
+              showIcon
+              type={sourcePreviewStatus.type}
+              message={sourcePreviewStatus.message}
+              description={sourcePreviewStatus.description}
+            />
+          ) : (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('market_watch.source_config_no_preview_result')} />
+          )}
+          {sourcePreviewDocument ? (
+            <Space direction="vertical" size={8} style={{ width: '100%' }}>
+              <Space size={[8, 4]} wrap>
+                {sourcePreviewDocument.status ? <Text type="secondary">HTTP {sourcePreviewDocument.status}</Text> : null}
+                <Text type="secondary">{formatDateTime(sourcePreviewDocument.captured_at)}</Text>
+              </Space>
+              <Text strong>{sourcePreviewDocument.title || sourcePreviewDocument.final_url || sourcePreviewDocument.url}</Text>
+              {sourcePreviewDocument.final_url ? (
+                <Text type="secondary">
+                  {t('market_watch.final_url')}:{' '}
+                  <Text copyable={{ text: sourcePreviewDocument.final_url }} style={sourceDocumentUrlStyle}>
+                    {sourcePreviewDocument.final_url}
+                  </Text>
+                </Text>
+              ) : null}
+              <pre style={sourceConfigRawStyle}>{sourcePreviewDocument.markdown || ''}</pre>
+            </Space>
+          ) : null}
+        </Space>
       </Drawer>
     </Space>
   );

@@ -1098,6 +1098,22 @@
     "description": "Combines stock warehouse holdings, positions, and Markdown rendered from user-configured web sources so Watch AI can decide whether to start an AI debate trade.",
     "refresh": "Refresh",
     "settings": "Settings",
+    "source_config_action": "Data Source Config",
+    "source_config_title": "Data Source Config",
+    "source_config_preview_run": "Start Getting",
+    "add_data_source": "Add Data Source",
+    "add_news_source": "Add to News Source",
+    "data_source_saved": "Saved to data source configs.",
+    "news_source_saved": "Saved to news source configs.",
+    "source_config_needs_pair": "Added to the settings form. Add both data and news sources before saving.",
+    "source_config_preview_success": "Data available",
+    "source_config_preview_empty": "Request succeeded but no content was returned",
+    "source_config_preview_empty_desc": "Check whether the URL requires login, the page loads dynamically, or the selector is too narrow.",
+    "source_config_preview_error": "Get failed",
+    "source_config_preview_failed": "Get test failed",
+    "source_config_save_failed": "Failed to save data source config",
+    "source_config_no_preview_result": "Enter a URL and selectors, then click Start Getting",
+    "source_config": "Data Source Config",
     "load_failed": "Failed to load market watch data",
     "settings_saved": "Market watch settings saved",
     "settings_save_failed": "Failed to save market watch settings",
@@ -1195,13 +1211,15 @@
       "trading_strategy": "Watch AI uses this trading strategy to judge whether the current quote and news justify a trading analysis."
     },
     "validation": {
-      "source_urls_required": "Enter at least one URL"
+      "source_urls_required": "Enter at least one URL",
+      "source_url_required": "Enter a URL"
     },
     "units": {
       "hours": "hours"
     },
     "placeholders": {
       "source_urls": "One page config per line, e.g. https://example.com/page @@ body > div.main",
+      "source_config": "e.g. https://example.com/page @@ body > div.main @@ .news-list",
       "markdown_cleanup_patterns": "Enter a regex and press Enter, e.g. (?m)^[ \\t]*\\*[ \\t]*\\|[ \\t]*$"
     }
   },

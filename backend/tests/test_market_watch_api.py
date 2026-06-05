@@ -4,6 +4,7 @@ import uuid
 from app.ai.market_watch.schemas import (
     DEFAULT_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS,
     DEFAULT_MARKET_WATCH_SCAN_INTERVAL_SECONDS,
+    MarketWatchMarkdownDocument,
 )
 from app.crud.user import create_user
 from app.models.market_watch import MarketWatchEvent
@@ -141,6 +142,44 @@ def test_market_watch_scan_returns_skeleton_response(client, auth_headers) -> No
     assert payload["stock_count"] == 0
     assert payload["ai_evaluated"] is False
     assert payload["items"] == []
+
+
+def test_market_watch_source_preview_reuses_source_fetcher(client, auth_headers, monkeypatch) -> None:
+    from app.api.endpoints import market_watch
+
+    captured = {}
+
+    async def fake_fetch_market_watch_documents(urls, source_type, *, clean_markdown, markdown_cleanup_patterns):
+        captured["urls"] = urls
+        captured["source_type"] = source_type
+        captured["clean_markdown"] = clean_markdown
+        captured["markdown_cleanup_patterns"] = markdown_cleanup_patterns
+        return [
+            MarketWatchMarkdownDocument(
+                id="data:0:preview",
+                source_type="data",
+                url="https://example.com/page",
+                final_url="https://example.com/page",
+                title="Preview",
+                markdown="matched data",
+                status=200,
+                captured_at=datetime.now(),
+            )
+        ]
+
+    monkeypatch.setattr(market_watch, "fetch_market_watch_documents", fake_fetch_market_watch_documents)
+
+    response = client.post(
+        "/api/v1/market-watch/source-preview",
+        headers=auth_headers,
+        json={"source_config": "https://example.com/page @@ main @@ .news"},
+    )
+
+    assert response.status_code == 200
+    assert captured["urls"] == ["https://example.com/page @@ main @@ .news"]
+    assert captured["source_type"] == "data"
+    assert captured["clean_markdown"] is True
+    assert response.json()["markdown"] == "matched data"
 
 
 def test_market_watch_events_returns_current_user_events(client, auth_headers, db_session) -> None:

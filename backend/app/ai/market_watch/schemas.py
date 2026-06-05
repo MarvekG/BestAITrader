@@ -372,6 +372,29 @@ class MarketWatchMarkdownDocument(BaseModel):
     captured_at: datetime
 
 
+class MarketWatchSourcePreviewRequest(BaseModel):
+    """单次网页源抓取预览请求。"""
+
+    source_config: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("source_config", mode="before")
+    @classmethod
+    def _strip_source_config(cls, value: Any) -> str | None:
+        """
+        清理用户输入的网页源配置空白字符。
+
+        Args:
+            value: 前端提交的 URL 或 ``URL @@ selector1 @@ selector2`` 原始文本。
+
+        Returns:
+            去除首尾空白后的网页源配置；空文本按未填写处理。
+        """
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+
 class MarketWatchEventSchema(BaseModel):
     """Structured audit record for market watch scan and decision events."""
 

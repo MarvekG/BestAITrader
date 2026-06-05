@@ -46,6 +46,10 @@ export interface MarketWatchMarkdownDocument {
   captured_at: string;
 }
 
+export interface MarketWatchSourcePreviewRequest {
+  source_config: string;
+}
+
 export interface WatchAiDebateParameters {
   trading_frequency: WatchAiTradingFrequency;
   trading_strategy: WatchAiTradingStrategy;
@@ -131,6 +135,10 @@ export const marketWatchApi = {
 
   scan: async () => {
     return apiClient.post<MarketWatchScanResponse>('/market-watch/scan');
+  },
+
+  previewSource: async (payload: MarketWatchSourcePreviewRequest) => {
+    return apiClient.post<MarketWatchMarkdownDocument>('/market-watch/source-preview', payload);
   },
 
   getEvents: async (params: MarketWatchEventsQuery = {}) => {
