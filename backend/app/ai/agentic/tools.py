@@ -56,6 +56,112 @@ def _format_trade_execution_result(payload: Dict[str, Any]) -> Dict[str, Any]:
         result["risk_control"] = make_json_serializable(payload["risk_control"])
     return result
 
+
+def _build_trade_gate_rejection(reason: str, message: str, details: Dict[str, Any]) -> Dict[str, Any]:
+    """构建 PM 交易决策门禁拒绝结果。
+
+    Args:
+        reason: 机器可读的拒绝原因。
+        message: 给 PM 阅读的拒绝说明。
+        details: 触发门禁时的关键上下文字段。
+
+    Returns:
+        统一格式化后的工具返回值。
+    """
+    return _format_trade_execution_result(
+        {
+            "success": False,
+            "reason": reason,
+            "message": message,
+            "gate": "pm_decision_quality_gate",
+            "details": make_json_serializable(details),
+        }
+    )
+
+
+def _evaluate_pm_trade_gate(
+    *,
+    action: str,
+    target_position: float,
+    current_position: float,
+    price: float,
+    stop_loss: float,
+    take_profit: Optional[float],
+    current_total_shares: int,
+    current_available_shares: int,
+) -> Dict[str, Any] | None:
+    """校验 PM 交易工具调用是否与当前仓位和基础风控一致。
+
+    Args:
+        action: PM 调用工具时传入的动作。
+        target_position: PM 设定的目标仓位比例。
+        current_position: 当前目标股票仓位比例。
+        price: 当前可用交易价格。
+        stop_loss: PM 设定的止损价。
+        take_profit: PM 设定的止盈价；缺失时不做止盈门禁。
+        current_total_shares: 当前总持仓数量。
+        current_available_shares: 当前真实可卖数量。
+
+    Returns:
+        若应拒绝交易，返回统一工具结果；否则返回 None。
+    """
+    act = str(action or "").strip().lower()
+    details = {
+        "action": act,
+        "target_position": target_position,
+        "current_position": current_position,
+        "price": price,
+        "stop_loss": stop_loss,
+        "take_profit": take_profit,
+        "current_total_shares": current_total_shares,
+        "current_available_shares": current_available_shares,
+    }
+
+    if act not in {"buy", "sell"}:
+        return _build_trade_gate_rejection(
+            "invalid_trade_action",
+            "Trade gate rejected the order: action must be 'buy' or 'sell'. Use no trade tool for hold.",
+            details,
+        )
+
+    if target_position < 0 or target_position > 1:
+        return _build_trade_gate_rejection(
+            "invalid_target_position",
+            "Trade gate rejected the order: target_position must be between 0 and 1.",
+            details,
+        )
+
+    tolerance = 1e-6
+    if act == "buy" and target_position <= current_position + tolerance:
+        return _build_trade_gate_rejection(
+            "decision_target_mismatch",
+            "Trade gate rejected the buy: target_position must be greater than current_position.",
+            details,
+        )
+
+    if act == "sell" and target_position >= current_position - tolerance:
+        return _build_trade_gate_rejection(
+            "decision_target_mismatch",
+            "Trade gate rejected the sell: target_position must be lower than current_position.",
+            details,
+        )
+
+    if act == "buy" and stop_loss >= price:
+        return _build_trade_gate_rejection(
+            "invalid_buy_stop_loss",
+            "Trade gate rejected the buy: stop_loss must be below the current price.",
+            details,
+        )
+
+    if act == "buy" and take_profit is not None and take_profit <= price:
+        return _build_trade_gate_rejection(
+            "invalid_buy_take_profit",
+            "Trade gate rejected the buy: take_profit must be above the current price.",
+            details,
+        )
+
+    return None
+
 STOCK_QUERY_HANDLERS = {
     "status": lambda stock_code, limit: StockTools.check_data_status(stock_code),
     "basic": lambda stock_code, limit: StockTools.get_stock_basic_info(stock_code),
@@ -820,6 +926,7 @@ async def execute_trading_order(
     target_position: float,
     session_id: str,
     stop_loss: float,
+    take_profit: float,
 ) -> Dict[str, Any]:
     """
     执行股票交易下单工具 (Execute stock trading order).
@@ -835,6 +942,7 @@ async def execute_trading_order(
       - target_position = 0 即为全额清仓。
     - session_id: 当前会话 ID (必须从 Context 中准确获取)，用于关联账户和持久化。
     - stop_loss: 止损价，必填。成交后会直接写入持仓 `purchase_details.stop_loss`。
+    - take_profit: PM 本轮止盈价或目标价，必填。买入时必须高于当前价。
 
     注意:
     1. 自动执行 A 股交易规则：买入必须是 100 的整数倍；卖出减仓时尽量取 100 倍数。
@@ -858,6 +966,9 @@ async def execute_trading_order(
 
     if stop_loss <= 0:
         return _format_trade_execution_result({"error": f"Invalid stop_loss: {stop_loss}. stop_loss must be greater than 0."})
+
+    if take_profit <= 0:
+        return _format_trade_execution_result({"error": f"Invalid take_profit: {take_profit}. take_profit must be greater than 0."})
 
     session_uuid = None
     try:
@@ -914,7 +1025,23 @@ async def execute_trading_order(
                 trading_engine.build_position_snapshot(pos)["available_shares"]
                 if pos else 0
             )
-            
+
+            current_position = (
+                (current_total_shares * price) / total_assets if total_assets > 0 else 0.0
+            )
+            gate_result = _evaluate_pm_trade_gate(
+                action=action,
+                target_position=target_position,
+                current_position=current_position,
+                price=price,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                current_total_shares=current_total_shares,
+                current_available_shares=current_available_shares,
+            )
+            if gate_result is not None:
+                return gate_result
+
             # 5. 计算差额
             diff_shares = target_total_shares - current_total_shares
             suggested_shares = 0
