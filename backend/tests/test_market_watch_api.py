@@ -39,6 +39,7 @@ def test_market_watch_settings_returns_defaults(client, auth_headers) -> None:
     assert payload["scan_start_time"] == "09:30"
     assert payload["scan_end_time"] == "15:00"
     assert payload["recent_debate_dedup_enabled"] is True
+    assert payload["recent_debate_lookback_hours"] == 24
     assert payload["data_source_urls"] == []
     assert payload["news_source_urls"] == []
     assert payload["clean_source_markdown"] is True
@@ -63,6 +64,7 @@ def test_market_watch_settings_update_persists_runtime_values(client, auth_heade
             "data_source_urls": ["https://example.com/data"],
             "news_source_urls": ["news.example.com/latest"],
             "recent_debate_dedup_enabled": False,
+            "recent_debate_lookback_hours": 36,
             "clean_source_markdown": False,
             "markdown_cleanup_patterns": [r"(?m)^REMOVE ME$"],
             "trading_frequency": "日内交易 (Day Trading)",
@@ -80,6 +82,7 @@ def test_market_watch_settings_update_persists_runtime_values(client, auth_heade
     assert payload["data_source_urls"] == ["https://example.com/data"]
     assert payload["news_source_urls"] == ["https://news.example.com/latest"]
     assert payload["recent_debate_dedup_enabled"] is False
+    assert payload["recent_debate_lookback_hours"] == 36
     assert payload["clean_source_markdown"] is False
     assert payload["markdown_cleanup_patterns"] == [r"(?m)^REMOVE ME$"]
     assert payload["trading_frequency"] == "日内交易 (Day Trading)"
@@ -92,6 +95,7 @@ def test_market_watch_settings_update_persists_runtime_values(client, auth_heade
     assert setting.value["scan_interval_seconds"] == 45
     assert setting.value["news_source_urls"] == ["https://news.example.com/latest"]
     assert setting.value["recent_debate_dedup_enabled"] is False
+    assert setting.value["recent_debate_lookback_hours"] == 36
     assert setting.value["markdown_cleanup_patterns"] == [r"(?m)^REMOVE ME$"]
     assert refresh_calls == ["refresh"]
 

@@ -1166,6 +1166,7 @@
       "scan_end_time": "扫描结束时间",
       "auto_launch_debate": "允许自动启动 AI 辩论",
       "recent_debate_dedup_enabled": "启用近期辩论去重",
+      "recent_debate_lookback_hours": "近期辩论去重范围（小时）",
       "cooldown_minutes": "同股冷却时间（分钟）",
       "cooldown_break_confidence": "突破冷却置信度",
       "data_source_urls": "数据源网页配置",
@@ -1183,6 +1184,7 @@
       "scan_end_time": "每天允许启动盯盘扫描的结束时间，默认 A 股收盘时间 15:00。",
       "auto_launch_debate": "开启后，盯盘 AI 判断需要启动辩论且通过冷却/去重检查时，会自动创建 AI 辩论任务。",
       "recent_debate_dedup_enabled": "开启后，盯盘 AI 会参考近期已启动辩论，避免同一证据反复触发；关闭后近期辩论只作为背景，不参与去重。",
+      "recent_debate_lookback_hours": "近期辩论去重使用的历史窗口，单位小时，默认 24 小时。",
       "cooldown_minutes": "同一股票成功启动辩论后，在该分钟数内默认不重复启动，避免同一事件反复触发。",
       "cooldown_break_confidence": "处于冷却期时，只有盯盘 AI 置信度达到该值并引用新的文档证据，才允许突破冷却。",
       "data_source_urls": "必填。每行一个网页配置；可写 URL @@ selector1 @@ selector2，只把匹配区域转成 Markdown。",
@@ -1194,6 +1196,9 @@
     },
     "validation": {
       "source_urls_required": "请至少填写一个 URL"
+    },
+    "units": {
+      "hours": "小时"
     },
     "placeholders": {
       "source_urls": "每行一个网页配置，例如 https://example.com/page @@ body > div.main",

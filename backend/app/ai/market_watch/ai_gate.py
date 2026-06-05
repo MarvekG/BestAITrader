@@ -6,7 +6,6 @@ from typing import Any, Protocol
 from pydantic import TypeAdapter
 
 from app.ai.market_watch.schemas import WatchAiDecision
-from app.core.config import settings as app_settings
 from app.core.logger import get_logger
 
 
@@ -22,18 +21,19 @@ class LlmClient(Protocol):
         """Return parsed JSON from an LLM provider."""
 
 
-def build_watch_ai_prompt(*, recent_debate_dedup_enabled: bool = True) -> str:
+def build_watch_ai_prompt(*, recent_debate_dedup_enabled: bool = True, recent_debate_lookback_hours: int = 24) -> str:
     """
     构建盯盘 AI 的系统提示词。
 
     Args:
         recent_debate_dedup_enabled: 是否启用近期已启动辩论的去重规则。
+        recent_debate_lookback_hours: 判重时关注的已启动辩论小时窗口。
 
     Returns:
         要求基于证据输出 JSON 决策的系统提示词。
     """
     schema = json.dumps(WATCH_AI_DECISIONS_ADAPTER.json_schema(), ensure_ascii=False)
-    recent_launch_window_hours = app_settings.MARKET_WATCH_RECENT_DEBATE_LAUNCH_LOOKBACK_HOURS
+    recent_launch_window_hours = recent_debate_lookback_hours
     recent_debate_dedup_rule = (
         f"""先查看 `recent_debate_launches`，并使用其中的 `created_at` 判断历史辩论发生时间。如果同一股票在过去 {recent_launch_window_hours} 小时内已经因为相同触发事件、相同公告/新闻事实、或实质相同的证据摘要启动过辩论，本轮不要再次输出 `start_debate`；应输出 `monitor` 或 `ignore`，并在 `trigger_reason` 中简要说明“{recent_launch_window_hours} 小时内相同事件已启动过辩论”。
 
@@ -330,7 +330,10 @@ def build_watch_ai_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
             "content": build_watch_ai_prompt(
                 recent_debate_dedup_enabled=bool(
                     (payload.get("settings") or {}).get("recent_debate_dedup_enabled", True)
-                )
+                ),
+                recent_debate_lookback_hours=int(
+                    (payload.get("settings") or {}).get("recent_debate_lookback_hours", 24)
+                ),
             ),
         },
         {"role": "user", "content": _format_watch_ai_input("DATABASE_CONTEXT", database_context)},

@@ -647,7 +647,7 @@ async def test_scan_sends_recent_successful_debate_launches_to_watch_ai(db_sessi
 
 
 @pytest.mark.asyncio
-async def test_recent_debate_launch_window_uses_runtime_config(db_session, monkeypatch) -> None:
+async def test_recent_debate_launch_window_uses_runtime_setting(db_session) -> None:
     user = _create_user(db_session)
     _add_recent_launch_event(
         db_session,
@@ -657,15 +657,10 @@ async def test_recent_debate_launch_window_uses_runtime_config(db_session, monke
         evidence_summary="25 小时前事件",
         created_at=datetime(2026, 5, 13, 9, 0),
     )
-    monkeypatch.setattr(
-        market_watch_service.app_settings,
-        "MARKET_WATCH_RECENT_DEBATE_LAUNCH_LOOKBACK_HOURS",
-        26,
-    )
-
     launches = market_watch_service._load_recent_debate_launches(
         user_id=user.id,
         now=datetime(2026, 5, 14, 10, 0),
+        lookback_hours=26,
     )
 
     assert len(launches) == 1

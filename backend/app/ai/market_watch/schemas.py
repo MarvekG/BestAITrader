@@ -277,6 +277,7 @@ class MarketWatchSettingsResponse(BaseModel):
     scan_end_time: str = Field(DEFAULT_MARKET_WATCH_SCAN_END_TIME, pattern=MARKET_WATCH_TIME_PATTERN)
     auto_launch_debate: bool = True
     recent_debate_dedup_enabled: bool = True
+    recent_debate_lookback_hours: int = Field(24, ge=1, le=168)
     cooldown_minutes: int = Field(60, ge=0, le=1440)
     cooldown_break_confidence: float = Field(0.85, ge=0, le=1)
     data_source_urls: list[str] = Field(default_factory=list, max_length=MAX_MARKET_WATCH_SOURCE_URLS)
@@ -323,6 +324,7 @@ class MarketWatchSettingsUpdate(BaseModel):
     scan_end_time: str | None = Field(None, pattern=MARKET_WATCH_TIME_PATTERN)
     auto_launch_debate: bool | None = None
     recent_debate_dedup_enabled: bool | None = None
+    recent_debate_lookback_hours: int | None = Field(None, ge=1, le=168)
     cooldown_minutes: int | None = Field(None, ge=0, le=1440)
     cooldown_break_confidence: float | None = Field(None, ge=0, le=1)
     data_source_urls: list[str] | None = Field(None, max_length=MAX_MARKET_WATCH_SOURCE_URLS)

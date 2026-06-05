@@ -38,6 +38,7 @@ def test_merge_market_watch_settings_keeps_existing_values_for_partial_update() 
     assert merged.scan_end_time == "14:30"
     assert merged.cooldown_minutes == 60
     assert merged.recent_debate_dedup_enabled is True
+    assert merged.recent_debate_lookback_hours == 24
     assert merged.trading_frequency == "中长线持有 (Position Trading)"
     assert merged.data_source_urls == ["https://example.com/quotes"]
     assert merged.news_source_urls == ["https://news.example.com/feed"]
@@ -93,6 +94,9 @@ def test_market_watch_settings_reject_invalid_runtime_config() -> None:
         MarketWatchSettingsUpdate(cooldown_break_confidence=1.5)
 
     with pytest.raises(ValidationError):
+        MarketWatchSettingsUpdate(recent_debate_lookback_hours=0)
+
+    with pytest.raises(ValidationError):
         MarketWatchSettingsUpdate(trading_frequency="")
 
     with pytest.raises(ValidationError):
@@ -137,6 +141,7 @@ def test_market_watch_settings_default_scan_window_matches_a_share_session() -> 
     assert settings.scan_end_time == "15:00"
     assert settings.scan_interval_seconds == 300
     assert settings.scan_non_trading_days is False
+    assert settings.recent_debate_lookback_hours == 24
     assert settings.trading_frequency == "中长线持有 (Position Trading)"
     assert settings.trading_strategy == "价值投资 (Value Investing)"
     assert settings.data_source_urls == []
@@ -165,6 +170,7 @@ def test_market_watch_settings_persist_in_system_settings_table(test_db) -> None
         MarketWatchSettingsUpdate(
             scan_interval_seconds=45,
             scan_non_trading_days=True,
+            recent_debate_lookback_hours=48,
             data_source_urls=["https://example.com/data"],
             news_source_urls=["news.example.com/latest"],
             clean_source_markdown=False,
@@ -183,7 +189,9 @@ def test_market_watch_settings_persist_in_system_settings_table(test_db) -> None
 
     assert updated.scan_interval_seconds == 45
     assert updated.scan_non_trading_days is True
+    assert updated.recent_debate_lookback_hours == 48
     assert row.value["scan_non_trading_days"] is True
+    assert row.value["recent_debate_lookback_hours"] == 48
     assert row.value["data_source_urls"] == ["https://example.com/data"]
     assert row.value["news_source_urls"] == ["https://news.example.com/latest"]
     assert row.value["clean_source_markdown"] is False

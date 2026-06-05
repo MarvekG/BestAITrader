@@ -252,7 +252,11 @@ async def scan_market_watch(
             news_documents=news_document_items,
             account_summary=scan_context["account_summary"],
             positions=scan_context["positions"],
-            recent_debate_launches=_load_recent_debate_launches(user_id=user_id, now=scan_now),
+            recent_debate_launches=_load_recent_debate_launches(
+                user_id=user_id,
+                now=scan_now,
+                lookback_hours=settings.recent_debate_lookback_hours,
+            ),
         )
         logger.debug(
             "Market watch Watch AI full input",
@@ -608,17 +612,18 @@ def _build_watch_ai_payload(
     }
 
 
-def _load_recent_debate_launches(*, user_id: int, now: datetime) -> list[dict[str, Any]]:
+def _load_recent_debate_launches(*, user_id: int, now: datetime, lookback_hours: int) -> list[dict[str, Any]]:
     """读取近期成功启动过的辩论记录，作为盯盘 AI 判重输入。
 
     Args:
         user_id: 当前用户 ID。
-        now: 本轮扫描时间，用于计算 24 小时窗口。
+        now: 本轮扫描时间，用于计算近期窗口。
+        lookback_hours: 往前查询已启动辩论记录的小时数。
 
     Returns:
         按时间倒序排列的近期启动记录，包含股票、触发原因、证据摘要和会话 ID。
     """
-    cutoff = now - timedelta(hours=app_settings.MARKET_WATCH_RECENT_DEBATE_LAUNCH_LOOKBACK_HOURS)
+    cutoff = now - timedelta(hours=lookback_hours)
     with database_module.SessionLocal() as db:
         events = (
             db.query(MarketWatchEvent)
