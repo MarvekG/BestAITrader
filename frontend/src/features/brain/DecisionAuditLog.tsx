@@ -42,6 +42,7 @@ interface AuditAnalysis {
 
 export interface DecisionAuditLogProps {
   sessionId?: string;
+  isActive?: boolean;
 }
 
 const isInfoAnalystMessage = (msg: AuditMessage) =>
@@ -70,7 +71,7 @@ const getStepMessagesFor = (allMessages: AuditMessage[], stepIndex: number) => {
   }
 };
 
-export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId }) => {
+export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, isActive = true }) => {
   const { t } = useTranslation();
   const { message } = AntdApp.useApp();
   const { activeSession } = useSessionStore();
@@ -134,8 +135,9 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId })
   }, [activeSession, effectiveSessionId]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    if (!isActive) return;
+    void fetchData();
+  }, [fetchData, isActive]);
 
   const generateMarkdown = (exportType: 'decision' | 'all') => {
     let reportTitle = t('session.report_title');

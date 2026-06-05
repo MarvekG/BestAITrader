@@ -100,7 +100,11 @@ const getStockAnalysisQuestion = (task: AsyncTaskRecord): string => (
 
 const formatTaskDate = (value?: string | null): string => (value ? new Date(value).toLocaleString() : '-');
 
-export const DebateManagementPanel: React.FC = () => {
+interface DebateManagementPanelProps {
+  isActive?: boolean;
+}
+
+export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ isActive = true }) => {
   const { t } = useTranslation();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(false);
@@ -126,8 +130,9 @@ export const DebateManagementPanel: React.FC = () => {
   }, [message, t]);
 
   useEffect(() => {
-    fetchSessions();
-  }, [fetchSessions]);
+    if (!isActive) return;
+    void fetchSessions();
+  }, [fetchSessions, isActive]);
 
   useEffect(() => {
     const handleDebateSessionsRefresh = () => {
@@ -356,13 +361,17 @@ export const DebateManagementPanel: React.FC = () => {
         width="90%"
         styles={{ body: { padding: 0, height: '85vh' } }}
       >
-        {reportSessionId && <DecisionAuditLog sessionId={reportSessionId} />}
+        {reportSessionId && <DecisionAuditLog sessionId={reportSessionId} isActive={reportModalVisible} />}
       </Modal>
     </div>
   );
 };
 
-export const StockResearchAnalysisPanel: React.FC = () => {
+interface StockResearchAnalysisPanelProps {
+  isActive?: boolean;
+}
+
+export const StockResearchAnalysisPanel: React.FC<StockResearchAnalysisPanelProps> = ({ isActive = true }) => {
   const { t } = useTranslation();
   const [stockOptions, setStockOptions] = useState<StockOption[]>([]);
   const [selectedStockCode, setSelectedStockCode] = useState('');
@@ -406,8 +415,9 @@ export const StockResearchAnalysisPanel: React.FC = () => {
   }, [message, t]);
 
   useEffect(() => {
-    loadAnalysisHistory(1, STOCK_ANALYSIS_HISTORY_PAGE_SIZE);
-  }, [loadAnalysisHistory]);
+    if (!isActive) return;
+    void loadAnalysisHistory(1, STOCK_ANALYSIS_HISTORY_PAGE_SIZE);
+  }, [isActive, loadAnalysisHistory]);
 
   useEffect(() => {
     if (!currentAnalysisTask || FINISHED_TASK_STATUS.has(currentAnalysisTask.status)) return undefined;

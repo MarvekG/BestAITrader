@@ -124,8 +124,9 @@ export const StockWarehousePage: React.FC = () => {
   }, [message, t]);
 
   useEffect(() => {
+    if (activeTab !== 'warehouse') return;
     fetchStocks();
-  }, [fetchStocks]);
+  }, [activeTab, fetchStocks]);
 
   const handleSearchStock = async (value: string) => {
     if (!value) {
@@ -650,12 +651,12 @@ export const StockWarehousePage: React.FC = () => {
           {
             key: 'debate-management',
             label: renderTabLabel(t('session.analysis_sessions_tab')),
-            children: <DebateManagementPanel />,
+            children: <DebateManagementPanel isActive={activeTab === 'debate-management'} />,
           },
           {
             key: 'stock-research-analysis',
             label: renderTabLabel(t('session.stock_analysis_tab')),
-            children: <StockResearchAnalysisPanel />,
+            children: <StockResearchAnalysisPanel isActive={activeTab === 'stock-research-analysis'} />,
           },
           { key: 'stock-data', label: renderTabLabel(t('layout.menu.stock_data')), children: <StockDataPage /> },
         ]}
