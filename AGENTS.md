@@ -78,7 +78,7 @@
 - 新增后端 SQLAlchemy 表并参与 API/DB 测试时，必须检查并更新 `_sqlite_test_tables()`。
 - 单测禁止访问真实 LLM、Redis、Tushare、NewsAPI、Tavily、浏览器外部服务；使用现有 mock/fake/monkeypatch 模式。
 - Memory 测试环境设置 `MEMORY_DATABASE_URL=db.invalid`，真实数据库访问若未 mock 会失败。
-- 提示词变更不要新增 pytest 或其他单元测试来约束 prompt 文案；提示词效果通过人工审计、既有评测脚本或用户明确要求的 live eval 验证。
+- 提示词变更禁止新增 pytest 或其他单元测试来约束 prompt 文案；也不要在既有单测中新增针对 prompt 文案的字符串断言。提示词效果通过人工审计、既有评测脚本或用户明确要求的 live eval 验证。
 - 前端当前没有 test script；提交前至少运行 lint、typecheck、build，且 ESLint warning 会因 `--max-warnings 0` 失败。
 
 ## 高风险边界
@@ -179,7 +179,7 @@ def add(a: int, b: int) -> int:
 - 针对记忆系统，禁止直接使用关键词匹配，影响记忆系统的泛化性能。
 - 针对记忆系统，禁止为了让用例通过而搞定制化修改，影响记忆系统的泛化性能
 - 针对记忆系统，prompts的案例要和测试样本不同，避免影响记忆系统的泛化性能。
-- 针对提示词维护，禁止新增专门的 prompt pytest/单测；不要用测试反向锁死提示词表达，优先保持 prompt 简洁和可审计。
+- 针对提示词维护，禁止新增专门的 prompt pytest/单测，也禁止把 prompt 文案断言塞进既有测试；不要用测试反向锁死提示词表达，优先保持 prompt 简洁和可审计。
 
 ## 项目结构
 - 模块划分清晰
