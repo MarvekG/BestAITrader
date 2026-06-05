@@ -53,6 +53,7 @@ async def test_execute_trading_order_buy_logic():
             "action": "buy",
             "target_position": 0.5,
             "stop_loss": 95.0,
+            "take_profit": 120.0,
         })
         
         # Verify call to core tool happened with injected session_id
@@ -112,6 +113,7 @@ async def test_execute_trading_order_sell_liquidation():
             "action": "sell",
             "target_position": 0.0,
             "stop_loss": 88.0,
+            "take_profit": 120.0,
         })
         
         # Verify sell all available
@@ -159,6 +161,7 @@ async def test_execute_trading_order_sell_liquidation_rounds_down_to_lot_size():
             "action": "sell",
             "target_position": 0.0,
             "stop_loss": 88.0,
+            "take_profit": 120.0,
         })
 
         args = mock_execute.call_args[1]
@@ -201,6 +204,7 @@ async def test_execute_trading_order_buy_logic_accepts_decimal_account_assets():
             "action": "buy",
             "target_position": 0.05,
             "stop_loss": 4.7,
+            "take_profit": 12.0,
         })
 
         args = mock_execute.call_args[1]
@@ -259,12 +263,118 @@ async def test_execute_trading_order_skips_when_risk_control_blocks():
             "action": "buy",
             "target_position": 0.05,
             "stop_loss": 9.0,
+            "take_profit": 12.0,
         })
 
         mock_execute.assert_called_once()
         assert result["success"] is False
         assert result["reason"] == "risk_control_blocked"
         assert result["risk_control"]["blocks"][0]["rule"] == "require_stop_loss"
+
+
+@pytest.mark.asyncio
+async def test_execute_trading_order_rejects_buy_when_target_not_above_current_position():
+    with patch("app.core.config.settings.ENABLE_AUTO_TRADE", True), \
+         patch("app.core.database.SessionLocal") as mock_session_local, \
+         patch("app.trading.service.trading_service.execute_order_and_update_db", new_callable=AsyncMock) as mock_execute:
+        mock_db = MagicMock()
+        mock_session_local.return_value.__enter__.return_value = mock_db
+        session_id = str(uuid4())
+        stock_code = "600519.SH"
+
+        from app.ai.llm_engine.agents.governance import PortfolioManagerAgent
+        agent = PortfolioManagerAgent(state={"session_id": session_id})
+        wrapped_tool = next(t for t in agent.tools if t.name == "execute_trading_order")
+
+        mock_user = MagicMock()
+        mock_market = MagicMock()
+        mock_pos = MagicMock()
+        mock_pos.total_shares = 1000
+        mock_pos.available_shares = 1000
+        mock_pos.frozen_shares = 0
+        mock_pos.purchase_details = {}
+
+        mock_query = mock_db.query.return_value
+        mock_filter = mock_query.filter.return_value
+        mock_order_by = mock_filter.order_by.return_value
+        mock_filter.first.side_effect = [MagicMock(), mock_user, mock_pos]
+        mock_order_by.first.side_effect = [mock_market]
+        mock_user.account.total_assets = Decimal("100000.00")
+        mock_market.current_price = Decimal("10.00")
+
+        result = await wrapped_tool.ainvoke({
+            "stock_code": stock_code,
+            "action": "buy",
+            "target_position": 0.10,
+            "stop_loss": 9.0,
+            "take_profit": 12.0,
+        })
+
+        mock_execute.assert_not_called()
+        assert result["success"] is False
+        assert result["reason"] == "decision_target_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_execute_trading_order_rejects_buy_when_take_profit_not_above_price():
+    with patch("app.core.config.settings.ENABLE_AUTO_TRADE", True), \
+         patch("app.core.database.SessionLocal") as mock_session_local, \
+         patch("app.trading.service.trading_service.execute_order_and_update_db", new_callable=AsyncMock) as mock_execute:
+        mock_db = MagicMock()
+        mock_session_local.return_value.__enter__.return_value = mock_db
+        session_id = str(uuid4())
+        stock_code = "600519.SH"
+
+        from app.ai.llm_engine.agents.governance import PortfolioManagerAgent
+        agent = PortfolioManagerAgent(state={"session_id": session_id})
+        wrapped_tool = next(t for t in agent.tools if t.name == "execute_trading_order")
+
+        mock_user = MagicMock()
+        mock_market = MagicMock()
+        mock_query = mock_db.query.return_value
+        mock_filter = mock_query.filter.return_value
+        mock_order_by = mock_filter.order_by.return_value
+        mock_filter.first.side_effect = [MagicMock(), mock_user, None]
+        mock_order_by.first.side_effect = [mock_market]
+        mock_user.account.total_assets = Decimal("100000.00")
+        mock_market.current_price = Decimal("10.00")
+
+        result = await wrapped_tool.ainvoke({
+            "stock_code": stock_code,
+            "action": "buy",
+            "target_position": 0.05,
+            "stop_loss": 9.0,
+            "take_profit": 10.0,
+        })
+
+        mock_execute.assert_not_called()
+        assert result["success"] is False
+        assert result["reason"] == "invalid_buy_take_profit"
+
+
+@pytest.mark.asyncio
+async def test_execute_trading_order_rejects_invalid_take_profit_before_db_lookup():
+    with patch("app.core.config.settings.ENABLE_AUTO_TRADE", True), \
+         patch("app.core.database.SessionLocal") as mock_session_local, \
+         patch("app.trading.service.trading_service.execute_order_and_update_db", new_callable=AsyncMock) as mock_execute:
+        session_id = str(uuid4())
+
+        from app.ai.llm_engine.agents.governance import PortfolioManagerAgent
+        agent = PortfolioManagerAgent(state={"session_id": session_id})
+        wrapped_tool = next(t for t in agent.tools if t.name == "execute_trading_order")
+
+        result = await wrapped_tool.ainvoke({
+            "stock_code": "600519.SH",
+            "action": "buy",
+            "target_position": 0.05,
+            "stop_loss": 9.0,
+            "take_profit": 0,
+        })
+
+        mock_session_local.assert_not_called()
+        mock_execute.assert_not_called()
+        assert result["success"] is False
+        assert result["reason"] == "Invalid take_profit: 0.0. take_profit must be greater than 0."
 
 if __name__ == "__main__":
     asyncio.run(test_execute_trading_order_buy_logic())

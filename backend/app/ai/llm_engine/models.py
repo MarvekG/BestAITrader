@@ -61,6 +61,8 @@ class PMDecision(BaseModel):
     # Detailed execution parameters for the trade
     price_range: str = Field(..., description="Execution price range or target")
     stop_loss: float = Field(..., description="Stop loss price")
+    take_profit: float = Field(..., gt=0, description="Take-profit or target price")
+    holding_horizon_days: int = Field(..., gt=0, description="Expected holding horizon in days")
     risk_assessment: float = Field(..., ge=0, le=1, description="Risk assessment score for this specific trade")
     execution_details: str = Field(..., description="Detailed execution plan")
 

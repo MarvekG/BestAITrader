@@ -31,6 +31,7 @@ export const DashboardPage: React.FC = () => {
   const [messageCount, setMessageCount] = useState(0);
   const [debateMessages, setDebateMessages] = useState<DebateMessage[]>([]);
   const [isDebateCompleted, setIsDebateCompleted] = useState(false);
+  const [activeDashboardTab, setActiveDashboardTab] = useState('1');
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const maxReconnectAttempts = 5;
@@ -358,7 +359,8 @@ export const DashboardPage: React.FC = () => {
             styles={{ body: { flex: 1, padding: 0, minHeight: 0 } }}
           >
             <Tabs
-              defaultActiveKey="1"
+              activeKey={activeDashboardTab}
+              onChange={setActiveDashboardTab}
               size="large"
               style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
               tabBarStyle={{ paddingLeft: 16 }}
@@ -368,7 +370,7 @@ export const DashboardPage: React.FC = () => {
                   label: messageCount > 0 ? `${t('dashboard.live_debate')} (${messageCount})` : t('dashboard.live_debate'),
                   children: <div style={{ minHeight: 'calc(100vh - 300px)' }}><DebateArena messages={debateMessages} loading={loading} /></div>
                 },
-                { key: '2', label: t('dashboard.decision_audit'), children: <div style={{ minHeight: 'calc(100vh - 300px)' }}><DecisionAuditLog /></div> }
+                { key: '2', label: t('dashboard.decision_audit'), children: <div style={{ minHeight: 'calc(100vh - 300px)' }}><DecisionAuditLog isActive={activeDashboardTab === '2'} /></div> }
               ]}
             />
           </Card>

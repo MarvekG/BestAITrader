@@ -392,6 +392,8 @@ async def test_base_agent_repairs_structured_markdown_final_output_without_recal
             investment_plan="Keep a 15% pilot position and review the next report.",
             price_range="66.28",
             stop_loss=60.0,
+            take_profit=78.0,
+            holding_horizon_days=20,
             risk_assessment=0.42,
             execution_details="Trade executed successfully; no additional tool call needed.",
             report_markdown="# PM report\n\n## 1. Verdict\nExecuted a 15% pilot buy.",

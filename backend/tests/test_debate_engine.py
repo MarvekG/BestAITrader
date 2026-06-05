@@ -8,6 +8,7 @@ import pytest
 from app.ai.llm_engine.models import PMDecision
 from app.ai.llm_engine.orchestrator import (
     create_analyst_workflow,
+    _build_portfolio_field_descriptions,
     persist_agent_report,
     portfolio_management,
 )
@@ -52,10 +53,49 @@ MOCK_CONTEXT = {
 }
 
 
+def test_pm_decision_requires_take_profit_and_holding_horizon_days():
+    """PM 决策必须包含有效止盈目标和预期持有周期。"""
+    with pytest.raises(ValueError):
+        PMDecision(
+            decision="buy",
+            confidence_score=80,
+            target_position=0.5,
+            verdict_summary="Bull case is stronger",
+            investment_plan="Build position gradually",
+            price_range="9.8-10.2",
+            stop_loss=9.5,
+            take_profit=0,
+            holding_horizon_days=20,
+            risk_assessment=0.2,
+            execution_details="Start with half target size",
+            report_markdown="# PM Decision",
+        )
+
+    with pytest.raises(ValueError):
+        PMDecision(
+            decision="buy",
+            confidence_score=80,
+            target_position=0.5,
+            verdict_summary="Bull case is stronger",
+            investment_plan="Build position gradually",
+            price_range="9.8-10.2",
+            stop_loss=9.5,
+            take_profit=11.5,
+            holding_horizon_days=0,
+            risk_assessment=0.2,
+            execution_details="Start with half target size",
+            report_markdown="# PM Decision",
+        )
+
+
 def _expected_static_context(portfolio_info=None):
     static_context = {"data": MOCK_CONTEXT}
     static_context["portfolio_info"] = (
-        portfolio_info if portfolio_info is not None else {"account": {}, "position": {}}
+        portfolio_info if portfolio_info is not None else {
+            "account": {},
+            "position": {},
+            "field_descriptions": _build_portfolio_field_descriptions(),
+        }
     )
     return static_context
 
@@ -109,6 +149,8 @@ async def test_current_workflow_runs_with_mocked_agents(initial_state):
                     investment_plan="Build position gradually",
                     price_range="9.8-10.2",
                     stop_loss=9.5,
+                    take_profit=11.5,
+                    holding_horizon_days=20,
                     risk_assessment=0.2,
                     execution_details="Start with half target size",
                     report_markdown="# PM Decision",
@@ -157,6 +199,8 @@ async def test_analyst_workflow_preserves_market_watch_trigger_context(initial_s
                     investment_plan="Build position gradually",
                     price_range="9.8-10.2",
                     stop_loss=9.5,
+                    take_profit=11.5,
+                    holding_horizon_days=20,
                     risk_assessment=0.2,
                     execution_details="Start with half target size",
                     report_markdown="# PM Decision",
@@ -197,6 +241,8 @@ async def test_analyst_workflow_allows_agent_calls_in_parallel_by_default(initia
                 investment_plan="Build position gradually",
                 price_range="9.8-10.2",
                 stop_loss=9.5,
+                take_profit=11.5,
+                holding_horizon_days=20,
                 risk_assessment=0.2,
                 execution_details="Start with half target size",
                 report_markdown="# PM Decision",
@@ -246,6 +292,8 @@ async def test_analyst_workflow_runs_agent_calls_serially_when_env_parallel_disa
                 investment_plan="Build position gradually",
                 price_range="9.8-10.2",
                 stop_loss=9.5,
+                take_profit=11.5,
+                holding_horizon_days=20,
                 risk_assessment=0.2,
                 execution_details="Start with half target size",
                 report_markdown="# PM Decision",
@@ -287,6 +335,8 @@ async def test_portfolio_management_returns_current_pm_decision_schema(initial_s
         investment_plan="Exit position",
         price_range="market",
         stop_loss=9.0,
+        take_profit=10.5,
+        holding_horizon_days=10,
         risk_assessment=0.8,
         execution_details="Sell all available shares",
         report_markdown="# Sell",
@@ -368,6 +418,8 @@ async def test_persist_agent_report_saves_current_pm_decision():
         investment_plan="Hold current position",
         price_range="10-11",
         stop_loss=9.2,
+        take_profit=12.0,
+        holding_horizon_days=20,
         risk_assessment=0.3,
         execution_details="No immediate trade",
         report_markdown="# Hold",
@@ -392,3 +444,5 @@ async def test_persist_agent_report_saves_current_pm_decision():
     assert saved_message.confidence == 0.75
     assert saved_message.reasoning == "# Hold"
     assert saved_message.analysis["target_position"] == 0.3
+    assert saved_message.analysis["take_profit"] == 12.0
+    assert saved_message.analysis["holding_horizon_days"] == 20

@@ -1,5 +1,6 @@
 import asyncio
 from datetime import datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch, MagicMock
 from uuid import uuid4
@@ -9,10 +10,15 @@ from app.ai.llm_engine.orchestrator import (
     AnalystState, fetch_context, sentiment_analysis, vertical_analysis,
     strategic_round_1, strategic_round_2_1, strategic_round_2_rebuttal,
     portfolio_management, persist_agent_report,
-    create_analyst_workflow
+    create_analyst_workflow, _get_previous_pm_decision, _build_portfolio_field_descriptions
 )
 from app.ai.llm_engine.models import PMDecision
 from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER, AGENT_ROLE_PORTFOLIO_MANAGER
+from app.models.debate_message import DebateMessage
+from app.models.order import Order
+from app.models.session import Session as DebateSession
+from app.models.trade_record import TradeRecord
+from app.models.user import User
 
 # Mock Data
 MOCK_CONTEXT = {
@@ -76,7 +82,11 @@ MOCK_REPORTS = {
 def _expected_static_context(portfolio_info=None):
     static_context = {"data": MOCK_CONTEXT}
     static_context["portfolio_info"] = (
-        portfolio_info if portfolio_info is not None else {"account": {}, "position": {}}
+        portfolio_info if portfolio_info is not None else {
+            "account": {},
+            "position": {},
+            "field_descriptions": _build_portfolio_field_descriptions(),
+        }
     )
     return static_context
 
@@ -172,6 +182,7 @@ async def test_fetch_context_node_keeps_portfolio_risk_control_in_build_context(
             "available_cash": 200000.0,
             "market_value": 800000.0,
         }
+        assert result["static_context"]["portfolio_info"]["field_descriptions"] == _build_portfolio_field_descriptions()
 
 @pytest.mark.asyncio
 async def test_sentiment_analysis_node(initial_state):
@@ -437,6 +448,8 @@ async def test_persist_agent_report_saves_pm_report():
         investment_plan="Build position in tranches",
         price_range="10-11",
         stop_loss=9.5,
+        take_profit=12.0,
+        holding_horizon_days=20,
         risk_assessment=0.2,
         execution_details="Start with half size",
         report_markdown="# PM report",
@@ -492,3 +505,238 @@ async def test_portfolio_management_passes_expected_top_level_keys(initial_state
             "strategic_debate",
         }
         assert pm_runtime_context["previous_pm_decision"]["decision"] == "buy"
+
+
+def test_get_previous_pm_decision_includes_execution_summary_with_dates(db_session):
+    user = User(
+        username="previous_pm_context_user",
+        email="previous_pm_context_user@example.com",
+        password_hash="hashed",
+    )
+    db_session.add(user)
+    db_session.flush()
+    previous_session = DebateSession(
+        user_id=user.id,
+        stock_code="000001.SZ",
+        trading_frequency="swing",
+        trading_strategy="momentum",
+        status="completed",
+    )
+    current_session = DebateSession(
+        user_id=user.id,
+        stock_code="000001.SZ",
+        trading_frequency="swing",
+        trading_strategy="momentum",
+        status="active",
+    )
+    db_session.add_all([previous_session, current_session])
+    db_session.flush()
+    pm_message = DebateMessage(
+        session_id=previous_session.session_id,
+        stage="portfolio_management",
+        round_number=0,
+        agent_name="PM",
+        agent_role=AGENT_ROLE_PORTFOLIO_MANAGER,
+        decision="buy",
+        confidence=0.8,
+        reasoning="# previous report",
+        analysis={
+            "decision": "buy",
+            "target_position": 0.3,
+            "stop_loss": 9.5,
+            "take_profit": 12.0,
+            "holding_horizon_days": 20,
+            "price_range": "10-11",
+            "execution_details": "filled",
+        },
+        created_at=datetime(2026, 1, 1, 15, 0),
+    )
+    db_session.add(pm_message)
+    db_session.add_all(
+        [
+            Order(
+                session_id=previous_session.session_id,
+                stock_code="000001.SZ",
+                action="buy",
+                order_type="market",
+                price=Decimal("10.0"),
+                shares=100,
+                status="filled",
+                realized_pnl=Decimal("3.5"),
+                created_at=datetime(2026, 1, 1, 15, 1),
+            ),
+            TradeRecord(
+                session_id=previous_session.session_id,
+                stock_code="000001.SZ",
+                action="buy",
+                quantity=100,
+                fill_price=Decimal("10.0"),
+                trade_time=datetime(2026, 1, 1, 15, 5),
+            ),
+            TradeRecord(
+                session_id=previous_session.session_id,
+                stock_code="000001.SZ",
+                action="buy",
+                quantity=300,
+                fill_price=Decimal("12.0"),
+                trade_time=datetime(2026, 1, 1, 15, 6),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
+        result = _get_previous_pm_decision(current_session.session_id, "000001.SZ")
+
+    assert result["decision"] == "buy"
+    assert result["take_profit"] == 12.0
+    assert result["holding_horizon_days"] == 20
+    assert result["execution_summary"] == {
+        "has_orders": True,
+        "has_trades": True,
+        "order_count": 1,
+        "filled_order_count": 1,
+        "avg_fill_price": 11.5,
+        "total_quantity": 400,
+        "realized_pnl": 3.5,
+        "first_order_time": "2026-01-01T15:01:00",
+        "latest_order_time": "2026-01-01T15:01:00",
+        "first_trade_time": "2026-01-01T15:05:00",
+        "latest_trade_time": "2026-01-01T15:06:00",
+    }
+    assert "experience_review_summary" not in result
+
+
+def test_get_previous_pm_decision_orders_execution_summary_by_order_time(db_session):
+    user = User(
+        username="previous_pm_multi_order_user",
+        email="previous_pm_multi_order_user@example.com",
+        password_hash="hashed",
+    )
+    db_session.add(user)
+    db_session.flush()
+    previous_session = DebateSession(
+        user_id=user.id,
+        stock_code="000001.SZ",
+        trading_frequency="swing",
+        trading_strategy="momentum",
+        status="completed",
+    )
+    current_session = DebateSession(
+        user_id=user.id,
+        stock_code="000001.SZ",
+        trading_frequency="swing",
+        trading_strategy="momentum",
+        status="active",
+    )
+    db_session.add_all([previous_session, current_session])
+    db_session.flush()
+    db_session.add(
+        DebateMessage(
+            session_id=previous_session.session_id,
+            stage="portfolio_management",
+            round_number=0,
+            agent_name="PM",
+            agent_role=AGENT_ROLE_PORTFOLIO_MANAGER,
+            decision="buy",
+            confidence=0.8,
+            reasoning="# previous report",
+            analysis={"decision": "buy", "target_position": 0.3},
+            created_at=datetime(2026, 1, 1, 15, 0),
+        )
+    )
+    later_order_id = uuid4()
+    earlier_order_id = uuid4()
+    db_session.add_all(
+        [
+            Order(
+                order_id=later_order_id,
+                session_id=previous_session.session_id,
+                stock_code="000001.SZ",
+                action="buy",
+                order_type="market",
+                price=Decimal("11.0"),
+                shares=100,
+                status="filled",
+                created_at=datetime(2026, 1, 1, 15, 3),
+            ),
+            Order(
+                order_id=earlier_order_id,
+                session_id=previous_session.session_id,
+                stock_code="000001.SZ",
+                action="buy",
+                order_type="market",
+                price=Decimal("10.0"),
+                shares=100,
+                status="filled",
+                created_at=datetime(2026, 1, 1, 15, 1),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
+        result = _get_previous_pm_decision(current_session.session_id, "000001.SZ")
+
+    assert result["execution_summary"]["first_order_time"] == "2026-01-01T15:01:00"
+    assert result["execution_summary"]["latest_order_time"] == "2026-01-01T15:03:00"
+
+
+def test_get_previous_pm_decision_marks_missing_execution(db_session):
+    user = User(
+        username="previous_pm_no_result_user",
+        email="previous_pm_no_result_user@example.com",
+        password_hash="hashed",
+    )
+    db_session.add(user)
+    db_session.flush()
+    previous_session = DebateSession(
+        user_id=user.id,
+        stock_code="000001.SZ",
+        trading_frequency="swing",
+        trading_strategy="momentum",
+        status="completed",
+    )
+    current_session = DebateSession(
+        user_id=user.id,
+        stock_code="000001.SZ",
+        trading_frequency="swing",
+        trading_strategy="momentum",
+        status="active",
+    )
+    db_session.add_all([previous_session, current_session])
+    db_session.flush()
+    db_session.add(
+        DebateMessage(
+            session_id=previous_session.session_id,
+            stage="portfolio_management",
+            round_number=0,
+            agent_name="PM",
+            agent_role=AGENT_ROLE_PORTFOLIO_MANAGER,
+            decision="hold",
+            confidence=0.7,
+            reasoning="# previous hold report",
+            analysis={"decision": "hold", "target_position": 0.0},
+            created_at=datetime(2026, 1, 1, 15, 0),
+        )
+    )
+    db_session.commit()
+
+    with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
+        result = _get_previous_pm_decision(current_session.session_id, "000001.SZ")
+
+    assert result["decision"] == "hold"
+    assert result["execution_summary"] == {
+        "has_orders": False,
+        "has_trades": False,
+        "order_count": 0,
+        "filled_order_count": 0,
+        "avg_fill_price": None,
+        "total_quantity": 0,
+        "realized_pnl": 0,
+        "first_order_time": None,
+        "latest_order_time": None,
+        "first_trade_time": None,
+        "latest_trade_time": None,
+    }
+    assert "experience_review_summary" not in result

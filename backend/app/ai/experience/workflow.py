@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -204,6 +205,69 @@ def _extract_written_memories(tool_trace: List[Dict[str, Any]]) -> List[Dict[str
                 item[key] = value
         items.append(item)
     return items
+
+
+def _safe_iso_text(value: Any) -> str:
+    """把时间值转换为稳定的 ISO 文本。
+
+    Args:
+        value: 可能来自复盘上下文的时间对象或字符串。
+
+    Returns:
+        可写入记忆正文的时间文本；无法识别时返回空字符串。
+    """
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        return value.strip()
+    return ""
+
+
+def _build_memory_time_prefix(state: ExperienceWorkflowState) -> str:
+    """构造写入结构化记忆所需的时间前缀。
+
+    Args:
+        state: 经验复盘工作流状态，包含 PM 决策上下文和复盘周期。
+
+    Returns:
+        包含决策时间、复盘时间和复盘周期的单行前缀。
+    """
+    full_context = state.get("full_context") or {}
+    pm_decision = full_context.get("pm_decision") if isinstance(full_context.get("pm_decision"), dict) else {}
+    session = full_context.get("session") if isinstance(full_context.get("session"), dict) else {}
+    decision_time = _safe_iso_text(pm_decision.get("created_at") or session.get("created_at"))
+    reviewed_at = _safe_iso_text(state.get("reviewed_at") or datetime.now())
+    review_horizon = str(state.get("review_horizon") or "").strip()
+
+    parts = []
+    if decision_time:
+        parts.append(f"决策时间: {decision_time}")
+    if reviewed_at:
+        parts.append(f"复盘时间: {reviewed_at}")
+    if review_horizon:
+        parts.append(f"复盘周期: {review_horizon}")
+    return "时间: " + "；".join(parts) if parts else ""
+
+
+def _attach_time_to_memory_args(tool_args: Dict[str, Any], state: ExperienceWorkflowState) -> Dict[str, Any]:
+    """为 write_memory 参数中的正文补充复盘时间信息。
+
+    Args:
+        tool_args: 模型生成的工具调用参数。
+        state: 经验复盘工作流状态，用于读取决策时间和复盘周期。
+
+    Returns:
+        带时间前缀的工具调用参数副本。
+    """
+    content = str(tool_args.get("content") or "").strip()
+    if not content:
+        return tool_args
+
+    time_prefix = _build_memory_time_prefix(state)
+    if not time_prefix:
+        return tool_args
+
+    return {**tool_args, "content": f"{time_prefix}\n{content}"}
 
 
 def _build_experience_analysis_payload(
@@ -424,6 +488,8 @@ def _build_review_system_prompt(skills_prompt_suffix: str) -> str:
             "你必须把 market_outcome_summary 中的收益、回撤、相对收益结果作为核心证据输入。"
             "凡是关于决策时点的历史事实，包括 timeline、PM 字段、执行结果、价格路径、收益和回撤，一律以输入里的 review_input 为准。"
             "工具调用拿到的是当前时点的实时或补充信息，可能与决策时点不同，只能用于补充解释和验证原因，不能覆盖、改写或否定输入中的历史事实。"
+            "你必须后验评价 PM 的退出设计：`take_profit` 是否合理、是否过高或过低、价格路径是否曾达到或接近止盈目标、`holding_horizon_days` 是否匹配实际涨跌节奏，以及止盈、止损、持有周期组合是否构成可复用经验。"
+            "如果 PM 缺少明确退出纪律，或持有周期与实际价格路径明显不匹配，必须把它写入 `risk_control` 或 `process_improvement` 相关结论；但不得改变系统固定的 5d/20d/60d 复盘周期。"
             "你的核心工作不是复述各个 agent 说了什么，而是判断：哪些论点真正解释了后验价格路径，哪些论点没有被市场验证。"
             "分析“股票为什么涨跌”时，优先从这些维度归因：政策、业绩、估值修复或杀估值、资金流与成交结构、板块 Beta 与指数环境、商品价格与成本、情绪催化、事件驱动、预期差修正。"
             "如果多个因素都相关，你必须指出 1-3 个主导因素，并说明它们如何对应到价格路径和回撤。"
@@ -444,11 +510,11 @@ def _build_review_system_prompt(skills_prompt_suffix: str) -> str:
             "记忆工具已自动绑定到当前股票，只允许写入当前股票记忆，不支持通用记忆，也不要尝试传入 `stock_code`。"
             "\n记忆写入协议:\n"
             "1. 写入前提: 在调用 `write_memory` 前，先判断哪些主题有新增经验；没有新增经验的主题可以跳过。\n"
-            "2. 内容要素: 写入记忆时，`content` 必须同时包含真实股票名和股票代码，并清楚覆盖本次对象、交易频率、交易策略、原始 PM 结论正确性、决策后实际涨跌结果、主导驱动、多维原因拆解、被验证信号、被证伪信号、可复用规则、未来 Debate / PM / 风控检查项、失效条件/边界；若交易频率或交易策略无法确认，必须在正文中说明缺失。\n"
+            "2. 内容要素: 写入记忆时，`content` 必须同时包含真实股票名和股票代码，并清楚覆盖本次对象、交易频率、交易策略、原始 PM 结论正确性、决策后实际涨跌结果、`take_profit` 与 `holding_horizon_days` 的后验评价、主导驱动、多维原因拆解、被验证信号、被证伪信号、可复用规则、未来 Debate / PM / 风控检查项、失效条件/边界；若交易频率或交易策略无法确认，必须在正文中说明缺失。\n"
             "3. 推荐写入顺序:\n"
             "3.1 [MEMORY_TOPIC: decision_outcome]: 如果原始 PM 结论有明确后验结果，记录原始决策、目标仓位、置信度、止损/加仓计划、后续收益/回撤/相对收益和结论正确性。\n"
             "3.2 [MEMORY_TOPIC: driver_validation]: 如果能区分被验证、被证伪和噪音信号，记录主导驱动、被验证信号、被证伪信号、噪音信号和被排除伪因。\n"
-            "3.3 [MEMORY_TOPIC: risk_control]: 如果仓位、止损、`buy`/`sell`/`hold` 或回撤管理有教训，记录仓位大小、买入/卖出/持有条件、止损是否缺失/失效、流动性、板块 Beta、事件落地和失效条件。\n"
+            "3.3 [MEMORY_TOPIC: risk_control]: 如果仓位、止损、加仓、减仓、退出或回撤管理有教训，记录仓位大小、买入/卖出/持有条件、止损是否缺失/失效、流动性、板块 Beta、事件落地和失效条件。\n"
             "3.4 [MEMORY_TOPIC: strategy_fit]: 如果经验的适用频率、策略或市场环境存在明显边界，记录适用的交易频率、交易策略、市场环境、失效环境和经验是否过时及原因。\n"
             "3.5 [MEMORY_TOPIC: process_improvement]: 如果能提炼出未来 Debate / PM / Risk 的流程检查项，记录哪个 Agent 要补什么证据、哪类推理错误要避免、PM 如何调整仓位/置信度/卖出设计、Risk Control 要检查哪些否决条件。\n"
             "4. 拆分规则: 一条 Memory 只写一个主主题；不同主题必须分次调用 `write_memory`，不要把多个主题揉成一条 Memory。每个 `write_memory` 调用只承载一个主题，主题之间不要互相夹带。\n"
@@ -479,9 +545,11 @@ def _build_review_system_prompt(skills_prompt_suffix: str) -> str:
         "4. extract reusable market experience, trading rules, and process improvements that can help future debates make more profitable conclusions. "
         "Your main input only contains the agents' timeline conclusions, PM trading fields, execution outcome, and post-decision market outcome. "
         "You must treat the returns, drawdowns, and relative-performance fields in `market_outcome_summary` as core evidence. "
-        "For any historical fact about the decision-time state, including the timeline, PM fields, execution result, price path, returns, and drawdowns, the `review_input` must be treated as the source of truth. "
-        "Any tool output is current-time or supplementary information and may differ from the decision-time state, so it may only be used for explanation or corroboration and must never overwrite the historical facts in the input. "
-        "Your job is not to restate each agent, but to determine which arguments truly explain the later price path and which were not validated by the market. "
+            "For any historical fact about the decision-time state, including the timeline, PM fields, execution result, price path, returns, and drawdowns, the `review_input` must be treated as the source of truth. "
+            "Any tool output is current-time or supplementary information and may differ from the decision-time state, so it may only be used for explanation or corroboration and must never overwrite the historical facts in the input. "
+            "You must evaluate the PM's exit design with hindsight: whether `take_profit` was reasonable, too high or too low, whether the price path reached or approached the target, whether `holding_horizon_days` matched the actual price rhythm, and whether the take-profit, stop-loss, and holding-period design creates reusable experience. "
+            "If the PM lacked clear exit discipline, or if the holding horizon clearly mismatched the actual price path, include that in `risk_control` or `process_improvement` conclusions; do not change the system's fixed 5d/20d/60d review horizons. "
+            "Your job is not to restate each agent, but to determine which arguments truly explain the later price path and which were not validated by the market. "
         "When explaining why the stock moved, prioritize attribution across policy, earnings, valuation rerating or derating, flow and trading structure, sector beta and index environment, commodity costs, sentiment catalyst, event-driven moves, and expectation reset. "
         "If several factors matter, identify the top 1-3 dominant drivers and connect them to the price path and drawdown. "
         "If the current context is insufficient to explain the move, you may call external tools for evidence; otherwise do not search mechanically. "
@@ -501,11 +569,11 @@ def _build_review_system_prompt(skills_prompt_suffix: str) -> str:
         "The memory tools are already bound to the current stock. Only stock-bound memory is supported here, general memory is not supported, and you must not try to pass `stock_code`. "
         "\nMemory write protocol:\n"
         "1. Write precondition: before calling `write_memory`, decide which topics contain new lessons; topics without new lessons may be skipped.\n"
-        "2. Content elements: memory `content` must include both the real stock name and stock code, and clearly cover the object, trading frequency, trading strategy, original PM correctness, actual post-decision outcome, dominant drivers, multi-factor driver decomposition, validated signals, falsified signals, reusable rules, future Debate / PM / risk-control checklist items, and failure conditions or boundaries. If trading frequency or strategy cannot be confirmed, state the missing field in the content.\n"
+        "2. Content elements: memory `content` must include both the real stock name and stock code, and clearly cover the object, trading frequency, trading strategy, original PM correctness, actual post-decision outcome, hindsight evaluation of `take_profit` and `holding_horizon_days`, dominant drivers, multi-factor driver decomposition, validated signals, falsified signals, reusable rules, future Debate / PM / risk-control checklist items, and failure conditions or boundaries. If trading frequency or strategy cannot be confirmed, state the missing field in the content.\n"
         "3. Recommended write order:\n"
         "3.1 [MEMORY_TOPIC: decision_outcome]: if the original PM conclusion has clear later outcome evidence, record the original decision, target size, confidence, stop/add plan, later return/drawdown/relative return, and correctness.\n"
         "3.2 [MEMORY_TOPIC: driver_validation]: if validated, falsified, and noisy signals can be separated, record dominant drivers, validated signals, falsified signals, noisy signals, and rejected false causes.\n"
-        "3.3 [MEMORY_TOPIC: risk_control]: if sizing, stop-loss, `buy`/`sell`/`hold`, or drawdown control produced a lesson, record sizing, buy/sell/hold conditions, missing/failed stops, liquidity, sector beta, event realization, and invalidation conditions.\n"
+        "3.3 [MEMORY_TOPIC: risk_control]: if sizing, stop-loss, add, reduce, exit, or drawdown control produced a lesson, record sizing, buy/sell/hold conditions, missing/failed stops, liquidity, sector beta, event realization, and invalidation conditions.\n"
         "3.4 [MEMORY_TOPIC: strategy_fit]: if the lesson has clear frequency, strategy, or market-regime boundaries, record applicable trading frequency, strategy, market regime, invalidation regime, and whether the lesson is stale and why.\n"
         "3.5 [MEMORY_TOPIC: process_improvement]: if future Debate / PM / Risk checklist items can be extracted, record which Agent should verify what evidence, which reasoning error to avoid, how PM should adjust sizing/confidence/sell design, and which veto checks Risk Control must run.\n"
         "4. Split rule: one Memory must carry one primary topic only. Different topics must use separate `write_memory` calls; do not mix multiple topics into one Memory. Each `write_memory` call must carry only one topic, and topics must not be bundled together.\n"
@@ -623,6 +691,8 @@ async def review_debate_conclusion(state: ExperienceWorkflowState) -> Dict[str, 
                     if tool_name == "search_news":
                         internet_tools_used.add(tool_name)
                     tool_args = make_json_serializable(tool_call["args"])
+                    if tool_name == "write_memory" and isinstance(tool_args, dict):
+                        tool_args = _attach_time_to_memory_args(tool_args, state)
                     tool_trace_entry = {"name": tool_name, "args": tool_args}
                     tool_trace.append(tool_trace_entry)
                     await _push_review_update(
@@ -663,7 +733,7 @@ async def review_debate_conclusion(state: ExperienceWorkflowState) -> Dict[str, 
                         )
                         continue
 
-                    tool_result = await tool_func.ainvoke(tool_call["args"])
+                    tool_result = await tool_func.ainvoke(tool_args)
                     tool_payload = stable_json_dumps(make_json_serializable(tool_result))
                     if tool_name == "write_memory":
                         if isinstance(tool_result, dict):
@@ -682,7 +752,7 @@ async def review_debate_conclusion(state: ExperienceWorkflowState) -> Dict[str, 
                             role_name="experience_debate_review",
                             tool_name=tool_name,
                             content=tool_payload,
-                            tool_args=tool_call["args"],
+                            tool_args=tool_args,
                             workflow="experience_review",
                             stage="tool_summary",
                             iteration_index=iteration + 1,

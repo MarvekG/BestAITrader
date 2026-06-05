@@ -24,7 +24,8 @@ class PortfolioManagerAgent(BaseAgent):
             stock_code: str,
             action: str,
             target_position: float,
-            stop_loss: float
+            stop_loss: float,
+            take_profit: float,
         ):
             """
             执行股票交易下单工具 (Execute stock trading order).
@@ -39,6 +40,7 @@ class PortfolioManagerAgent(BaseAgent):
               - 如果是 'sell'，则计算达到目标比例所需卖出的股数。
               - target_position = 0 即为全额清仓。
             - stop_loss: 最终止损价，必填。系统会在成交后直接写入持仓。
+            - take_profit: 最终止盈价或目标价，必填。买入时必须高于当前价。
 
             注意:
             1. 自动执行 A 股交易规则：买入必须是 100 的整数倍；卖出减仓时尽量取 100 倍数。
@@ -54,6 +56,7 @@ class PortfolioManagerAgent(BaseAgent):
                 target_position=target_position,
                 session_id=self.session_id,
                 stop_loss=stop_loss,
+                take_profit=take_profit,
             )
 
         tools.append(execute_trading_order)
