@@ -539,6 +539,8 @@ def test_get_previous_pm_decision_includes_execution_summary_with_dates(db_sessi
             "decision": "buy",
             "target_position": 0.3,
             "stop_loss": 9.5,
+            "take_profit": 12.0,
+            "holding_horizon_days": 20,
             "price_range": "10-11",
             "execution_details": "filled",
         },
@@ -582,6 +584,8 @@ def test_get_previous_pm_decision_includes_execution_summary_with_dates(db_sessi
         result = _get_previous_pm_decision(current_session.session_id, "000001.SZ")
 
     assert result["decision"] == "buy"
+    assert result["take_profit"] == 12.0
+    assert result["holding_horizon_days"] == 20
     assert result["execution_summary"] == {
         "has_orders": True,
         "has_trades": True,

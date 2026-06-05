@@ -448,6 +448,8 @@ def _get_previous_pm_decision(
                 "confidence": debate_msg.confidence,
                 "target_position": analysis.get("target_position"),
                 "stop_loss": analysis.get("stop_loss"),
+                "take_profit": analysis.get("take_profit"),
+                "holding_horizon_days": analysis.get("holding_horizon_days"),
                 "price_range": analysis.get("price_range"),
                 "execution_details": analysis.get("execution_details"),
                 "report_markdown": analysis.get("report_markdown") or debate_msg.reasoning or "",

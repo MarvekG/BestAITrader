@@ -240,7 +240,7 @@ def test_get_review_run_result_falls_back_from_completed_event_payload(db_sessio
         decision="buy",
         confidence=0.82,
         reasoning="pm reasoning",
-        analysis={"decision": "buy"},
+        analysis={"decision": "buy", "take_profit": 12.0, "holding_horizon_days": 20},
     )
     completed_run_id = str(uuid.uuid4())
     db_session.add(pm_message)
@@ -398,7 +398,7 @@ def _create_pm_decision(db_session, session, *, created_at=datetime(2026, 1, 1, 
         decision="buy",
         confidence=0.82,
         reasoning="pm reasoning",
-        analysis={"decision": "buy"},
+        analysis={"decision": "buy", "take_profit": 12.0, "holding_horizon_days": 20},
         created_at=created_at,
     )
     db_session.add(message)
@@ -452,6 +452,8 @@ def test_build_debate_review_context_uses_buy_fill_price_as_entry(db_session):
     )
 
     market_outcome = context["market_outcome_summary"]
+    assert context["pm_decision"]["take_profit"] == 12.0
+    assert context["pm_decision"]["holding_horizon_days"] == 20
     assert market_outcome["entry_price"] == 11.0
     assert market_outcome["entry_price_source"] == "trade_fill_price"
     assert market_outcome["close_20d_return"] == pytest.approx((30.5 / 11.0) - 1)

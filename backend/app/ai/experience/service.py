@@ -1188,6 +1188,8 @@ class ExperienceService:
                 ),
                 "target_position": target_position,
                 "stop_loss": pm_analysis.get("stop_loss"),
+                "take_profit": pm_analysis.get("take_profit"),
+                "holding_horizon_days": pm_analysis.get("holding_horizon_days"),
                 "price_range": pm_analysis.get("price_range"),
                 "verdict_summary": pm_analysis.get("verdict_summary"),
                 "investment_plan": pm_analysis.get("investment_plan"),

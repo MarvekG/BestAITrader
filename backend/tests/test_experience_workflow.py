@@ -285,10 +285,13 @@ async def test_review_allows_final_json_without_memory_write(monkeypatch):
 async def test_review_records_write_memory_result_metadata(monkeypatch):
     """复盘工具轨迹应保留 Memory 写入标识和股票范围，便于经验库索引。"""
 
+    write_memory_calls = []
+
     class FakeWriteMemoryTool:
         name = "write_memory"
 
-        async def ainvoke(self, _args: dict[str, Any]) -> dict[str, Any]:
+        async def ainvoke(self, args: dict[str, Any]) -> dict[str, Any]:
+            write_memory_calls.append(args)
             return {
                 "success": True,
                 "status": "accepted",
@@ -332,14 +335,25 @@ async def test_review_records_write_memory_result_metadata(monkeypatch):
             "trading_frequency": "波段",
             "trading_strategy": "趋势追踪",
             "full_context": {
-                "pm_decision": {"decision": "buy"},
+                "pm_decision": {
+                    "decision": "buy",
+                    "created_at": "2026-01-02T09:35:00",
+                },
                 "market_outcome_summary": {"return_20d": 0.03},
             },
+            "review_horizon": "20d",
+            "reviewed_at": "2026-01-30T15:30:00",
         }
     )
 
     trace_result = result["analysis_payload"]["tool_invocation_summary"][0]["result"]
+    trace_args = result["analysis_payload"]["tool_invocation_summary"][0]["args"]
     written_memory = result["analysis_payload"]["written_memories"][0]
+    assert write_memory_calls[0]["content"].startswith(
+        "时间: 决策时间: 2026-01-02T09:35:00；复盘时间: 2026-01-30T15:30:00；复盘周期: 20d\n"
+    )
+    assert trace_args["content"] == write_memory_calls[0]["content"]
+    assert written_memory["content"] == write_memory_calls[0]["content"]
     assert "event_id" not in trace_result
     assert trace_result["observation_id"] == "obs_1"
     assert trace_result["memo_session"] == "stock"
