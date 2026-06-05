@@ -491,6 +491,45 @@ def test_build_debate_review_context_falls_back_to_decision_day_close_without_bu
     assert market_outcome["entry_price_source"] == "decision_day_close"
 
 
+def test_build_market_outcome_summary_returns_empty_when_kline_closes_missing(db_session):
+    stock_code = "000003.SZ"
+    db_session.add(
+        StockBasic(
+            stock_code=stock_code,
+            name="Missing Close Stock",
+            industry="Bank",
+            market="SZSE",
+        )
+    )
+    db_session.flush()
+    db_session.add_all(
+        [
+            KlineData(
+                stock_code=stock_code,
+                date=date(2026, 1, 1) + timedelta(days=index),
+                freq="D",
+                open=10 + index,
+                close=None,
+                high=11 + index,
+                low=9 + index,
+            )
+            for index in range(3)
+        ]
+    )
+    db_session.commit()
+
+    market_outcome = experience_service._build_market_outcome_summary(
+        db_session,
+        stock_code=stock_code,
+        industry="Bank",
+        decision_time=datetime(2026, 1, 1, 15, 0),
+        review_horizon="5d",
+        market_day_count=3,
+    )
+
+    assert market_outcome == {}
+
+
 def test_list_review_candidates_returns_ready_horizons(db_session):
     user, session = _create_user_and_session(db_session)
     _create_stock_and_klines(db_session, count=21)

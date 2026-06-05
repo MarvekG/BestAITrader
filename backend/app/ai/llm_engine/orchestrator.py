@@ -412,7 +412,12 @@ def _build_previous_execution_summary(db, session_id: UUID) -> Dict[str, Any]:
     from app.models.order import Order
     from app.models.trade_record import TradeRecord
 
-    orders = db.query(Order).filter(Order.session_id == session_id).all()
+    orders = (
+        db.query(Order)
+        .filter(Order.session_id == session_id)
+        .order_by(Order.created_at.asc(), Order.order_id.asc())
+        .all()
+    )
     trades = (
         db.query(TradeRecord)
         .filter(TradeRecord.session_id == session_id)

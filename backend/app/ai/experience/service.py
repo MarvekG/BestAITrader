@@ -1350,7 +1350,9 @@ class ExperienceService:
         closes = [float(item.close) for item in rows if item.close is not None]
         highs = [float(item.high) for item in rows if item.high is not None]
         lows = [float(item.low) for item in rows if item.low is not None]
-        entry_price = entry_price_override if entry_price_override and entry_price_override > 0 else closes[0]
+        entry_price = entry_price_override if entry_price_override and entry_price_override > 0 else (
+            closes[0] if closes else None
+        )
         if not entry_price:
             return {}
         entry_price_source = "trade_fill_price" if entry_price_override and entry_price_override > 0 else "decision_day_close"

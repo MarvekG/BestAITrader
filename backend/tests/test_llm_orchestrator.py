@@ -607,6 +607,81 @@ def test_get_previous_pm_decision_includes_execution_summary_with_dates(db_sessi
     assert "experience_review_summary" not in result
 
 
+def test_get_previous_pm_decision_orders_execution_summary_by_order_time(db_session):
+    user = User(
+        username="previous_pm_multi_order_user",
+        email="previous_pm_multi_order_user@example.com",
+        password_hash="hashed",
+    )
+    db_session.add(user)
+    db_session.flush()
+    previous_session = DebateSession(
+        user_id=user.id,
+        stock_code="000001.SZ",
+        trading_frequency="swing",
+        trading_strategy="momentum",
+        status="completed",
+    )
+    current_session = DebateSession(
+        user_id=user.id,
+        stock_code="000001.SZ",
+        trading_frequency="swing",
+        trading_strategy="momentum",
+        status="active",
+    )
+    db_session.add_all([previous_session, current_session])
+    db_session.flush()
+    db_session.add(
+        DebateMessage(
+            session_id=previous_session.session_id,
+            stage="portfolio_management",
+            round_number=0,
+            agent_name="PM",
+            agent_role=AGENT_ROLE_PORTFOLIO_MANAGER,
+            decision="buy",
+            confidence=0.8,
+            reasoning="# previous report",
+            analysis={"decision": "buy", "target_position": 0.3},
+            created_at=datetime(2026, 1, 1, 15, 0),
+        )
+    )
+    later_order_id = uuid4()
+    earlier_order_id = uuid4()
+    db_session.add_all(
+        [
+            Order(
+                order_id=later_order_id,
+                session_id=previous_session.session_id,
+                stock_code="000001.SZ",
+                action="buy",
+                order_type="market",
+                price=Decimal("11.0"),
+                shares=100,
+                status="filled",
+                created_at=datetime(2026, 1, 1, 15, 3),
+            ),
+            Order(
+                order_id=earlier_order_id,
+                session_id=previous_session.session_id,
+                stock_code="000001.SZ",
+                action="buy",
+                order_type="market",
+                price=Decimal("10.0"),
+                shares=100,
+                status="filled",
+                created_at=datetime(2026, 1, 1, 15, 1),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
+        result = _get_previous_pm_decision(current_session.session_id, "000001.SZ")
+
+    assert result["execution_summary"]["first_order_time"] == "2026-01-01T15:01:00"
+    assert result["execution_summary"]["latest_order_time"] == "2026-01-01T15:03:00"
+
+
 def test_get_previous_pm_decision_marks_missing_execution(db_session):
     user = User(
         username="previous_pm_no_result_user",
