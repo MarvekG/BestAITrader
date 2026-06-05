@@ -360,6 +360,47 @@ def _build_layer1_reports(
     return layer1_reports
 
 
+def _build_previous_execution_summary(db, session_id: UUID) -> Dict[str, Any]:
+    """构建上一轮 PM 决策关联的最小交易执行摘要。
+
+    Args:
+        db: 数据库会话。
+        session_id: 上一轮 Debate session ID。
+
+    Returns:
+        包含订单数、成交数、成交均价、成交数量、已实现盈亏和最近成交时间的摘要。
+    """
+    from app.models.order import Order
+    from app.models.trade_record import TradeRecord
+
+    orders = db.query(Order).filter(Order.session_id == session_id).all()
+    trades = (
+        db.query(TradeRecord)
+        .filter(TradeRecord.session_id == session_id)
+        .order_by(TradeRecord.trade_time.asc(), TradeRecord.created_at.asc())
+        .all()
+    )
+    total_quantity = sum(int(item.quantity or 0) for item in trades)
+    total_fill_amount = sum(
+        int(item.quantity or 0) * float(item.fill_price)
+        for item in trades
+        if item.fill_price is not None and int(item.quantity or 0) > 0
+    )
+    return {
+        "has_orders": bool(orders),
+        "has_trades": bool(trades),
+        "order_count": len(orders),
+        "filled_order_count": len([item for item in orders if item.status == "filled"]),
+        "avg_fill_price": total_fill_amount / total_quantity if total_quantity > 0 else None,
+        "total_quantity": total_quantity,
+        "realized_pnl": sum(float(item.realized_pnl or 0) for item in orders),
+        "first_order_time": orders[0].created_at.isoformat() if orders and orders[0].created_at else None,
+        "latest_order_time": orders[-1].created_at.isoformat() if orders and orders[-1].created_at else None,
+        "first_trade_time": trades[0].trade_time.isoformat() if trades and trades[0].trade_time else None,
+        "latest_trade_time": trades[-1].trade_time.isoformat() if trades and trades[-1].trade_time else None,
+    }
+
+
 def _get_previous_pm_decision(
     session_id: Optional[UUID],
     stock_code: str
@@ -396,6 +437,7 @@ def _get_previous_pm_decision(
 
             debate_msg, prev_session = previous_msg
             analysis = debate_msg.analysis if isinstance(debate_msg.analysis, dict) else {}
+            execution_summary = _build_previous_execution_summary(db, prev_session.session_id)
             return {
                 "session_id": str(prev_session.session_id),
                 "session_status": prev_session.status,
@@ -408,7 +450,8 @@ def _get_previous_pm_decision(
                 "stop_loss": analysis.get("stop_loss"),
                 "price_range": analysis.get("price_range"),
                 "execution_details": analysis.get("execution_details"),
-                "report_markdown": analysis.get("report_markdown") or debate_msg.reasoning or ""
+                "report_markdown": analysis.get("report_markdown") or debate_msg.reasoning or "",
+                "execution_summary": execution_summary,
             }
         except Exception:
             logger.exception("Failed to fetch previous PM decision")
