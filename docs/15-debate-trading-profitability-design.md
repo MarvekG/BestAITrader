@@ -30,6 +30,8 @@
 
 ### 1. 给 PM 决策补两个最小结构化字段
 
+状态：已完成。
+
 现状：
 
 - `PMDecision` 已有 `target_position`、`price_range`、`stop_loss` 和 `execution_details`。
@@ -70,7 +72,8 @@
 - `backend/app/ai/llm_engine/models.py`
 - `backend/app/ai/llm_engine/prompts/templates.py`
 - `backend/tests/test_llm_orchestrator.py`
-- `backend/tests/test_llm_runner.py`
+- `backend/tests/test_debate_engine.py`
+- `backend/tests/test_agentic_logic.py`
 
 验收标准：
 
@@ -79,6 +82,8 @@
 - PM 仍是唯一交易决策者。
 
 ### 2. 复盘入口价优先使用真实成交价
+
+状态：已完成。
 
 现状：
 
@@ -112,17 +117,21 @@
 
 ### 3. 下一次 Debate 召回上一轮 PM 决策的交易结果
 
+状态：已完成。
+
 现状：
 
 - `_get_previous_pm_decision()` 已召回同用户同股票上一条 PM 决策。
-- 但召回内容主要是 PM 原始观点，缺少该决策后是否成交、成交价、盈亏和复盘结论。
+- 交易不是每轮 Debate 都会发生，因此上一轮 PM 决策只能携带“是否有订单/是否有成交”的显式状态，不能假设已有交易结果。
+- 经验复盘是周期性的，至少要到 5d、20d 或 60d 等 horizon 满足后才可能生成，不适合直接作为下一次 PM 的稳定输入。
 
 必须调整：
 
 - `_get_previous_pm_decision()` 增加上一轮交易执行摘要。
-- 最小字段包括：`order_count`、`filled_order_count`、`avg_fill_price`、`total_quantity`、`realized_pnl`、`latest_trade_time`。
-- 如果已有经验复盘结果，可附带最近一次复盘的 `original_judgment.verdict` 和 `decision_process_improvement.pm_changes`。
-- PM prompt 中明确要求：再次分析同一股票时，必须先说明上一轮交易结果如何影响本次仓位和决策。
+- 最小字段包括：`has_orders`、`has_trades`、`order_count`、`filled_order_count`、`avg_fill_price`、`total_quantity`、`realized_pnl`、`first_order_time`、`latest_order_time`、`first_trade_time`、`latest_trade_time`。
+- 没有订单或成交时必须显式返回空状态，例如 `has_orders=false`、`has_trades=false`，避免 PM 误以为已有交易结果。
+- 上一轮交易信息必须带日期，避免只有价格和数量而没有时间锚点。
+- 不向 PM 注入周期性经验复盘结论；复盘结果仍留在 `experience` 系统内用于后验分析和经验库。
 
 不做：
 
@@ -130,18 +139,19 @@
 - 不做自动经验采纳。
 - 不新增 Memory 强制写入规则。
 - 不让历史交易结果自动生成新订单。
+- 不把 5d/20d/60d 周期性复盘结论直接塞进 PM runtime context。
 
 影响文件：
 
 - `backend/app/ai/llm_engine/orchestrator.py`
-- `backend/app/ai/llm_engine/prompts/templates.py`
 - `backend/tests/test_llm_orchestrator.py`
 
 验收标准：
 
 - 下一次同用户同股票 Debate 的 PM runtime context 包含上一轮执行摘要。
-- 若上一轮已有复盘结论，PM 可看到最小复盘结论。
-- PM 输出报告中能审计到是否吸收上一轮结果。
+- 上一轮无订单/无成交时，执行摘要明确标记 `has_orders=false`、`has_trades=false`。
+- 上一轮有订单/成交时，执行摘要包含订单和成交时间字段。
+- PM 输入不包含周期性复盘摘要。
 
 ## 明确不做
 
@@ -157,16 +167,16 @@
 
 ## 实施顺序
 
-1. 先加 `take_profit` 和 `holding_horizon_days`，让 PM 决策的退出意图可结构化。
-2. 再修复经验复盘 entry price，保证交易后验用真实成交价。
-3. 最后把上一轮执行摘要和复盘结论注入下一次 PM context。
+1. 已完成：加 `take_profit` 和 `holding_horizon_days`，让 PM 决策的退出意图可结构化。
+2. 已完成：修复经验复盘 entry price，保证交易后验优先使用真实买入成交均价。
+3. 已完成：把上一轮 PM 决策的交易执行摘要注入下一次 PM context；不注入周期性经验复盘结论。
 
 ## 最小完成标准
 
 完成后，系统应能回答三个问题：
 
 - PM 上次决定买、卖或持有时，原计划是什么。
-- 这个计划是否实际成交，成交价和结果是什么。
-- PM 这次是否基于上次交易结果调整了仓位或判断。
+- 这个计划是否实际产生订单或成交，若有成交则成交时间、成交价和结果是什么。
+- PM 这次是否参考了上一轮 PM 决策和可用交易结果来调整仓位或判断。
 
 只要这三个问题可审计，Debate 交易系统就具备了最小赚钱闭环；其他优化可以后续再做。
