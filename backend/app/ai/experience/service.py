@@ -110,6 +110,31 @@ def _extract_original_conclusion(message: DebateMessage) -> str:
     return ""
 
 
+def _weighted_buy_fill_price(trades: List[TradeRecord]) -> float | None:
+    """计算买入成交记录的加权均价。
+
+    Args:
+        trades: 当前 Debate session 关联的成交记录列表。
+
+    Returns:
+        有买入成交时返回按成交股数加权的均价；没有有效买入成交时返回 None。
+    """
+    total_quantity = 0
+    total_amount = 0.0
+    for trade in trades:
+        if str(trade.action or "").lower() != "buy":
+            continue
+        quantity = int(trade.quantity or 0)
+        fill_price = _decimal_or_none(trade.fill_price)
+        if quantity <= 0 or fill_price is None or fill_price <= 0:
+            continue
+        total_quantity += quantity
+        total_amount += quantity * fill_price
+    if total_quantity <= 0:
+        return None
+    return total_amount / total_quantity
+
+
 class ExperienceService:
     def _extract_review_horizon_from_event(self, row: ExperienceReviewEvent) -> ReviewHorizon | None:
         """从复盘事件中提取复盘周期。
@@ -1132,6 +1157,7 @@ class ExperienceService:
 
         pm_decision = str(pm_message.decision or pm_analysis.get("decision") or "hold").lower()
         target_position = _safe_num(pm_analysis.get("target_position"), 0.0)
+        buy_fill_price = _weighted_buy_fill_price(trades)
         market_outcome = self._build_market_outcome_summary(
             db=db,
             stock_code=session_obj.stock_code,
@@ -1139,6 +1165,7 @@ class ExperienceService:
             decision_time=pm_message.created_at,
             review_horizon=review_horizon,
             market_day_count=market_day_count,
+            entry_price_override=buy_fill_price,
         )
 
         return {
@@ -1284,6 +1311,7 @@ class ExperienceService:
         decision_time: datetime | None,
         review_horizon: ReviewHorizon = "20d",
         market_day_count: int = 0,
+        entry_price_override: float | None = None,
     ) -> Dict[str, Any]:
         """构建决策后行情结果摘要。
 
@@ -1294,6 +1322,7 @@ class ExperienceService:
             decision_time: PM 决策时间。
             review_horizon: 当前选择的复盘周期。
             market_day_count: 决策后可用的日 K 样本数量。
+            entry_price_override: 实际买入成交均价；存在时优先作为收益计算入口价。
 
         Returns:
             包含所选周期收益、各周期收益、回撤和相对收益的行情结果摘要。
@@ -1319,9 +1348,10 @@ class ExperienceService:
         closes = [float(item.close) for item in rows if item.close is not None]
         highs = [float(item.high) for item in rows if item.high is not None]
         lows = [float(item.low) for item in rows if item.low is not None]
-        entry_price = closes[0] if closes else None
+        entry_price = entry_price_override if entry_price_override and entry_price_override > 0 else closes[0]
         if not entry_price:
             return {}
+        entry_price_source = "trade_fill_price" if entry_price_override and entry_price_override > 0 else "decision_day_close"
 
         def compute_return(index: int) -> float | None:
             if not closes or len(closes) <= index:
@@ -1394,6 +1424,7 @@ class ExperienceService:
         return {
             "entry_date": rows[0].date.isoformat() if rows else None,
             "entry_price": entry_price,
+            "entry_price_source": entry_price_source,
             "market_day_count": market_day_count,
             "selected_horizon": review_horizon,
             "selected_horizon_outcome": {

@@ -11,6 +11,7 @@ from app.models.data_storage import KlineData, StockBasic
 from app.models.debate_message import DebateMessage
 from app.models.experience_review_event import ExperienceReviewEvent
 from app.models.session import Session as DebateSession
+from app.models.trade_record import TradeRecord
 from app.models.user import User
 
 
@@ -403,6 +404,89 @@ def _create_pm_decision(db_session, session, *, created_at=datetime(2026, 1, 1, 
     db_session.add(message)
     db_session.commit()
     return message
+
+
+def test_build_debate_review_context_uses_buy_fill_price_as_entry(db_session):
+    user, session = _create_user_and_session(db_session)
+    _create_stock_and_klines(db_session, count=21)
+    pm_message = _create_pm_decision(db_session, session)
+    db_session.add_all(
+        [
+            TradeRecord(
+                session_id=session.session_id,
+                stock_code=session.stock_code,
+                action="buy",
+                quantity=100,
+                fill_price=8.0,
+                trade_time=datetime(2026, 1, 1, 15, 5),
+            ),
+            TradeRecord(
+                session_id=session.session_id,
+                stock_code=session.stock_code,
+                action="buy",
+                quantity=300,
+                fill_price=12.0,
+                trade_time=datetime(2026, 1, 1, 15, 6),
+            ),
+            TradeRecord(
+                session_id=session.session_id,
+                stock_code=session.stock_code,
+                action="sell",
+                quantity=100,
+                fill_price=99.0,
+                trade_time=datetime(2026, 1, 2, 10, 0),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    context = experience_service._build_debate_review_context(
+        db_session,
+        session_obj=session,
+        stock_name="Ping An Bank",
+        industry="Bank",
+        debate_messages=[pm_message],
+        pm_message=pm_message,
+        review_horizon="20d",
+        market_day_count=21,
+    )
+
+    market_outcome = context["market_outcome_summary"]
+    assert market_outcome["entry_price"] == 11.0
+    assert market_outcome["entry_price_source"] == "trade_fill_price"
+    assert market_outcome["close_20d_return"] == pytest.approx((30.5 / 11.0) - 1)
+
+
+def test_build_debate_review_context_falls_back_to_decision_day_close_without_buy_trade(db_session):
+    user, session = _create_user_and_session(db_session)
+    _create_stock_and_klines(db_session, count=21)
+    pm_message = _create_pm_decision(db_session, session)
+    db_session.add(
+        TradeRecord(
+            session_id=session.session_id,
+            stock_code=session.stock_code,
+            action="sell",
+            quantity=100,
+            fill_price=99.0,
+            trade_time=datetime(2026, 1, 2, 10, 0),
+        )
+    )
+    db_session.commit()
+
+    context = experience_service._build_debate_review_context(
+        db_session,
+        session_obj=session,
+        stock_name="Ping An Bank",
+        industry="Bank",
+        debate_messages=[pm_message],
+        pm_message=pm_message,
+        review_horizon="20d",
+        market_day_count=21,
+    )
+
+    market_outcome = context["market_outcome_summary"]
+    assert market_outcome["entry_price"] == 10.5
+    assert market_outcome["entry_price_source"] == "decision_day_close"
 
 
 def test_list_review_candidates_returns_ready_horizons(db_session):
