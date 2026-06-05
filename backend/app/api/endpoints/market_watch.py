@@ -19,11 +19,14 @@ from app.ai.market_watch.audit import (
 )
 from app.ai.market_watch.schemas import (
     MarketWatchEventSchema,
+    MarketWatchMarkdownDocument,
     MarketWatchSettingsResponse,
     MarketWatchSettingsUpdate,
+    MarketWatchSourcePreviewRequest,
 )
 from app.ai.market_watch.service import scan_market_watch
 from app.ai.market_watch.settings import get_market_watch_settings, upsert_market_watch_settings
+from app.ai.market_watch.web_sources import fetch_market_watch_documents
 from app.models.user import User
 from app.tasks.async_scheduler import async_task_scheduler
 from app.websocket.manager import ws_manager
@@ -63,6 +66,37 @@ async def scan_market_watch_once(
         current_user.id,
         background_tasks=background_tasks,
     )
+
+
+@router.post("/source-preview", response_model=MarketWatchMarkdownDocument)
+async def preview_market_watch_source(
+    payload: MarketWatchSourcePreviewRequest,
+    current_user: User = Depends(get_current_user),
+) -> MarketWatchMarkdownDocument:
+    """
+    预览单个盯盘网页源的 Markdown 抓取结果。
+
+    Args:
+        payload: 用户输入的网页源配置，格式与实时盯盘配置一致。
+        current_user: 当前已认证用户。
+
+    Returns:
+        复用盯盘网页源抓取逻辑渲染得到的 Markdown 文档。
+
+    Raises:
+        HTTPException: 当 URL 或 selector 配置无效时返回 400。
+    """
+    settings = get_market_watch_settings(current_user.id)
+    try:
+        documents = await fetch_market_watch_documents(
+            [payload.source_config],
+            "data",
+            clean_markdown=settings.clean_source_markdown,
+            markdown_cleanup_patterns=settings.markdown_cleanup_patterns,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return documents[0]
 
 
 @router.get("/events", response_model=list[MarketWatchEventSchema])
