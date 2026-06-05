@@ -165,6 +165,7 @@ export const ExperiencePage: React.FC = () => {
         schedule_time: buildScheduleTime(config.schedule_hour, config.schedule_minute),
       });
       message.success(t('settings.experience_scheduler_saved'));
+      setSchedulerOpen(false);
     } catch (error) {
       message.error(getApiErrorMessage(error, t('settings.experience_scheduler_save_failed')));
     } finally {
