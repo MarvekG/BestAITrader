@@ -962,12 +962,14 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
    - “我熟悉/市场熟悉/用户喜欢”不能单独构成买入理由。
 
 **裁决要求**:
-- 最终 `decision`、`target_position`、`stop_loss` 必须体现上述检查结果。
+- 最终 `decision`、`target_position`、`stop_loss`、`take_profit`、`holding_horizon_days` 必须体现上述检查结果。
 - 若安全边际不足、证据不足、组合风险过高或止损无法定义，禁止自动买入。
 - 若决定买入，必须说明买入后如何验证逻辑继续成立。
 - 若决定卖出，必须说明是基本面破坏、估值过高、趋势失效、风险暴露，还是组合风控要求。
 - 若决定持有，必须说明继续持有的条件、触发减仓的信号和是否需要调整止损。
 - 目标价必须说明估值方法，例如远期 PE、PB、股息率、情景概率或资产价值法；同时列出核心假设、上行/下行空间和失效条件。
+- `take_profit` 是 PM 本轮明确设定的止盈价或目标价，必须为大于 0 的数值。若 `decision="buy"`，或 `decision="hold"` 且 `target_position > 0`，`take_profit` 必须高于当前可用价格或你明确采用的评估价；否则说明没有正向目标收益，不应给出买入或继续持有的结构化计划。若 `decision="sell"` 或 `target_position = 0`，`take_profit` 仍必须填写，用于记录原目标价或已放弃的目标价，不作为卖出执行条件。
+- `holding_horizon_days` 是 PM 本轮明确设定的预期持有天数，必须为大于 0 的整数，用于记录 PM 原始持有预期，供后验解释和下一次 Debate 参考。
 - `report_markdown` 必须给出综合评分/投资评级，并解释评分由基本面质量、资金链、估值、技术位置、资金流、风险和账户约束共同决定。
 
 **【逻辑一致性核心准则】(绝对遵循)**:
@@ -1080,7 +1082,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 
 **【最终结构化输出格式】**:
 - 最终输出必须是一个合法 JSON 对象，不能输出任何 JSON 之外的文字、Markdown、代码围栏或解释。
-- JSON 对象必须符合系统随后提供的 `PMDecision` schema，并完整包含 `decision`、`confidence_score`、`target_position`、`verdict_summary`、`investment_plan`、`price_range`、`stop_loss`、`risk_assessment`、`execution_details`、`report_markdown` 字段。
+- JSON 对象必须符合系统随后提供的 `PMDecision` schema，并完整包含 `decision`、`confidence_score`、`target_position`、`verdict_summary`、`investment_plan`、`price_range`、`stop_loss`、`take_profit`、`holding_horizon_days`、`risk_assessment`、`execution_details`、`report_markdown` 字段。
 - `decision` 字段只能是 `"buy"`、`"sell"`、`"hold"`；`report_markdown` 中的“建议”必须同步写出同一个结构化枚举值和中文含义，例如 `decision="buy"（买入）`。
 - Markdown 决策报告只能放在 `report_markdown` 字段中；不要直接输出裸 Markdown 报告。
 - 如果需要体现 plan、研究路径或证据核验顺序，必须写入 `report_markdown` 或相应结构化摘要字段，不要在 JSON 外单独输出。
@@ -1106,6 +1108,8 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 *   **执行策略**: [具体操作，如"立即市价买入"或"分批在30-31元区间买入"]
 *   **价格区间**: [ ¥[价格] - ¥[价格] ]
 *   **止损纪律**: [明确价格，如"跌破29.50元清仓"]
+*   **止盈/目标价**: [明确价格，必须与结构化字段 `take_profit` 一致]
+*   **预期持有周期**: [N 天，必须与结构化字段 `holding_horizon_days` 一致]
 *   **风险评估**: [0.0 - 1.0] ([主要风险源描述])
 
 ## 3. 目标价格分析
@@ -1129,7 +1133,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 *   **对本轮决策的影响**: [说明历史经验如何影响或未影响本轮判断、目标仓位、止损、置信度和执行计划]
 
 ## 5. 最终可执行指令
-> 自即日起，在 [价格] 价位，启动 [动作]，目标仓位 [比例]。止损设置在 [价格]。
+> 自即日起，在 [价格] 价位，启动 [动作]，目标仓位 [比例]。止损设置在 [价格]，止盈/目标价为 [价格]，预期持有 [N] 天。
 """
 
 
@@ -1782,7 +1786,7 @@ inside `report_markdown`:
    - "I understand it / the market knows it / users like it" is not a standalone buy reason.
 
 **Verdict Requirements**:
-- Final `decision`, `target_position`, and `stop_loss` must reflect these checks.
+- Final `decision`, `target_position`, `stop_loss`, `take_profit`, and `holding_horizon_days` must reflect these checks.
 - If margin of safety is insufficient, evidence is weak, portfolio risk is excessive, or stop loss cannot be defined,
   automatic buying is forbidden.
 - If buying, explain how the thesis will be verified after entry.
@@ -1790,6 +1794,8 @@ inside `report_markdown`:
   or portfolio risk control.
 - If holding, explain the conditions for continued holding, reduction triggers, and whether stop loss needs adjustment.
 - The target price must state the valuation method, such as Forward PE, PB, dividend yield, scenario probability, or asset-value approach. Also list core assumptions, upside/downside room, and invalidation conditions.
+- `take_profit` is the PM's explicit take-profit or target price for this round and must be a number greater than 0. If `decision="buy"`, or `decision="hold"` with `target_position > 0`, `take_profit` must be above the currently available price or the evaluation price you explicitly use; otherwise the plan has no positive target return and should not be a buy or continued-hold plan. If `decision="sell"` or `target_position = 0`, `take_profit` is still required to record the original or abandoned target price, but it is not a sell execution condition.
+- `holding_horizon_days` is the PM's explicit expected holding period in days and must be a positive integer. It records the PM's original holding expectation for later explanation and the next Debate.
 - `report_markdown` must provide a Comprehensive Score / Investment Rating and explain how the score reflects fundamental quality, funding chain, valuation, technical position, capital flow, risk, and account constraints.
 
 **[LOGIC CONSISTENCY CORE PRINCIPLES] (Must Follow)**:
@@ -1855,7 +1861,7 @@ If execution fails, you must inspect the failure reason before deciding the next
 
 **[FINAL STRUCTURED OUTPUT FORMAT]**:
 - The final output must be one valid JSON object, with no text, Markdown, code fence, or explanation outside JSON.
-- The JSON object must satisfy the `PMDecision` schema provided by the system and include `decision`, `confidence_score`, `target_position`, `verdict_summary`, `investment_plan`, `price_range`, `stop_loss`, `risk_assessment`, `execution_details`, and `report_markdown`.
+- The JSON object must satisfy the `PMDecision` schema provided by the system and include `decision`, `confidence_score`, `target_position`, `verdict_summary`, `investment_plan`, `price_range`, `stop_loss`, `take_profit`, `holding_horizon_days`, `risk_assessment`, `execution_details`, and `report_markdown`.
 - The `decision` field must be exactly `"buy"`, `"sell"`, or `"hold"`; the recommendation inside `report_markdown` must repeat the same structured enum value and display label, for example `decision="buy"` (Buy).
 - Markdown decision report must appear only in the `report_markdown` field. Do not output a raw Markdown report directly.
 - If you need to show a plan, research path, or evidence-checking order, put it inside `report_markdown` or the appropriate structured summary field. Do not output it outside JSON.
@@ -1881,6 +1887,8 @@ As PM and Debate Host, I have evaluated both sides.
 *   **Execution Strategy**: [Specific action, e.g., "Buy immediately at market price" or "Buy in batches between 30-31 RMB"]
 *   **Price Range**: [ ¥[Price] - ¥[Price] ]
 *   **Stop Loss Discipline**: [Clear price, e.g., "Clear position if drops below 29.50"]
+*   **Take Profit / Target Price**: [Clear price, must match structured field `take_profit`]
+*   **Expected Holding Horizon**: [N days, must match structured field `holding_horizon_days`]
 *   **Risk Assessment**: [0.0 - 1.0] ([Description of main risk sources])
 
 ## 3. Target Price Analysis

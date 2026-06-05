@@ -437,6 +437,8 @@ async def test_persist_agent_report_saves_pm_report():
         investment_plan="Build position in tranches",
         price_range="10-11",
         stop_loss=9.5,
+        take_profit=12.0,
+        holding_horizon_days=20,
         risk_assessment=0.2,
         execution_details="Start with half size",
         report_markdown="# PM report",
