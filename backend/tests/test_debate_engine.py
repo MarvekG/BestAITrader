@@ -8,6 +8,7 @@ import pytest
 from app.ai.llm_engine.models import PMDecision
 from app.ai.llm_engine.orchestrator import (
     create_analyst_workflow,
+    _build_portfolio_field_descriptions,
     persist_agent_report,
     portfolio_management,
 )
@@ -90,7 +91,11 @@ def test_pm_decision_requires_take_profit_and_holding_horizon_days():
 def _expected_static_context(portfolio_info=None):
     static_context = {"data": MOCK_CONTEXT}
     static_context["portfolio_info"] = (
-        portfolio_info if portfolio_info is not None else {"account": {}, "position": {}}
+        portfolio_info if portfolio_info is not None else {
+            "account": {},
+            "position": {},
+            "field_descriptions": _build_portfolio_field_descriptions(),
+        }
     )
     return static_context
 

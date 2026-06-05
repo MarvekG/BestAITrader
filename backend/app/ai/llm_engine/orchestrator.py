@@ -9,6 +9,7 @@ from app.ai.llm_routing import should_run_debate_agents_in_parallel
 from app.ai.llm_engine.context import (
     AIContextService,
 )
+from app.core.config import settings
 from app.core.logger import get_logger
 from app.ai.llm_engine.agents.specialists import (
     FundamentalAgent, TechnicalAgent, CapitalFlowAgent, SentimentAgent, RiskAgent, NewsAgent, PolicyAgent
@@ -39,6 +40,40 @@ from app.ai.llm_engine.roles import (
 )
 
 logger = get_logger(__name__)
+
+
+def _build_portfolio_field_descriptions() -> Dict[str, str]:
+    """构建投资组合输入字段说明。
+
+    Returns:
+        随系统语言切换的字段说明，用于帮助 PM 理解 `portfolio_info` 中的持仓字段口径。
+    """
+    if str(settings.SYSTEM_LANGUAGE).lower().startswith("en"):
+        return {
+            "position.current_position": (
+                "The target stock's current market-value weight in total account assets; "
+                "use it as the current-position baseline for target_position."
+            ),
+            "position.avg_cost": (
+                "Current average holding cost, used to identify cost anchoring, "
+                "stop-loss room, and profit-protection needs."
+            ),
+            "position.profit_loss": "Current unrealized profit/loss amount.",
+            "position.profit_loss_pct": "Current unrealized profit/loss percentage.",
+            "position.available_shares": (
+                "Current actual sellable quantity. If it is zero or insufficient, "
+                "a sell decision should still be expressed as sell, with T+1 or sellable-share limits "
+                "explained in the execution plan."
+            ),
+        }
+
+    return {
+        "position.current_position": "当前目标股票市值占账户总资产的比例，是 target_position 的当前仓位基准。",
+        "position.avg_cost": "当前持仓平均成本，用于识别锚定成本、止损空间和盈亏保护需求。",
+        "position.profit_loss": "当前持仓浮盈浮亏金额。",
+        "position.profit_loss_pct": "当前持仓浮盈浮亏比例。",
+        "position.available_shares": "当前真实可卖出数量；为 0 或不足时，卖出决策仍应表达为 sell，并在执行计划说明 T+1 或可卖限制。",
+    }
 
 # Define State
 
@@ -211,7 +246,11 @@ async def fetch_context(state: AnalystState) -> Dict[str, Any]:
     try:
         ai_context_snapshot = await AIContextService().build(stock_code)
 
-        portfolio_info = {"account": {}, "position": {}}
+        portfolio_info = {
+            "account": {},
+            "position": {},
+            "field_descriptions": _build_portfolio_field_descriptions(),
+        }
         user_id: Optional[int] = None
 
         if session_id:

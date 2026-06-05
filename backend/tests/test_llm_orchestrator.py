@@ -10,7 +10,7 @@ from app.ai.llm_engine.orchestrator import (
     AnalystState, fetch_context, sentiment_analysis, vertical_analysis,
     strategic_round_1, strategic_round_2_1, strategic_round_2_rebuttal,
     portfolio_management, persist_agent_report,
-    create_analyst_workflow, _get_previous_pm_decision
+    create_analyst_workflow, _get_previous_pm_decision, _build_portfolio_field_descriptions
 )
 from app.ai.llm_engine.models import PMDecision
 from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER, AGENT_ROLE_PORTFOLIO_MANAGER
@@ -82,7 +82,11 @@ MOCK_REPORTS = {
 def _expected_static_context(portfolio_info=None):
     static_context = {"data": MOCK_CONTEXT}
     static_context["portfolio_info"] = (
-        portfolio_info if portfolio_info is not None else {"account": {}, "position": {}}
+        portfolio_info if portfolio_info is not None else {
+            "account": {},
+            "position": {},
+            "field_descriptions": _build_portfolio_field_descriptions(),
+        }
     )
     return static_context
 
@@ -178,6 +182,7 @@ async def test_fetch_context_node_keeps_portfolio_risk_control_in_build_context(
             "available_cash": 200000.0,
             "market_value": 800000.0,
         }
+        assert result["static_context"]["portfolio_info"]["field_descriptions"] == _build_portfolio_field_descriptions()
 
 @pytest.mark.asyncio
 async def test_sentiment_analysis_node(initial_state):

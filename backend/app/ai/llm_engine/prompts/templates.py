@@ -1061,10 +1061,6 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 **核心约束**: 你必须审视 Context 中的 `portfolio_info`。
 - `total_shares`: 当前账户中该目标股票的持仓数量。
 - `available_shares`: **当前真实可卖出数量**。
-- `portfolio_info.position.current_position`: 当前目标股票市值占账户总资产的比例，是判断 `target_position` 应对应 `buy`、`sell` 还是 `hold` 的当前仓位基准。
-- `portfolio_info.position.avg_cost`: 当前持仓平均成本，用于识别锚定成本、止损空间和盈亏保护需求。
-- `portfolio_info.position.profit_loss`: 当前持仓浮盈浮亏金额。
-- `portfolio_info.position.profit_loss_pct`: 当前持仓浮盈浮亏比例。
 - `portfolio_info.account.total_assets`: 账户当前的总资产规模。你不必进行精确的数值乘除计算（系统会自动依据你的目标仓位进行精确计算），你的核心职责是确定**战略目标仓位百分比 (target_position)**。
 - 你应**适当考虑股市整体情绪**。当市场整体情绪显著转弱、系统性风险上升或热点扩散明显失败时，应更审慎地控制仓位、节奏与止损；当市场整体情绪明显改善时，可适度提高执行积极性，但不得凌驾于个股基本面和风险控制之上。
 - 你在“辩论总结与判决”前，必须先综合审阅 `sentiment_report`、`news_report`、`policy_report`、`strategic_debate` 与 `previous_pm_decision`。
@@ -1848,10 +1844,6 @@ inside `report_markdown`:
 **CORE CONSTRAINT**: You must review `portfolio_info` in the Context.
 - `total_shares`: The quantity of the target stock currently held in the account.
 - `available_shares`: **Current actual sellable quantity**.
-- `portfolio_info.position.current_position`: The target stock's current market-value weight in total account assets. Use it as the current-position baseline for deciding whether `target_position` maps to `buy`, `sell`, or `hold`.
-- `portfolio_info.position.avg_cost`: Current average holding cost. Use it to identify cost anchoring, stop-loss room, and profit-protection needs.
-- `portfolio_info.position.profit_loss`: Current unrealized profit/loss amount.
-- `portfolio_info.position.profit_loss_pct`: Current unrealized profit/loss percentage.
 - `portfolio_info.account.total_assets`: The current total asset size of the account. You do not need to perform precise numerical multiplication or division (the system will automatically calculate precisely based on your target position). Your core responsibility is to determine the **strategic target position percentage (target_position)**.
 - You should **appropriately consider overall market sentiment**. When market-wide sentiment clearly weakens, systemic risk rises, or theme diffusion fails, you should be more conservative with position sizing, execution pace, and stop-loss discipline. When market sentiment clearly improves, you may increase execution aggressiveness moderately, but never let that override single-stock fundamentals and risk control.
 - Before issuing the verdict, you must first review `sentiment_report`, `news_report`, `policy_report`, `strategic_debate`, and `previous_pm_decision`.
