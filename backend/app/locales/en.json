@@ -1166,6 +1166,7 @@
       "scan_end_time": "Scan End Time",
       "auto_launch_debate": "Allow Auto AI Debate Launch",
       "recent_debate_dedup_enabled": "Enable Recent Debate Deduplication",
+      "recent_debate_lookback_hours": "Recent Debate Dedup Range (hours)",
       "cooldown_minutes": "Same-stock Cooldown (minutes)",
       "cooldown_break_confidence": "Cooldown Break Confidence",
       "data_source_urls": "Data Source Page Configs",
@@ -1183,6 +1184,7 @@
       "scan_end_time": "Latest time each day when market watch scans may start. Default is the A-share close time, 15:00.",
       "auto_launch_debate": "When enabled, Watch AI can create an AI debate task after it decides to start a debate and passes cooldown/dedup checks.",
       "recent_debate_dedup_enabled": "When enabled, Watch AI uses recent launched debates to avoid repeated triggers from the same evidence. When disabled, recent debates are background context only.",
+      "recent_debate_lookback_hours": "History window used for recent debate deduplication, in hours. Defaults to 24 hours.",
       "cooldown_minutes": "After a debate is launched for a stock, another launch for the same stock is skipped during this window.",
       "cooldown_break_confidence": "During cooldown, Watch AI can only break cooldown when confidence reaches this value and cites new document evidence.",
       "data_source_urls": "Required. One page config per line; use URL @@ selector1 @@ selector2 to render only matched regions.",
@@ -1194,6 +1196,9 @@
     },
     "validation": {
       "source_urls_required": "Enter at least one URL"
+    },
+    "units": {
+      "hours": "hours"
     },
     "placeholders": {
       "source_urls": "One page config per line, e.g. https://example.com/page @@ body > div.main",

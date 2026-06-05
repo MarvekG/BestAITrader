@@ -17,6 +17,7 @@ export interface MarketWatchSettings {
   scan_end_time: string;
   auto_launch_debate: boolean;
   recent_debate_dedup_enabled: boolean;
+  recent_debate_lookback_hours: number;
   cooldown_minutes: number;
   cooldown_break_confidence: number;
   data_source_urls: string[];

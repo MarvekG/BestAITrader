@@ -599,6 +599,16 @@ export const MarketWatchPage: React.FC = () => {
             <Switch />
           </Form.Item>
           <Form.Item
+            name="recent_debate_lookback_hours"
+            label={settingLabel(
+              t('market_watch.settings_fields.recent_debate_lookback_hours'),
+              t('market_watch.help.recent_debate_lookback_hours'),
+            )}
+            rules={[{ required: true }]}
+          >
+            <InputNumber min={1} max={168} step={1} addonAfter={t('market_watch.units.hours')} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item
             name="cooldown_minutes"
             label={settingLabel(t('market_watch.settings_fields.cooldown_minutes'), t('market_watch.help.cooldown_minutes'))}
             rules={[{ required: true }]}

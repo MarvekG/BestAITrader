@@ -66,13 +66,8 @@ def test_build_watch_ai_prompt_forbids_guessing() -> None:
     assert "news_documents[].markdown" not in prompt
 
 
-def test_build_watch_ai_prompt_uses_configured_recent_debate_window(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "app.ai.market_watch.ai_gate.app_settings.MARKET_WATCH_RECENT_DEBATE_LAUNCH_LOOKBACK_HOURS",
-        36,
-    )
-
-    prompt = build_watch_ai_prompt()
+def test_build_watch_ai_prompt_uses_configured_recent_debate_window() -> None:
+    prompt = build_watch_ai_prompt(recent_debate_lookback_hours=36)
 
     assert "过去 36 小时" in prompt
 
@@ -100,6 +95,12 @@ def test_build_watch_ai_messages_uses_recent_debate_dedup_setting() -> None:
     messages = build_watch_ai_messages({"settings": {"recent_debate_dedup_enabled": False}})
 
     assert "近期辩论判重已关闭" in messages[0]["content"]
+
+
+def test_build_watch_ai_messages_uses_recent_debate_lookback_setting() -> None:
+    messages = build_watch_ai_messages({"settings": {"recent_debate_lookback_hours": 48}})
+
+    assert "过去 48 小时" in messages[0]["content"]
 
 
 def test_should_launch_debate_requires_debate_parameters() -> None:
