@@ -113,6 +113,11 @@ const sourceConfigRawStyle: React.CSSProperties = {
   maxHeight: 'calc(100vh - 360px)',
   minHeight: 360,
 };
+const sourceConfigListStyle: React.CSSProperties = {
+  maxHeight: 220,
+  overflowY: 'auto',
+  paddingRight: 4,
+};
 const watchAiActionColor: Record<string, string> = {
   ignore: 'default',
   monitor: 'blue',
@@ -886,25 +891,27 @@ export const MarketWatchPage: React.FC = () => {
               title={t('market_watch.settings_fields.data_sources')}
               extra={<Button size="small" type="link" onClick={() => void copySettingValues('data_sources')}>{t('common.copy')}</Button>}
             >
-              <List
-                size="small"
-                dataSource={settings?.data_sources ?? []}
-                locale={{ emptyText: t('market_watch.source_config_empty_list') }}
-                renderItem={(source) => (
-                  <List.Item
-                    actions={[
-                      <Button key="load" size="small" onClick={() => loadSourceIntoForm('data_sources', source)}>
-                        {t('market_watch.source_config_load')}
-                      </Button>,
-                    ]}
-                  >
-                    <List.Item.Meta
-                      title={<Text style={sourceDocumentUrlStyle}>{source.url}</Text>}
-                    />
-                    <Tag>{t('market_watch.source_config_cleanup_count', { count: source.cleanup_patterns?.length ?? 0 })}</Tag>
-                  </List.Item>
-                )}
-              />
+              <div style={sourceConfigListStyle}>
+                <List
+                  size="small"
+                  dataSource={settings?.data_sources ?? []}
+                  locale={{ emptyText: t('market_watch.source_config_empty_list') }}
+                  renderItem={(source) => (
+                    <List.Item
+                      actions={[
+                        <Button key="load" size="small" onClick={() => loadSourceIntoForm('data_sources', source)}>
+                          {t('market_watch.source_config_load')}
+                        </Button>,
+                      ]}
+                    >
+                      <List.Item.Meta
+                        title={<Text style={sourceDocumentUrlStyle}>{source.url}</Text>}
+                      />
+                      <Tag>{t('market_watch.source_config_cleanup_count', { count: source.cleanup_patterns?.length ?? 0 })}</Tag>
+                    </List.Item>
+                  )}
+                />
+              </div>
             </Card>
           </Col>
           <Col xs={24} md={12}>
@@ -913,25 +920,27 @@ export const MarketWatchPage: React.FC = () => {
               title={t('market_watch.settings_fields.news_sources')}
               extra={<Button size="small" type="link" onClick={() => void copySettingValues('news_sources')}>{t('common.copy')}</Button>}
             >
-              <List
-                size="small"
-                dataSource={settings?.news_sources ?? []}
-                locale={{ emptyText: t('market_watch.source_config_empty_list') }}
-                renderItem={(source) => (
-                  <List.Item
-                    actions={[
-                      <Button key="load" size="small" onClick={() => loadSourceIntoForm('news_sources', source)}>
-                        {t('market_watch.source_config_load')}
-                      </Button>,
-                    ]}
-                  >
-                    <List.Item.Meta
-                      title={<Text style={sourceDocumentUrlStyle}>{source.url}</Text>}
-                    />
-                    <Tag>{t('market_watch.source_config_cleanup_count', { count: source.cleanup_patterns?.length ?? 0 })}</Tag>
-                  </List.Item>
-                )}
-              />
+              <div style={sourceConfigListStyle}>
+                <List
+                  size="small"
+                  dataSource={settings?.news_sources ?? []}
+                  locale={{ emptyText: t('market_watch.source_config_empty_list') }}
+                  renderItem={(source) => (
+                    <List.Item
+                      actions={[
+                        <Button key="load" size="small" onClick={() => loadSourceIntoForm('news_sources', source)}>
+                          {t('market_watch.source_config_load')}
+                        </Button>,
+                      ]}
+                    >
+                      <List.Item.Meta
+                        title={<Text style={sourceDocumentUrlStyle}>{source.url}</Text>}
+                      />
+                      <Tag>{t('market_watch.source_config_cleanup_count', { count: source.cleanup_patterns?.length ?? 0 })}</Tag>
+                    </List.Item>
+                  )}
+                />
+              </div>
             </Card>
           </Col>
         </Row>
