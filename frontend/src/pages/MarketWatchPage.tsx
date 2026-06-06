@@ -54,7 +54,8 @@ type MarketWatchSettingsFormValues = Omit<
 };
 
 type MarketWatchSourcePreviewFormValues = {
-  source_config: string;
+  source_url: string;
+  content_selectors?: string[];
   cleanup_patterns?: string[];
 };
 
@@ -201,20 +202,22 @@ const dedupeSources = (sources: MarketWatchSourceConfig[]) => {
   });
 };
 
-const formatSourceConfigString = (source: MarketWatchSourceConfig) => {
-  return [source.url, ...(source.content_selectors ?? [])].join(' @@ ');
+const formatSourcePreviewConfig = (values: MarketWatchSourcePreviewFormValues) => {
+  return [values.source_url, ...(values.content_selectors ?? [])]
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join(' @@ ');
 };
 
 const sourceKey = (source: MarketWatchSourceConfig) => {
   return `${source.url}\n${(source.content_selectors ?? []).join('\n')}`;
 };
 
-const sourceConfigStringToSource = (sourceConfig: string, cleanupPatterns: string[] = []): MarketWatchSourceConfig => {
-  const [rawUrl, ...rawSelectors] = sourceConfig.split('@@').map((part) => part.trim()).filter(Boolean);
+const sourceFormValuesToSource = (values: MarketWatchSourcePreviewFormValues): MarketWatchSourceConfig => {
   return {
-    url: rawUrl,
-    content_selectors: rawSelectors,
-    cleanup_patterns: Array.from(new Set(cleanupPatterns.map((item) => item.trim()).filter(Boolean))),
+    url: values.source_url.trim(),
+    content_selectors: Array.from(new Set((values.content_selectors ?? []).map((item) => item.trim()).filter(Boolean))),
+    cleanup_patterns: Array.from(new Set((values.cleanup_patterns ?? []).map((item) => item.trim()).filter(Boolean))),
   };
 };
 
@@ -416,7 +419,8 @@ export const MarketWatchPage: React.FC = () => {
 
   const loadSourceIntoForm = (fieldName: MarketWatchSourceField, source: MarketWatchSourceConfig) => {
     sourcePreviewForm.setFieldsValue({
-      source_config: formatSourceConfigString(source),
+      source_url: source.url,
+      content_selectors: source.content_selectors ?? [],
       cleanup_patterns: source.cleanup_patterns ?? [],
     });
     setEditingSourceField(fieldName);
@@ -437,7 +441,7 @@ export const MarketWatchPage: React.FC = () => {
       setSourcePreviewLoading(true);
       setSourcePreviewDocument(null);
       const document = await marketWatchApi.previewSource({
-        source_config: values.source_config,
+        source_config: formatSourcePreviewConfig(values),
         cleanup_patterns: values.cleanup_patterns ?? [],
       });
       setSourcePreviewDocument(document);
@@ -450,11 +454,11 @@ export const MarketWatchPage: React.FC = () => {
 
   const handleAddSourceConfig = async (fieldName: 'data_sources' | 'news_sources') => {
     try {
-      const { source_config: sourceConfig, cleanup_patterns: cleanupPatterns } = await sourcePreviewForm.validateFields();
+      const values = await sourcePreviewForm.validateFields();
       setSavingSettings(true);
       const currentSettings = await marketWatchApi.getSettings();
       const currentValues = currentSettings[fieldName] ?? [];
-      const nextSource = sourceConfigStringToSource(sourceConfig, cleanupPatterns);
+      const nextSource = sourceFormValuesToSource(values);
       const withoutCurrent = editingSourceField === fieldName && editingSourceKey
         ? currentValues.filter((source) => sourceKey(source) !== editingSourceKey)
         : currentValues;
@@ -946,13 +950,22 @@ export const MarketWatchPage: React.FC = () => {
         </Row>
         <Form form={sourcePreviewForm} layout="vertical">
           <Form.Item
-            name="source_config"
-            label={t('market_watch.source_config')}
+            name="source_url"
+            label={t('market_watch.source_url')}
             rules={[{ required: true, message: t('market_watch.validation.source_url_required') }]}
           >
-            <Input.TextArea
-              autoSize={{ minRows: 2, maxRows: 4 }}
-              placeholder={t('market_watch.placeholders.source_config')}
+            <Input placeholder={t('market_watch.placeholders.source_url')} />
+          </Form.Item>
+          <Form.Item
+            name="content_selectors"
+            label={t('market_watch.source_selectors')}
+            tooltip={t('market_watch.help.source_selectors')}
+          >
+            <Select
+              mode="tags"
+              allowClear
+              tokenSeparators={['\n']}
+              placeholder={t('market_watch.placeholders.source_selectors')}
             />
           </Form.Item>
           <Form.Item

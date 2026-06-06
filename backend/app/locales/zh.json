@@ -1117,6 +1117,8 @@
     "source_config_delete_empty": "请先从列表加载一个配置再删除",
     "source_config_no_preview_result": "输入 URL 和 selector 后点击开始获取",
     "source_config": "数据源配置",
+    "source_url": "URL 地址",
+    "source_selectors": "选择器",
     "source_cleanup_patterns": "当前 URL 清理正则",
     "source_config_clear_editor": "清空编辑区",
     "source_config_load": "加载",
@@ -1196,8 +1198,8 @@
       "recent_debate_lookback_hours": "近期辩论去重范围（小时）",
       "cooldown_minutes": "同股冷却时间（分钟）",
       "cooldown_break_confidence": "突破冷却置信度",
-      "data_sources": "数据源网页配置",
-      "news_sources": "新闻源网页配置",
+      "data_sources": "数据源 URL 地址",
+      "news_sources": "新闻源 URL 地址",
       "trading_frequency": "交易频率",
       "trading_strategy": "交易策略"
     },
@@ -1214,6 +1216,7 @@
       "cooldown_break_confidence": "处于冷却期时，只有盯盘 AI 置信度达到该值并引用新的文档证据，才允许突破冷却。",
       "data_sources": "必填。JSON 数组；每条配置包含 url、content_selectors 和该 URL 专属 cleanup_patterns。",
       "news_sources": "必填。JSON 数组；每条配置包含 url、content_selectors 和该 URL 专属 cleanup_patterns，并推送到前端。",
+      "source_selectors": "可选。每个选择器只作用于当前 URL，用于限定转换为 Markdown 的页面区域。",
       "source_cleanup_patterns": "只作用于当前 URL 的 Markdown 清理正则，不会影响其他数据源。",
       "trading_frequency": "盯盘 AI 会按该交易频率判断当前行情和新闻是否值得启动交易分析。",
       "trading_strategy": "盯盘 AI 会按该交易策略判断当前行情和新闻是否值得启动交易分析。"
@@ -1228,6 +1231,8 @@
     "placeholders": {
       "source_urls": "每行一个网页配置，例如 https://example.com/page @@ body > div.main",
       "source_config": "例如 https://example.com/page @@ body > div.main @@ .news-list",
+      "source_url": "例如 https://example.com/page",
+      "source_selectors": "输入 selector 后回车，例如 body > div.main",
       "source_cleanup_patterns": "输入当前 URL 专属正则后回车",
       "sources_json": "[{\"url\":\"https://example.com/page\",\"content_selectors\":[\"main\"],\"cleanup_patterns\":[]}]"
     }

@@ -1117,6 +1117,8 @@
     "source_config_delete_empty": "Load a config from the list before deleting",
     "source_config_no_preview_result": "Enter a URL and selectors, then click Start Getting",
     "source_config": "Data Source Config",
+    "source_url": "URL Address",
+    "source_selectors": "Selectors",
     "source_cleanup_patterns": "Current URL Cleanup Regexes",
     "source_config_clear_editor": "Clear Editor",
     "source_config_load": "Load",
@@ -1196,8 +1198,8 @@
       "recent_debate_lookback_hours": "Recent Debate Dedup Range (hours)",
       "cooldown_minutes": "Same-stock Cooldown (minutes)",
       "cooldown_break_confidence": "Cooldown Break Confidence",
-      "data_sources": "Data Source Page Configs",
-      "news_sources": "News Source Page Configs",
+      "data_sources": "Data Source URL Addresses",
+      "news_sources": "News Source URL Addresses",
       "trading_frequency": "Trading Frequency",
       "trading_strategy": "Trading Strategy"
     },
@@ -1214,6 +1216,7 @@
       "cooldown_break_confidence": "During cooldown, Watch AI can only break cooldown when confidence reaches this value and cites new document evidence.",
       "data_sources": "Required. JSON array; each entry has url, content_selectors, and cleanup_patterns scoped to that URL.",
       "news_sources": "Required. JSON array; each entry has url, content_selectors, and cleanup_patterns scoped to that URL and pushed to the frontend.",
+      "source_selectors": "Optional. Each selector is scoped to the current URL and limits the page area rendered to Markdown.",
       "source_cleanup_patterns": "Markdown cleanup regexes scoped only to the current URL; they do not affect other sources.",
       "trading_frequency": "Watch AI uses this trading frequency to judge whether the current quote and news justify a trading analysis.",
       "trading_strategy": "Watch AI uses this trading strategy to judge whether the current quote and news justify a trading analysis."
@@ -1228,6 +1231,8 @@
     "placeholders": {
       "source_urls": "One page config per line, e.g. https://example.com/page @@ body > div.main",
       "source_config": "e.g. https://example.com/page @@ body > div.main @@ .news-list",
+      "source_url": "e.g. https://example.com/page",
+      "source_selectors": "Enter a selector and press Enter, e.g. body > div.main",
       "source_cleanup_patterns": "Enter regexes scoped to the current URL and press Enter",
       "sources_json": "[{\"url\":\"https://example.com/page\",\"content_selectors\":[\"main\"],\"cleanup_patterns\":[]}]"
     }
