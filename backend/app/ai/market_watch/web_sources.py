@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from app.ai.market_watch.schemas import (
     MarketWatchMarkdownDocument,
+    MarketWatchSourceConfig,
     MarketWatchSourceType,
     clean_market_watch_markdown,
     parse_market_watch_source_config,
@@ -41,11 +42,9 @@ def _coerce_browser_result(result: Any, url: str) -> dict[str, Any]:
 async def _fetch_market_watch_document(
     *,
     index: int,
-    source_config: str,
+    source_config: str | MarketWatchSourceConfig,
     source_type: MarketWatchSourceType,
     browser_tool: BrowserMarkdownToolLike,
-    clean_markdown: bool,
-    markdown_cleanup_patterns: list[str] | None,
 ) -> MarketWatchMarkdownDocument:
     captured_at = datetime.now(timezone.utc)
     parsed_source = parse_market_watch_source_config(source_config)
@@ -77,8 +76,8 @@ async def _fetch_market_watch_document(
     if markdown is None:
         markdown = ""
     markdown_text = str(markdown)
-    if clean_markdown:
-        markdown_text = clean_market_watch_markdown(markdown_text, markdown_cleanup_patterns)
+    if parsed_source.cleanup_patterns:
+        markdown_text = clean_market_watch_markdown(markdown_text, parsed_source.cleanup_patterns)
 
     return MarketWatchMarkdownDocument(
         id=_document_id(source_type, index, parsed_source.url),
@@ -94,27 +93,23 @@ async def _fetch_market_watch_document(
 
 
 async def fetch_market_watch_documents(
-    urls: list[str],
+    sources: list[str | MarketWatchSourceConfig],
     source_type: MarketWatchSourceType,
     *,
     browser_tool: BrowserMarkdownToolLike | None = None,
-    clean_markdown: bool = True,
-    markdown_cleanup_patterns: list[str] | None = None,
 ) -> list[MarketWatchMarkdownDocument]:
     """
     Render configured market-watch source pages as full Markdown documents.
 
     Args:
-        urls: User-configured page URLs to render.
+        sources: User-configured page sources to render.
         source_type: Whether the URLs represent market data or news context.
         browser_tool: Optional browser tool override for tests.
-        clean_markdown: Whether to apply configured cleanup to rendered Markdown.
-        markdown_cleanup_patterns: Regex patterns to apply when cleanup is enabled.
 
     Returns:
         One Markdown document per configured URL, including error documents when rendering fails.
     """
-    if not urls:
+    if not sources:
         return []
 
     if browser_tool is None:
@@ -126,12 +121,10 @@ async def fetch_market_watch_documents(
         *(
             _fetch_market_watch_document(
                 index=index,
-                source_config=url,
+                source_config=source,
                 source_type=source_type,
                 browser_tool=browser_tool,
-                clean_markdown=clean_markdown,
-                markdown_cleanup_patterns=markdown_cleanup_patterns,
             )
-            for index, url in enumerate(urls)
+            for index, source in enumerate(sources)
         )
     )

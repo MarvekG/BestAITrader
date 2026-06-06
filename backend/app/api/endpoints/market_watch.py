@@ -22,7 +22,9 @@ from app.ai.market_watch.schemas import (
     MarketWatchMarkdownDocument,
     MarketWatchSettingsResponse,
     MarketWatchSettingsUpdate,
+    MarketWatchSourceConfig,
     MarketWatchSourcePreviewRequest,
+    parse_market_watch_source_config,
 )
 from app.ai.market_watch.service import scan_market_watch
 from app.ai.market_watch.settings import get_market_watch_settings, upsert_market_watch_settings
@@ -86,13 +88,16 @@ async def preview_market_watch_source(
     Raises:
         HTTPException: 当 URL 或 selector 配置无效时返回 400。
     """
-    settings = get_market_watch_settings(current_user.id)
     try:
+        source = parse_market_watch_source_config(payload.source_config)
+        source = MarketWatchSourceConfig(
+            url=source.url,
+            content_selectors=source.content_selectors,
+            cleanup_patterns=payload.cleanup_patterns,
+        )
         documents = await fetch_market_watch_documents(
-            [payload.source_config],
+            [source],
             "data",
-            clean_markdown=settings.clean_source_markdown,
-            markdown_cleanup_patterns=settings.markdown_cleanup_patterns,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

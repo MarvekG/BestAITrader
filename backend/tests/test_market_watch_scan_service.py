@@ -12,13 +12,11 @@ import pytest
 
 from app.ai.market_watch import service as market_watch_service
 from app.ai.market_watch.schemas import (
-    DEFAULT_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS,
     DebateParameters,
     MarketWatchMarkdownDocument,
     MarketWatchSettingsUpdate,
     MarketWatchSourceType,
     WatchAiDecision,
-    clean_market_watch_markdown,
 )
 from app.ai.market_watch.service import scan_market_watch
 from app.ai.market_watch.settings import upsert_market_watch_settings
@@ -52,26 +50,21 @@ class FakeSourceDocumentFetcher:
 
     async def __call__(
         self,
-        urls: list[str],
+        urls: list[Any],
         source_type: MarketWatchSourceType,
-        *,
-        clean_markdown: bool = True,
-        markdown_cleanup_patterns: list[str] | None = None,
     ) -> list[MarketWatchMarkdownDocument]:
         """Return one Markdown document per configured URL."""
         self.calls.append(
             {
-                "urls": list(urls),
+                "urls": [getattr(url, "url", url) for url in urls],
                 "source_type": source_type,
-                "clean_markdown": clean_markdown,
-                "markdown_cleanup_patterns": markdown_cleanup_patterns,
             }
         )
         return [
             _source_document(
                 document_id=f"{source_type}-{index + 1}",
                 source_type=source_type,
-                url=url,
+                url=getattr(url, "url", url),
             )
             for index, url in enumerate(urls)
         ]
@@ -90,19 +83,14 @@ class BlockingSourceDocumentFetcher:
 
     async def __call__(
         self,
-        urls: list[str],
+        urls: list[Any],
         source_type: MarketWatchSourceType,
-        *,
-        clean_markdown: bool = True,
-        markdown_cleanup_patterns: list[str] | None = None,
     ) -> list[MarketWatchMarkdownDocument]:
         """Record the call and wait until the test releases all calls."""
         self.calls.append(
             {
-                "urls": list(urls),
+                "urls": [getattr(url, "url", url) for url in urls],
                 "source_type": source_type,
-                "clean_markdown": clean_markdown,
-                "markdown_cleanup_patterns": markdown_cleanup_patterns,
             }
         )
         self.active_calls += 1
@@ -115,7 +103,7 @@ class BlockingSourceDocumentFetcher:
             _source_document(
                 document_id=f"{source_type}-{index + 1}",
                 source_type=source_type,
-                url=url,
+                url=getattr(url, "url", url),
             )
             for index, url in enumerate(urls)
         ]
@@ -194,12 +182,9 @@ def test_build_watch_ai_payload_sorts_stock_lists_for_cache_stability() -> None:
 async def _raising_source_document_fetcher(
     urls: list[str],
     source_type: MarketWatchSourceType,
-    *,
-    clean_markdown: bool = True,
-    markdown_cleanup_patterns: list[str] | None = None,
 ) -> list[MarketWatchMarkdownDocument]:
     """Raise a deterministic configured source fetch failure."""
-    _ = urls, source_type, clean_markdown, markdown_cleanup_patterns
+    _ = urls, source_type
     raise RuntimeError("source unavailable")
 
 
@@ -223,8 +208,8 @@ def _create_user(db_session, user_id: int = 100, *, configure_sources: bool = Tr
         upsert_market_watch_settings(
             user.id,
             MarketWatchSettingsUpdate(
-                data_source_urls=["https://example.com/data"],
-                news_source_urls=["https://example.com/news"],
+                data_sources=["https://example.com/data"],
+                news_sources=["https://example.com/news"],
             ),
         )
     return user
@@ -479,14 +464,10 @@ async def test_scan_can_run_on_non_trading_day_when_enabled(db_session) -> None:
         {
             "urls": ["https://example.com/data"],
             "source_type": "data",
-            "clean_markdown": True,
-            "markdown_cleanup_patterns": DEFAULT_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS,
         },
         {
             "urls": ["https://example.com/news"],
             "source_type": "news",
-            "clean_markdown": True,
-            "markdown_cleanup_patterns": DEFAULT_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS,
         },
     ]
     assert len(gate.payloads) == 1
@@ -668,7 +649,7 @@ async def test_recent_debate_launch_window_uses_runtime_setting(db_session) -> N
 
 
 @pytest.mark.asyncio
-async def test_scan_pushes_same_cleaned_markdown_to_frontend_and_watch_ai(db_session, monkeypatch) -> None:
+async def test_scan_pushes_same_source_markdown_to_frontend_and_watch_ai(db_session, monkeypatch) -> None:
     user = _create_user(db_session)
     _add_stock(db_session, user.id, "000001")
     _add_quote(db_session, "000001")
@@ -682,21 +663,16 @@ async def test_scan_pushes_same_cleaned_markdown_to_frontend_and_watch_ai(db_ses
     async def cleaning_fetcher(
         urls: list[str],
         source_type: MarketWatchSourceType,
-        *,
-        clean_markdown: bool = True,
-        markdown_cleanup_patterns: list[str] | None = None,
     ) -> list[MarketWatchMarkdownDocument]:
         documents: list[MarketWatchMarkdownDocument] = []
         for index, url in enumerate(urls):
-            raw_markdown = f"# {source_type}\n* |\nVisible {source_type} context"
-            markdown = (
-                clean_market_watch_markdown(raw_markdown, markdown_cleanup_patterns) if clean_markdown else raw_markdown
-            )
+            source_url = getattr(url, "url", url)
+            markdown = f"# {source_type}\n* |\nVisible {source_type} context"
             documents.append(
                 _source_document(
                     document_id=f"{source_type}-{index + 1}",
                     source_type=source_type,
-                    url=url,
+                    url=source_url,
                     markdown=markdown,
                 )
             )
@@ -721,9 +697,9 @@ async def test_scan_pushes_same_cleaned_markdown_to_frontend_and_watch_ai(db_ses
         for document in result["data_documents"] + result["news_documents"]
     }
     assert pushed_documents == ai_documents == response_documents
-    assert all("* |" not in markdown for markdown in pushed_documents.values())
-    assert pushed_documents["data-1"] == "# data\n\nVisible data context"
-    assert pushed_documents["news-1"] == "# news\n\nVisible news context"
+    assert all("* |" in markdown for markdown in pushed_documents.values())
+    assert pushed_documents["data-1"] == "# data\n* |\nVisible data context"
+    assert pushed_documents["news-1"] == "# news\n* |\nVisible news context"
 
 
 @pytest.mark.asyncio
@@ -757,8 +733,8 @@ async def test_scan_evaluates_watch_ai_for_configured_data_and_news_sources(db_s
     upsert_market_watch_settings(
         user.id,
         MarketWatchSettingsUpdate(
-            data_source_urls=["https://example.com/data"],
-            news_source_urls=["https://example.com/news"],
+            data_sources=["https://example.com/data"],
+            news_sources=["https://example.com/news"],
         ),
     )
     gate = FakeWatchAiGate(_ignore_decision())
@@ -800,68 +776,6 @@ async def test_scan_loads_data_and_news_source_documents_concurrently(db_session
 
 
 @pytest.mark.asyncio
-async def test_scan_passes_markdown_cleaning_setting_to_source_fetcher(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quiet_quote(db_session, "000001")
-    upsert_market_watch_settings(
-        user.id,
-        MarketWatchSettingsUpdate(clean_source_markdown=False),
-    )
-
-    await scan_market_watch(
-        user.id,
-        watch_ai_gate=FakeWatchAiGate(_ignore_decision()),
-    )
-
-    assert FakeSourceDocumentFetcher.calls == [
-        {
-            "urls": ["https://example.com/data"],
-            "source_type": "data",
-            "clean_markdown": False,
-            "markdown_cleanup_patterns": DEFAULT_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS,
-        },
-        {
-            "urls": ["https://example.com/news"],
-            "source_type": "news",
-            "clean_markdown": False,
-            "markdown_cleanup_patterns": DEFAULT_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS,
-        },
-    ]
-
-
-@pytest.mark.asyncio
-async def test_scan_passes_markdown_cleanup_patterns_to_source_fetcher(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quiet_quote(db_session, "000001")
-    upsert_market_watch_settings(
-        user.id,
-        MarketWatchSettingsUpdate(markdown_cleanup_patterns=[r"(?m)^REMOVE ME$"]),
-    )
-
-    await scan_market_watch(
-        user.id,
-        watch_ai_gate=FakeWatchAiGate(_ignore_decision()),
-    )
-
-    assert FakeSourceDocumentFetcher.calls == [
-        {
-            "urls": ["https://example.com/data"],
-            "source_type": "data",
-            "clean_markdown": True,
-            "markdown_cleanup_patterns": [r"(?m)^REMOVE ME$"],
-        },
-        {
-            "urls": ["https://example.com/news"],
-            "source_type": "news",
-            "clean_markdown": True,
-            "markdown_cleanup_patterns": [r"(?m)^REMOVE ME$"],
-        },
-    ]
-
-
-@pytest.mark.asyncio
 async def test_scan_sends_full_markdown_documents_without_news_cache_truncation(db_session) -> None:
     user = _create_user(db_session)
     _add_stock(db_session, user.id, "000001")
@@ -869,7 +783,7 @@ async def test_scan_sends_full_markdown_documents_without_news_cache_truncation(
     upsert_market_watch_settings(
         user.id,
         MarketWatchSettingsUpdate(
-            news_source_urls=["https://example.com/news-a", "https://example.com/news-b"],
+            news_sources=["https://example.com/news-a", "https://example.com/news-b"],
         ),
     )
     gate = FakeWatchAiGate(_ignore_decision())
@@ -878,16 +792,12 @@ async def test_scan_sends_full_markdown_documents_without_news_cache_truncation(
     async def full_markdown_fetcher(
         urls: list[str],
         source_type: MarketWatchSourceType,
-        *,
-        clean_markdown: bool = True,
-        markdown_cleanup_patterns: list[str] | None = None,
     ) -> list[MarketWatchMarkdownDocument]:
-        _ = clean_markdown, markdown_cleanup_patterns
         return [
             _source_document(
                 document_id=f"{source_type}-{index + 1}",
                 source_type=source_type,
-                url=url,
+                url=getattr(url, "url", url),
                 markdown=markdown,
             )
             for index, url in enumerate(urls)

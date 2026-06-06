@@ -23,14 +23,6 @@ MAX_MARKET_WATCH_SOURCE_SELECTOR_LENGTH = 500
 TradingFrequencyCode = Literal["day", "swing", "position"]
 TradingStrategyCode = Literal["value", "trend"]
 MarketWatchSourceType = Literal["data", "news"]
-DEFAULT_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS = [
-    r"(?m)^\s*\*\s*\|\s*$",
-    r"(?m)^\s*(?:\[!\[[^\]\n]*\]\([^)\n]*\)\]\([^)\n]*\)\s*)+$",
-    r"\\?!\[[^\]\n]*\]\s*\(data:image[^\s)\n]*\)?",
-    r"\\?!\[[^\]\n]*\]\s*\([\s\S]*?\)",
-    r"(?m)^\s*(?:[-*+]\s*)?(?:\[[^\]\n]*\]\([^)\n]+\)\s*)+$",
-    r"\((?://|https?://)[^)\s]+\)",
-]
 
 
 TRADING_FREQUENCY_CODE_MAP: dict[TradingFrequencyCode, str] = {
@@ -114,6 +106,42 @@ class MarketWatchSourceConfig(BaseModel):
 
     url: str
     content_selectors: list[str] = Field(default_factory=list)
+    cleanup_patterns: list[str] = Field(default_factory=list, max_length=MAX_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS)
+
+    @field_validator("url", mode="before")
+    @classmethod
+    def _normalize_url(cls, value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            raise ValueError("source URLs must include a URL")
+        normalized_input = text if "://" in text else f"https://{text}"
+        parsed = urlparse(normalized_input)
+        scheme = parsed.scheme.lower()
+        if scheme not in {"http", "https"} or not parsed.netloc or not parsed.hostname:
+            raise ValueError("source URLs must use http or https and include a hostname")
+        return urlunparse((scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
+
+    @field_validator("content_selectors", mode="before")
+    @classmethod
+    def _normalize_content_selectors(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, (list, tuple, set)):
+            raise ValueError("content_selectors must be a list of CSS selectors")
+        selectors: list[str] = []
+        for raw_selector in value:
+            selector = str(raw_selector).strip()
+            if not selector:
+                continue
+            if len(selector) > MAX_MARKET_WATCH_SOURCE_SELECTOR_LENGTH:
+                raise ValueError(f"source selectors must be at most {MAX_MARKET_WATCH_SOURCE_SELECTOR_LENGTH} characters")
+            selectors.append(selector)
+        return selectors
+
+    @field_validator("cleanup_patterns", mode="before")
+    @classmethod
+    def _normalize_cleanup_patterns(cls, value: Any) -> list[str]:
+        return normalize_market_watch_cleanup_patterns(value)
 
 
 def _split_source_config_values(value: str) -> list[str]:
@@ -132,26 +160,68 @@ def parse_market_watch_source_config(raw_value: Any) -> MarketWatchSourceConfig:
     Returns:
         Normalized URL and optional CSS selectors.
     """
+    if isinstance(raw_value, MarketWatchSourceConfig):
+        return raw_value
+    if isinstance(raw_value, dict):
+        return MarketWatchSourceConfig(**raw_value)
+
     parts = [part.strip() for part in str(raw_value).split(MARKET_WATCH_SOURCE_SELECTOR_SEPARATOR)]
     text = parts[0] if parts else ""
     if not text:
         raise ValueError("source URLs must include a URL")
 
-    normalized_input = text if "://" in text else f"https://{text}"
-    parsed = urlparse(normalized_input)
-    scheme = parsed.scheme.lower()
-    if scheme not in {"http", "https"} or not parsed.netloc or not parsed.hostname:
-        raise ValueError("source URLs must use http or https and include a hostname")
-    normalized_url = urlunparse((scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
+    return MarketWatchSourceConfig(url=text, content_selectors=parts[1:])
 
-    selectors: list[str] = []
-    for selector in parts[1:]:
-        if not selector:
+
+def normalize_market_watch_cleanup_patterns(value: Any) -> list[str]:
+    """
+    归一化单个网页源绑定的 Markdown 清理正则。
+
+    Args:
+        value: 前端提交的正则列表。
+
+    Returns:
+        去除空值和重复项后的正则列表。
+    """
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple, set)):
+        raise ValueError("cleanup_patterns must be a list of regex strings")
+
+    patterns: list[str] = []
+    seen_patterns: set[str] = set()
+    for raw_pattern in value:
+        pattern = str(raw_pattern).strip()
+        if not pattern or pattern in seen_patterns:
             continue
-        if len(selector) > MAX_MARKET_WATCH_SOURCE_SELECTOR_LENGTH:
-            raise ValueError(f"source selectors must be at most {MAX_MARKET_WATCH_SOURCE_SELECTOR_LENGTH} characters")
-        selectors.append(selector)
-    return MarketWatchSourceConfig(url=normalized_url, content_selectors=selectors)
+        if len(pattern) > MAX_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERN_LENGTH:
+            raise ValueError(
+                f"cleanup patterns must be at most {MAX_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERN_LENGTH} characters"
+            )
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ValueError(f"invalid cleanup regex: {exc}") from exc
+        patterns.append(pattern)
+        seen_patterns.add(pattern)
+    return patterns
+
+
+def clean_market_watch_markdown(markdown: str, patterns: list[str]) -> str:
+    """
+    对单个网页源应用其专属 Markdown 清理正则。
+
+    Args:
+        markdown: 浏览器工具渲染出的 Markdown。
+        patterns: 当前网页源绑定的正则列表。
+
+    Returns:
+        清理后的 Markdown。
+    """
+    cleaned = markdown
+    for pattern in patterns:
+        cleaned = re.compile(pattern).sub("", cleaned)
+    return cleaned
 
 
 def format_market_watch_source_config(config: MarketWatchSourceConfig) -> str:
@@ -204,62 +274,38 @@ def normalize_market_watch_source_urls(value: Any) -> list[str]:
     return normalized_configs
 
 
-def normalize_markdown_cleanup_patterns(value: Any, *, allow_none: bool = False) -> list[str] | None:
+def normalize_market_watch_sources(value: Any) -> list[MarketWatchSourceConfig]:
     """
-    Normalize user-configured Markdown cleanup regex patterns.
+    归一化结构化网页源配置，并按 URL 与 selector 去重。
 
     Args:
-        value: List-like regex pattern value.
-        allow_none: Whether ``None`` should be preserved for partial updates.
+        value: 结构化 source 列表，或旧版 URL 配置列表。
 
     Returns:
-        A validated list of regex pattern strings, or ``None`` when allowed.
+        可持久化的网页源配置列表。
     """
     if value is None:
-        if allow_none:
-            return None
-        return list(DEFAULT_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS)
-    if not isinstance(value, (list, tuple, set)):
-        raise ValueError("markdown cleanup patterns must be a list of regex strings")
+        return []
+    if isinstance(value, str):
+        raw_values = _split_source_config_values(value)
+    elif isinstance(value, (list, tuple, set)):
+        raw_values = list(value)
+    else:
+        raise ValueError("sources must be a list of source configs")
 
-    patterns: list[str] = []
-    for raw_pattern in value:
-        pattern = str(raw_pattern).strip()
-        if not pattern:
+    sources: list[MarketWatchSourceConfig] = []
+    seen_keys: set[tuple[str, tuple[str, ...]]] = set()
+    for raw_value in raw_values:
+        source = parse_market_watch_source_config(raw_value)
+        key = (source.url, tuple(source.content_selectors))
+        if key in seen_keys:
             continue
-        if len(pattern) > MAX_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERN_LENGTH:
-            raise ValueError(
-                f"markdown cleanup patterns must be at most "
-                f"{MAX_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERN_LENGTH} characters"
-            )
-        try:
-            re.compile(pattern)
-        except re.error as exc:
-            raise ValueError(f"invalid markdown cleanup regex: {exc}") from exc
-        patterns.append(pattern)
+        sources.append(source)
+        seen_keys.add(key)
 
-    if len(patterns) > MAX_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS:
-        raise ValueError(f"at most {MAX_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS} markdown cleanup patterns are allowed")
-    if not patterns:
-        return list(DEFAULT_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS)
-    return patterns
-
-
-def clean_market_watch_markdown(markdown: str, patterns: list[str] | None = None) -> str:
-    """
-    Apply configured cleanup regexes to rendered market-watch Markdown.
-
-    Args:
-        markdown: Rendered Markdown returned by the browser tool.
-        patterns: Regex patterns to apply in order. Callers should pass the configured setting value.
-
-    Returns:
-        Markdown after configured cleanup substitutions.
-    """
-    cleaned = markdown
-    for pattern in patterns or []:
-        cleaned = re.compile(pattern).sub("", cleaned)
-    return cleaned
+    if len(sources) > MAX_MARKET_WATCH_SOURCE_URLS:
+        raise ValueError(f"at most {MAX_MARKET_WATCH_SOURCE_URLS} sources are allowed")
+    return sources
 
 
 class MarketWatchSettingsResponse(BaseModel):
@@ -280,13 +326,8 @@ class MarketWatchSettingsResponse(BaseModel):
     recent_debate_lookback_hours: int = Field(24, ge=1, le=168)
     cooldown_minutes: int = Field(60, ge=0, le=1440)
     cooldown_break_confidence: float = Field(0.85, ge=0, le=1)
-    data_source_urls: list[str] = Field(default_factory=list, max_length=MAX_MARKET_WATCH_SOURCE_URLS)
-    news_source_urls: list[str] = Field(default_factory=list, max_length=MAX_MARKET_WATCH_SOURCE_URLS)
-    clean_source_markdown: bool = True
-    markdown_cleanup_patterns: list[str] = Field(
-        default_factory=lambda: list(DEFAULT_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS),
-        max_length=MAX_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS,
-    )
+    data_sources: list[MarketWatchSourceConfig] = Field(default_factory=list, max_length=MAX_MARKET_WATCH_SOURCE_URLS)
+    news_sources: list[MarketWatchSourceConfig] = Field(default_factory=list, max_length=MAX_MARKET_WATCH_SOURCE_URLS)
     trading_frequency: str = Field(DEFAULT_MARKET_WATCH_TRADING_FREQUENCY, min_length=1, max_length=50)
     trading_strategy: str = Field(DEFAULT_MARKET_WATCH_TRADING_STRATEGY, min_length=1, max_length=50)
     created_at: datetime | None = None
@@ -300,19 +341,10 @@ class MarketWatchSettingsResponse(BaseModel):
             raise ValueError("scan_start_time must be earlier than scan_end_time")
         return self
 
-    @field_validator("data_source_urls", "news_source_urls", mode="before")
+    @field_validator("data_sources", "news_sources", mode="before")
     @classmethod
-    def _normalize_source_urls(cls, value: Any) -> list[str]:
-        return normalize_market_watch_source_urls(value)
-
-    @field_validator("markdown_cleanup_patterns", mode="before")
-    @classmethod
-    def _normalize_markdown_cleanup_patterns(cls, value: Any) -> list[str]:
-        patterns = normalize_markdown_cleanup_patterns(value)
-        if patterns is None:
-            return []
-        return patterns
-
+    def _normalize_sources(cls, value: Any) -> list[MarketWatchSourceConfig]:
+        return normalize_market_watch_sources(value)
 
 class MarketWatchSettingsUpdate(BaseModel):
     """Partial update payload for market watch settings."""
@@ -327,10 +359,8 @@ class MarketWatchSettingsUpdate(BaseModel):
     recent_debate_lookback_hours: int | None = Field(None, ge=1, le=168)
     cooldown_minutes: int | None = Field(None, ge=0, le=1440)
     cooldown_break_confidence: float | None = Field(None, ge=0, le=1)
-    data_source_urls: list[str] | None = Field(None, max_length=MAX_MARKET_WATCH_SOURCE_URLS)
-    news_source_urls: list[str] | None = Field(None, max_length=MAX_MARKET_WATCH_SOURCE_URLS)
-    clean_source_markdown: bool | None = None
-    markdown_cleanup_patterns: list[str] | None = Field(None, max_length=MAX_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS)
+    data_sources: list[MarketWatchSourceConfig] | None = Field(None, max_length=MAX_MARKET_WATCH_SOURCE_URLS)
+    news_sources: list[MarketWatchSourceConfig] | None = Field(None, max_length=MAX_MARKET_WATCH_SOURCE_URLS)
     trading_frequency: str | None = Field(None, min_length=1, max_length=50)
     trading_strategy: str | None = Field(None, min_length=1, max_length=50)
 
@@ -342,21 +372,15 @@ class MarketWatchSettingsUpdate(BaseModel):
             raise ValueError("scan_start_time must be earlier than scan_end_time")
         return self
 
-    @field_validator("data_source_urls", "news_source_urls", mode="before")
+    @field_validator("data_sources", "news_sources", mode="before")
     @classmethod
-    def _normalize_source_urls(cls, value: Any) -> list[str] | None:
+    def _normalize_sources(cls, value: Any) -> list[MarketWatchSourceConfig] | None:
         if value is None:
             return None
-        normalized = normalize_market_watch_source_urls(value)
+        normalized = normalize_market_watch_sources(value)
         if not normalized:
             raise ValueError("source URLs must include at least one URL")
         return normalized
-
-    @field_validator("markdown_cleanup_patterns", mode="before")
-    @classmethod
-    def _normalize_markdown_cleanup_patterns(cls, value: Any) -> list[str] | None:
-        return normalize_markdown_cleanup_patterns(value, allow_none=True)
-
 
 class MarketWatchMarkdownDocument(BaseModel):
     """Rendered Markdown document fetched from a configured market-watch source URL."""
@@ -376,6 +400,7 @@ class MarketWatchSourcePreviewRequest(BaseModel):
     """单次网页源抓取预览请求。"""
 
     source_config: str = Field(min_length=1, max_length=2000)
+    cleanup_patterns: list[str] = Field(default_factory=list, max_length=MAX_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS)
 
     @field_validator("source_config", mode="before")
     @classmethod
@@ -393,6 +418,11 @@ class MarketWatchSourcePreviewRequest(BaseModel):
             return None
         text = str(value).strip()
         return text or None
+
+    @field_validator("cleanup_patterns", mode="before")
+    @classmethod
+    def _normalize_cleanup_patterns(cls, value: Any) -> list[str]:
+        return normalize_market_watch_cleanup_patterns(value)
 
 
 class MarketWatchEventSchema(BaseModel):

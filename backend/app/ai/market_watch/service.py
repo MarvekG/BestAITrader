@@ -23,6 +23,7 @@ from app.ai.market_watch.audit import publish_market_watch_documents_payload
 from app.ai.market_watch.schemas import (
     MarketWatchMarkdownDocument,
     MarketWatchSettingsResponse,
+    MarketWatchSourceConfig,
     MarketWatchSourceType,
     parse_market_watch_time,
     trading_frequency_label,
@@ -70,7 +71,7 @@ def _scan_skip_reason(settings: MarketWatchSettingsResponse, now: datetime) -> s
     end_time = parse_market_watch_time(settings.scan_end_time)
     if current_time < start_time or current_time > end_time:
         return "outside_scan_time_window"
-    if not settings.data_source_urls or not settings.news_source_urls:
+    if not settings.data_sources or not settings.news_sources:
         return "missing_source_urls"
     return None
 
@@ -87,11 +88,8 @@ class SourceDocumentFetcher(Protocol):
 
     def __call__(
         self,
-        urls: list[str],
+        sources: list[str | MarketWatchSourceConfig],
         source_type: MarketWatchSourceType,
-        *,
-        clean_markdown: bool = True,
-        markdown_cleanup_patterns: list[str] | None = None,
     ) -> Awaitable[list[MarketWatchMarkdownDocument]]:
         """Render configured source URLs as Markdown documents."""
 
@@ -190,18 +188,14 @@ async def scan_market_watch(
     items = scan_context["items"]
     data_documents, news_documents = await asyncio.gather(
         _load_source_documents(
-            settings.data_source_urls,
+            settings.data_sources,
             "data",
             source_document_fetcher,
-            clean_markdown=settings.clean_source_markdown,
-            markdown_cleanup_patterns=settings.markdown_cleanup_patterns,
         ),
         _load_source_documents(
-            settings.news_source_urls,
+            settings.news_sources,
             "news",
             source_document_fetcher,
-            clean_markdown=settings.clean_source_markdown,
-            markdown_cleanup_patterns=settings.markdown_cleanup_patterns,
         ),
     )
     await _publish_source_documents(user_id=user_id, documents=data_documents + news_documents)
@@ -448,30 +442,25 @@ def _load_scan_context(user_id: int, settings: Any) -> dict[str, Any]:
 
 
 async def _load_source_documents(
-    urls: list[str],
+    sources: list[str | MarketWatchSourceConfig],
     source_type: MarketWatchSourceType,
     source_document_fetcher: SourceDocumentFetcher | None,
-    *,
-    clean_markdown: bool = True,
-    markdown_cleanup_patterns: list[str] | None = None,
 ) -> list[MarketWatchMarkdownDocument]:
-    if not urls:
+    if not sources:
         return []
 
     fetcher = source_document_fetcher or fetch_market_watch_documents
     try:
         return await fetcher(
-            urls,
+            sources,
             source_type,
-            clean_markdown=clean_markdown,
-            markdown_cleanup_patterns=markdown_cleanup_patterns,
         )
     except Exception as exc:
         logger.exception(
             "Market watch configured source fetch failed",
             extra={
                 "source_type": source_type,
-                "source_count": len(urls),
+                "source_count": len(sources),
                 "error": str(exc),
             },
         )
@@ -488,7 +477,8 @@ async def _load_source_documents(
                 error=f"{type(exc).__name__}: {exc}",
                 captured_at=captured_at,
             )
-            for index, url in enumerate(urls)
+            for index, source in enumerate(sources)
+            for url in [getattr(source, "url", source)]
         ]
 
 
