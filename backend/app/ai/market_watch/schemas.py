@@ -276,7 +276,7 @@ def normalize_market_watch_source_urls(value: Any) -> list[str]:
 
 def normalize_market_watch_sources(value: Any) -> list[MarketWatchSourceConfig]:
     """
-    归一化结构化网页源配置，并按 URL 与 selector 去重。
+    归一化结构化网页源配置，并按 URL 去重。
 
     Args:
         value: 结构化 source 列表，或旧版 URL 配置列表。
@@ -294,14 +294,13 @@ def normalize_market_watch_sources(value: Any) -> list[MarketWatchSourceConfig]:
         raise ValueError("sources must be a list of source configs")
 
     sources: list[MarketWatchSourceConfig] = []
-    seen_keys: set[tuple[str, tuple[str, ...]]] = set()
+    seen_urls: set[str] = set()
     for raw_value in raw_values:
         source = parse_market_watch_source_config(raw_value)
-        key = (source.url, tuple(source.content_selectors))
-        if key in seen_keys:
+        if source.url in seen_urls:
             continue
         sources.append(source)
-        seen_keys.add(key)
+        seen_urls.add(source.url)
 
     if len(sources) > MAX_MARKET_WATCH_SOURCE_URLS:
         raise ValueError(f"at most {MAX_MARKET_WATCH_SOURCE_URLS} sources are allowed")

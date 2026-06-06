@@ -192,7 +192,7 @@ const dedupeSources = (sources: MarketWatchSourceConfig[]) => {
       content_selectors: source.content_selectors ?? [],
       cleanup_patterns: Array.from(new Set((source.cleanup_patterns ?? []).map((item) => item.trim()).filter(Boolean))),
     };
-    const key = `${normalizedSource.url}\n${normalizedSource.content_selectors.join('\n')}`;
+    const key = normalizedSource.url;
     if (!normalizedSource.url || seen.has(key)) {
       return false;
     }
@@ -210,7 +210,7 @@ const formatSourcePreviewConfig = (values: MarketWatchSourcePreviewFormValues) =
 };
 
 const sourceKey = (source: MarketWatchSourceConfig) => {
-  return `${source.url}\n${(source.content_selectors ?? []).join('\n')}`;
+  return source.url;
 };
 
 const sourceFormValuesToSource = (values: MarketWatchSourcePreviewFormValues): MarketWatchSourceConfig => {
@@ -459,9 +459,12 @@ export const MarketWatchPage: React.FC = () => {
       const currentSettings = await marketWatchApi.getSettings();
       const currentValues = currentSettings[fieldName] ?? [];
       const nextSource = sourceFormValuesToSource(values);
-      const withoutCurrent = editingSourceField === fieldName && editingSourceKey
-        ? currentValues.filter((source) => sourceKey(source) !== editingSourceKey)
-        : currentValues;
+      const withoutCurrent = currentValues.filter((source) => {
+        if (source.url === nextSource.url) {
+          return false;
+        }
+        return !(editingSourceField === fieldName && editingSourceKey && sourceKey(source) === editingSourceKey);
+      });
       const nextPayload = {
         [fieldName]: dedupeSources([...withoutCurrent, nextSource]),
       };

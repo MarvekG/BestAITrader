@@ -75,6 +75,19 @@ def test_market_watch_settings_keeps_cleanup_patterns_per_source() -> None:
     assert source.cleanup_patterns == [r"(?m)^noise$"]
 
 
+def test_market_watch_settings_deduplicates_sources_by_url() -> None:
+    update = MarketWatchSettingsUpdate(
+        data_sources=[
+            "https://example.com/quotes @@ main",
+            {"url": "https://example.com/quotes", "content_selectors": ["article"], "cleanup_patterns": ["debug"]},
+        ]
+    )
+
+    assert [source.model_dump() for source in update.data_sources or []] == [
+        {"url": "https://example.com/quotes", "content_selectors": ["main"], "cleanup_patterns": []}
+    ]
+
+
 def test_merge_market_watch_settings_treats_explicit_none_as_omitted() -> None:
     existing = MarketWatchSettingsResponse(
         user_id=7,
