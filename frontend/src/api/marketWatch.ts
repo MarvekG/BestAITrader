@@ -7,6 +7,12 @@ export type WatchAiDecisionUrgency = 'low' | 'medium' | 'high';
 export type WatchAiTradingFrequency = 'day' | 'swing' | 'position';
 export type WatchAiTradingStrategy = 'value' | 'trend';
 
+export interface MarketWatchSourceConfig {
+  url: string;
+  content_selectors: string[];
+  cleanup_patterns: string[];
+}
+
 export interface MarketWatchSettings {
   id?: number | null;
   user_id: number;
@@ -20,10 +26,8 @@ export interface MarketWatchSettings {
   recent_debate_lookback_hours: number;
   cooldown_minutes: number;
   cooldown_break_confidence: number;
-  data_source_urls: string[];
-  news_source_urls: string[];
-  clean_source_markdown: boolean;
-  markdown_cleanup_patterns: string[];
+  data_sources: MarketWatchSourceConfig[];
+  news_sources: MarketWatchSourceConfig[];
   trading_frequency: string;
   trading_strategy: string;
   created_at?: string | null;
@@ -48,6 +52,7 @@ export interface MarketWatchMarkdownDocument {
 
 export interface MarketWatchSourcePreviewRequest {
   source_config: string;
+  cleanup_patterns: string[];
 }
 
 export interface WatchAiDebateParameters {

@@ -1,11 +1,7 @@
 from datetime import datetime
 import uuid
 
-from app.ai.market_watch.schemas import (
-    DEFAULT_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS,
-    DEFAULT_MARKET_WATCH_SCAN_INTERVAL_SECONDS,
-    MarketWatchMarkdownDocument,
-)
+from app.ai.market_watch.schemas import DEFAULT_MARKET_WATCH_SCAN_INTERVAL_SECONDS, MarketWatchMarkdownDocument
 from app.crud.user import create_user
 from app.models.market_watch import MarketWatchEvent
 from app.models.system_setting import SystemSetting
@@ -41,10 +37,8 @@ def test_market_watch_settings_returns_defaults(client, auth_headers) -> None:
     assert payload["scan_end_time"] == "15:00"
     assert payload["recent_debate_dedup_enabled"] is True
     assert payload["recent_debate_lookback_hours"] == 24
-    assert payload["data_source_urls"] == []
-    assert payload["news_source_urls"] == []
-    assert payload["clean_source_markdown"] is True
-    assert payload["markdown_cleanup_patterns"] == DEFAULT_MARKET_WATCH_MARKDOWN_CLEANUP_PATTERNS
+    assert payload["data_sources"] == []
+    assert payload["news_sources"] == []
     assert payload["trading_frequency"] == "中长线持有 (Position Trading)"
     assert payload["trading_strategy"] == "价值投资 (Value Investing)"
 
@@ -62,12 +56,10 @@ def test_market_watch_settings_update_persists_runtime_values(client, auth_heade
             "scan_interval_seconds": 45,
             "scan_start_time": "10:00",
             "scan_end_time": "14:30",
-            "data_source_urls": ["https://example.com/data"],
-            "news_source_urls": ["news.example.com/latest"],
+            "data_sources": [{"url": "https://example.com/data", "cleanup_patterns": [r"(?m)^REMOVE ME$"]}],
+            "news_sources": ["news.example.com/latest"],
             "recent_debate_dedup_enabled": False,
             "recent_debate_lookback_hours": 36,
-            "clean_source_markdown": False,
-            "markdown_cleanup_patterns": [r"(?m)^REMOVE ME$"],
             "trading_frequency": "日内交易 (Day Trading)",
             "trading_strategy": "趋势追踪 (Trend Following)",
         },
@@ -80,12 +72,14 @@ def test_market_watch_settings_update_persists_runtime_values(client, auth_heade
     assert payload["scan_interval_seconds"] == 45
     assert payload["scan_start_time"] == "10:00"
     assert payload["scan_end_time"] == "14:30"
-    assert payload["data_source_urls"] == ["https://example.com/data"]
-    assert payload["news_source_urls"] == ["https://news.example.com/latest"]
+    assert payload["data_sources"] == [
+        {"url": "https://example.com/data", "content_selectors": [], "cleanup_patterns": [r"(?m)^REMOVE ME$"]}
+    ]
+    assert payload["news_sources"] == [
+        {"url": "https://news.example.com/latest", "content_selectors": [], "cleanup_patterns": []}
+    ]
     assert payload["recent_debate_dedup_enabled"] is False
     assert payload["recent_debate_lookback_hours"] == 36
-    assert payload["clean_source_markdown"] is False
-    assert payload["markdown_cleanup_patterns"] == [r"(?m)^REMOVE ME$"]
     assert payload["trading_frequency"] == "日内交易 (Day Trading)"
     assert payload["trading_strategy"] == "趋势追踪 (Trend Following)"
     setting = (
@@ -94,10 +88,11 @@ def test_market_watch_settings_update_persists_runtime_values(client, auth_heade
         .one()
     )
     assert setting.value["scan_interval_seconds"] == 45
-    assert setting.value["news_source_urls"] == ["https://news.example.com/latest"]
+    assert setting.value["news_sources"] == [
+        {"url": "https://news.example.com/latest", "content_selectors": [], "cleanup_patterns": []}
+    ]
     assert setting.value["recent_debate_dedup_enabled"] is False
     assert setting.value["recent_debate_lookback_hours"] == 36
-    assert setting.value["markdown_cleanup_patterns"] == [r"(?m)^REMOVE ME$"]
     assert refresh_calls == ["refresh"]
 
 
@@ -110,8 +105,8 @@ def test_market_watch_settings_are_isolated_by_user(client, db_session) -> None:
         headers=owner_headers,
         json={
             "scan_interval_seconds": 45,
-            "data_source_urls": ["https://example.com/data"],
-            "news_source_urls": ["https://example.com/news"],
+            "data_sources": ["https://example.com/data"],
+            "news_sources": ["https://example.com/news"],
         },
     )
     other_response = client.get("/api/v1/market-watch/settings", headers=other_headers)
@@ -123,15 +118,17 @@ def test_market_watch_settings_are_isolated_by_user(client, db_session) -> None:
     assert other_response.json()["scan_interval_seconds"] == DEFAULT_MARKET_WATCH_SCAN_INTERVAL_SECONDS
 
 
-def test_market_watch_settings_update_requires_data_and_news_source_urls(client, auth_headers) -> None:
+def test_market_watch_settings_update_allows_sources_to_be_configured_later(client, auth_headers) -> None:
     response = client.put(
         "/api/v1/market-watch/settings",
         headers=auth_headers,
         json={"scan_interval_seconds": 45},
     )
 
-    assert response.status_code == 400
-    assert "data_source_urls and news_source_urls are required" in response.json()["detail"]
+    assert response.status_code == 200
+    assert response.json()["scan_interval_seconds"] == 45
+    assert response.json()["data_sources"] == []
+    assert response.json()["news_sources"] == []
 
 
 def test_market_watch_scan_returns_skeleton_response(client, auth_headers) -> None:
@@ -149,11 +146,9 @@ def test_market_watch_source_preview_reuses_source_fetcher(client, auth_headers,
 
     captured = {}
 
-    async def fake_fetch_market_watch_documents(urls, source_type, *, clean_markdown, markdown_cleanup_patterns):
-        captured["urls"] = urls
+    async def fake_fetch_market_watch_documents(sources, source_type):
+        captured["sources"] = sources
         captured["source_type"] = source_type
-        captured["clean_markdown"] = clean_markdown
-        captured["markdown_cleanup_patterns"] = markdown_cleanup_patterns
         return [
             MarketWatchMarkdownDocument(
                 id="data:0:preview",
@@ -172,13 +167,14 @@ def test_market_watch_source_preview_reuses_source_fetcher(client, auth_headers,
     response = client.post(
         "/api/v1/market-watch/source-preview",
         headers=auth_headers,
-        json={"source_config": "https://example.com/page @@ main @@ .news"},
+        json={"source_config": "https://example.com/page @@ main @@ .news", "cleanup_patterns": [r"(?m)^REMOVE ME$"]},
     )
 
     assert response.status_code == 200
-    assert captured["urls"] == ["https://example.com/page @@ main @@ .news"]
+    assert captured["sources"][0].url == "https://example.com/page"
+    assert captured["sources"][0].content_selectors == ["main", ".news"]
+    assert captured["sources"][0].cleanup_patterns == [r"(?m)^REMOVE ME$"]
     assert captured["source_type"] == "data"
-    assert captured["clean_markdown"] is True
     assert response.json()["markdown"] == "matched data"
 
 

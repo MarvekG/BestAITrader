@@ -47,12 +47,6 @@ def merge_market_watch_settings(
     return MarketWatchSettingsResponse(**data)
 
 
-def _ensure_required_source_urls(settings: MarketWatchSettingsResponse) -> None:
-    if settings.data_source_urls and settings.news_source_urls:
-        return
-    raise ValueError("data_source_urls and news_source_urls are required")
-
-
 def _materialize_market_watch_settings(
     user_id: int,
     row: SystemSetting | None,
@@ -60,6 +54,12 @@ def _materialize_market_watch_settings(
     data = MarketWatchSettingsResponse(user_id=user_id).model_dump()
     if row is not None and isinstance(row.value, dict):
         data.update(row.value)
+        if "data_sources" not in row.value and row.value.get("data_source_urls"):
+            data["data_sources"] = row.value["data_source_urls"]
+        if "news_sources" not in row.value and row.value.get("news_source_urls"):
+            data["news_sources"] = row.value["news_source_urls"]
+        data.pop("data_source_urls", None)
+        data.pop("news_source_urls", None)
         data["created_at"] = row.created_at
         data["updated_at"] = row.updated_at
     data["user_id"] = user_id
@@ -99,7 +99,6 @@ def upsert_market_watch_settings(
         existing_row = system_setting.get_by_key(db, market_watch_settings_key(user_id), user_id=user_id)
         existing = _materialize_market_watch_settings(user_id, existing_row)
         merged = merge_market_watch_settings(existing, update)
-        _ensure_required_source_urls(merged)
         value = merged.model_dump(mode="json", exclude={"created_at", "updated_at"})
         row = system_setting.set_value(
             db,
