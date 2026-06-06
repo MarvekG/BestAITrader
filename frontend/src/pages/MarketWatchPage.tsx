@@ -417,6 +417,32 @@ export const MarketWatchPage: React.FC = () => {
     }
   };
 
+  const copySourceEditorValue = async (fieldName: keyof MarketWatchSourcePreviewFormValues) => {
+    const value = sourcePreviewForm.getFieldValue(fieldName);
+    const text = Array.isArray(value) ? value.map((item) => item.trim()).filter(Boolean).join('\n') : String(value ?? '').trim();
+
+    if (!text) {
+      message.warning(t('market_watch.copy_empty'));
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(text);
+      message.success(t('market_watch.copy_success'));
+    } catch (error) {
+      message.error(formatErrorMessage(error) || t('market_watch.copy_failed'));
+    }
+  };
+
+  const sourceEditorLabel = (label: string, fieldName: keyof MarketWatchSourcePreviewFormValues) => (
+    <Space size={8}>
+      <span>{label}</span>
+      <Button size="small" type="link" onClick={() => void copySourceEditorValue(fieldName)}>
+        {t('common.copy')}
+      </Button>
+    </Space>
+  );
+
   const loadSourceIntoForm = (fieldName: MarketWatchSourceField, source: MarketWatchSourceConfig) => {
     sourcePreviewForm.setFieldsValue({
       source_url: source.url,
@@ -864,7 +890,7 @@ export const MarketWatchPage: React.FC = () => {
 
       <Drawer
         title={t('market_watch.source_config_title')}
-        width="min(960px, 92vw)"
+        width="min(1200px, 96vw)"
         open={sourcePreviewOpen}
         onClose={() => setSourcePreviewOpen(false)}
         styles={{ body: sourceConfigDrawerBodyStyle }}
@@ -914,7 +940,6 @@ export const MarketWatchPage: React.FC = () => {
                       <List.Item.Meta
                         title={<Text style={sourceDocumentUrlStyle}>{source.url}</Text>}
                       />
-                      <Tag>{t('market_watch.source_config_cleanup_count', { count: source.cleanup_patterns?.length ?? 0 })}</Tag>
                     </List.Item>
                   )}
                 />
@@ -943,7 +968,6 @@ export const MarketWatchPage: React.FC = () => {
                       <List.Item.Meta
                         title={<Text style={sourceDocumentUrlStyle}>{source.url}</Text>}
                       />
-                      <Tag>{t('market_watch.source_config_cleanup_count', { count: source.cleanup_patterns?.length ?? 0 })}</Tag>
                     </List.Item>
                   )}
                 />
@@ -954,14 +978,14 @@ export const MarketWatchPage: React.FC = () => {
         <Form form={sourcePreviewForm} layout="vertical">
           <Form.Item
             name="source_url"
-            label={t('market_watch.source_url')}
+            label={sourceEditorLabel(t('market_watch.source_url'), 'source_url')}
             rules={[{ required: true, message: t('market_watch.validation.source_url_required') }]}
           >
             <Input placeholder={t('market_watch.placeholders.source_url')} />
           </Form.Item>
           <Form.Item
             name="content_selectors"
-            label={t('market_watch.source_selectors')}
+            label={sourceEditorLabel(t('market_watch.source_selectors'), 'content_selectors')}
             tooltip={t('market_watch.help.source_selectors')}
           >
             <Select
@@ -973,7 +997,7 @@ export const MarketWatchPage: React.FC = () => {
           </Form.Item>
           <Form.Item
             name="cleanup_patterns"
-            label={t('market_watch.source_cleanup_patterns')}
+            label={sourceEditorLabel(t('market_watch.source_cleanup_patterns'), 'cleanup_patterns')}
             tooltip={t('market_watch.help.source_cleanup_patterns')}
           >
             <Select
