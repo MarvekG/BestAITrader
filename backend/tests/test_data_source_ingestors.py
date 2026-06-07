@@ -63,8 +63,8 @@ class TestIngestorRegistration:
 
     def test_get_ingestor(self):
         """测试获取采集器"""
-        akshare_ingestor = ingestor_manager.get_ingestor('akshare')
-        assert akshare_ingestor is None, "akshare 采集器已移除，不应被注册"
+        removed_ingestor = ingestor_manager.get_ingestor('removed_source')
+        assert removed_ingestor is None, "已移除的数据源不应被注册"
 
         tushare_ingestor = ingestor_manager.get_ingestor('tushare')
         assert tushare_ingestor is not None, "无法获取 tushare 采集器"
@@ -410,7 +410,7 @@ class TestFailoverMechanism:
     """测试灾备切换机制"""
 
     @pytest.mark.asyncio
-    async def test_failover_skips_removed_default_source(
+    async def test_failover_skips_unregistered_default_source(
         self, test_stock_code, test_date_range
     ):
         """测试默认源不可用时仍可使用 tushare"""
@@ -419,7 +419,7 @@ class TestFailoverMechanism:
         tushare_ingestor = ingestor_manager.get_ingestor('tushare')
 
         with patch('app.data.ingestors.manager.settings.ENABLE_DATA_SOURCE_FAILOVER', True):
-            with patch.object(ingestor_manager, 'default_source', 'akshare'):
+            with patch.object(ingestor_manager, 'default_source', 'removed_source'):
                 with patch.object(settings, 'TUSHARE_TOKEN', 'test-token'):
                     with patch.object(
                         tushare_ingestor,
@@ -434,7 +434,7 @@ class TestFailoverMechanism:
                         )
 
                         mock_tushare.assert_called_once()
-                        assert result is True, "tushare 应该在 akshare 移除后可用"
+                        assert result is True, "tushare 应该在默认源不可用时可用"
 
     @pytest.mark.asyncio
     async def test_failover_all_sources_failed(

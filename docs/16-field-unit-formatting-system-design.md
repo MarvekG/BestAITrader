@@ -33,7 +33,7 @@
 - 源数据插件负责原始字段语义和字段映射；必要的源数据尺度归一化在对应采集函数中显式处理。
 - 标准字段单位系统负责 `标准表名 + 标准字段名 + 标准数值` 到 `带单位展示值` 的转换。
 - 字段单位补齐只发生在 LLM context 边界，不发生在落库前，也不发生在交易和风控计算链路中。
-- 单位配置使用标准字段名，不使用 Tushare、Akshare 等原始字段名。
+- 单位配置使用标准字段名，不使用 Tushare 原始字段名。
 - 单位后缀必须使用 `units.*` i18n key，不硬编码中文或英文单位。
 - 对不存在单位配置的字段保持原值，不做猜测。
 - 对源字段同名但语义不同的情况，必须在插件映射层解决。
@@ -356,13 +356,13 @@ LLM context: 主力净流入 = -14843.47万元
 - Tushare `gross_margin` 映射到 `gross_profit`。
 - Tushare `grossprofit_margin` 映射到 `gross_margin`。
 - Tushare 资金流金额字段按标准口径归一化。
-- Akshare/Tushare 同一标准字段最终落库口径一致。
+- Tushare 源字段映射到标准字段后，单位格式化只消费标准字段值。
 
 Context 回归测试：
 
-- `financial_indicator_latest` 中 `gross_margin` 展示为百分比。
-- `financial_indicator_latest` 中 `gross_profit` 不展示为百分比。
-- 实时行情价格展示为元，涨跌幅展示为百分比。
+- `financial_indicator_latest` 中仅 Tushare 官方明确百分比单位的增长率字段展示为百分比。
+- `financial_indicator_latest` 中 `gross_margin`、`gross_profit` 等官方未明确单位字段保持原值。
+- 实时行情只对代码可计算的涨跌幅展示百分比；价格等字段无官方单位证据时保持原值。
 - 资金流金额展示为万元时已按配置缩放。
 - PM 持仓上下文金额、股数和仓位比例直接带单位。
 
