@@ -219,6 +219,7 @@ class CapitalFlowSource:
             trade_list.append({
                 "date": str(t.trade_date),
                 "price": t.price,
+                "volume": t.volume,
                 "amount": t.amount,
                 "premium_rate": t.premium_rate,
                 "buyer": t.buyer[:30] if t.buyer else "",

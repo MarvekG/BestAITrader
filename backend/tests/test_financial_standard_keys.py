@@ -21,7 +21,7 @@ from app.models.data_storage import (
     StockInsider,
     StockMargin,
     StockRelease,
-    StockRealtimeMarket,
+    StockValuationHistory,
     StockSEO,
     StockTopHolders,
 )
@@ -87,13 +87,14 @@ def test_format_payload_values_uses_table_unit_config(monkeypatch):
 
     financial = format_payload_values(
         "data.financial_indicator",
-        {"gross_margin": 27.4158, "gross_profit": 11779497981},
+        {"net_profit_dedt_yoy": -0.27, "gross_margin": 27.4158, "gross_profit": 11779497981},
     )
     position = format_payload_values("portfolio.position", {"current_position": 0.19})
     unknown = format_payload_values("unknown.table", {"unknown_field": 8.5})
 
-    assert financial["gross_margin"] == "27.42%"
-    assert financial["gross_profit"] == "11779497981元"
+    assert financial["net_profit_dedt_yoy"] == "-0.27%"
+    assert financial["gross_margin"] == 27.4158
+    assert financial["gross_profit"] == 11779497981
     assert position["current_position"] == "19%"
     assert unknown["unknown_field"] == 8.5
 
@@ -114,11 +115,11 @@ def test_format_payload_values_recursively_uses_table_unit_config(monkeypatch):
 
     result = format_payload_values("data.financial_indicator", payload)
 
-    assert result["data"]["gross_margin"] == "27.42%"
-    assert result["data"]["q_gsprofit_margin"] == "27.42%"
-    assert result["data"]["gross_profit"] == "11779497981元"
+    assert result["data"]["gross_margin"] == 27.4158
+    assert result["data"]["q_gsprofit_margin"] == 27.4158
+    assert result["data"]["gross_profit"] == 11779497981
     assert result["data"]["nested"]["net_profit_dedt_yoy"] == "-0.27%"
-    assert result["data"]["items"][0]["roe"] == "4.08%"
+    assert result["data"]["items"][0]["roe"] == 4.0826
     assert result["meta"]["report_date"] == "2026-03-31"
 
 
@@ -195,10 +196,10 @@ def test_fundamental_financial_calculation_uses_standard_keys_for_600519():
     assert result["report_date"] == "2025-12-31"
     assert result["total_revenue_yoy"] == "12.5%"
     assert result["net_profit_yoy"] == "18.8%"
-    assert result["roe"] == "31.2%"
-    assert result["gross_margin"] == "91.5%"
-    assert result["net_margin"] == "52.4%"
-    assert result["debt_to_asset"] == "18.6%"
+    assert result["roe"] == 31.2
+    assert result["gross_margin"] == 91.5
+    assert result["net_margin"] == 52.4
+    assert result["debt_to_asset"] == 18.6
     assert result["eps"] == 67.8
 
 
@@ -234,7 +235,7 @@ def test_fundamental_financials_falls_back_to_cogs_ratio_for_gross_margin():
     builder = FundamentalReader()
     result = builder.financials(FakeSession([record]), "600519.SH")
 
-    assert result["gross_margin"] == "91.29%"
+    assert result["gross_margin"] == 91.29
 
 
 def test_fundamental_financials_falls_back_to_operating_cost_for_gross_margin():
@@ -250,7 +251,7 @@ def test_fundamental_financials_falls_back_to_operating_cost_for_gross_margin():
     builder = FundamentalReader()
     result = builder.financials(FakeSession([record]), "600519.SH")
 
-    assert result["gross_margin"] == "68%"
+    assert result["gross_margin"] == 68
 
 
 def test_fundamental_financials_keeps_small_percentage_as_reported():
@@ -270,7 +271,7 @@ def test_financial_history_and_dupont_use_standard_keys_for_601988():
     latest_record = SimpleNamespace(
         report_date=date(2025, 12, 31),
         announcement_date=date(2026, 1, 10),
-        data_source="akshare",
+        data_source="tushare",
         data={
             "total_revenue": 2000.0,
             "net_profit": 500.0,
@@ -294,7 +295,7 @@ def test_financial_history_and_dupont_use_standard_keys_for_601988():
     prev_record = SimpleNamespace(
         report_date=date(2025, 9, 30),
         announcement_date=date(2025, 10, 30),
-        data_source="akshare",
+        data_source="tushare",
         data={
             "total_revenue": 1900.0,
             "net_profit": 460.0,
@@ -358,9 +359,9 @@ def test_top_holders_use_latest_period_only_and_mark_staleness():
 
     assert result["overview"]["report_date"] == str(latest_date)
     assert result["overview"]["reference_status"] == "stale"
-    assert result["overview"]["age_days"] >= 220
+    assert result["overview"]["age_days"].endswith("天")
     assert result["overview"]["institutional_count"] == 1
-    assert result["concentration"]["total_hold_ratio_pct"] == 13.3
+    assert result["concentration"]["total_hold_ratio_pct"] == "13.3%"
     assert result["change"]["increasing_holder_count"] == 1
     assert result["change"]["decreasing_holder_count"] == 1
     assert len(result["holders_latest"]) == 2
@@ -396,10 +397,11 @@ def test_forecast_returns_structured_latest_guidance():
     assert result["overview"]["window"] == "latest"
     assert result["overview"]["forecast_type"] == "预增"
     assert result["overview"]["reference_status"] == "active"
-    assert result["profit_guidance_latest"]["unit"] == "10k_cny"
-    assert result["profit_guidance_latest"]["midpoint"] == 135000.0
+    assert "unit" not in result["profit_guidance_latest"]
+    assert result["profit_guidance_latest"]["midpoint"] == "135000万元"
     assert result["growth_guidance_latest"]["window"] == "latest"
-    assert result["growth_guidance_latest"]["midpoint_pct"] == 32.5
+    assert "unit" not in result["growth_guidance_latest"]
+    assert result["growth_guidance_latest"]["midpoint_pct"] == "32.5%"
     assert result["growth_guidance_latest"]["direction_label"] == "positive"
     assert result["signal"]["momentum_label"] == "positive"
     assert result["risk_flags"] == []
@@ -412,7 +414,7 @@ def test_northbound_flow_returns_structured_foreign_sentiment():
         date=date.today() - timedelta(days=20),
         hold_shares=12_500_000.0,
         hold_value=18_750_000_000.0,
-        hold_ratio=0.0185,
+        hold_ratio=1.85,
         close_price=1500.0,
         change_percent=1.2,
         net_buy_volume=350_000.0,
@@ -424,7 +426,7 @@ def test_northbound_flow_returns_structured_foreign_sentiment():
         date=date.today() - timedelta(days=120),
         hold_shares=11_800_000.0,
         hold_value=17_900_000_000.0,
-        hold_ratio=0.0162,
+        hold_ratio=1.62,
         close_price=1480.0,
         change_percent=-0.5,
         net_buy_volume=-50_000.0,
@@ -436,7 +438,7 @@ def test_northbound_flow_returns_structured_foreign_sentiment():
         date=date.today() - timedelta(days=400),
         hold_shares=10_400_000.0,
         hold_value=15_300_000_000.0,
-        hold_ratio=0.0135,
+        hold_ratio=1.35,
         close_price=1350.0,
         change_percent=0.4,
         net_buy_volume=80_000.0,
@@ -455,7 +457,7 @@ def test_northbound_flow_returns_structured_foreign_sentiment():
     assert result["overview"]["reference_status"] == "active"
     assert result["latest_position"]["hold_ratio_pct"] == "1.85%"
     assert result["quarter_change"]["hold_ratio_change_pct"] == "0.23%"
-    assert result["quarter_change"]["net_buy_amount_10k_cny"] == "6800万元"
+    assert result["quarter_change"]["net_buy_amount_10k_cny"] == 6800.0
     assert result["signal"]["flow_label"] == "accumulating"
     assert result["signal"]["foreign_sentiment_label"] == "positive"
     assert result["recent_records"][0]["date"] == str(latest.date)
@@ -467,7 +469,7 @@ def test_capital_flow_northbound_formats_decimal_holding_ratio_as_percent():
         stock_code="600519.SH",
         date=date.today() - timedelta(days=20),
         hold_shares=12_500_000.0,
-        hold_ratio=0.0438,
+        hold_ratio=4.38,
         net_buy_amount=68_000_000.0,
         net_buy_volume=350_000.0,
     )
@@ -475,7 +477,7 @@ def test_capital_flow_northbound_formats_decimal_holding_ratio_as_percent():
         stock_code="600519.SH",
         date=date.today() - timedelta(days=120),
         hold_shares=12_000_000.0,
-        hold_ratio=0.0428,
+        hold_ratio=4.28,
         net_buy_amount=8_000_000.0,
         net_buy_volume=50_000.0,
     )
@@ -546,7 +548,7 @@ def test_dragon_tiger_activity_returns_structured_trading_signal():
     assert result["overview"]["event_count"] == 3
     assert result["overview"]["unique_stock_count"] == 3
     assert result["overview"]["unique_trade_date_count"] == 3
-    assert result["overview"]["cumulative_net_buy_10k_cny"] == "5400万元"
+    assert result["overview"]["cumulative_net_buy_10k_cny"] == 5400.0
     assert result["signal"]["activity_label"] == "sporadic"
     assert result["signal"]["market_sentiment_label"] == "market_buying_bias"
     assert result["all_records"][0]["stock_code"] == "600519.SH"
@@ -575,11 +577,12 @@ def test_block_trade_values_append_units_without_extra_unit_fields():
         "000651.SZ",
     )
 
-    assert result["total_amount"] == "4455.6万元"
-    assert result["avg_premium"] == "-3.25%"
-    assert result["recent_trades"][0]["price"] == "37.13元"
-    assert result["recent_trades"][0]["amount"] == "4455.6万元"
-    assert result["recent_trades"][0]["premium_rate"] == "-3.25%"
+    assert result["total_amount"] == 4455.6
+    assert result["avg_premium"] == -3.25
+    assert result["recent_trades"][0]["price"] == 37.13
+    assert result["recent_trades"][0]["volume"] == "120万股"
+    assert result["recent_trades"][0]["amount"] == 4455.6
+    assert result["recent_trades"][0]["premium_rate"] == -3.25
     assert "amount_unit" not in result["recent_trades"][0]
 
 
@@ -612,7 +615,7 @@ def test_stock_money_flow_converts_yuan_amounts_to_10k_cny_unit():
     assert trend[0]["net_inflow_main"] == "1200万元"
 
 
-def test_fund_holding_sorts_top_funds_and_labels_units():
+def test_fund_holding_sorts_top_funds_and_keeps_tushare_unsupported_units_raw():
     latest_date = date(2025, 12, 31)
     prev_date = date(2025, 9, 30)
     records = [
@@ -834,8 +837,8 @@ def test_lockup_release_returns_structured_upcoming_pressure():
     assert result["overview"]["total_upcoming_ratio_to_float_pct"] == 5.2
     assert result["overview"]["total_upcoming_market_value_10k_cny"] == 160000.0
     assert result["signal"]["pressure_label"] == "elevated"
-    assert result["upcoming_releases"][0]["days_until_release"] == 15
-    assert result["recent_releases"][0]["days_since_release"] == 20
+    assert result["upcoming_releases"][0]["days_until_release"] == "15天"
+    assert result["recent_releases"][0]["days_since_release"] == "20天"
     assert "Near-term lockup release may pressure float supply" in result["risk_flags"]
     assert "Upcoming lockup ratio is meaningful relative to float" in result["risk_flags"]
 
@@ -908,25 +911,25 @@ def test_margin_analysis_returns_structured_leverage_signal():
         SimpleNamespace(stock_code="600519.SH", trade_date=date(2026, 3, 17), margin_balance=108_000_000.0, short_balance=4_800_000.0, margin_buy_amount=10_000_000.0, margin_repay_amount=9_000_000.0),
         SimpleNamespace(stock_code="600519.SH", trade_date=date(2026, 3, 14), margin_balance=100_000_000.0, short_balance=5_000_000.0, margin_buy_amount=9_000_000.0, margin_repay_amount=8_500_000.0),
     ]
-    realtime = SimpleNamespace(stock_code="600519.SH", total_market_cap=100.0)
+    valuation = SimpleNamespace(stock_code="600519.SH", data_date=date(2026, 3, 20), total_market_value=1_000_000.0)
 
     builder = FundamentalReader()
     result = builder.margin_analysis(
-        ModelMapSession({StockMargin: records, StockRealtimeMarket: [realtime]}),
+        ModelMapSession({StockMargin: records, StockValuationHistory: [valuation]}),
         "600519.SH",
     )
 
     assert result["overview"]["trade_date"] == "2026-03-20"
-    assert result["overview"]["market_cap_cny"] == 1000000.0
-    assert result["overview"]["margin_balance_cny"] == 120000000.0
-    assert result["overview"]["short_balance_cny"] == 4000000.0
-    assert result["overview"]["margin_ratio_to_market_cap_pct"] == 12000.0
+    assert result["overview"]["market_cap_cny"] == "1000000元"
+    assert result["overview"]["margin_balance_cny"] == "120000000元"
+    assert result["overview"]["short_balance_cny"] == "4000000元"
+    assert result["overview"]["margin_ratio_to_market_cap_pct"] == "12000%"
     assert result["signal"]["margin_short_ratio"] == 30.0
     assert result["signal"]["leverage_label"] == "high_leverage"
     assert result["signal"]["positioning_label"] == "long_crowded"
     assert result["signal"]["flow_label"] == "rising_fast"
     assert result["trend"]["window"] == "5tradingday"
-    assert result["trend"]["margin_balance_change_5d_pct"] == 20.0
+    assert result["trend"]["margin_balance_change_5d_pct"] == "20%"
     assert "Margin balance is high relative to market cap" in result["risk_flags"]
     assert "Margin positioning is skewed heavily to the long side" in result["risk_flags"]
 
@@ -990,16 +993,16 @@ def test_financial_trend_uses_gross_margin_fallbacks():
     assert result["overview"]["quarters_analyzed"] == 8
     assert result["overview"]["recent_quarters_used"] == 8
     assert result["profitability_trend"]["direction"] == "improving"
-    assert result["profitability_trend"]["series"]["gross_margin"][0]["gross_margin"] == "92%"
-    assert result["profitability_trend"]["series"]["gross_margin"][1]["gross_margin"] == "90%"
-    assert result["profitability_trend"]["series"]["gross_margin"][2]["gross_margin"] == "85%"
-    assert result["profitability_trend"]["series"]["gross_margin"][3]["gross_margin"] == "80%"
-    assert result["profitability_trend"]["series"]["gross_margin"][7]["gross_margin"] == "72%"
+    assert result["profitability_trend"]["series"]["gross_margin"][0]["gross_margin"] == 92.0
+    assert result["profitability_trend"]["series"]["gross_margin"][1]["gross_margin"] == 90.0
+    assert result["profitability_trend"]["series"]["gross_margin"][2]["gross_margin"] == 85.0
+    assert result["profitability_trend"]["series"]["gross_margin"][3]["gross_margin"] == 80.0
+    assert result["profitability_trend"]["series"]["gross_margin"][7]["gross_margin"] == 72.0
     assert result["growth_trend"]["direction"] == "improving"
     assert result["leverage_trend"]["direction"] == "improving"
-    assert result["recent_quarters"][0]["roe"] == "20%"
-    assert result["recent_quarters"][0]["gross_margin"] == "92%"
-    assert result["recent_quarters"][7]["debt_to_asset"] == "44%"
+    assert result["recent_quarters"][0]["roe"] == 20.0
+    assert result["recent_quarters"][0]["gross_margin"] == 92.0
+    assert result["recent_quarters"][7]["debt_to_asset"] == 44.0
 
 
 def test_financial_trend_keeps_extreme_growth_rates_and_uses_non_null_latest():
@@ -1060,7 +1063,7 @@ def test_financial_trend_keeps_extreme_growth_rates_and_uses_non_null_latest():
     assert result["growth_trend"]["direction"] == "improving"
     assert result["growth_trend"]["series"]["total_revenue_yoy"][0]["total_revenue_yoy"] == "1500%"
     assert result["growth_trend"]["latest"]["net_profit_yoy"] == "1200%"
-    assert result["growth_trend"]["change_vs_oldest"] == "1100百分点"
+    assert result["growth_trend"]["change_vs_oldest"] == 1100.0
     assert result["growth_trend"]["quarters_used"] == 7
 
 
@@ -1120,7 +1123,7 @@ def test_financial_context_includes_localized_balance_sheet_data(monkeypatch):
         report_type="合并报表",
         currency="CNY",
         is_audit=True,
-        data_source="akshare",
+        data_source="tushare",
         data={
             "total_revenue": 1000.0,
             "net_profit": 500.0,
@@ -1133,7 +1136,7 @@ def test_financial_context_includes_localized_balance_sheet_data(monkeypatch):
         report_type="合并报表",
         currency="CNY",
         is_audit=True,
-        data_source="akshare",
+        data_source="tushare",
         data={
             "money_cap": 123.45,
             "total_assets": 678.9,
@@ -1146,7 +1149,7 @@ def test_financial_context_includes_localized_balance_sheet_data(monkeypatch):
         report_type="合并报表",
         currency="CNY",
         is_audit=True,
-        data_source="akshare",
+        data_source="tushare",
         data={
             "n_cashflow_act": 321.0,
             "n_cashflow_inv_act": -45.6,

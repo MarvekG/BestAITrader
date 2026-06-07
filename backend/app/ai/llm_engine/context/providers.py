@@ -7,6 +7,7 @@ from app.ai.llm_engine.context.runtime import merge_status
 from app.ai.llm_engine.context.types import AIContextLayer, AIContextPayload
 from app.crud.account import ensure_user_account
 from app.models.user import User
+from app.data.metadata.field_units import format_payload_values
 from app.performance.service import get_latest_performance_summary
 from app.portfolio.service import get_portfolio_overview
 
@@ -48,18 +49,19 @@ class MetadataProvider:
     async def build(self, runtime: Any, sections: Mapping[str, AIContextPayload]) -> AIContextLayer:
         with runtime.db_session() as db:
             stock = runtime.get_stock_basic(db)
+            company = {
+                "industry": stock.industry if stock else None,
+                "area": stock.area if stock else None,
+                "list_date": str(stock.list_date) if stock and stock.list_date else None,
+                "total_share": stock.total_share if stock else None,
+                "float_share": stock.float_share if stock else None,
+            }
             payload = {
                 "status": "available" if stock else "missing",
                 "generated_at": runtime.generated_at.isoformat(),
                 "stock_code": runtime.stock_code,
                 "stock_name": runtime.stock_name(db),
-                "company": {
-                    "industry": stock.industry if stock else None,
-                    "area": stock.area if stock else None,
-                    "list_date": str(stock.list_date) if stock and stock.list_date else None,
-                    "total_share": stock.total_share if stock else None,
-                    "float_share": stock.float_share if stock else None,
-                },
+                "company": company,
             }
             return AIContextLayer(self.name, payload)
 
@@ -104,8 +106,11 @@ class PortfolioProvider:
 
             payload = {
                 "status": "available",
-                "overview": get_portfolio_overview(db, user=user),
-                "performance": get_latest_performance_summary(db, user_id=user_id),
+                "overview": format_payload_values("portfolio.overview", get_portfolio_overview(db, user=user)),
+                "performance": format_payload_values(
+                    "portfolio.performance",
+                    get_latest_performance_summary(db, user_id=user_id),
+                ),
                 "risk_control": build_portfolio_risk_control_context(db, ensure_user_account(db, user)),
             }
             return AIContextLayer(self.name, payload)

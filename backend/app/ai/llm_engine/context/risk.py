@@ -3,6 +3,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 from app.core.i18n import i18n_service
 from app.ai.llm_engine.context.section_wrappers import status_payload
+from app.data.metadata.field_units import format_payload_values
 from app.models.data_storage import (
     StockPledge, StockInsider, StockRelease, StockShareholder, StockPledgeSummary
 )
@@ -139,7 +140,7 @@ class RiskSource:
             else "NO"
         )
 
-        return {
+        payload = {
             "data_status": "available",
             "status": "AVAILABLE",
             "data_scope": "latest_financial_snapshot",
@@ -150,6 +151,7 @@ class RiskSource:
             "double_high_risk": double_high,
             "latest_report_date": latest_meta.get("report_date") or latest_meta.get("报告期")
         }
+        return format_payload_values("risk.financial_warning", payload)
 
     def _get_pledge(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """获取质押信息，优先使用汇总数据，并辅以明细数据"""
@@ -182,7 +184,7 @@ class RiskSource:
             "current_price": pledge_detail.current_price if pledge_detail else None,
             "liquidate_price": pledge_detail.liquidate_price if pledge_detail else None
         }
-        return res
+        return format_payload_values("risk.pledge", res)
 
     def _get_insider(self, db: Session,
                      stock_code: str) -> List[Dict[str, Any]]:
@@ -203,7 +205,7 @@ class RiskSource:
                 "avg_price": i.change_avg_price,  # 减持均价
                 "shares_after": i.shares_after_change  # 减持后剩余
             })
-        return results
+        return format_payload_values("risk.insider", results)
 
     def _get_lockup(self, db: Session,
                     stock_code: str) -> List[Dict[str, Any]]:
@@ -228,7 +230,7 @@ class RiskSource:
                 "release_type": r.release_type,  # 解禁类型
                 "market_value": r.release_market_value  # 解禁市值
             })
-        return results
+        return format_payload_values("risk.lockup_release", results)
 
     def _get_shareholder(self, db: Session, stock_code: str) -> Dict[str, Any]:
         sh = db.query(StockShareholder).filter(
@@ -238,12 +240,13 @@ class RiskSource:
         if not sh:
             return {}
 
-        return {
+        payload = {
             "end_date": str(sh.end_date),
             "count": sh.holder_count,
             "change_ratio": sh.holder_count_change_ratio,
             "avg_shares": sh.avg_hold_shares
         }
+        return format_payload_values("risk.shareholder", payload)
 
     def _get_shareholder_trend(
             self, db: Session, stock_code: str) -> Dict[str, Any]:
@@ -309,7 +312,7 @@ class RiskSource:
         else:
             total_change_pct = 0
 
-        return {
+        payload = {
             "trend_signal": trend_signal,
             "consecutive_decrease": consecutive_decrease,
             "consecutive_increase": consecutive_increase,
@@ -317,3 +320,4 @@ class RiskSource:
             "quarters_analyzed": len(changes),
             "recent_changes": changes[:4]  # 最近4个季度
         }
+        return format_payload_values("risk.shareholder", payload)

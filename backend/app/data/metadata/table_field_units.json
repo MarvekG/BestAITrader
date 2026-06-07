@@ -4,9 +4,12 @@
     "shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
     "lots": {"unit": "units.lots", "display_scale": 1, "precision": 0},
     "ten_thousand_cny": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2},
+    "thousand_cny": {"unit": "units.thousand_cny", "display_scale": 1, "precision": 2},
     "hundred_million_cny": {"unit": "units.hundred_million_cny", "display_scale": 1, "precision": 2},
     "multiple": {"unit": "units.multiple", "display_scale": 1, "precision": 2},
     "points": {"unit": "units.points", "display_scale": 1, "precision": 2},
+    "days": {"unit": "units.days", "display_scale": 1, "precision": 0},
+    "times": {"unit": "units.times", "display_scale": 1, "precision": 2},
     "households": {"unit": "units.households", "display_scale": 1, "precision": 0},
     "percentage_points": {"unit": "units.percentage_points", "display_scale": 1, "precision": 2},
     "percent": {"unit": "units.percent", "display_scale": 1, "precision": 2},
@@ -14,98 +17,135 @@
     "ratio_percent": {"unit": "units.percent", "display_scale": 100, "precision": 2},
     "ratio_percent_4": {"unit": "units.percent", "display_scale": 100, "precision": 4}
   },
+  "portfolio.overview": {
+    "total_assets": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "available_cash": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "frozen_cash": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "market_value": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "total_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
+    "available_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
+    "frozen_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
+    "avg_cost": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "current_price": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "unrealized_pnl": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "stop_loss": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "cash_ratio": {"unit": "units.percent", "display_scale": 100, "precision": 2},
+    "position_ratio": {"unit": "units.percent", "display_scale": 100, "precision": 2},
+    "weight": {"unit": "units.percent", "display_scale": 100, "precision": 2},
+    "unrealized_pnl_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2},
+    "top_single_position_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2},
+    "top_industry_position_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2},
+    "max_unrealized_loss_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2},
+    "stop_loss_coverage_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2},
+    "estimated_volatility_20d": {"unit": "units.percent", "display_scale": 100, "precision": 2},
+    "estimated_volatility_60d": {"unit": "units.percent", "display_scale": 100, "precision": 2}
+  },
+  "portfolio.performance": {
+    "available_cash": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "market_value": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "cumulative_return": {"unit": "units.percent", "display_scale": 100, "precision": 2},
+    "benchmark_cumulative_return": {"unit": "units.percent", "display_scale": 100, "precision": 2},
+    "excess_return": {"unit": "units.percent", "display_scale": 100, "precision": 2},
+    "max_drawdown": {"unit": "units.percent", "display_scale": 100, "precision": 2}
+  },
+  "portfolio.risk_control": {
+    "max_single_position_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2},
+    "max_industry_position_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2},
+    "min_cash_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2},
+    "stop_loss_warning_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2}
+  },
+  "fundamental.forecast": {
+    "age_days": {"unit": "units.days", "display_scale": 1, "precision": 0},
+    "min": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2},
+    "max": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2},
+    "midpoint": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2},
+    "min_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "max_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "midpoint_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+  },
+  "fundamental.top_holders": {
+    "age_days": {"unit": "units.days", "display_scale": 1, "precision": 0},
+    "total_hold_ratio_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "hold_ratio_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+  },
+  "fundamental.industry_rank": {},
+  "fundamental.insider_activity": {
+    "change_ratio_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "ratio_after_change_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+  },
+  "fundamental.margin_analysis": {
+    "market_cap_cny": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "margin_balance_cny": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "short_balance_cny": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "margin_buy_amount_cny": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "margin_repay_amount_cny": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "margin_ratio_to_market_cap_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "short_ratio_to_market_cap_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "margin_balance_change_5d_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+  },
+  "fundamental.fund_holding": {},
+  "fundamental.seo_history": {},
+  "fundamental.lockup_release": {
+    "release_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
+    "days_until_release": {"unit": "units.days", "display_scale": 1, "precision": 0},
+    "days_since_release": {"unit": "units.days", "display_scale": 1, "precision": 0}
+  },
+  "events.earnings_countdown": {
+    "days_countdown": {"unit": "units.days", "display_scale": 1, "precision": 0}
+  },
+  "risk.financial_warning": {
+    "goodwill_ratio": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "debt_ratio": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+  },
+  "risk.insider": {
+    "ratio": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+  },
+  "risk.lockup_release": {
+    "shares": {"unit": "units.shares", "display_scale": 1, "precision": 0}
+  },
+  "risk.shareholder": {
+    "count": {"unit": "units.households", "display_scale": 1, "precision": 0},
+    "avg_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
+    "change_ratio": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "total_change_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "change_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+  },
   "fundamental.financial_trend": {
-    "roe": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "gross_margin": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "net_margin": {"unit": "units.percent", "display_scale": 1, "precision": 2},
     "total_revenue_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
     "net_profit_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "net_profit_dedt_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "debt_to_asset": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "change_vs_oldest": {"unit": "units.percentage_points", "display_scale": 1, "precision": 2}
-  },
-  "fundamental.basic_info": {
-    "total_share": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "float_share": {"unit": "units.shares", "display_scale": 1, "precision": 0}
+    "net_profit_dedt_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2}
   },
   "fundamental.financials": {
     "total_revenue_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "net_profit_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "roe": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "gross_margin": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "net_margin": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "debt_to_asset": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "net_profit_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2}
   },
   "fundamental.valuation": {
-    "pe_ttm": {"unit": "units.multiple", "display_scale": 1, "precision": 2},
-    "pb": {"unit": "units.multiple", "display_scale": 1, "precision": 2},
-    "ps": {"unit": "units.multiple", "display_scale": 1, "precision": 2},
     "dividend_yield": {"unit": "units.percent", "display_scale": 1, "precision": 2},
     "total_mv": {"unit": "units.cny", "display_scale": 1, "precision": 2},
     "float_mv": {"unit": "units.cny", "display_scale": 1, "precision": 2}
   },
   "fundamental.northbound_flow": {
+    "age_days": {"unit": "units.days", "display_scale": 1, "precision": 0},
     "hold_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "hold_value_10k_cny": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2},
-    "hold_ratio_pct": {"unit": "units.percent", "display_scale": 100, "precision": 4},
-    "close_price_cny": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "hold_ratio_pct": {"unit": "units.percent", "display_scale": 1, "precision": 4},
     "change_percent": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "hold_ratio_change_pct": {"unit": "units.percent", "display_scale": 100, "precision": 4},
-    "net_buy_volume": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "net_buy_amount_10k_cny": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2},
-    "hold_value_change_10k_cny": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2}
+    "hold_ratio_change_pct": {"unit": "units.percent", "display_scale": 1, "precision": 4},
+    "net_buy_volume": {"unit": "units.shares", "display_scale": 1, "precision": 0}
   },
-  "fundamental.dragon_tiger_activity": {
-    "cumulative_net_buy_10k_cny": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2},
-    "net_buy_amount_10k_cny": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2},
-    "buy_amount_10k_cny": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2},
-    "sell_amount_10k_cny": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2},
-    "price_change_percent": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "net_buy_ratio_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "post_1_day_price_change_percent": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "post_5_day_price_change_percent": {"unit": "units.percent", "display_scale": 1, "precision": 2}
-  },
+  "fundamental.dragon_tiger_activity": {},
   "technical.kline": {
-    "open": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "high": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "low": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "close": {"unit": "units.cny", "display_scale": 1, "precision": 2},
     "volume": {"unit": "units.lots", "display_scale": 1, "precision": 0},
     "pct_chg": {"unit": "units.percent", "display_scale": 1, "precision": 2}
   },
-  "technical.indicators": {
-    "ma5": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "ma10": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "ma20": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "ma30": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "ma60": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "ma120": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "ma250": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "upper": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "mid": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "lower": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "atr": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "obv": {"unit": "units.lots", "display_scale": 1, "precision": 0}
-  },
+  "technical.indicators": {},
   "technical.realtime_market": {
-    "price": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "pct_chg": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "turnover_rate": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "volume_ratio": {"unit": "units.multiple", "display_scale": 1, "precision": 2},
-    "amplitude": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "pb": {"unit": "units.multiple", "display_scale": 1, "precision": 2},
-    "pe": {"unit": "units.multiple", "display_scale": 1, "precision": 2},
-    "amount": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "volume": {"unit": "units.lots", "display_scale": 1, "precision": 0},
-    "turnover": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "total_market_cap": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "circulating_market_cap": {"unit": "units.cny", "display_scale": 1, "precision": 2}
+    "pct_chg": {"unit": "units.percent", "display_scale": 1, "precision": 2}
   },
   "technical.index_context": {
     "close": {"unit": "units.points", "display_scale": 1, "precision": 2},
     "pct_chg": {"unit": "units.percent", "display_scale": 1, "precision": 2},
     "volume": {"unit": "units.lots", "display_scale": 1, "precision": 0},
-    "amount": {"unit": "units.cny", "display_scale": 1, "precision": 2}
+    "amount": {"unit": "units.thousand_cny", "display_scale": 1, "precision": 2}
   },
   "capital_flow.money_flow": {
     "net_inflow_main": {"unit": "units.ten_thousand_cny", "display_scale": 0.0001, "precision": 2},
@@ -114,33 +154,19 @@
     "net_inflow_huge": {"unit": "units.ten_thousand_cny", "display_scale": 0.0001, "precision": 2},
     "net_inflow_main_3d": {"unit": "units.ten_thousand_cny", "display_scale": 0.0001, "precision": 2},
     "net_inflow_main_5d": {"unit": "units.ten_thousand_cny", "display_scale": 0.0001, "precision": 2},
-    "net_inflow_main_10d": {"unit": "units.ten_thousand_cny", "display_scale": 0.0001, "precision": 2},
-    "close_price": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "pct_chg": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "net_inflow_main_10d": {"unit": "units.ten_thousand_cny", "display_scale": 0.0001, "precision": 2}
   },
   "capital_flow.northbound": {
+    "age_days": {"unit": "units.days", "display_scale": 1, "precision": 0},
     "hold_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "hold_ratio": {"unit": "units.percent", "display_scale": 100, "precision": 4},
-    "net_buy_amount": {"unit": "units.cny", "display_scale": 1, "precision": 2},
+    "hold_ratio": {"unit": "units.percent", "display_scale": 1, "precision": 4},
     "net_buy_volume": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "latest_hold_ratio": {"unit": "units.percent", "display_scale": 100, "precision": 4},
-    "prev_hold_ratio": {"unit": "units.percent", "display_scale": 100, "precision": 4},
-    "ratio_change": {"unit": "units.percent", "display_scale": 100, "precision": 4},
+    "latest_hold_ratio": {"unit": "units.percent", "display_scale": 1, "precision": 4},
+    "prev_hold_ratio": {"unit": "units.percent", "display_scale": 1, "precision": 4},
+    "ratio_change": {"unit": "units.percent", "display_scale": 1, "precision": 4},
     "hold_shares_growth_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2}
   },
-  "capital_flow.dragon_tiger": {
-    "net_buy": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "buy_amount": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "sell_amount": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "turnover_rate": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "price_change": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "post_1d": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "post_5d": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "post_10d": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "success_rate_5d": {"unit": "units.percent", "display_scale": 1, "precision": 1},
-    "avg_post_5d_change": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "avg_post_10d_change": {"unit": "units.percent", "display_scale": 1, "precision": 2}
-  },
+  "capital_flow.dragon_tiger": {},
   "capital_flow.margin": {
     "rz_balance": {"unit": "units.cny", "display_scale": 1, "precision": 2},
     "rz_buy": {"unit": "units.cny", "display_scale": 1, "precision": 2},
@@ -148,11 +174,7 @@
     "rq_sell": {"unit": "units.shares", "display_scale": 1, "precision": 0}
   },
   "capital_flow.block_trade": {
-    "price": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "amount": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2},
-    "total_amount": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2},
-    "premium_rate": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "avg_premium": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "volume": {"unit": "units.ten_thousand_shares", "display_scale": 1, "precision": 2}
   },
   "capital_flow.sector_flow": {
     "net_inflow": {"unit": "units.hundred_million_cny", "display_scale": 0.00000001, "precision": 2},
@@ -170,16 +192,26 @@
     "operating_revenue_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
     "net_profit_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
     "net_profit_dedt_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "roe": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "roe_waa": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "roe_diluted": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "basic_eps_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "dt_eps_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "cfps_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "op_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "ebt_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "ocf_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
     "roe_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "gross_margin": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "q_gsprofit_margin": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "net_profit_margin": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "debt_to_assets_ratio": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "cogs_ratio": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "gross_profit": {"unit": "units.cny", "display_scale": 1, "precision": 2}
+    "q_gr_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "q_gr_qoq": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "q_sales_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "q_sales_qoq": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "q_op_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "quarterly_operating_profit_qoq": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "q_op_qoq": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "q_profit_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "q_profit_qoq": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "q_netprofit_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "q_netprofit_qoq": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "total_assets_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
+    "bps_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2}
   },
   "portfolio.account": {
     "total_assets": {"unit": "units.cny", "display_scale": 1, "precision": 2},

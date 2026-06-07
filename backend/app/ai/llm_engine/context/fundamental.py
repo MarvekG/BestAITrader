@@ -15,7 +15,7 @@ from app.models.data_storage import (
     NorthboundData, DragonTigerData,
     StockInsider, StockRelease, StockPledge,
     StockSEO, StockPledgeSummary,
-    StockMargin, StockRealtimeMarket,
+    StockMargin,
     StockLimitDownPool
 )
 
@@ -132,7 +132,7 @@ class FundamentalSource:
             "total_share": stock.total_share,
             "float_share": stock.float_share,
         }
-        return format_payload_values("fundamental.basic_info", payload)
+        return payload
 
     def _get_financials(self, db: Session, stock_code: str) -> Dict[str, Any]:
         # Get latest financial indicator
@@ -326,7 +326,7 @@ class FundamentalSource:
         if direction_label == "mixed":
             risk_flags.append("Guidance range crosses zero growth")
 
-        return {
+        payload = {
             "overview": {
                 "window": "latest",
                 "report_date": str(forecast.report_date),
@@ -339,7 +339,6 @@ class FundamentalSource:
             "profit_guidance_latest": {
                 "metric": "net_profit",
                 "window": "latest",
-                "unit": "10k_cny",
                 "min": round(net_profit_min, 2) if net_profit_min is not None else None,
                 "max": round(net_profit_max, 2) if net_profit_max is not None else None,
                 "midpoint": profit_midpoint,
@@ -347,7 +346,6 @@ class FundamentalSource:
             "growth_guidance_latest": {
                 "metric": "net_profit_growth",
                 "window": "latest",
-                "unit": "pct",
                 "min_pct": round(growth_min, 2) if growth_min is not None else None,
                 "max_pct": round(growth_max, 2) if growth_max is not None else None,
                 "midpoint_pct": growth_midpoint,
@@ -360,6 +358,7 @@ class FundamentalSource:
             "risk_flags": risk_flags,
             "content_summary": forecast.forecast_content[:200] if forecast.forecast_content else "",
         }
+        return format_payload_values("fundamental.forecast", payload)
 
     def _get_northbound_flow(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """北向资金最近 12 条记录，适合 LLM 判断外资情绪变化"""
@@ -596,7 +595,7 @@ class FundamentalSource:
                 "rank": h.holder_rank
             })
 
-        return {
+        payload = {
             "overview": {
                 "report_date": str(latest_report_date) if latest_report_date else None,
                 "reference_status": "stale" if is_stale else "active",
@@ -615,6 +614,7 @@ class FundamentalSource:
             },
             "holders_latest": holder_list[:10]
         }
+        return format_payload_values("fundamental.top_holders", payload)
 
     def _get_fund_holding(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """获取公募基金持仓信息，含环比变化 | Get fund holdings with QoQ change"""
@@ -743,7 +743,7 @@ class FundamentalSource:
                 "signal": qoq_signal
             }
 
-        return result
+        return format_payload_values("fundamental.fund_holding", result)
 
     def _get_financial_trend(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """
@@ -1023,7 +1023,7 @@ class FundamentalSource:
         else:
             breadth_label = "mixed"
 
-        return {
+        payload = {
             "overview": {
                 "industry": industry_name,
                 "window": "latest",
@@ -1052,6 +1052,7 @@ class FundamentalSource:
                 "total_market_cap_cny": round(industry_info.total_market_cap, 2) if industry_info.total_market_cap is not None else None,
             },
         }
+        return format_payload_values("fundamental.industry_rank", payload)
 
     def _get_insider_activity(self, db: Session, stock_code: str, months: int = 6) -> Dict[str, Any]:
         """
@@ -1164,7 +1165,7 @@ class FundamentalSource:
             reverse=True,
         )
 
-        return {
+        payload = {
             "overview": {
                 "window": f"{months}month",
                 "record_count": len(records),
@@ -1184,6 +1185,7 @@ class FundamentalSource:
             "recent_events": activities[:5],
             "risk_flags": risk_flags,
         }
+        return format_payload_values("fundamental.insider_activity", payload)
 
     def _get_lockup_release(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """
@@ -1251,7 +1253,7 @@ class FundamentalSource:
         if total_upcoming_ratio_to_float >= 5:
             risk_flags.append("Upcoming lockup ratio is meaningful relative to float")
 
-        return {
+        payload = {
             "overview": {
                 "window": "past90day_to_next12month",
                 "recent_release_count": len(recent_releases),
@@ -1267,6 +1269,7 @@ class FundamentalSource:
             "recent_releases": list(reversed(recent_releases[-3:])),
             "risk_flags": risk_flags,
         }
+        return format_payload_values("fundamental.lockup_release", payload)
 
     def _get_seo_history(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """
@@ -1327,7 +1330,7 @@ class FundamentalSource:
         if latest_age_days is not None and latest_age_days <= 365:
             risk_flags.append("Recent equity financing may still weigh on dilution expectations")
 
-        return {
+        payload = {
             "overview": {
                 "window": "latest5_alltime",
                 "record_count": len(records),
@@ -1341,6 +1344,7 @@ class FundamentalSource:
             "recent_offerings": offerings,
             "risk_flags": risk_flags,
         }
+        return format_payload_values("fundamental.seo_history", payload)
 
     def _get_pledge_info(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """
@@ -1383,11 +1387,11 @@ class FundamentalSource:
         latest_margin = margin_records[0]
 
         market_cap = 0
-        realtime = db.query(StockRealtimeMarket).filter(
-            StockRealtimeMarket.stock_code == stock_code
-        ).first()
-        if realtime:
-            market_cap = (realtime.total_market_cap or 0) * 10000
+        valuation = db.query(StockValuationHistory).filter(
+            StockValuationHistory.stock_code == stock_code
+        ).order_by(desc(StockValuationHistory.data_date)).first()
+        if valuation:
+            market_cap = valuation.total_market_value or 0
 
         margin_balance = latest_margin.margin_balance or 0
         short_balance = latest_margin.short_balance or 0
@@ -1436,7 +1440,7 @@ class FundamentalSource:
         if change_5d_pct is not None and change_5d_pct >= 10:
             risk_flags.append("Margin balance expanded quickly over the last 5 trading days")
 
-        return {
+        payload = {
             "overview": {
                 "trade_date": str(latest_margin.trade_date) if latest_margin.trade_date else None,
                 "market_cap_cny": round(market_cap, 2) if market_cap > 0 else None,
@@ -1460,3 +1464,4 @@ class FundamentalSource:
             },
             "risk_flags": risk_flags,
         }
+        return format_payload_values("fundamental.margin_analysis", payload)
