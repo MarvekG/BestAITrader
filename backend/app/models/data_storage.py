@@ -25,7 +25,7 @@ class  StockBasic(Base):
   total_share  =  Column(Float)
   float_share  =  Column(Float)
   status  =  Column(String(20),  default='L')  #  L:  Listed,  D:  Delisted
-  data_source  =  Column(String(20),  default='akshare')
+  data_source  =  Column(String(20),  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -43,7 +43,7 @@ class  FinancialIndicator(Base):
   data  =  Column(JSONB,  nullable=False)
   update_date  =  Column(Date,  default=datetime.now().date)  #  记录更新日期
 
-  data_source  =  Column(String(20),  default='akshare')
+  data_source  =  Column(String(20),  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -72,7 +72,7 @@ class StockIncomeStatement(Base):
   data = Column(JSONB, nullable=False)
   update_date = Column(Date, default=datetime.now().date)
 
-  data_source = Column(String(20), default='akshare')
+  data_source = Column(String(20), default='tushare')
   created_at = Column(DateTime, default=datetime.now)
   updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -100,7 +100,7 @@ class StockBalanceSheet(Base):
   data = Column(JSONB, nullable=False)
   update_date = Column(Date, default=datetime.now().date)
 
-  data_source = Column(String(20), default='akshare')
+  data_source = Column(String(20), default='tushare')
   created_at = Column(DateTime, default=datetime.now)
   updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -128,7 +128,7 @@ class StockCashflowStatement(Base):
   data = Column(JSONB, nullable=False)
   update_date = Column(Date, default=datetime.now().date)
 
-  data_source = Column(String(20), default='akshare')
+  data_source = Column(String(20), default='tushare')
   created_at = Column(DateTime, default=datetime.now)
   updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -157,7 +157,7 @@ class KlineData(Base):
   change  =  Column(Float)
   change_percent  =  Column(Float)
   freq  =  Column(String(10),  default='D')  #  D:  Daily,  W:  Weekly,  M:  Monthly
-  data_source  =  Column(String(20),  default='akshare')
+  data_source  =  Column(String(20),  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -218,7 +218,7 @@ class  NorthboundData(Base):
   net_buy_volume  =  Column(Float)  #  今日增持股数
   net_buy_amount  =  Column(Float)  #  今日增持资金
   hold_value_change  =  Column(Float)  #  今日持股市值变化
-  data_source  =  Column(String(20),  default='akshare')
+  data_source  =  Column(String(20),  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -262,7 +262,7 @@ class  DragonTigerData(Base):
 
   details  =  Column(JSONB)  #  For  nested  details  if  any
 
-  data_source  =  Column(String(20),  nullable=False,  default='akshare')
+  data_source  =  Column(String(20),  nullable=False,  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -276,7 +276,7 @@ class  DragonTigerData(Base):
 
 
 class  StockRealtimeMarket(Base):
-  """Real-time  market  data  from  AkShare"""
+  """Real-time  market  data  from  Tushare"""
   __tablename__  =  "stock_realtime_market"
   __table_args__ = {"schema": "data"}
 
@@ -329,7 +329,7 @@ class  StockRealtimeMarket(Base):
   main_net_inflow_rank_10d = Column(Integer)    # f471
 
   timestamp  =  Column(DateTime,  default=datetime.now)
-  data_source  =  Column(String(20),  nullable=False,  default='akshare')
+  data_source  =  Column(String(20),  nullable=False,  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -353,7 +353,7 @@ class  StockValuationHistory(Base):
   ps_static  =  Column(Float)  #  市销率  (静)
   peg  =  Column(Float)  #  PEG
   dividend_yield  =  Column(Float)  #  股息率  (%)
-  data_source  =  Column(String(20),  nullable=False,  default='akshare')
+  data_source  =  Column(String(20),  nullable=False,  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -367,7 +367,7 @@ class  StockValuationHistory(Base):
 
 
 class  IndustryData(Base):
-  """Industry  board  data  from  AkShare"""
+  """Industry  board  data  from  Tushare"""
   __tablename__  =  "industry_data"
   __table_args__ = {"schema": "data"}
 
@@ -385,7 +385,7 @@ class  IndustryData(Base):
   leading_stock_name  =  Column(String(100))
   leading_stock_change_percent  =  Column(Float)
   timestamp  =  Column(DateTime,  default=datetime.utcnow)
-  data_source  =  Column(String(20),  default='akshare')
+  data_source  =  Column(String(20),  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.utcnow)
   updated_at  =  Column(DateTime,  default=datetime.utcnow,  onupdate=datetime.now)
 
@@ -419,7 +419,7 @@ class  StockLimitUpPool(Base):
   fund_amount  =  Column(Float)  #  封板资金
   open_times  =  Column(Integer)  #  炸板次数
 
-  data_source  =  Column(String(20),  default='akshare')
+  data_source  =  Column(String(20),  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -459,7 +459,7 @@ class  StockZhabanPool(Base):
   limit_up_reason  =  Column(Text)  #  所属行业/涨停原因
   speed_increase  =  Column(Float)  #  涨速
 
-  data_source  =  Column(String(20),  default='akshare')
+  data_source  =  Column(String(20),  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -500,7 +500,7 @@ class  StockLimitDownPool(Base):
   board_turnover  =  Column(Float)  #  板上成交额
   dynamic_pe  =  Column(Float)  #  动态市盈率
 
-  data_source  =  Column(String(20),  default='akshare')
+  data_source  =  Column(String(20),  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -543,7 +543,7 @@ class  StockMoneyFlow(Base):
   net_inflow_main_5d  =  Column(Float)
   net_inflow_main_10d  =  Column(Float)
 
-  data_source  =  Column(String(20),  default='akshare')
+  data_source  =  Column(String(20),  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -579,7 +579,7 @@ class  StockShareholder(Base):
   price_at_end  =  Column(Float)  #  截止日收盘价
   price_change_ratio  =  Column(Float)  #  区间涨跌幅  (%)
 
-  data_source  =  Column(String(20),  default='akshare')
+  data_source  =  Column(String(20),  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -610,7 +610,7 @@ class  StockPledge(Base):
   current_price  =  Column(Float)  #  最新价  (接口返回)
   liquidate_price  =  Column(Float)  #  平仓线  (估算)
 
-  data_source  =  Column(String(20),  default='akshare')
+  data_source  =  Column(String(20),  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -643,7 +643,7 @@ class StockPledgeSummary(Base):
     
     price_change_1y = Column(Float)        # 近一年涨跌幅 (%)
     
-    data_source = Column(String(20), default='akshare')
+    data_source = Column(String(20), default='tushare')
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -673,7 +673,7 @@ class  StockInsider(Base):
   shares_after_change  =  Column(BigInteger)  #  变动后持股数
   ratio_after_change  =  Column(Float)  #  变动后持股比  (%)
 
-  data_source  =  Column(String(20),  default='akshare')
+  data_source  =  Column(String(20),  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -698,7 +698,7 @@ class  StockRelease(Base):
 
   release_type  =  Column(String(100))  #  解禁限售股类型  (如:  首发原股东,  定增)
 
-  data_source  =  Column(String(20),  default='akshare')
+  data_source  =  Column(String(20),  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -726,7 +726,7 @@ class  StockForecast(Base):
   growth_max  =  Column(Float)  #  增长上限  (%)
   forecast_content  =  Column(Text)  #  业绩变动原因说明
 
-  data_source  =  Column(String(20),  default='akshare')
+  data_source  =  Column(String(20),  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -758,7 +758,7 @@ class  StockMargin(Base):
   #  综合
   margin_short_balance  =  Column(Float)  #  融资融券余额  (元)
 
-  data_source  =  Column(String(20),  default='akshare')
+  data_source  =  Column(String(20),  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -777,7 +777,7 @@ class  CommonData(Base):
   stock_code  =  Column(String(20),  primary_key=True)
   update_date  =  Column(Date,  primary_key=True)
   data_payload  =  Column(JSONB)
-  data_source  =  Column(String(50))  #  e.g.  'akshare',  'tushare'
+  data_source  =  Column(String(50))  #  e.g.  'tushare'
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
@@ -799,7 +799,7 @@ class IndexDaily(Base):
     change = Column(Float)
     pct_chg = Column(Float)
 
-    data_source = Column(String(20), default='akshare')
+    data_source = Column(String(20), default='tushare')
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -825,7 +825,7 @@ class StockBlockTrade(Base):
     buyer = Column(String(200))        # 买方营业部
     seller = Column(String(200))       # 卖方营业部
     
-    data_source = Column(String(20), default='akshare')
+    data_source = Column(String(20), default='tushare')
     created_at = Column(DateTime, default=datetime.now)
 
     __table_args__ = (
@@ -862,7 +862,7 @@ class SectorMoneyFlow(Base):
     
     leading_stock = Column(String(100)) # 领涨股
     
-    data_source = Column(String(20), default='akshare')
+    data_source = Column(String(20), default='tushare')
     created_at = Column(DateTime, default=datetime.now)
 
     __table_args__ = (
@@ -890,7 +890,7 @@ class StockTopHolders(Base):
     
     holder_rank = Column(Integer)      # 排名 (1-10)
     
-    data_source = Column(String(20), default='akshare')
+    data_source = Column(String(20), default='tushare')
     created_at = Column(DateTime, default=datetime.now)
 
     __table_args__ = (
@@ -915,7 +915,7 @@ class StockFundHolding(Base):
     hold_ratio_stock = Column(Float)   # 占流通股比
     hold_ratio_fund = Column(Float)    # 占净值比
     
-    data_source = Column(String(20), default='akshare')
+    data_source = Column(String(20), default='tushare')
     created_at = Column(DateTime, default=datetime.now)
 
     __table_args__ = (
@@ -944,7 +944,7 @@ class StockInteractiveQA(Base):
 
     content_hash = Column(String(64))
 
-    data_source = Column(String(50), default='akshare')
+    data_source = Column(String(50), default='tushare')
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
 
@@ -970,7 +970,7 @@ class FinancialCalendar(Base):
     third_book_date = Column(Date) # 三次预约
     actual_date = Column(Date, index=True) # 实际披露日期
     
-    data_source = Column(String(20), default='akshare')
+    data_source = Column(String(20), default='tushare')
     created_at = Column(DateTime, default=datetime.now)
 
     __table_args__ = (
@@ -999,7 +999,7 @@ class StockSEO(Base):
     issue_object = Column(Text) # 发行对象
     lock_period = Column(String(50)) # 限售期
     
-    data_source = Column(String(20), default='akshare')
+    data_source = Column(String(20), default='tushare')
     created_at = Column(DateTime, default=datetime.now)
 
 
