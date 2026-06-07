@@ -147,11 +147,21 @@ async def test_ai_context_service_includes_portfolio_static_context_for_current_
         "min_cash_pct": 0.1,
         "require_stop_loss": True,
         "stop_loss_warning_pct": 0.1,
+        "rule_policies": {
+            "require_stop_loss": "block",
+            "max_single_position_pct": "block",
+            "max_industry_position_pct": "block",
+            "min_cash_pct": "block",
+            "stop_loss_warning_pct": "block",
+        },
     }
     assert portfolio_context["risk_control"]["text"] == (
         "Portfolio risk control: enabled; max single-stock weight 20.00%; "
         "max industry weight 35.00%; minimum cash ratio 10.00%; "
-        "buy orders require stop loss; stop-loss warning threshold 10.00%."
+        "buy orders require stop loss; stop-loss warning threshold 10.00%; "
+        "rule policies {'require_stop_loss': 'block', 'max_single_position_pct': 'block', "
+        "'max_industry_position_pct': 'block', 'min_cash_pct': 'block', "
+        "'stop_loss_warning_pct': 'block'}."
     )
     assert context["metadata"]["coverage"]["layers"]["portfolio"] == "available"
 
@@ -216,6 +226,7 @@ def test_realtime_market_prefers_latest_timestamp_row():
 
     market = source._get_realtime_market(db, "600519.SH")
 
-    assert market["price"] == 1401.3
-    assert market["pct_chg"] == -3.02
-    assert market["volume"] == 4114309.0
+    assert market["price"] == "1401.3元"
+    assert market["pct_chg"] == "-3.02%"
+    assert market["volume"] == "4114309手"
+    assert market["turnover"] == "5811960008元"

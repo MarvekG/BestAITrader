@@ -36,6 +36,8 @@ def test_financial_indicator_standard_key_loaded_from_json():
     assert ColumnMapper.get_financial_indicator_standard_key("净利润增长率(%)", "akshare_financial_analysis_indicator") == "net_profit_yoy"
     assert ColumnMapper.get_financial_indicator_standard_key("总资产周转率(次)", "akshare_financial_analysis_indicator") == "asset_turnover"
     assert ColumnMapper.get_financial_indicator_standard_key("assets_turn", "tushare_fina_indicator") == "asset_turnover"
+    assert ColumnMapper.get_financial_indicator_standard_key("gross_margin", "tushare_fina_indicator") == "gross_profit"
+    assert ColumnMapper.get_financial_indicator_standard_key("grossprofit_margin", "tushare_fina_indicator") == "gross_margin"
     assert ColumnMapper.get_financial_indicator_standard_key("total_revenue_ps", "tushare_fina_indicator") == "total_revenue_ps"
     assert ColumnMapper.get_financial_indicator_standard_key("revenue_ps", "tushare_fina_indicator") == "revenue_ps"
     assert ColumnMapper.get_financial_indicator_standard_key("经营现金净流量与净利润的比率(%)", "akshare_financial_analysis_indicator") == "ocf_to_profit"
@@ -69,3 +71,4 @@ def test_tushare_income_statement_mapping_includes_optional_fields():
 
 def test_get_table_field_label_prefers_table_labels():
     assert get_table_field_label("data.financial_indicator", "diluted_eps") == "稀释每股收益"
+    assert get_table_field_label("data.financial_indicator", "gross_profit") == "毛利"

@@ -149,11 +149,12 @@ class SnapshotProvider:
             }
 
             latest_financials = financial.latest_financials(db, runtime.stock_code)
+            latest_financials_for_context = financial.source._format_latest_financials_for_context(latest_financials)
             financial_statements = {
                 "status": merge_status(latest_financials),
                 "financial_indicator_latest": _wrap_snapshot(
                     financial,
-                    financial.localize_raw_data(latest_financials, "data.financial_indicator")
+                    financial.localize_raw_data(latest_financials_for_context, "data.financial_indicator")
                 ),
             }
             valuation = _wrap_dict(fundamental, fundamental.valuation(db, runtime.stock_code))

@@ -9,7 +9,9 @@ from app.ai.llm_routing import should_run_debate_agents_in_parallel
 from app.ai.llm_engine.context import (
     AIContextService,
 )
+from app.data.metadata.field_units import format_payload_values
 from app.core.config import settings
+from app.core.i18n import i18n_service
 from app.core.logger import get_logger
 from app.ai.llm_engine.agents.specialists import (
     FundamentalAgent, TechnicalAgent, CapitalFlowAgent, SentimentAgent, RiskAgent, NewsAgent, PolicyAgent
@@ -51,15 +53,15 @@ def _build_portfolio_field_descriptions() -> Dict[str, str]:
     if str(settings.SYSTEM_LANGUAGE).lower().startswith("en"):
         return {
             "position.current_position": (
-                "The target stock's current market-value weight in total account assets; "
-                "use it as the current-position baseline for target_position."
+                "The target stock's current market-value weight in total account assets, shown with %. "
+                "Convert it to a 0-1 ratio when comparing with target_position."
             ),
             "position.avg_cost": (
                 "Current average holding cost, used to identify cost anchoring, "
                 "stop-loss room, and profit-protection needs."
             ),
             "position.profit_loss": "Current unrealized profit/loss amount.",
-            "position.profit_loss_pct": "Current unrealized profit/loss percentage.",
+            "position.profit_loss_pct": "Current unrealized profit/loss percentage, shown with %.",
             "position.available_shares": (
                 "Current actual sellable quantity. If it is zero or insufficient, "
                 "a sell decision should still be expressed as sell, with T+1 or sellable-share limits "
@@ -68,12 +70,47 @@ def _build_portfolio_field_descriptions() -> Dict[str, str]:
         }
 
     return {
-        "position.current_position": "当前目标股票市值占账户总资产的比例，是 target_position 的当前仓位基准。",
+        "position.current_position": "当前目标股票市值占账户总资产的比例，字段值直接带%；与 target_position 比较时换算为 0-1。",
         "position.avg_cost": "当前持仓平均成本，用于识别锚定成本、止损空间和盈亏保护需求。",
         "position.profit_loss": "当前持仓浮盈浮亏金额。",
-        "position.profit_loss_pct": "当前持仓浮盈浮亏比例。",
+        "position.profit_loss_pct": "当前持仓浮盈浮亏比例，字段值直接带%。",
         "position.available_shares": "当前真实可卖出数量；为 0 或不足时，卖出决策仍应表达为 sell，并在执行计划说明 T+1 或可卖限制。",
     }
+
+
+def _get_latest_position_price(db: Any, stock_code: str, fallback_price: float) -> tuple[float, str, str | None]:
+    """获取用于 PM 持仓重估的最新可用价格。
+
+    Args:
+        db: 数据库会话。
+        stock_code: 标准股票代码。
+        fallback_price: 持仓表中的备选价格。
+
+    Returns:
+        ``(价格, 来源, 来源时间)``；优先实时行情，其次最新日 K 收盘价，最后使用持仓快照价。
+    """
+    from sqlalchemy import desc
+
+    from app.models.data_storage import KlineData, StockRealtimeMarket
+
+    latest_market = db.query(StockRealtimeMarket).filter(
+        StockRealtimeMarket.stock_code == stock_code
+    ).order_by(desc(StockRealtimeMarket.timestamp)).first()
+    if latest_market:
+        market_price = _safe_float(latest_market.current_price)
+        if market_price is not None and market_price > 0:
+            return market_price, "realtime_market", _safe_isoformat(latest_market.timestamp)
+
+    latest_kline = db.query(KlineData).filter(
+        KlineData.stock_code == stock_code,
+        KlineData.freq == "D",
+    ).order_by(desc(KlineData.date)).first()
+    if latest_kline:
+        close_price = _safe_float(latest_kline.close)
+        if close_price is not None and close_price > 0:
+            return close_price, "daily_kline_close", _safe_isoformat(latest_kline.date)
+
+    return fallback_price, "position_snapshot", None
 
 # Define State
 
@@ -268,10 +305,14 @@ async def fetch_context(state: AnalystState) -> Dict[str, Any]:
                     account = db.query(Account).filter(Account.user_id == session_obj.user_id).first()
                     if account:
                         portfolio_info["account"] = {
-                            "total_assets": float(account.total_assets or 0),
-                            "available_cash": float(account.available_cash or 0),
-                            "market_value": float(account.market_value or 0)
+                            "total_assets": account.total_assets,
+                            "available_cash": account.available_cash,
+                            "market_value": account.market_value,
                         }
+                        portfolio_info["account"] = format_payload_values(
+                            "portfolio.account",
+                            portfolio_info["account"],
+                        )
 
                         # 获取当前股票持仓信息
                         position = db.query(Position).filter(
@@ -279,37 +320,49 @@ async def fetch_context(state: AnalystState) -> Dict[str, Any]:
                             Position.stock_code == stock_code
                         ).first()
                         if position:
-                            # 动态价格对齐：如果数据库中 current_price 为 0，尝试从实时行情补全
-                            curr_price = float(position.current_price or 0)
-                            if curr_price <= 0:
-                                from app.models.data_storage import StockRealtimeMarket
-                                from sqlalchemy import desc
-                                latest_market = db.query(StockRealtimeMarket).filter(
-                                    StockRealtimeMarket.stock_code == stock_code
-                                ).order_by(desc(StockRealtimeMarket.timestamp)).first()
-                                if latest_market:
-                                    curr_price = float(latest_market.current_price)
-                                    logger.info(
-                                        "Fixed position price using realtime market",
-                                        extra={"stock_code": stock_code, "current_price": curr_price},
-                                    )
+                            # PM 决策必须使用最新可用行情重估持仓，不能依赖可能滞后的 positions 快照价。
+                            snapshot_price = _safe_float(position.current_price) or 0
+                            curr_price, price_source, price_reference_time = _get_latest_position_price(
+                                db,
+                                stock_code,
+                                snapshot_price,
+                            )
+                            if price_source != "position_snapshot":
+                                logger.info(
+                                    "Revalued position using latest market price",
+                                    extra={
+                                        "stock_code": stock_code,
+                                        "current_price": curr_price,
+                                        "price_source": price_source,
+                                        "price_reference_time": price_reference_time,
+                                    },
+                                )
 
                             # 计算当前该股仓位比例 (current_position = 市值 / 总资产)
                             total_assets = float(account.total_assets or 0)
+                            total_shares = int(position.total_shares or 0)
+                            avg_cost = _safe_float(position.avg_cost) or 0
+                            market_value = total_shares * curr_price
+                            profit_loss = (curr_price - avg_cost) * total_shares
+                            profit_loss_pct = (curr_price - avg_cost) / avg_cost if avg_cost > 0 else 0
                             current_pos_ratio = (
-                                (position.total_shares * curr_price) / total_assets if total_assets > 0 else 0
+                                market_value / total_assets if total_assets > 0 else 0
                             )
 
                             portfolio_info["position"] = {
                                 "stock_code": position.stock_code,
-                                "total_shares": position.total_shares,
+                                "total_shares": total_shares,
                                 "available_shares": position.available_shares,
-                                "avg_cost": float(position.avg_cost or 0),
+                                "avg_cost": avg_cost,
                                 "current_price": curr_price,
-                                "current_position": round(current_pos_ratio, 4),
-                                "profit_loss": float(position.profit_loss or 0),
-                                "profit_loss_pct": float(position.profit_loss_pct or 0)
+                                "current_position": current_pos_ratio,
+                                "profit_loss": profit_loss,
+                                "profit_loss_pct": profit_loss_pct,
                             }
+                            portfolio_info["position"] = format_payload_values(
+                                "portfolio.position",
+                                portfolio_info["position"],
+                            )
         static_context = dict(state.get("static_context", {}) or {})
         static_context["data"] = ai_context_snapshot
         static_context["portfolio_info"] = portfolio_info
@@ -443,6 +496,293 @@ def _build_previous_execution_summary(db, session_id: UUID) -> Dict[str, Any]:
         "first_trade_time": trades[0].trade_time.isoformat() if trades and trades[0].trade_time else None,
         "latest_trade_time": trades[-1].trade_time.isoformat() if trades and trades[-1].trade_time else None,
     }
+
+
+def _safe_float(value: Any) -> float | None:
+    """安全转换数值为浮点数。
+
+    Args:
+        value: 可能来自数据库的 Decimal、int、float、字符串或空值。
+
+    Returns:
+        转换后的浮点数；无法转换或为空时返回 None。
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_isoformat(value: Any) -> str | None:
+    """安全格式化日期时间字段。
+
+    Args:
+        value: 可能具备 `isoformat` 方法的日期时间对象。
+
+    Returns:
+        ISO 格式时间字符串；字段为空或不支持格式化时返回 None。
+    """
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _build_pm_history_item(debate_msg: Any, session_obj: Any, execution_summary: Dict[str, Any]) -> Dict[str, Any]:
+    """构建同股历史 PM 决策摘要。
+
+    Args:
+        debate_msg: PM 决策消息记录。
+        session_obj: 决策所属投研会话记录。
+        execution_summary: 该会话关联的订单和成交摘要。
+
+    Returns:
+        面向 PM 的压缩历史决策摘要，不包含完整长报告。
+    """
+    analysis = debate_msg.analysis if isinstance(debate_msg.analysis, dict) else {}
+    return {
+        "session_id": str(session_obj.session_id),
+        "created_at": _safe_isoformat(debate_msg.created_at),
+        "trading_frequency": session_obj.trading_frequency,
+        "trading_strategy": session_obj.trading_strategy,
+        "decision": debate_msg.decision or analysis.get("decision"),
+        "confidence": debate_msg.confidence,
+        "target_position": analysis.get("target_position"),
+        "stop_loss": analysis.get("stop_loss"),
+        "take_profit": analysis.get("take_profit"),
+        "risk_assessment": analysis.get("risk_assessment"),
+        "verdict_summary": analysis.get("verdict_summary"),
+        "execution_summary": execution_summary,
+    }
+
+
+def _build_order_history_item(order: Any, pm_by_session: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    """构建同股历史订单摘要。
+
+    Args:
+        order: 订单数据库记录。
+        pm_by_session: 按会话 ID 索引的 PM 决策摘要。
+
+    Returns:
+        包含实际方向、数量、成交价、盈亏和止损参考的订单摘要。
+    """
+    session_id = str(order.session_id) if order.session_id else None
+    pm_snapshot = pm_by_session.get(session_id or "", {})
+    return {
+        "order_id": str(order.order_id),
+        "session_id": session_id,
+        "created_at": _safe_isoformat(order.created_at),
+        "filled_at": _safe_isoformat(order.filled_at),
+        "action": order.action,
+        "order_type": order.order_type,
+        "status": order.status,
+        "price": _safe_float(order.price),
+        "shares": int(order.shares or 0),
+        "filled_shares": int(order.filled_shares or 0),
+        "avg_fill_price": _safe_float(order.avg_fill_price),
+        "realized_pnl": _safe_float(order.realized_pnl),
+        "source": order.source,
+        "pm_decision": pm_snapshot.get("decision"),
+        "pm_stop_loss": pm_snapshot.get("stop_loss"),
+        "pm_take_profit": pm_snapshot.get("take_profit"),
+        "pm_target_position": pm_snapshot.get("target_position"),
+    }
+
+
+def _build_trade_history_item(trade: Any, order_by_id: Dict[str, Any]) -> Dict[str, Any]:
+    """构建同股历史成交摘要。
+
+    Args:
+        trade: 成交记录。
+        order_by_id: 按订单 ID 索引的订单记录，用于补充订单级已实现盈亏。
+
+    Returns:
+        包含实际成交方向、成交数量、成交价、费用和订单盈亏的摘要。
+    """
+    order_id = str(trade.order_id) if trade.order_id else None
+    order = order_by_id.get(order_id or "")
+    return {
+        "trade_id": str(trade.trade_id),
+        "order_id": order_id,
+        "session_id": str(trade.session_id) if trade.session_id else None,
+        "trade_time": _safe_isoformat(trade.trade_time),
+        "action": trade.action,
+        "quantity": int(trade.quantity or 0),
+        "fill_price": _safe_float(trade.fill_price),
+        "commission": _safe_float(trade.commission),
+        "stamp_duty": _safe_float(trade.stamp_duty),
+        "transfer_fee": _safe_float(trade.transfer_fee),
+        "total_fees": _safe_float(trade.total_fees),
+        "net_amount": _safe_float(trade.net_amount),
+        "order_realized_pnl": _safe_float(order.realized_pnl) if order else None,
+    }
+
+
+def _build_pm_review_focus() -> list[str]:
+    """构建 PM 同股历史复盘关注点。
+
+    Returns:
+        随系统语言切换的复盘问题列表，供 PM 在报告中逐项回答。
+    """
+    return [
+        i18n_service.t("ai_analyst.pm_review_focus.actual_trades"),
+        i18n_service.t("ai_analyst.pm_review_focus.realized_pnl"),
+        i18n_service.t("ai_analyst.pm_review_focus.latest_exit_reference"),
+        i18n_service.t("ai_analyst.pm_review_focus.new_verifiable_edge"),
+    ]
+
+
+def _get_same_stock_history(
+    session_id: Optional[UUID],
+    stock_code: str,
+    *,
+    decision_limit: int = 5,
+    order_limit: int = 10,
+    trade_limit: int = 10,
+) -> Dict[str, Any]:
+    """获取同一用户同一股票的压缩交易历史。
+
+    Args:
+        session_id: 当前投研会话 ID。
+        stock_code: 股票代码。
+        decision_limit: 最近 PM 决策摘要数量上限。
+        order_limit: 最近订单数量上限。
+        trade_limit: 最近成交数量上限。
+
+    Returns:
+        PM 可直接阅读的结构化历史，包括实际买卖、盈亏、止损参考和回补复盘提示。
+    """
+    if not session_id:
+        return {}
+
+    from sqlalchemy import or_
+
+    from app.core.database import SessionLocal
+    from app.models.account import Account
+    from app.models.debate_message import DebateMessage
+    from app.models.order import Order
+    from app.models.session import Session as SessionModel
+    from app.models.trade_record import TradeRecord
+
+    with SessionLocal() as db:
+        try:
+            current_session = db.query(SessionModel).filter(SessionModel.session_id == session_id).first()
+            if not current_session:
+                return {}
+
+            previous_sessions = db.query(SessionModel).filter(
+                SessionModel.user_id == current_session.user_id,
+                SessionModel.stock_code == stock_code,
+                SessionModel.session_id != session_id,
+            ).all()
+            previous_session_ids = [item.session_id for item in previous_sessions]
+            account_ids = [
+                item.account_id
+                for item in db.query(Account).filter(Account.user_id == current_session.user_id).all()
+            ]
+
+            pm_rows = []
+            if previous_session_ids:
+                pm_rows = db.query(DebateMessage, SessionModel).join(
+                    SessionModel,
+                    SessionModel.session_id == DebateMessage.session_id,
+                ).filter(
+                    DebateMessage.session_id.in_(previous_session_ids),
+                    DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
+                ).order_by(DebateMessage.created_at.desc()).limit(decision_limit).all()
+
+            recent_pm_decisions = [
+                _build_pm_history_item(
+                    debate_msg,
+                    session_obj,
+                    _build_previous_execution_summary(db, session_obj.session_id),
+                )
+                for debate_msg, session_obj in pm_rows
+            ]
+            pm_by_session = {item["session_id"]: item for item in recent_pm_decisions}
+
+            order_filters = [
+                Order.stock_code == stock_code,
+                or_(Order.session_id.is_(None), Order.session_id != session_id),
+            ]
+            ownership_filters = []
+            if account_ids:
+                ownership_filters.append(Order.account_id.in_(account_ids))
+            if previous_session_ids:
+                ownership_filters.append(Order.session_id.in_(previous_session_ids))
+            if ownership_filters:
+                order_filters.append(or_(*ownership_filters))
+            else:
+                order_filters.append(Order.session_id.in_([]))
+
+            orders = db.query(Order).filter(*order_filters).order_by(Order.created_at.desc()).limit(order_limit).all()
+
+            trade_filters = [
+                TradeRecord.stock_code == stock_code,
+                or_(TradeRecord.session_id.is_(None), TradeRecord.session_id != session_id),
+            ]
+            trade_ownership_filters = []
+            if account_ids:
+                trade_ownership_filters.append(TradeRecord.account_id.in_(account_ids))
+            if previous_session_ids:
+                trade_ownership_filters.append(TradeRecord.session_id.in_(previous_session_ids))
+            if trade_ownership_filters:
+                trade_filters.append(or_(*trade_ownership_filters))
+            else:
+                trade_filters.append(TradeRecord.session_id.in_([]))
+
+            trades = db.query(TradeRecord).filter(*trade_filters).order_by(
+                TradeRecord.trade_time.desc(),
+                TradeRecord.created_at.desc(),
+            ).limit(trade_limit).all()
+
+            order_by_id = {str(order.order_id): order for order in orders}
+            missing_trade_order_ids = [
+                trade.order_id
+                for trade in trades
+                if trade.order_id and str(trade.order_id) not in order_by_id
+            ]
+            if missing_trade_order_ids:
+                for order in db.query(Order).filter(Order.order_id.in_(missing_trade_order_ids)).all():
+                    order_by_id[str(order.order_id)] = order
+
+            recent_orders = [_build_order_history_item(order, pm_by_session) for order in orders]
+            recent_trades = [_build_trade_history_item(trade, order_by_id) for trade in trades]
+            realized_pnls = [item["realized_pnl"] for item in recent_orders if item["realized_pnl"] is not None]
+            loss_orders = [item for item in recent_orders if (item["realized_pnl"] or 0) < 0]
+            sell_orders = [item for item in recent_orders if str(item.get("action") or "").lower() == "sell"]
+            recent_realized_pnl = round(sum(realized_pnls), 4) if realized_pnls else 0.0
+            has_recent_realized_loss = any(value < 0 for value in realized_pnls)
+
+            return {
+                "stock_code": stock_code,
+                "lookback": {
+                    "decision_limit": decision_limit,
+                    "order_limit": order_limit,
+                    "trade_limit": trade_limit,
+                },
+                "recent_execution_summary": {
+                    "has_orders": bool(recent_orders),
+                    "has_trades": bool(recent_trades),
+                    "recent_order_count": len(recent_orders),
+                    "recent_trade_count": len(recent_trades),
+                    "recent_realized_pnl": recent_realized_pnl,
+                    "has_recent_realized_loss": has_recent_realized_loss,
+                    "latest_exit_order": sell_orders[0] if sell_orders else None,
+                    "latest_loss_order": loss_orders[0] if loss_orders else None,
+                    "new_edge_review_required": has_recent_realized_loss or bool(sell_orders),
+                    "pm_review_focus": _build_pm_review_focus(),
+                },
+                "recent_orders": recent_orders,
+                "recent_trades": recent_trades,
+                "recent_pm_decisions": recent_pm_decisions,
+            }
+        except Exception:
+            logger.exception("Failed to fetch same-stock history")
+            return {}
 
 
 def _get_previous_pm_decision(
@@ -776,6 +1116,7 @@ async def portfolio_management(state: AnalystState) -> Dict[str, Any]:
     static_context = state.get("static_context", {})
     session_id = state.get("session_id")
     previous_pm_decision = _get_previous_pm_decision(session_id, state["stock_code"])
+    same_stock_history = _get_same_stock_history(session_id, state["stock_code"])
     runtime_context = _build_runtime_context(
         state,
         {
@@ -783,6 +1124,7 @@ async def portfolio_management(state: AnalystState) -> Dict[str, Any]:
             "news_report": state.get("news_report", ""),
             "policy_report": state.get("policy_report", ""),
             "previous_pm_decision": previous_pm_decision,
+            "same_stock_history": same_stock_history,
             "vertical_views": state.get("vertical_reports", {}),
             "strategic_debate": state.get("strategic_reports", {}),
         },

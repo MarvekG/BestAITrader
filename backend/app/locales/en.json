@@ -945,7 +945,17 @@
     "ten_thousand_long": " (10k)",
     "shares_10k": "10k Shares",
     "money_10k": "10k CNY",
-    "hand": "Hand"
+    "hand": "Hand",
+    "cny": " CNY",
+    "shares": " shares",
+    "lots": " lots",
+    "ten_thousand_cny": " 10k CNY",
+    "hundred_million_cny": " 100m CNY",
+    "multiple": "x",
+    "points": " pts",
+    "households": " holders",
+    "percentage_points": " pp",
+    "percent": "%"
   },
   "trading": {
     "order_updated": "Order updated",
@@ -1855,6 +1865,12 @@
       "portfolio_manager": "Portfolio Manager",
       "news_analyst": "News Analyst",
       "policy_analyst": "Policy Analyst"
+    },
+    "pm_review_focus": {
+      "actual_trades": "What was actually bought or sold historically",
+      "realized_pnl": "How much those trades actually made or lost",
+      "latest_exit_reference": "Where the latest stop-loss or liquidation reference was",
+      "new_verifiable_edge": "Whether this round has new verifiable edge versus the losing trade"
     },
     "stages": {
       "fetch_context": "Market Context Fetching",

@@ -945,7 +945,17 @@
     "ten_thousand_long": "万",
     "shares_10k": "万股",
     "money_10k": "万元",
-    "hand": "手"
+    "hand": "手",
+    "cny": "元",
+    "shares": "股",
+    "lots": "手",
+    "ten_thousand_cny": "万元",
+    "hundred_million_cny": "亿元",
+    "multiple": "倍",
+    "points": "点",
+    "households": "户",
+    "percentage_points": "百分点",
+    "percent": "%"
   },
   "trading": {
     "order_updated": "订单已更新",
@@ -1855,6 +1865,12 @@
       "portfolio_manager": "投资经理",
       "news_analyst": "新闻分析师",
       "policy_analyst": "政策分析师"
+    },
+    "pm_review_focus": {
+      "actual_trades": "历史上实际买卖了什么",
+      "realized_pnl": "这些交易实际赚亏多少",
+      "latest_exit_reference": "上一轮止损或清仓参考在哪里",
+      "new_verifiable_edge": "本轮相对亏损交易是否有新增可验证优势"
     },
     "stages": {
       "fetch_context": "获取市场环境",
@@ -2783,7 +2799,7 @@
       "research_payload_missing_list": "LLM 个股研究结果缺少 research 列表",
       "research_payload_invalid_with_reason": "LLM 个股研究结果不合法：{reason}",
       "recommendation_count_mismatch": "应用当前约束后推荐股票不足：期望 {expected} 只，实际 {actual} 只",
-      "run_interrupted_by_restart": "服务重启，未完成的智能选股任务已标记为失败",
+      "run_interrupted_by_restart": "服务重启，未完成的 AI 智能选股任务已标记为失败",
       "fragments": {
         "factor_completeness_ratio": "因子数据完整股票 {complete_count}/{total_count}，完整率 {completeness_ratio}%，低于要求的 {required_ratio}%",
         "missing_quant_fields": "{stock_code} {stock_name} 缺少 {fields}",

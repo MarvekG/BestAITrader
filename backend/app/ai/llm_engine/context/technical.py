@@ -1,6 +1,7 @@
 from typing import Dict, Any, List
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
+from app.data.metadata.field_units import format_payload_values
 from app.models.data_storage import KlineData, StockRealtimeMarket, IndexDaily
 from app.models.stock_indicators import StockIndicators
 
@@ -23,7 +24,7 @@ class TechnicalSource:
         # Return in chronological order (oldest to newest)
         klines.reverse()
 
-        return [
+        payload = [
             {
                 "date": str(k.date),
                 "open": k.open,
@@ -31,10 +32,11 @@ class TechnicalSource:
                 "low": k.low,
                 "close": k.close,
                 "volume": k.volume,
-                "pct_chg": k.change_percent
+                "pct_chg": k.change_percent,
             }
             for k in klines
         ]
+        return format_payload_values("technical.kline", payload)
 
     def _get_latest_indicators(self, db: Session, stock_code: str) -> Dict[str, Any]:
         ind = db.query(StockIndicators).filter(
@@ -44,12 +46,16 @@ class TechnicalSource:
         if not ind:
             return {}
 
-        return {
+        payload = {
             "date": str(ind.trade_date),
             "ma": {
-                "ma5": ind.ma5, "ma10": ind.ma10,
-                "ma20": ind.ma20, "ma30": ind.ma30,
-                "ma60": ind.ma60, "ma120": ind.ma120, "ma250": ind.ma250
+                "ma5": ind.ma5,
+                "ma10": ind.ma10,
+                "ma20": ind.ma20,
+                "ma30": ind.ma30,
+                "ma60": ind.ma60,
+                "ma120": ind.ma120,
+                "ma250": ind.ma250,
             },
             "macd": {
                 "dif": ind.macd, "dea": ind.macd_signal, "hist": ind.macd_hist
@@ -61,15 +67,18 @@ class TechnicalSource:
                 "k": ind.kdj_k, "d": ind.kdj_d, "j": ind.kdj_j
             },
             "boll": {
-                "upper": ind.boll_upper, "mid": ind.boll_mid, "lower": ind.boll_lower
+                "upper": ind.boll_upper,
+                "mid": ind.boll_mid,
+                "lower": ind.boll_lower,
             },
             "other": {
                 "cci": ind.cci,
                 "wr_14": ind.wr_14,
                 "atr": ind.atr,
-                "obv": ind.obv
+                "obv": ind.obv,
             }
         }
+        return format_payload_values("technical.indicators", payload)
 
     def _get_realtime_market(self, db: Session, stock_code: str) -> Dict[str, Any]:
         realtime = db.query(StockRealtimeMarket).filter(
@@ -79,7 +88,7 @@ class TechnicalSource:
         if not realtime:
             return {}
 
-        return {
+        payload = {
             "price": realtime.current_price,
             "pct_chg": realtime.change_percent,
             "turnover_rate": realtime.turnover_rate,
@@ -91,8 +100,9 @@ class TechnicalSource:
             "volume": realtime.volume,
             "turnover": realtime.turnover,
             "total_market_cap": realtime.total_market_cap,
-            "circulating_market_cap": realtime.circulating_market_cap
+            "circulating_market_cap": realtime.circulating_market_cap,
         }
+        return format_payload_values("technical.realtime_market", payload)
 
     def _get_index_context(self, db: Session, index_code: str = "sh000001") -> Dict[str, Any]:
         """
@@ -106,11 +116,12 @@ class TechnicalSource:
         if not index:
             return {}
 
-        return {
+        payload = {
             "index_code": index.index_code,
             "date": str(index.trade_date),
             "close": index.close,
             "pct_chg": index.pct_chg,
             "volume": index.volume,
-            "amount": index.amount
+            "amount": index.amount,
         }
+        return format_payload_values("technical.index_context", payload)

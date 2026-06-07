@@ -210,6 +210,8 @@ class TestTushareIngestor:
             'undist_profit_ps': [5.67],
             'retainedps': [4.56],
             'assets_turn': [0.88],
+            'gross_margin': [123456.78],
+            'grossprofit_margin': [27.5],
             'netprofit_yoy': [22.5],
         }))
 
@@ -241,6 +243,8 @@ class TestTushareIngestor:
         assert payload['undistributed_profit_ps'] == 5.67
         assert payload['retained_earnings_ps'] == 4.56
         assert payload['asset_turnover'] == 0.88
+        assert payload['gross_profit'] == 123456.78
+        assert payload['gross_margin'] == 27.5
         assert payload['net_profit_yoy'] == 22.5
         assert '_indicator_definitions' not in payload
 

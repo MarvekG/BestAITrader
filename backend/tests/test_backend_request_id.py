@@ -54,8 +54,14 @@ async def test_memory_client_forwards_request_id(monkeypatch) -> None:
         async def __aexit__(self, exc_type, exc, tb) -> None:
             del exc_type, exc, tb
 
-        async def post(self, url: str, json: dict[str, object], headers: dict[str, str]):
-            del url, json
+        async def post(
+            self,
+            url: str,
+            json: dict[str, object],
+            headers: dict[str, str],
+            timeout: float | None = None,
+        ):
+            del url, json, timeout
             captured_headers.update(headers)
             return _FakeResponse()
 

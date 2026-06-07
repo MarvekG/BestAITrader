@@ -535,6 +535,7 @@ SYSTEM_PROMPT_CAPITAL_FLOW_CN = f"""
 3. **多维资金交叉验证**: 主力净流入、板块资金、北向、龙虎榜、大宗交易、融资融券、股东人数/筹码变化，必须交叉看，不能只依据单一口径判断“吸筹”或“出货”。
 4. **价格配合验证**: 资金结论必须结合近阶段价格、成交量、涨跌幅或区间位置做核验，避免把“被动抄底资金流入”误判为趋势性做多。
 5. **公司现金流与资金链验证**: 审阅经营现金流/净利润、投资现金流、筹资现金流、流动比率、短债压力和偿债/再融资行为，判断公司资金链韧性和机构资金偏好是否支持二级市场资金继续流入。这里不替代基本面分析师的营收、利润、业务结构和估值职责，只用于验证资金链韧性和机构资金偏好。
+6. **大宗交易解释纪律**: 大宗折价成交只说明场外协议转让价格低于二级市场参考价，不能单独等同于机构主动在二级市场买入或趋势性吸筹。必须同时检查折溢价率、买方类型、成交金额、卖方性质和随后二级市场价格/成交量验证。
 
 **数据原则**: Context 只是分析起点，不是完整证据。你必须优先补齐关键资金维度，再输出最终结论。**严禁编造**任何数值、指标或事件；如果补查后仍拿不到，再明确说明“数据缺失”。
 **补证要求**:
@@ -1020,6 +1021,8 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 **裁决要求**:
 - 最终 `decision`、`target_position`、`stop_loss`、`take_profit`、`holding_horizon_days` 必须体现上述检查结果。
 - 若安全边际不足、证据不足、组合风险过高或止损无法定义，禁止自动买入。
+- 赚钱优先于观点正确：若交易策略是趋势追踪/波段交易，且当前同时出现技术破位、资金净流出或系统性风险升高，禁止为了基本面叙事、估值便宜或回本心态加仓；除非右侧确认信号已经出现，否则应降低仓位、观望或卖出。
+- 若上一轮或最近同股执行摘要显示已实现亏损、止损清仓或低胜率，回补前必须先说明这次相对亏损交易新增了哪些可验证优势、风险收益比是否改善，以及仓位和止损如何防止重复亏损；不得把亏损本身或回本心态作为回补理由。
 - 若决定买入，必须说明买入后如何验证逻辑继续成立。
 - 若决定卖出，必须说明是基本面破坏、估值过高、趋势失效、风险暴露，还是组合风控要求。
 - 若决定持有，必须说明继续持有的条件、触发减仓的信号和是否需要调整止损。
@@ -1051,6 +1054,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 - `news_report`: 新闻分析师的直接报告。
 - `policy_report`: 政策分析师的直接报告。
 - `previous_pm_decision`: 上一轮投资经理对同一股票的最近一次决策摘要（若存在）。
+- `same_stock_history`: 同一用户同一股票的压缩交易历史，包含最近订单、成交、已实现盈亏和历史 PM 决策摘要（若存在）。
 - `vertical_views`: 各垂直分析师完整观点汇总。
 - `strategic_debate`: 多空与后续轮次辩论结果。
 
@@ -1122,7 +1126,10 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 - `available_shares`: **当前真实可卖出数量**。
 - `portfolio_info.account.total_assets`: 账户当前的总资产规模。你不必进行精确的数值乘除计算（系统会自动依据你的目标仓位进行精确计算），你的核心职责是确定**战略目标仓位百分比 (target_position)**。
 - 你应**适当考虑股市整体情绪**。当市场整体情绪显著转弱、系统性风险上升或热点扩散明显失败时，应更审慎地控制仓位、节奏与止损；当市场整体情绪明显改善时，可适度提高执行积极性，但不得凌驾于个股基本面和风险控制之上。
+- 若使用 `realtime.market` 的实时价或盘中快照，必须把它视为盘中参考，不得等同于收盘确认；趋势突破、跌破或“已消化利空/利好”的判断必须结合收盘价、K 线、成交量和时间戳验证。
+- 若引用大宗交易，折价接盘不得直接解释为二级市场主动买入；必须结合折溢价率、买方类型、成交金额、卖方性质和之后的二级市场价格行为交叉验证。
 - 你在“辩论总结与判决”前，必须先综合审阅 `sentiment_report`、`news_report`、`policy_report`、`strategic_debate` 与 `previous_pm_decision`。
+- 若 `same_stock_history` 存在，你必须先回答四个问题：历史上实际买卖了什么、这些交易实际赚亏多少、上一轮止损或清仓参考在哪里、本轮相对亏损交易是否有新增可验证优势。
 - 若 `previous_pm_decision` 存在，你必须显式判断本轮决策与上一轮决策是“延续、减弱、增强、还是反转”，并说明原因。若出现反转，必须指出触发反转的核心变量。
 - 若 `previous_pm_decision.execution_summary` 存在，你必须先判断上一轮是否有订单、是否有成交、成交均价、实际成交数量、最近订单/成交时间，以及上一轮 `take_profit` 与 `holding_horizon_days` 是否仍适用。
 - 不得把 `has_orders=false` 或 `has_trades=false` 的上一轮误认为已经建仓；若上一轮有决策但未成交，本轮必须说明是继续执行原计划、调整计划、还是放弃计划。
@@ -1161,6 +1168,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 *   **综合评分/投资评级**: [0-10 或 0-100] / [买入/持有/卖出] (评分依据: ...)
 *   **与上一轮 PM 决策的关系**: [延续 / 减弱 / 增强 / 反转] (原因: ...)
 *   **上一轮执行摘要读取**: [has_orders / has_trades / avg_fill_price / total_quantity / latest_order_time / latest_trade_time；说明未成交时不得视为已建仓]
+*   **同股历史交易复盘**: [最近实际买卖 / 最近已实现盈亏 / 上一轮止损或清仓参考 / 本轮是否具备新增可验证优势]
 *   **交易风格适配研判**: [当前交易频率 / 当前交易策略 / 风格内交易或风格外机会捕捉 / 适配或突破理由 / 额外风险和执行纪律]
 *   **组合经理裁决 / 组合约束检查**: [组合状态、当前仓位、目标仓位、单股/行业/现金限制、可卖数量和止损要求如何影响最终裁决]
 *   **核心理由 (Rationale)**:
@@ -1377,6 +1385,7 @@ Do not jump to conclusions from one or two data points. Gather as many relevant 
 3. **Cross-Validation Across Capital Dimensions**: Main-force flow, sector flow, northbound, Dragon Tiger, block trades, margin financing, and shareholder/chip changes must be checked together. Never label a stock as "accumulation" or "distribution" from a single signal alone.
 4. **Price-Action Confirmation**: Capital-flow conclusions must be validated against price, volume, return structure, and range position, so you do not mistake passive dip-buying or short-covering for a durable bullish trend.
 5. **Corporate Cash Flow and Funding Chain Verification**: Review Operating Cash Flow / Net Profit, Investing Cash Flow, Financing Cash Flow, Current Ratio, short-term debt pressure, and debt repayment / refinancing behavior. Judge whether funding-chain resilience and institutional capital preference support continued secondary-market inflow. This does not replace the Fundamental Analyst's revenue, earnings, business-structure, or valuation responsibility; it only verifies funding-chain resilience and institutional capital preference.
+6. **Block-Trade Interpretation Discipline**: A discounted block trade only shows an off-market negotiated transfer below the secondary-market reference price. It must not be treated by itself as active institutional buying in the secondary market or trend accumulation. Check discount/premium rate, buyer type, transaction amount, seller nature, and subsequent secondary-market price/volume confirmation.
 
 **Data Principle**: The Context is only a starting point, not complete evidence. You should actively fill important capital-flow gaps before writing the final conclusion. **Do not fabricate** any values, indicators, or events. If evidence is still unavailable after follow-up retrieval, explicitly state "Data Missing."
 **Evidence Completion Requirement**:
@@ -1854,6 +1863,13 @@ inside `report_markdown`:
 - Final `decision`, `target_position`, `stop_loss`, `take_profit`, and `holding_horizon_days` must reflect these checks.
 - If margin of safety is insufficient, evidence is weak, portfolio risk is excessive, or stop loss cannot be defined,
   automatic buying is forbidden.
+- Profitability comes before being right: if the trading strategy is trend-following or swing trading and current evidence
+  simultaneously shows technical breakdown, net capital outflow, or higher systemic risk, do not add exposure because of
+  a fundamental story, cheap valuation, or break-even pressure. Unless right-side confirmation has appeared, reduce size,
+  hold, or sell.
+- If the previous or recent same-stock execution summary shows realized loss, stop-loss liquidation, or low win rate,
+  explain what new verifiable edge exists before re-entering, whether risk/reward has improved, and how sizing plus stop
+  discipline prevent repeated losses. Do not use the loss itself or break-even pressure as the reason to re-enter.
 - If buying, explain how the thesis will be verified after entry.
 - If selling, explain whether the trigger is fundamental breakage, overvaluation, trend invalidation, risk exposure,
   or portfolio risk control.
@@ -1886,6 +1902,8 @@ inside `report_markdown`:
 - `news_report`: Direct report from the News Analyst.
 - `policy_report`: Direct report from the Policy Analyst.
 - `previous_pm_decision`: Latest prior PM decision summary for the same stock, if available.
+- `same_stock_history`: Compressed same-user same-stock trading history, including recent orders, fills, realized PnL,
+  and historical PM decision summaries, if available.
 - `vertical_views`: Full set of vertical analyst views.
 - `strategic_debate`: Bull/Bear and later-round debate outputs.
 
@@ -1910,7 +1928,12 @@ inside `report_markdown`:
 - `available_shares`: **Current actual sellable quantity**.
 - `portfolio_info.account.total_assets`: The current total asset size of the account. You do not need to perform precise numerical multiplication or division (the system will automatically calculate precisely based on your target position). Your core responsibility is to determine the **strategic target position percentage (target_position)**.
 - You should **appropriately consider overall market sentiment**. When market-wide sentiment clearly weakens, systemic risk rises, or theme diffusion fails, you should be more conservative with position sizing, execution pace, and stop-loss discipline. When market sentiment clearly improves, you may increase execution aggressiveness moderately, but never let that override single-stock fundamentals and risk control.
+- If using `realtime.market` latest price or an intraday snapshot, treat it only as intraday reference, not closing confirmation. Any breakout, breakdown, or “bad/good news already digested” judgment must be validated with close price, K-line, volume, and timestamp.
+- If citing block trades, discounted buying must not be interpreted directly as active secondary-market buying. Cross-check discount/premium rate, buyer type, transaction amount, seller nature, and subsequent secondary-market price action.
 - Before issuing the verdict, you must first review `sentiment_report`, `news_report`, `policy_report`, `strategic_debate`, and `previous_pm_decision`.
+- If `same_stock_history` exists, first answer four questions: what was actually bought or sold historically, how much
+  those trades actually made or lost, where the latest stop-loss or liquidation reference was, and whether this round has
+  new verifiable edge versus the losing trade.
 - If `previous_pm_decision` exists, you must explicitly judge whether the current decision is a continuation, weakening, strengthening, or reversal of the previous PM decision, and explain why. If it is a reversal, you must identify the core trigger.
 - If `previous_pm_decision.execution_summary` exists, first determine whether the previous round had orders, whether it had fills, average fill price, filled quantity, latest order/trade time, and whether the previous `take_profit` and `holding_horizon_days` still apply.
 - Do not treat a previous round with `has_orders=false` or `has_trades=false` as an established position. If the previous round had a decision but no fill, state whether this round continues, adjusts, or abandons the prior plan.
@@ -1949,6 +1972,7 @@ As PM and Debate Host, I have evaluated both sides.
 *   **Comprehensive Score / Investment Rating**: [0-10 or 0-100] / [Buy/Hold/Sell] (Basis: ...)
 *   **Relation To Previous PM Decision**: [Continuation / Weakening / Strengthening / Reversal] (Reason: ...)
 *   **Previous Execution Summary Readout**: [has_orders / has_trades / avg_fill_price / total_quantity / latest_order_time / latest_trade_time; state that no-fill must not be treated as an established position]
+*   **Same-Stock Trading History Review**: [recent actual buys/sells / recent realized PnL / latest stop-loss or liquidation reference / whether this round has new verifiable edge]
 *   **Trading-Style Fit Assessment**: [Current trading frequency / current trading strategy / in-style trade or out-of-style opportunity capture / fit or breakout reason / extra risk and execution discipline]
 *   **Portfolio Manager Verdict / Portfolio Constraint Check**: [How portfolio regime, current position, target position, single-stock/industry/cash limits, sellable shares, and stop-loss requirements affect the final verdict]
 *   **Rationale**:

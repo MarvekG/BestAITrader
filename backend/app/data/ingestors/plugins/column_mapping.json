@@ -1565,7 +1565,7 @@
         "undist_profit_ps": "undistributed_profit_ps",
         "extra_item": "extra_item",
         "profit_dedt": "recurring_profit",
-        "gross_margin": "gross_margin",
+        "gross_margin": "gross_profit",
         "current_ratio": "current_ratio",
         "quick_ratio": "quick_ratio",
         "cash_ratio": "cash_ratio",

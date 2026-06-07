@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.i18n import i18n_service
 from app.ai.llm_engine.context import constants as ctx_const
+from app.data.metadata.field_units import format_payload_values
 from app.ai.llm_engine.context.section_wrappers import status_payload
 from app.models.data_storage import (
     StockMoneyFlow, NorthboundData, DragonTigerData, StockMargin,
@@ -38,7 +39,7 @@ class CapitalFlowSource:
         if not flow:
             return {}
 
-        return {
+        payload = {
             "date": str(flow.trade_date),
             "net_inflow_main": flow.net_inflow_main,  # Main = Large + Huge
             "net_inflow_retail": (flow.net_inflow_small or 0) + (flow.net_inflow_medium or 0),
@@ -49,8 +50,9 @@ class CapitalFlowSource:
             "net_inflow_main_5d": flow.net_inflow_main_5d,
             "net_inflow_main_10d": flow.net_inflow_main_10d,
             "close_price": flow.close_price,
-            "pct_chg": flow.change_pct
+            "pct_chg": flow.change_pct,
         }
+        return format_payload_values("capital_flow.money_flow", payload)
 
     def _get_money_flow_trend(self, db: Session, stock_code: str, limit: int = 20) -> List[Dict[str, Any]]:
         """
@@ -67,9 +69,9 @@ class CapitalFlowSource:
                 "date": str(f.trade_date),
                 "net_inflow_main": f.net_inflow_main,
                 "net_inflow_ratio_main": f.net_inflow_ratio_main,
-                "pct_chg": f.change_pct
+                "pct_chg": f.change_pct,
             })
-        return trend
+        return format_payload_values("capital_flow.money_flow", trend)
 
     def _get_northbound(self, db: Session, stock_code: str) -> Dict[str, Any]:
         nb = db.query(NorthboundData).filter(
@@ -93,7 +95,7 @@ class CapitalFlowSource:
         if days_diff > 30:
             warning = f" (Data as of {data_date}, potentially outdated)"
 
-        return {
+        payload = {
             "data_status": "available",
             "scope": "stock_specific",
             "data_granularity": "latest_record",
@@ -106,6 +108,7 @@ class CapitalFlowSource:
             "net_buy_volume": nb.net_buy_volume,
             "warning": warning
         }
+        return format_payload_values("capital_flow.northbound", payload)
 
     def _get_dragon_tiger(self, db: Session, stock_code: str) -> Dict[str, Any]:
         # Get latest appearing on list
@@ -130,7 +133,7 @@ class CapitalFlowSource:
                 message=f"Last appearance {days_diff} days ago",
             )
 
-        return {
+        payload = {
             "data_status": "available",
             "date": str(dt.trade_date),
             "reason": dt.listing_reason,
@@ -141,6 +144,7 @@ class CapitalFlowSource:
             "price_change": dt.price_change_percent,
             "interpretation": dt.interpretation  # 机构解读
         }
+        return format_payload_values("capital_flow.dragon_tiger", payload)
 
     def _get_margin(self, db: Session, stock_code: str) -> Dict[str, Any]:
         mg = db.query(StockMargin).filter(
@@ -150,14 +154,15 @@ class CapitalFlowSource:
         if not mg:
             return self.status_payload("missing", status="Data Unavailable")
 
-        return {
+        payload = {
             "data_status": "available",
             "date": str(mg.trade_date),
             "rz_balance": mg.margin_balance,  # 融资余额
             "rz_buy": mg.margin_buy_amount,  # 融资买入
             "rq_balance": mg.short_balance,  # 融券余额
-            "rq_sell": mg.short_sell_volume  # 融券卖出量
+            "rq_sell": mg.short_sell_volume,  # 融券卖出量
         }
+        return format_payload_values("capital_flow.margin", payload)
 
     def _get_block_trade(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """获取大宗交易数据"""
@@ -213,23 +218,27 @@ class CapitalFlowSource:
         for t in trades[:5]:  # 最近5笔大宗交易
             trade_list.append({
                 "date": str(t.trade_date),
-                "price": round(t.price, 2) if t.price else 0,
-                "amount": round(t.amount, 2) if t.amount else 0,
-                "premium_rate": round(t.premium_rate, 2) if t.premium_rate else 0,
+                "price": t.price,
+                "amount": t.amount,
+                "premium_rate": t.premium_rate,
                 "buyer": t.buyer[:30] if t.buyer else "",
                 "seller": t.seller[:30] if t.seller else ""
             })
 
-        return {
+        payload = {
             "data_status": "available",
             "count": len(trades),
-            "total_amount": round(total_amount, 2),
-            "avg_premium": round(avg_premium, 2),
+            "total_amount": total_amount,
+            "avg_premium": avg_premium,
             "trade_intent": trade_intent,
             "activity_level": activity_level,
-            "top_buyers": [{"name": name[:30], "amount": round(amt, 2)} for name, amt in top_buyers],
+            "top_buyers": [
+                {"name": name[:30], "amount": amt}
+                for name, amt in top_buyers
+            ],
             "recent_trades": trade_list
         }
+        return format_payload_values("capital_flow.block_trade", payload)
 
     def _get_sector_flow(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """获取所属板块的资金流向数据"""
@@ -301,17 +310,18 @@ class CapitalFlowSource:
         # 实际上应该由 LLM 基于个股和板块的数据进行综合分析
         linkage_hint = i18n_service.get(ctx_const.LINKAGE_HINT)
 
-        return {
+        payload = {
             "data_status": "available",
             "sector_name": sector_flow.sector_name,
             "date": str(sector_flow.trade_date),
-            "net_inflow": round(net_inflow / 100000000, 2) if net_inflow else 0,  # 转换为亿元
-            "net_inflow_rate": round(sector_flow.net_inflow_rate, 2) if sector_flow.net_inflow_rate else 0,
-            "main_net_inflow": round(sector_flow.main_net_inflow / 100000000, 2) if sector_flow.main_net_inflow else 0, # 转换为亿元
+            "net_inflow": net_inflow,
+            "net_inflow_rate": sector_flow.net_inflow_rate,
+            "main_net_inflow": sector_flow.main_net_inflow if sector_flow.main_net_inflow else 0,
             "leading_stock": sector_flow.leading_stock,
             "flow_status": flow_status,
             "linkage_hint": linkage_hint
         }
+        return format_payload_values("capital_flow.sector_flow", payload)
 
     def _get_northbound_trend(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """
@@ -339,7 +349,10 @@ class CapitalFlowSource:
             return self.status_payload(
                 "partial",
                 status="Quarterly Comparison Unavailable",
-                latest_hold_ratio=round(latest.hold_ratio or 0, 4),
+                latest_hold_ratio=format_payload_values(
+                    "capital_flow.northbound",
+                    {"latest_hold_ratio": latest.hold_ratio},
+                )["latest_hold_ratio"],
                 update_date=str(latest.date),
             )
 
@@ -352,17 +365,18 @@ class CapitalFlowSource:
         if prev_quarter.hold_shares and prev_quarter.hold_shares > 0:
             hold_shares_growth_pct = (hold_change_shares / prev_quarter.hold_shares) * 100
 
-        return {
+        payload = {
             "data_status": "available",
             "period": "Quarterly",
-            "latest_hold_ratio": round(latest.hold_ratio or 0, 4),
-            "prev_hold_ratio": round(prev_quarter.hold_ratio or 0, 4),
-            "ratio_change": round(hold_ratio_change, 4),
-            "hold_shares_growth_pct": round(hold_shares_growth_pct, 2),
+            "latest_hold_ratio": latest.hold_ratio,
+            "prev_hold_ratio": prev_quarter.hold_ratio,
+            "ratio_change": hold_ratio_change,
+            "hold_shares_growth_pct": hold_shares_growth_pct,
             "latest_update_date": str(latest.date),
             "prev_update_date": str(prev_quarter.date),
             "frequency_hint": "Individual stock holdings are disclosed quarterly since 2024.08"
         }
+        return format_payload_values("capital_flow.northbound", payload)
 
     def _analyze_dragon_tiger_effect(
             self, db: Session, stock_code: str) -> Dict[str, Any]:
@@ -410,17 +424,18 @@ class CapitalFlowSource:
             "reason": latest.listing_reason,
             "post_1d": latest.post_1_day_price_change_percent,
             "post_5d": latest.post_5_day_price_change_percent,
-            "post_10d": latest.post_10_day_price_change_percent
+            "post_10d": latest.post_10_day_price_change_percent,
         }
 
-        return {
+        payload = {
             "data_status": "available",
             "historical_records": len(records),
-            "success_rate_5d": round(success_rate_5d, 1),  # 5日正收益率
-            "avg_post_5d_change": round(avg_5d_change, 2),  # 平均5日涨幅
-            "avg_post_10d_change": round(avg_10d_change, 2) if avg_10d_change else None,
+            "success_rate_5d": success_rate_5d,  # 5日正收益率
+            "avg_post_5d_change": avg_5d_change,  # 平均5日涨幅
+            "avg_post_10d_change": avg_10d_change if avg_10d_change else None,
             "latest_effect": latest_effect
         }
+        return format_payload_values("capital_flow.dragon_tiger", payload)
 
     def _get_shareholder(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """
@@ -451,14 +466,15 @@ class CapitalFlowSource:
                 "date": str(r.end_date),
                 "holder_count": r.holder_count,
                 "avg_hold_shares": r.avg_hold_shares,
-                "change_ratio": round(r.holder_count_change_ratio, 2) if r.holder_count_change_ratio else 0
+                "change_ratio": r.holder_count_change_ratio,
             })
 
-        return {
+        payload = {
             "data_status": "available",
             "latest_count": latest.holder_count,
             "avg_hold_shares": latest.avg_hold_shares,
-            "change_ratio": round(latest.holder_count_change_ratio, 2) if latest.holder_count_change_ratio else 0,
+            "change_ratio": latest.holder_count_change_ratio,
             "trend": trend,
             "history": history
         }
+        return format_payload_values("capital_flow.shareholder", payload)
