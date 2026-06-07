@@ -48,9 +48,20 @@ def _preview_text(value: Any, limit: int = 200) -> str:
 
 
 def _build_llm_probe_model(model: str, max_tokens: int = 256) -> Any:
+    """
+    构造 LLM 探针使用的聊天模型。
+
+    Args:
+        model: LiteLLM 模型别名。
+        max_tokens: 探针响应的最大输出 token 数。
+
+    Returns:
+        可执行 LangChain 调用的聊天模型。
+    """
+
     return build_chat_model(
         model=model,
-        temperature=0,
+        temperature=1,
         max_tokens=max_tokens,
     )
 

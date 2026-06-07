@@ -101,6 +101,7 @@ async def test_llm_probe_runs_all_probe_steps():
     assert result["checks"]["tool_call"]["tool_calls"][0]["name"] == "execute_python_sandboxed"
     assert result["checks"]["skills_call"]["tool_calls"][0]["name"] == "list_skills"
     assert all(call.get("extra_body") is None for call in build_calls)
+    assert all(call.get("temperature") == 1 for call in build_calls)
     assert [call.get("model") for call in build_calls[:2]] == ["backend-thinking", "backend"]
     thinking_call = next(call for call in build_calls if call.get("model") == "backend-thinking")
     assert thinking_call["max_tokens"] == 512
