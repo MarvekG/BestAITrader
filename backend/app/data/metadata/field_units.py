@@ -32,16 +32,18 @@ def _load_table_field_unit_config() -> Dict[str, Any]:
     return _table_field_unit_config
 
 
-def _localized_unit(unit_key: str, *, language: str | None = None) -> str:
+def _localized_unit(unit_key: Any, *, language: str | None = None) -> str:
     """使用 i18n key 翻译数值后缀单位。
 
     Args:
-        unit_key: ``units.*`` 格式的单位翻译键。
+        unit_key: ``units.*`` 格式的单位翻译键，或单位翻译键列表。
         language: 可选语言代码；为空时使用系统语言。
 
     Returns:
         对应语言下的单位后缀；缺少翻译时返回原始 key。
     """
+    if isinstance(unit_key, list):
+        return "".join(_localized_unit(item, language=language) for item in unit_key)
     if language:
         return i18n_service.get(unit_key, default=unit_key, lang=language)
     return i18n_service.t(unit_key)
@@ -98,7 +100,7 @@ def _format_number(value: Any, *, precision: int = 2) -> str | None:
 
 def _format_number_with_unit(
     value: Any,
-    unit_key: str,
+    unit_key: Any,
     *,
     precision: int = 2,
     language: str | None = None,
@@ -107,7 +109,7 @@ def _format_number_with_unit(
 
     Args:
         value: 原始数值。
-        unit_key: ``units.*`` 格式的单位翻译键。
+        unit_key: ``units.*`` 格式的单位翻译键，或单位翻译键列表。
         precision: 最多保留的小数位数。
         language: 可选语言代码；为空时使用系统语言。
 
@@ -118,6 +120,68 @@ def _format_number_with_unit(
     if text is None:
         return None
     return f"{text}{_localized_unit(unit_key, language=language)}"
+
+
+def _get_target_language(language: str | None = None) -> str:
+    """获取当前展示语言代码。
+
+    Args:
+        language: 可选语言代码；为空时使用系统语言。
+
+    Returns:
+        当前展示语言代码。
+    """
+    from app.core.config import settings
+
+    return (language or settings.SYSTEM_LANGUAGE or "zh").lower()
+
+
+def _pick_language_config(config: dict[str, Any], *, language: str | None = None) -> dict[str, Any] | None:
+    """按语言从字段单位配置中选择展示配置。
+
+    Args:
+        config: 字段单位配置。
+        language: 可选语言代码；为空时使用系统语言。
+
+    Returns:
+        当前语言下的展示配置；不存在时返回 None。
+    """
+    target_language = _get_target_language(language)
+    language_config = config.get(target_language)
+    return language_config if isinstance(language_config, dict) else None
+
+
+def _resolve_scale(scale: Any) -> float:
+    """把展示倍率配置解析为浮点数。
+
+    Args:
+        scale: 数字倍率。
+    Returns:
+        当前语言下应使用的展示倍率。
+    """
+    try:
+        return float(scale)
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _resolve_field_display(config: dict[str, Any], *, language: str | None = None) -> tuple[Any, float]:
+    """解析字段在当前语言下的单位和展示倍率。
+
+    Args:
+        config: 字段单位配置。
+        language: 可选语言代码；为空时使用系统语言。
+
+    Returns:
+        当前语言下的单位翻译键和展示倍率。
+    """
+    language_config = _pick_language_config(config, language=language)
+    if not language_config:
+        return None, 1.0
+
+    unit_key = language_config.get("unit")
+    scale = language_config.get("scale", 1)
+    return unit_key, _resolve_scale(scale)
 
 
 def _get_field_unit_config(table_name: str, field_name: str) -> dict[str, Any] | None:
@@ -161,14 +225,13 @@ def _format_field_value(
     if number is None:
         return value
 
-    display_scale = config.get("display_scale", 1)
+    unit_key, scale = _resolve_field_display(config, language=language)
     precision = int(config.get("precision", 2))
-    unit_key = config.get("unit")
     if not unit_key:
         return value
 
     return _format_number_with_unit(
-        number * float(display_scale),
+        number * scale,
         unit_key,
         precision=precision,
         language=language,

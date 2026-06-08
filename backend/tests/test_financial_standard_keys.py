@@ -1,5 +1,7 @@
 import os
+import json
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -73,12 +75,18 @@ class ModelMapSession:
 def test_format_payload_values_uses_i18n_unit_suffix(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "zh")
     assert format_payload_values("common_units", {"cny": 8.5})["cny"] == "8.5元"
+    assert format_payload_values("common_units", {"ten_thousand_cny": 4455.6})["ten_thousand_cny"] == "4455.6万元"
+    assert format_payload_values("common_units", {"hundred_million_cny": 12.3})["hundred_million_cny"] == "12.3亿元"
 
     monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "en")
     assert format_payload_values("common_units", {"cny": 8.5})["cny"] == "8.5 CNY"
     assert (
         format_payload_values("common_units", {"ten_thousand_cny": 4455.6})["ten_thousand_cny"]
-        == "4455.6 10k CNY"
+        == "44.56 million CNY"
+    )
+    assert (
+        format_payload_values("common_units", {"hundred_million_cny": 12.3})["hundred_million_cny"]
+        == "1.23 billion CNY"
     )
 
 
@@ -119,8 +127,73 @@ def test_format_payload_values_recursively_uses_table_unit_config(monkeypatch):
     assert result["data"]["q_gsprofit_margin"] == 27.4158
     assert result["data"]["gross_profit"] == 11779497981
     assert result["data"]["nested"]["net_profit_dedt_yoy"] == "-0.27%"
-    assert result["data"]["items"][0]["roe"] == 4.0826
+    assert result["data"]["items"][0]["roe"] == "4.08%"
     assert result["meta"]["report_date"] == "2026-03-31"
+
+
+def test_format_payload_values_uses_language_specific_unit_and_scale(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "zh")
+
+    payload = {"ten_thousand_cny": 10000, "hundred_million_cny": 10, "roe": 4.0826}
+
+    zh_common = format_payload_values("common_units", payload)
+    en_common = format_payload_values("common_units", payload, language="en")
+    en_financial = format_payload_values("data.financial_indicator", payload, language="en")
+
+    assert zh_common["ten_thousand_cny"] == "10000万元"
+    assert zh_common["hundred_million_cny"] == "10亿元"
+    assert en_common["ten_thousand_cny"] == "100 million CNY"
+    assert en_common["hundred_million_cny"] == "1 billion CNY"
+    assert en_financial["roe"] == "4.08%"
+
+
+def test_table_field_units_use_language_specific_schema():
+    config_path = Path(__file__).resolve().parents[1] / "app" / "data" / "metadata" / "table_field_units.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    total_assets = config["portfolio.overview"]["total_assets"]
+    ten_thousand_cny = config["common_units"]["ten_thousand_cny"]
+    hundred_million_cny = config["common_units"]["hundred_million_cny"]
+    unit_values = []
+
+    def collect_units(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key == "unit":
+                    unit_values.append(item)
+                else:
+                    collect_units(item)
+        elif isinstance(value, list):
+            for item in value:
+                collect_units(item)
+
+    collect_units(config)
+
+    assert "display_scale" not in json.dumps(config, ensure_ascii=False)
+    assert "units.million_cny" not in unit_values
+    assert "units.wanyuan" not in unit_values
+    assert total_assets == {
+        "zh": {"unit": "units.cny", "scale": 1},
+        "en": {"unit": "units.cny", "scale": 1},
+        "precision": 2,
+    }
+    assert ten_thousand_cny == {
+        "zh": {"unit": ["units.ten_thousand", "units.cny"], "scale": 1},
+        "en": {"unit": ["units.million", "units.cny"], "scale": "0.01"},
+        "precision": 2,
+    }
+    assert hundred_million_cny == {
+        "zh": {"unit": ["units.yi", "units.cny"], "scale": 1},
+        "en": {"unit": ["units.billion", "units.cny"], "scale": "0.1"},
+        "precision": 2,
+    }
+
+
+def test_format_payload_values_does_not_fallback_to_other_language(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "fr")
+
+    result = format_payload_values("common_units", {"cny": 8.5})
+
+    assert result["cny"] == 8.5
 
 
 class FundHoldingFakeSession:
