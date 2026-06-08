@@ -187,12 +187,20 @@ def _resolve_field_display(config: dict[str, Any], *, language: str | None = Non
 def _get_field_unit_config(table_name: str, field_name: str) -> dict[str, Any] | None:
     """读取标准表字段单位配置。
 
+    单位配置支持三类复用语义：
+    - ``$default_ref``：表级默认单位。字段没有单独配置时，默认引用 ``common_units`` 中的单位，
+      例如财报三表默认使用 ``cny_to_hundred_million``。
+    - ``$exclude_fields``：表级排除列表。字段在列表中时不补单位，直接返回原值，
+      例如 ``report_date``、``currency``、``data_source``。
+    - ``$ref``：字段级公共单位引用。字段不必重复写完整 ``zh``、``en``、``precision`` 配置，
+      可直接引用 ``common_units``，例如 ``basic_eps`` 使用 ``cny``、``total_share`` 使用 ``shares``。
+
     Args:
         table_name: 标准表名或虚拟上下文表名。
         field_name: 标准字段名。
 
     Returns:
-        字段单位配置；不存在时返回 None。表级 ``$default_ref`` 会作为缺省单位，字段级 ``$ref`` 会复用公共单位配置。
+        字段单位配置；不存在时返回 None。
     """
     all_config = _load_table_field_unit_config()
     table_config = all_config.get(table_name, {})
