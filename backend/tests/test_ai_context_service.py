@@ -226,7 +226,7 @@ def test_realtime_market_prefers_latest_timestamp_row():
 
     market = source._get_realtime_market(db, "600519.SH")
 
-    assert market["price"] == 1401.3
+    assert market["price"] == "1401.3元"
     assert market["pct_chg"] == "-3.02%"
-    assert market["volume"] == 4114309.0
-    assert market["turnover"] == 5811960008.0
+    assert market["volume"] == "4114309股"
+    assert market["turnover"] == "58.12亿元"

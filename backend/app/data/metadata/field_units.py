@@ -192,11 +192,32 @@ def _get_field_unit_config(table_name: str, field_name: str) -> dict[str, Any] |
         field_name: 标准字段名。
 
     Returns:
-        字段单位配置；不存在时返回 None。
+        字段单位配置；不存在时返回 None。表级 ``$default_ref`` 会作为缺省单位，字段级 ``$ref`` 会复用公共单位配置。
     """
-    table_config = _load_table_field_unit_config().get(table_name, {})
+    all_config = _load_table_field_unit_config()
+    table_config = all_config.get(table_name, {})
+    if not isinstance(table_config, dict):
+        return None
+
+    excluded_fields = table_config.get("$exclude_fields", [])
+    if isinstance(excluded_fields, list) and field_name in excluded_fields:
+        return None
+
     config = table_config.get(field_name)
-    return dict(config) if isinstance(config, dict) else None
+    if not isinstance(config, dict):
+        default_ref = table_config.get("$default_ref")
+        if not isinstance(default_ref, str):
+            return None
+        config = {"$ref": default_ref}
+
+    ref_name = config.get("$ref")
+    if isinstance(ref_name, str):
+        ref_config = all_config.get("common_units", {}).get(ref_name)
+        if isinstance(ref_config, dict):
+            merged = dict(ref_config)
+            merged.update({key: value for key, value in config.items() if key != "$ref"})
+            return merged
+    return dict(config)
 
 
 def _format_field_value(

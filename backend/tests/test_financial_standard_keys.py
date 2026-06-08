@@ -5,11 +5,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 os.environ.setdefault("TUSHARE_TOKEN", "test-token")
 os.environ.setdefault("TUSHARE_API", "http://test.invalid")
 
 from app.core.config import settings
 from app.data.metadata.field_units import format_payload_values
+from app.ai.llm_engine.context.providers import SnapshotProvider
 from app.ai.llm_engine.context.readers import FinancialReader, FundamentalReader
 from app.ai.llm_engine.context.capital_flow import CapitalFlowSource
 from app.models.data_storage import (
@@ -18,6 +21,9 @@ from app.models.data_storage import (
     StockFundHolding,
     StockBasic,
     StockBlockTrade,
+    StockBalanceSheet,
+    StockCashflowStatement,
+    StockIncomeStatement,
     StockMoneyFlow,
     IndustryData,
     StockInsider,
@@ -26,6 +32,7 @@ from app.models.data_storage import (
     StockValuationHistory,
     StockSEO,
     StockTopHolders,
+    FinancialIndicator,
 )
 
 
@@ -113,6 +120,30 @@ def test_format_payload_values_uses_table_unit_config(monkeypatch):
     assert financial["asset_turnover"] == "0.11次"
     assert position["current_position"] == "19%"
     assert unknown["unknown_field"] == 8.5
+
+
+def test_format_payload_values_uses_default_ref_for_financial_statements(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "zh")
+
+    income = format_payload_values(
+        "data.stock_income_statement",
+        {"total_revenue": 12_300_000_000, "basic_eps": 1.23456, "report_date": "2025-12-31"},
+    )
+    balance = format_payload_values(
+        "data.stock_balance_sheet",
+        {"total_assets": 67_890_000_000, "total_share": 100_000_000},
+    )
+    cashflow = format_payload_values(
+        "data.stock_cashflow_statement",
+        {"n_cashflow_act": 3_210_000_000},
+    )
+
+    assert income["total_revenue"] == "123亿元"
+    assert income["basic_eps"] == "1.2346元"
+    assert income["report_date"] == "2025-12-31"
+    assert balance["total_assets"] == "678.9亿元"
+    assert balance["total_share"] == "100000000股"
+    assert cashflow["n_cashflow_act"] == "32.1亿元"
 
 
 def test_format_payload_values_recursively_uses_table_unit_config(monkeypatch):
@@ -1300,6 +1331,38 @@ def test_financial_context_recursively_localizes_data_and_meta(monkeypatch):
     assert localized["meta"]["数据源"] == "tushare"
 
 
+def test_financial_context_localizes_tushare_optional_indicator_fields(monkeypatch):
+    monkeypatch.setattr(settings, "SYSTEM_LANGUAGE", "zh")
+
+    raw_payload = {
+        "data": {
+            "q_eps": 0.38,
+            "inv_turn": 0.72,
+            "q_gr_qoq": -6.64,
+            "ocf_to_or": 0.953,
+            "op_to_ebt": 102.5,
+            "q_dtprofit": 123456789.0,
+            "q_opincome": 234567890.0,
+            "roic_yearly": 8.91,
+            "update_flag": "1",
+        },
+        "meta": {"report_date": "2025-09-30"},
+    }
+
+    formatted = format_payload_values("data.financial_indicator", raw_payload)
+    localized = FinancialReader().localize_raw_data(formatted, "data.financial_indicator")
+
+    assert localized["data"]["单季度每股收益"] == "0.38元"
+    assert localized["data"]["存货周转率"] == "0.72次"
+    assert localized["data"]["单季度营业总收入环比增长率"] == "-6.64%"
+    assert localized["data"]["经营活动现金流净额/营业收入"] == "0.95倍"
+    assert localized["data"]["营业利润/利润总额"] == "102.5%"
+    assert localized["data"]["单季度扣非净利润"] == "1.23亿元"
+    assert localized["data"]["单季度经营活动净收益"] == "2.35亿元"
+    assert localized["data"]["年化投入资本回报率"] == "8.91%"
+    assert localized["data"]["更新标识"] == "1"
+
+
 def test_financial_context_includes_localized_balance_sheet_data(monkeypatch):
     monkeypatch.setattr(settings, "SYSTEM_LANGUAGE", "zh")
 
@@ -1312,8 +1375,8 @@ def test_financial_context_includes_localized_balance_sheet_data(monkeypatch):
         is_audit=True,
         data_source="tushare",
         data={
-            "total_revenue": 1000.0,
-            "net_profit": 500.0,
+            "total_revenue": 10_000_000_000.0,
+            "basic_eps": 1.23456,
         },
     )
     balance_record = SimpleNamespace(
@@ -1325,8 +1388,9 @@ def test_financial_context_includes_localized_balance_sheet_data(monkeypatch):
         is_audit=True,
         data_source="tushare",
         data={
-            "money_cap": 123.45,
-            "total_assets": 678.9,
+            "money_cap": 12_345_000_000.0,
+            "total_assets": 67_890_000_000.0,
+            "total_share": 100_000_000.0,
         },
     )
     cashflow_record = SimpleNamespace(
@@ -1338,22 +1402,107 @@ def test_financial_context_includes_localized_balance_sheet_data(monkeypatch):
         is_audit=True,
         data_source="tushare",
         data={
-            "n_cashflow_act": 321.0,
-            "n_cashflow_inv_act": -45.6,
+            "n_cashflow_act": 32_100_000_000.0,
+            "n_cashflow_inv_act": -4_560_000_000.0,
         },
     )
 
     builder = FinancialReader()
-    _ = builder.latest_income_statement(FakeSession([income_record]), "600519.SH")
-    _ = builder.income_statement_summary(FakeSession([income_record]), "600519.SH")
+    latest_income = builder.latest_income_statement(FakeSession([income_record]), "600519.SH")
+    income_history = builder.income_statement_summary(FakeSession([income_record]), "600519.SH")
     latest_balance = builder.latest_balance_sheet(FakeSession([balance_record]), "600519.SH")
     balance_history = builder.balance_sheet_history(FakeSession([balance_record]), "600519.SH")
     latest_cashflow = builder.latest_cashflow_statement(FakeSession([cashflow_record]), "600519.SH")
     cashflow_history = builder.cashflow_statement_history(FakeSession([cashflow_record]), "600519.SH")
 
-    assert latest_balance["data"]["货币资金"] == 123.45
-    assert latest_balance["data"]["资产总计"] == 678.9
-    assert latest_balance["meta"]["report_date"] == "2025-12-31"
-    assert balance_history[0]["data"]["货币资金"] == 123.45
-    assert latest_cashflow["data"]["经营活动产生的现金流量净额"] == 321.0
-    assert cashflow_history[0]["data"]["投资活动产生的现金流量净额"] == -45.6
+    assert latest_income["data"]["营业总收入"] == "100亿元"
+    assert latest_income["data"]["基本每股收益"] == "1.2346元"
+    assert income_history[0]["data"]["营业总收入"] == "100亿元"
+    assert latest_balance["data"]["货币资金"] == "123.45亿元"
+    assert latest_balance["data"]["资产总计"] == "678.9亿元"
+    assert latest_balance["data"]["实收资本(或股本)"] == "100000000股"
+    assert latest_balance["meta"]["报告期"] == "2025-12-31"
+    assert balance_history[0]["data"]["货币资金"] == "123.45亿元"
+    assert latest_cashflow["data"]["经营活动产生的现金流量净额"] == "321亿元"
+    assert cashflow_history[0]["data"]["投资活动产生的现金流量净额"] == "-45.6亿元"
+
+
+@pytest.mark.asyncio
+async def test_snapshot_context_exposes_financial_statements_with_units(monkeypatch):
+    monkeypatch.setattr(settings, "SYSTEM_LANGUAGE", "zh")
+
+    financial_record = SimpleNamespace(
+        report_date=date(2025, 12, 31),
+        announcement_date=date(2026, 1, 10),
+        data={"eps": 1.2345},
+    )
+    income_record = SimpleNamespace(
+        report_date=date(2025, 12, 31),
+        announcement_date=date(2026, 1, 10),
+        updated_at=date(2026, 1, 10),
+        report_type="合并报表",
+        currency="CNY",
+        is_audit=True,
+        data_source="tushare",
+        data={"total_revenue": 10_000_000_000.0, "basic_eps": 1.23456},
+    )
+    balance_record = SimpleNamespace(
+        report_date=date(2025, 12, 31),
+        announcement_date=date(2026, 1, 10),
+        updated_at=date(2026, 1, 10),
+        report_type="合并报表",
+        currency="CNY",
+        is_audit=True,
+        data_source="tushare",
+        data={"total_assets": 67_890_000_000.0},
+    )
+    cashflow_record = SimpleNamespace(
+        report_date=date(2025, 12, 31),
+        announcement_date=date(2026, 1, 10),
+        updated_at=date(2026, 1, 10),
+        report_type="合并报表",
+        currency="CNY",
+        is_audit=True,
+        data_source="tushare",
+        data={"n_cashflow_act": 32_100_000_000.0},
+    )
+    db = ModelMapSession(
+        {
+            FinancialIndicator: [financial_record],
+            StockIncomeStatement: [income_record],
+            StockBalanceSheet: [balance_record],
+            StockCashflowStatement: [cashflow_record],
+        }
+    )
+
+    class EmptyReader:
+        def __getattr__(self, _name):
+            return lambda *_args, **_kwargs: {}
+
+    class Runtime:
+        stock_code = "600519.SH"
+        readers = SimpleNamespace(
+            financial=FinancialReader(),
+            fundamental=EmptyReader(),
+            capital_flow=EmptyReader(),
+        )
+
+        def db_session(self):
+            class SessionContext:
+                def __enter__(self):
+                    return db
+
+                def __exit__(self, *_args):
+                    return False
+
+            return SessionContext()
+
+    layer = await SnapshotProvider().build(Runtime(), {})
+    statements = layer.payload["financial_statements"]
+
+    assert statements["status"] == "available"
+    assert statements["financial_indicator_latest"]["data"]["每股收益"] == "1.2345元"
+    assert statements["income_statement_latest"]["data"]["营业总收入"] == "100亿元"
+    assert statements["income_statement_latest"]["data"]["基本每股收益"] == "1.2346元"
+    assert statements["balance_sheet_latest"]["data"]["资产总计"] == "678.9亿元"
+    assert statements["cashflow_statement_latest"]["data"]["经营活动产生的现金流量净额"] == "321亿元"

@@ -141,6 +141,15 @@ class SnapshotProvider:
     name = "snapshot"
 
     async def build(self, runtime: Any, sections: Mapping[str, AIContextPayload]) -> AIContextLayer:
+        """构建单股静态快照上下文。
+
+        Args:
+            runtime: 当前 AI 上下文构建运行时。
+            sections: 已构建的上下文分层。
+
+        Returns:
+            包含公司、财报、估值、预测、持有人和资金流快照的上下文分层。
+        """
         fundamental = runtime.readers.fundamental
         financial = runtime.readers.financial
         capital_flow = runtime.readers.capital_flow
@@ -155,12 +164,18 @@ class SnapshotProvider:
 
             latest_financials = financial.latest_financials(db, runtime.stock_code)
             latest_financials_for_context = financial.source._format_latest_financials_for_context(latest_financials)
+            latest_income = financial.latest_income_statement(db, runtime.stock_code)
+            latest_balance = financial.latest_balance_sheet(db, runtime.stock_code)
+            latest_cashflow = financial.latest_cashflow_statement(db, runtime.stock_code)
             financial_statements = {
-                "status": merge_status(latest_financials),
+                "status": merge_status(latest_financials, latest_income, latest_balance, latest_cashflow),
                 "financial_indicator_latest": _wrap_snapshot(
                     financial,
                     financial.localize_raw_data(latest_financials_for_context, "data.financial_indicator")
                 ),
+                "income_statement_latest": _wrap_snapshot(financial, latest_income),
+                "balance_sheet_latest": _wrap_snapshot(financial, latest_balance),
+                "cashflow_statement_latest": _wrap_snapshot(financial, latest_cashflow),
             }
             valuation = _wrap_dict(fundamental, fundamental.valuation(db, runtime.stock_code))
             forecast = _wrap_dict(fundamental, fundamental.forecast(db, runtime.stock_code))
@@ -248,6 +263,15 @@ class SignalsProvider:
     name = "signals"
 
     async def build(self, runtime: Any, sections: Mapping[str, AIContextPayload]) -> AIContextLayer:
+        """构建风险、热度和资金流信号上下文。
+
+        Args:
+            runtime: 当前 AI 上下文构建运行时。
+            sections: 已构建的上下文分层。
+
+        Returns:
+            包含情绪热度、风险预警和资金流信号的上下文分层。
+        """
         sentiment = runtime.readers.sentiment
         risk = runtime.readers.risk
         capital_flow = runtime.readers.capital_flow
@@ -255,8 +279,8 @@ class SignalsProvider:
         fundamental = runtime.readers.fundamental
         with runtime.db_session() as db:
             latest_financials = financial.latest_financials(db, runtime.stock_code)
-            latest_balance = financial.latest_balance_sheet(db, runtime.stock_code)
-            latest_cashflow = financial.latest_cashflow_statement(db, runtime.stock_code)
+            latest_balance = financial.latest_balance_sheet(db, runtime.stock_code, format_for_context=False)
+            latest_cashflow = financial.latest_cashflow_statement(db, runtime.stock_code, format_for_context=False)
             financial_ctx = {
                 "financial_indicator_latest": _wrap_snapshot(
                     financial,

@@ -39,6 +39,26 @@ def test_financial_indicator_standard_key_loaded_from_json():
     assert ColumnMapper.get_financial_indicator_standard_key("roe_dt", "tushare_fina_indicator") == "roe_diluted"
 
 
+def test_tushare_financial_indicator_mapping_covers_optional_fields():
+    mapping = ColumnMapper.get_table_mapping("data.financial_indicator", "tushare_fina_indicator")
+    expected_identity_fields = {
+        "arturn_days",
+        "inv_turn",
+        "ocf_to_or",
+        "op_to_ebt",
+        "q_dtprofit",
+        "q_eps",
+        "q_gr_qoq",
+        "q_opincome",
+        "rd_exp",
+        "roic_yearly",
+        "update_flag",
+    }
+
+    for field in expected_identity_fields:
+        assert mapping[field] == field
+
+
 def test_tushare_income_statement_mapping_includes_optional_fields():
     mapping = ColumnMapper.get_table_mapping("data.stock_income_statement", "tushare_income_statement")
     expected_identity_fields = {
