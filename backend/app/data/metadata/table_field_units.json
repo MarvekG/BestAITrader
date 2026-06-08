@@ -1,230 +1,4681 @@
 {
   "common_units": {
-    "cny": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "lots": {"unit": "units.lots", "display_scale": 1, "precision": 0},
-    "ten_thousand_cny": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2},
-    "thousand_cny": {"unit": "units.thousand_cny", "display_scale": 1, "precision": 2},
-    "hundred_million_cny": {"unit": "units.hundred_million_cny", "display_scale": 1, "precision": 2},
-    "multiple": {"unit": "units.multiple", "display_scale": 1, "precision": 2},
-    "points": {"unit": "units.points", "display_scale": 1, "precision": 2},
-    "days": {"unit": "units.days", "display_scale": 1, "precision": 0},
-    "times": {"unit": "units.times", "display_scale": 1, "precision": 2},
-    "households": {"unit": "units.households", "display_scale": 1, "precision": 0},
-    "percentage_points": {"unit": "units.percentage_points", "display_scale": 1, "precision": 2},
-    "percent": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "percent_1": {"unit": "units.percent", "display_scale": 1, "precision": 1},
-    "ratio_percent": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "ratio_percent_4": {"unit": "units.percent", "display_scale": 100, "precision": 4}
+    "cny": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "shares": {
+      "zh": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "lots": {
+      "zh": {
+        "unit": "units.lots",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.lots",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "ten_thousand_cny": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": "0.01"
+      },
+      "precision": 2
+    },
+    "thousand_cny": {
+      "zh": {
+        "unit": [
+          "units.thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "hundred_million_cny": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1.0
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": "0.1"
+      },
+      "precision": 2
+    },
+    "cny_to_hundred_million": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "multiple": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "points": {
+      "zh": {
+        "unit": "units.points",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.points",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "days": {
+      "zh": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "times": {
+      "zh": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "households": {
+      "zh": {
+        "unit": "units.households",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.households",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "percentage_points": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "percent": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "percent_1": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 1
+    },
+    "ratio_percent": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "ratio_percent_4": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 4
+    }
   },
   "portfolio.overview": {
-    "total_assets": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "available_cash": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "frozen_cash": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "market_value": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "total_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "available_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "frozen_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "avg_cost": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "current_price": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "unrealized_pnl": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "stop_loss": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "cash_ratio": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "position_ratio": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "weight": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "unrealized_pnl_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "top_single_position_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "top_industry_position_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "max_unrealized_loss_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "stop_loss_coverage_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "estimated_volatility_20d": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "estimated_volatility_60d": {"unit": "units.percent", "display_scale": 100, "precision": 2}
+    "total_assets": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "available_cash": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "frozen_cash": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "market_value": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "total_shares": {
+      "zh": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "available_shares": {
+      "zh": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "frozen_shares": {
+      "zh": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "avg_cost": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "current_price": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "unrealized_pnl": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "stop_loss": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "cash_ratio": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "position_ratio": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "weight": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "unrealized_pnl_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "top_single_position_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "top_industry_position_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "max_unrealized_loss_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "stop_loss_coverage_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "estimated_volatility_20d": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "estimated_volatility_60d": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    }
   },
   "portfolio.performance": {
-    "available_cash": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "market_value": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "cumulative_return": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "benchmark_cumulative_return": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "excess_return": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "max_drawdown": {"unit": "units.percent", "display_scale": 100, "precision": 2}
+    "available_cash": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "market_value": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "cumulative_return": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "benchmark_cumulative_return": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "excess_return": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "max_drawdown": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    }
   },
   "portfolio.risk_control": {
-    "max_single_position_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "max_industry_position_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "min_cash_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "stop_loss_warning_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2}
+    "max_single_position_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "max_industry_position_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "min_cash_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "stop_loss_warning_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    }
   },
   "fundamental.forecast": {
-    "age_days": {"unit": "units.days", "display_scale": 1, "precision": 0},
-    "min": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2},
-    "max": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2},
-    "midpoint": {"unit": "units.ten_thousand_cny", "display_scale": 1, "precision": 2},
-    "min_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "max_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "midpoint_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "age_days": {
+      "zh": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "min": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": "0.01"
+      },
+      "precision": 2
+    },
+    "max": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": "0.01"
+      },
+      "precision": 2
+    },
+    "midpoint": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": "0.01"
+      },
+      "precision": 2
+    },
+    "min_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "max_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "midpoint_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    }
   },
   "fundamental.top_holders": {
-    "age_days": {"unit": "units.days", "display_scale": 1, "precision": 0},
-    "total_hold_ratio_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "hold_ratio_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "age_days": {
+      "zh": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "total_hold_ratio_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "hold_ratio_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    }
   },
   "fundamental.industry_rank": {},
   "fundamental.insider_activity": {
-    "change_ratio_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "ratio_after_change_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "change_ratio_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "ratio_after_change_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    }
   },
   "fundamental.margin_analysis": {
-    "market_cap_cny": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "margin_balance_cny": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "short_balance_cny": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "margin_buy_amount_cny": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "margin_repay_amount_cny": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "margin_ratio_to_market_cap_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "short_ratio_to_market_cap_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "margin_balance_change_5d_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "market_cap_cny": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "margin_balance_cny": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "short_balance_cny": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "margin_buy_amount_cny": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "margin_repay_amount_cny": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "margin_ratio_to_market_cap_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "short_ratio_to_market_cap_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "margin_balance_change_5d_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    }
   },
   "fundamental.fund_holding": {},
   "fundamental.seo_history": {},
   "fundamental.lockup_release": {
-    "release_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "days_until_release": {"unit": "units.days", "display_scale": 1, "precision": 0},
-    "days_since_release": {"unit": "units.days", "display_scale": 1, "precision": 0}
+    "release_shares": {
+      "zh": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "days_until_release": {
+      "zh": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "days_since_release": {
+      "zh": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "precision": 0
+    }
   },
   "events.earnings_countdown": {
-    "days_countdown": {"unit": "units.days", "display_scale": 1, "precision": 0}
+    "days_countdown": {
+      "zh": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "precision": 0
+    }
   },
   "risk.financial_warning": {
-    "goodwill_ratio": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "debt_ratio": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "goodwill_ratio": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "debt_ratio": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    }
   },
   "risk.insider": {
-    "ratio": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "ratio": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    }
   },
   "risk.lockup_release": {
-    "shares": {"unit": "units.shares", "display_scale": 1, "precision": 0}
+    "shares": {
+      "zh": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "precision": 0
+    }
   },
   "risk.shareholder": {
-    "count": {"unit": "units.households", "display_scale": 1, "precision": 0},
-    "avg_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "change_ratio": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "total_change_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "change_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "count": {
+      "zh": {
+        "unit": "units.households",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.households",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "avg_shares": {
+      "zh": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "change_ratio": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "total_change_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "change_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    }
   },
   "fundamental.financial_trend": {
-    "total_revenue_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "net_profit_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "net_profit_dedt_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "total_revenue_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "net_profit_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "net_profit_dedt_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "roe": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "gross_margin": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "net_margin": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "debt_to_asset": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "change_vs_oldest": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    }
   },
   "fundamental.financials": {
-    "total_revenue_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "net_profit_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "total_revenue_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "net_profit_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "roe": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "gross_margin": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "net_margin": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "debt_to_asset": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    }
   },
   "fundamental.valuation": {
-    "dividend_yield": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "total_mv": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "float_mv": {"unit": "units.cny", "display_scale": 1, "precision": 2}
+    "dividend_yield": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "total_mv": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "float_mv": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    }
   },
   "fundamental.northbound_flow": {
-    "age_days": {"unit": "units.days", "display_scale": 1, "precision": 0},
-    "hold_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "hold_ratio_pct": {"unit": "units.percent", "display_scale": 1, "precision": 4},
-    "change_percent": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "hold_ratio_change_pct": {"unit": "units.percent", "display_scale": 1, "precision": 4},
-    "net_buy_volume": {"unit": "units.shares", "display_scale": 1, "precision": 0}
+    "age_days": {
+      "zh": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "hold_shares": {
+      "zh": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "hold_ratio_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 4
+    },
+    "change_percent": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "hold_ratio_change_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 4
+    },
+    "net_buy_volume": {
+      "zh": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "hold_value_10k_cny": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": "0.01"
+      },
+      "precision": 2
+    },
+    "net_buy_amount_10k_cny": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": "0.01"
+      },
+      "precision": 2
+    },
+    "hold_value_change_10k_cny": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": "0.01"
+      },
+      "precision": 2
+    },
+    "close_price_cny": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    }
   },
-  "fundamental.dragon_tiger_activity": {},
+  "fundamental.dragon_tiger_activity": {
+    "cumulative_net_buy_10k_cny": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": "0.01"
+      },
+      "precision": 2
+    },
+    "net_buy_amount_10k_cny": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": "0.01"
+      },
+      "precision": 2
+    },
+    "buy_amount_10k_cny": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": "0.01"
+      },
+      "precision": 2
+    },
+    "sell_amount_10k_cny": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": "0.01"
+      },
+      "precision": 2
+    },
+    "price_change_percent": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "net_buy_ratio_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "post_1_day_price_change_percent": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "post_5_day_price_change_percent": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    }
+  },
   "technical.kline": {
-    "volume": {"unit": "units.lots", "display_scale": 1, "precision": 0},
-    "pct_chg": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "volume": {
+      "zh": {
+        "unit": "units.lots",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.lots",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "pct_chg": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    }
   },
   "technical.indicators": {},
   "technical.realtime_market": {
-    "pct_chg": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "price": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "pct_chg": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "turnover_rate": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "volume_ratio": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "amplitude": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "pb": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "pe": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "amount": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "volume": {
+      "zh": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "turnover": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "total_market_cap": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "circulating_market_cap": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    }
   },
   "technical.index_context": {
-    "close": {"unit": "units.points", "display_scale": 1, "precision": 2},
-    "pct_chg": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "volume": {"unit": "units.lots", "display_scale": 1, "precision": 0},
-    "amount": {"unit": "units.thousand_cny", "display_scale": 1, "precision": 2}
+    "close": {
+      "zh": {
+        "unit": "units.points",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.points",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "pct_chg": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "volume": {
+      "zh": {
+        "unit": "units.lots",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.lots",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "amount": {
+      "zh": {
+        "unit": [
+          "units.thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "precision": 2
+    }
   },
   "capital_flow.money_flow": {
-    "net_inflow_main": {"unit": "units.ten_thousand_cny", "display_scale": 0.0001, "precision": 2},
-    "net_inflow_retail": {"unit": "units.ten_thousand_cny", "display_scale": 0.0001, "precision": 2},
-    "net_inflow_ratio_main": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "net_inflow_huge": {"unit": "units.ten_thousand_cny", "display_scale": 0.0001, "precision": 2},
-    "net_inflow_main_3d": {"unit": "units.ten_thousand_cny", "display_scale": 0.0001, "precision": 2},
-    "net_inflow_main_5d": {"unit": "units.ten_thousand_cny", "display_scale": 0.0001, "precision": 2},
-    "net_inflow_main_10d": {"unit": "units.ten_thousand_cny", "display_scale": 0.0001, "precision": 2}
+    "net_inflow_main": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1e-4
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": 1e-6
+      },
+      "precision": 2
+    },
+    "net_inflow_retail": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1e-4
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": 1e-6
+      },
+      "precision": 2
+    },
+    "net_inflow_ratio_main": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "net_inflow_huge": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1e-4
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": 1e-6
+      },
+      "precision": 2
+    },
+    "net_inflow_main_3d": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1e-4
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": 1e-6
+      },
+      "precision": 2
+    },
+    "net_inflow_main_5d": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1e-4
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": 1e-6
+      },
+      "precision": 2
+    },
+    "net_inflow_main_10d": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1e-4
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": 1e-6
+      },
+      "precision": 2
+    }
   },
   "capital_flow.northbound": {
-    "age_days": {"unit": "units.days", "display_scale": 1, "precision": 0},
-    "hold_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "hold_ratio": {"unit": "units.percent", "display_scale": 1, "precision": 4},
-    "net_buy_volume": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "latest_hold_ratio": {"unit": "units.percent", "display_scale": 1, "precision": 4},
-    "prev_hold_ratio": {"unit": "units.percent", "display_scale": 1, "precision": 4},
-    "ratio_change": {"unit": "units.percent", "display_scale": 1, "precision": 4},
-    "hold_shares_growth_pct": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "age_days": {
+      "zh": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "hold_shares": {
+      "zh": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "hold_ratio": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 4
+    },
+    "net_buy_amount": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "net_buy_volume": {
+      "zh": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "latest_hold_ratio": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 4
+    },
+    "prev_hold_ratio": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 4
+    },
+    "ratio_change": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 4
+    },
+    "hold_shares_growth_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    }
   },
-  "capital_flow.dragon_tiger": {},
+  "capital_flow.dragon_tiger": {
+    "net_buy": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "buy_amount": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "sell_amount": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "turnover_rate": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "price_change": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    }
+  },
   "capital_flow.margin": {
-    "rz_balance": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "rz_buy": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "rq_balance": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "rq_sell": {"unit": "units.shares", "display_scale": 1, "precision": 0}
+    "rz_balance": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "rz_buy": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "rq_balance": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "rq_sell": {
+      "zh": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "precision": 0
+    }
   },
   "capital_flow.block_trade": {
-    "volume": {"unit": "units.ten_thousand_shares", "display_scale": 1, "precision": 2}
+    "volume": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.shares"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.shares"
+        ],
+        "scale": "0.01"
+      },
+      "precision": 2
+    },
+    "amount": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": "0.01"
+      },
+      "precision": 2
+    },
+    "total_amount": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": "0.01"
+      },
+      "precision": 2
+    },
+    "premium_rate": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "avg_premium": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "price": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    }
   },
   "capital_flow.sector_flow": {
-    "net_inflow": {"unit": "units.hundred_million_cny", "display_scale": 0.00000001, "precision": 2},
-    "net_inflow_rate": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "main_net_inflow": {"unit": "units.hundred_million_cny", "display_scale": 0.00000001, "precision": 2}
+    "net_inflow": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "net_inflow_rate": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "main_net_inflow": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    }
   },
   "capital_flow.shareholder": {
-    "holder_count": {"unit": "units.households", "display_scale": 1, "precision": 0},
-    "latest_count": {"unit": "units.households", "display_scale": 1, "precision": 0},
-    "avg_hold_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "change_ratio": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "holder_count": {
+      "zh": {
+        "unit": "units.households",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.households",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "latest_count": {
+      "zh": {
+        "unit": "units.households",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.households",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "avg_hold_shares": {
+      "zh": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "change_ratio": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    }
+  },
+  "data.stock_income_statement": {
+    "$default_ref": "cny_to_hundred_million",
+    "$exclude_fields": [
+      "stock_code",
+      "announcement_date",
+      "actual_announcement_date",
+      "report_date",
+      "report_type",
+      "company_type",
+      "report_period_type",
+      "currency",
+      "is_audit",
+      "update_date",
+      "data_source",
+      "_unused_update_flag"
+    ],
+    "basic_eps": {
+      "$ref": "cny",
+      "precision": 4
+    },
+    "diluted_eps": {
+      "$ref": "cny",
+      "precision": 4
+    }
+  },
+  "data.stock_balance_sheet": {
+    "$default_ref": "cny_to_hundred_million",
+    "$exclude_fields": [
+      "stock_code",
+      "announcement_date",
+      "actual_announcement_date",
+      "report_date",
+      "report_type",
+      "company_type",
+      "report_period_type",
+      "currency",
+      "is_audit",
+      "update_date",
+      "data_source",
+      "_unused_update_flag"
+    ],
+    "total_share": {
+      "$ref": "shares"
+    }
+  },
+  "data.stock_cashflow_statement": {
+    "$default_ref": "cny_to_hundred_million",
+    "$exclude_fields": [
+      "stock_code",
+      "announcement_date",
+      "actual_announcement_date",
+      "report_date",
+      "report_type",
+      "company_type",
+      "report_period_type",
+      "currency",
+      "is_audit",
+      "update_date",
+      "data_source",
+      "_unused_update_flag"
+    ]
   },
   "data.financial_indicator": {
-    "total_revenue_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "operating_revenue_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "net_profit_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "net_profit_dedt_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "basic_eps_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "dt_eps_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "cfps_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "op_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "ebt_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "ocf_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "roe_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "q_gr_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "q_gr_qoq": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "q_sales_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "q_sales_qoq": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "q_op_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "quarterly_operating_profit_qoq": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "q_op_qoq": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "q_profit_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "q_profit_qoq": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "q_netprofit_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "q_netprofit_qoq": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "total_assets_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2},
-    "bps_yoy": {"unit": "units.percent", "display_scale": 1, "precision": 2}
+    "roe": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "total_revenue_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "operating_revenue_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "net_profit_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "net_profit_dedt_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "basic_eps_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "dt_eps_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "cfps_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "op_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "ebt_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "ocf_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "roe_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_gr_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_gr_qoq": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_sales_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_sales_qoq": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_op_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "quarterly_operating_profit_qoq": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_op_qoq": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_profit_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_profit_qoq": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_netprofit_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_netprofit_qoq": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "total_assets_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "bps_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "extra_item": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "recurring_profit": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "gross_margin": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "operating_income": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "ebit": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "ebitda": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "free_cash_flow_firm": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "free_cash_flow_equity": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "current_exint": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "noncurrent_exint": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "interestdebt": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "netdebt": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "tangible_asset": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "working_capital": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "networking_capital": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "invest_capital": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "retained_earnings": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "fixed_assets": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "q_opincome": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "q_dtprofit": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "q_investincome": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "valuechange_income": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "non_op_profit": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "interst_income": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "profit_prefin_exp": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "eps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "diluted_eps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "q_eps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "bps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "ocfps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "cash_flow_ps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "ebit_ps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "fcff_ps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "fcfe_ps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "revenue_ps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "total_revenue_ps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "retained_earnings_ps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "capital_reserve_ps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "surplus_reserve_ps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "undistributed_profit_ps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "roe_waa": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "roe_diluted": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "roa": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "roic": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "net_profit_margin": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "debt_to_assets_ratio": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "cogs_ratio": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "expense_ratio": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "profit_to_gr": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "operating_profit_to_revenue": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "ebit_to_revenue": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "grossprofit_margin": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_gsprofit_margin": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_netprofit_margin": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_op_to_gr": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_profit_to_gr": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_ocf_to_sales": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "turn_days": {
+      "zh": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "invturn_days": {
+      "zh": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "arturn_days": {
+      "zh": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "accounts_receivable_turnover": {
+      "zh": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "fixed_asset_turnover": {
+      "zh": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "current_asset_turnover": {
+      "zh": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "asset_turnover": {
+      "zh": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "inv_turn": {
+      "zh": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "dt_eps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "capital_rese_ps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "surplus_rese_ps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "undist_profit_ps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "profit_dedt": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "ar_turn": {
+      "zh": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "ca_turn": {
+      "zh": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "fa_turn": {
+      "zh": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "assets_turn": {
+      "zh": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "op_income": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "fcff": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "fcfe": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "retainedps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "cfps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "netprofit_margin": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "cogs_of_sales": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "expense_of_sales": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "op_of_gr": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "ebit_of_gr": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "roe_dt": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "debt_to_assets": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "netprofit_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "dt_netprofit_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "assets_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "tr_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "or_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "daa": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "rd_exp": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.cny"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.cny"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
+    "diluted2_eps": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 4
+    },
+    "profit_to_op": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "dtprofit_to_profit": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "salescash_to_or": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "op_to_liqdebt": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "cash_to_liqdebt": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "ocf_to_shortdebt": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "tbassets_to_totalassets": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "roe_yearly": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "npta": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "roe_avg": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "opincome_of_ebt": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "eqt_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "quarterly_roe_diluted": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "ocf_to_opincome": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "tax_to_ebt": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "equity_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_opincome_to_ebt": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "roa_dp": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "quarterly_roe": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_salescash_to_or": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "ocf_to_interestdebt": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "cash_to_liqdebt_withinterest": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "ocf_to_debt": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_investincome_to_ebt": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "roa2_yearly": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_exp_to_sales": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "ca_to_assets": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "op_to_debt": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "eqt_to_talcapital": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "ocf_to_profit": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_gc_to_gr": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_saleexp_to_gr": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_roe": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_dt_roe": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_npta": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_dtprofit_to_profit": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "longdeb_to_debt": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_adminexp_to_gr": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "op_to_ebt": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_finaexp_to_gr": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "impai_ttm": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "finaexp_of_gr": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "net_profit_to_total_assets": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "currentdebt_to_debt": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "nop_to_ebt": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "total_equity_yoy": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "investincome_of_ebt": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "ocf_to_netdebt": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "n_op_profit_of_ebt": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "saleexp_to_gr": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "ebitda_to_debt": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "quarterly_npta": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "roa_yearly": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_ocf_to_or": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "int_to_talcap": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "adminexp_of_gr": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "capitalized_to_da": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "q_impair_to_gr_ttm": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "nca_to_assets": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "ocf_to_or": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "roic_yearly": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "gc_of_gr": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "cash_ratio": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "current_ratio": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "eqt_to_interestdebt": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "tangibleasset_to_debt": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "debt_to_eqt": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "eqt_to_debt": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "longdebt_to_workingcapital": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "quick_ratio": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "ebit_to_interest": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "dp_assets_to_eqt": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "tangasset_to_intdebt": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "assets_to_eqt": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "tangibleasset_to_netdebt": {
+      "zh": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.multiple",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "total_fa_trun": {
+      "zh": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.times",
+        "scale": 1
+      },
+      "precision": 2
+    }
   },
   "portfolio.account": {
-    "total_assets": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "available_cash": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "market_value": {"unit": "units.cny", "display_scale": 1, "precision": 2}
+    "total_assets": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "available_cash": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "market_value": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    }
   },
   "portfolio.position": {
-    "total_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "available_shares": {"unit": "units.shares", "display_scale": 1, "precision": 0},
-    "avg_cost": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "current_price": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "current_position": {"unit": "units.percent", "display_scale": 100, "precision": 2},
-    "profit_loss": {"unit": "units.cny", "display_scale": 1, "precision": 2},
-    "profit_loss_pct": {"unit": "units.percent", "display_scale": 100, "precision": 2}
+    "total_shares": {
+      "zh": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "available_shares": {
+      "zh": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.shares",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "avg_cost": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "current_price": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "current_position": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    },
+    "profit_loss": {
+      "zh": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "profit_loss_pct": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 100
+      },
+      "precision": 2
+    }
   }
 }

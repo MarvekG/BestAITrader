@@ -24,6 +24,14 @@ const getLooseString = (record: LooseRecord, key: string) => {
   return typeof value === 'string' ? value : undefined;
 };
 
+const formatNumber = (value: unknown, precision = 2) => {
+  if (typeof value !== 'number') return '0';
+  return value.toLocaleString(undefined, {
+    maximumFractionDigits: precision,
+    minimumFractionDigits: 0,
+  });
+};
+
 export interface DebateMessage {
   message_id: string;
   session_id: string;
@@ -310,7 +318,7 @@ export const DebateArena: React.FC<DebateArenaProps> = ({ messages = [], loading
                     parts.push(`### ${t('debate.market_snapshot')}`);
                     parts.push(`**${s.stock_name} (${s.stock_code})**`);
                     parts.push(`- ${t('debate.current_price')}: ${s.price.current} (${changeColor} ${(s.price.change_pct || 0).toFixed(2)}%)`);
-                    parts.push(`- ${t('debate.volume')}: ${((s.price.volume || 0) / 100).toFixed(0)}${t('units.hand')} | ${t('debate.turnover')}: ${((s.price.turnover || 0) / 100000000).toFixed(2)}${t('units.billion')}`);
+                    parts.push(`- ${t('debate.volume')}: ${formatNumber(s.price.volume, 0)} | ${t('debate.turnover')}: ${formatNumber(s.price.turnover)}`);
                   }
 
                   // 2. Valuation
@@ -318,7 +326,7 @@ export const DebateArena: React.FC<DebateArenaProps> = ({ messages = [], loading
                     parts.push(`#### ${t('debate.valuation')}`);
                     parts.push(`- PE(TTM): ${s.valuation.pe_ttm} | PE(Dyn): ${s.valuation.pe_dynamic || 'N/A'}`);
                     parts.push(`- PB: ${s.valuation.pb || 'N/A'} | PEG: ${s.valuation.peg || 'N/A'}`);
-                    parts.push(`- ${t('debate.total_cap')}: ${((s.valuation.market_cap || 0) / 100000000).toFixed(2)}${t('units.billion')}`);
+                    parts.push(`- ${t('debate.total_cap')}: ${formatNumber(s.valuation.market_cap)}`);
                   }
 
                   // 3. Fundamentals
@@ -344,7 +352,7 @@ export const DebateArena: React.FC<DebateArenaProps> = ({ messages = [], loading
                       parts.push(`- ${t('debate.northbound')}: ${s.capital_flow.northbound.net_buy_value || 'N/A'}`);
                     }
                     if (s.capital_flow.sector_flow) {
-                      parts.push(`- ${t('debate.industry_inflow')}: ${((s.capital_flow.sector_flow.net_inflow || 0) / 100000000).toFixed(2)}${t('units.billion')}`);
+                      parts.push(`- ${t('debate.industry_inflow')}: ${formatNumber(s.capital_flow.sector_flow.net_inflow)}`);
                     }
                   }
 

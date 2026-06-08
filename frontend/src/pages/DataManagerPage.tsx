@@ -11,6 +11,14 @@ import ReactMarkdown from 'react-markdown';
 
 const { Text } = Typography;
 
+const formatNumber = (value: number | null | undefined, precision = 2) => {
+    if (value == null) return '-';
+    return Number(value).toLocaleString(undefined, {
+        maximumFractionDigits: precision,
+        minimumFractionDigits: 0,
+    });
+};
+
 export const DataManagerPage: React.FC = () => {
     const { t } = useTranslation();
     const { message, notification } = App.useApp();
@@ -922,7 +930,7 @@ export const DataManagerPage: React.FC = () => {
             { title: t('stock_valuation_history.pe_ttm'), dataIndex: ['stock_valuation_history.pe_ttm'], key: 'stock_valuation_history.pe_ttm', render: (v: number) => v != null ? v.toFixed(2) : '-' },
             { title: t('stock_valuation_history.pe_static'), dataIndex: ['stock_valuation_history.pe_static'], key: 'stock_valuation_history.pe_static', render: (v: number) => v != null ? v.toFixed(2) : '-' },
             { title: t('stock_valuation_history.pb'), dataIndex: ['stock_valuation_history.pb'], key: 'stock_valuation_history.pb', render: (v: number) => v != null ? v.toFixed(2) : '-' },
-            { title: t('stock_valuation_history.total_market_value'), dataIndex: ['stock_valuation_history.total_market_value'], key: 'stock_valuation_history.total_market_value', render: (v: number) => v != null ? (v / 100000000).toFixed(2) + t('units.billion') : '-' },
+            { title: t('stock_valuation_history.total_market_value'), dataIndex: ['stock_valuation_history.total_market_value'], key: 'stock_valuation_history.total_market_value', render: (v: number) => v != null ? formatNumber(v) : '-' },
         ],
         financial: [] as any[], // Will be generated dynamically
         stock_interactive_qa: [
@@ -959,11 +967,11 @@ export const DataManagerPage: React.FC = () => {
             { title: t('northbound_data.close_price'), dataIndex: ['northbound_data.close_price'], key: 'northbound_data.close_price', render: (v: number) => v != null ? v.toFixed(2) : '-' },
             { title: t('northbound_data.change_percent'), dataIndex: ['northbound_data.change_percent'], key: 'northbound_data.change_percent', render: (v: number) => v != null ? <Text type={v > 0 ? 'danger' : 'success'}>{v.toFixed(2)}%</Text> : '-' },
             { title: t('northbound_data.hold_shares'), dataIndex: ['northbound_data.hold_shares'], key: 'northbound_data.hold_shares', render: (v: number) => v != null ? v.toLocaleString() : '-' },
-            { title: t('northbound_data.hold_value'), dataIndex: ['northbound_data.hold_value'], key: 'northbound_data.hold_value', render: (v: number) => v != null ? `¥${(v / 10000).toFixed(2)}${t('units.ten_thousand')}` : '-' },
+            { title: t('northbound_data.hold_value'), dataIndex: ['northbound_data.hold_value'], key: 'northbound_data.hold_value', render: (v: number) => v != null ? formatNumber(v) : '-' },
             { title: t('northbound_data.hold_ratio'), dataIndex: ['northbound_data.hold_ratio'], key: 'northbound_data.hold_ratio', render: (v: number) => v != null ? `${(v * 100).toFixed(2)}%` : '-' },
             { title: t('northbound_data.net_buy_volume'), dataIndex: ['northbound_data.net_buy_volume'], key: 'northbound_data.net_buy_volume', render: (v: number) => v != null ? v.toLocaleString() : '-' },
-            { title: t('northbound_data.net_buy_amount'), dataIndex: ['northbound_data.net_buy_amount'], key: 'northbound_data.net_buy_amount', render: (v: number) => v != null ? `¥${(v / 10000).toFixed(2)}${t('units.ten_thousand')}` : '-' },
-            { title: t('northbound_data.hold_value_change'), dataIndex: ['northbound_data.hold_value_change'], key: 'northbound_data.hold_value_change', render: (v: number) => v != null ? `¥${(v / 10000).toFixed(2)}${t('units.ten_thousand')}` : '-' },
+            { title: t('northbound_data.net_buy_amount'), dataIndex: ['northbound_data.net_buy_amount'], key: 'northbound_data.net_buy_amount', render: (v: number) => v != null ? formatNumber(v) : '-' },
+            { title: t('northbound_data.hold_value_change'), dataIndex: ['northbound_data.hold_value_change'], key: 'northbound_data.hold_value_change', render: (v: number) => v != null ? formatNumber(v) : '-' },
         ],
 
         dragontiger: [
@@ -990,21 +998,21 @@ export const DataManagerPage: React.FC = () => {
                 title: t('dragon_tiger_data.net_buy_amount'),
                 dataIndex: ['dragon_tiger_data.net_buy_amount'],
                 key: 'dragon_tiger_data.net_buy_amount',
-                render: (v: number) => v != null ? <Text type={v >= 0 ? 'danger' : 'success'}>{(v / 10000).toFixed(2)}{t('units.ten_thousand')}</Text> : '-',
+                render: (v: number) => v != null ? <Text type={v >= 0 ? 'danger' : 'success'}>{formatNumber(v)}</Text> : '-',
                 sorter: (a: any, b: any) => (a['dragon_tiger_data.net_buy_amount'] || 0) - (b['dragon_tiger_data.net_buy_amount'] || 0)
             },
             {
                 title: t('dragon_tiger_data.buy_amount'),
                 dataIndex: ['dragon_tiger_data.buy_amount'],
                 key: 'dragon_tiger_data.buy_amount',
-                render: (v: number) => v != null ? (v / 10000).toFixed(2) + t('units.ten_thousand') : '-',
+                render: (v: number) => v != null ? formatNumber(v) : '-',
                 sorter: (a: any, b: any) => (a['dragon_tiger_data.buy_amount'] || 0) - (b['dragon_tiger_data.buy_amount'] || 0)
             },
             {
                 title: t('dragon_tiger_data.sell_amount'),
                 dataIndex: ['dragon_tiger_data.sell_amount'],
                 key: 'dragon_tiger_data.sell_amount',
-                render: (v: number) => v != null ? (v / 10000).toFixed(2) + t('units.ten_thousand') : '-',
+                render: (v: number) => v != null ? formatNumber(v) : '-',
                 sorter: (a: any, b: any) => (a['dragon_tiger_data.sell_amount'] || 0) - (b['dragon_tiger_data.sell_amount'] || 0)
             },
             {
@@ -1028,12 +1036,12 @@ export const DataManagerPage: React.FC = () => {
             { title: t('stock_realtime_market.change_percent'), dataIndex: ['stock_realtime_market.change_percent'], key: 'stock_realtime_market.change_percent', width: 100, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v?.toFixed(2)}%</Text> },
             { title: t('stock_realtime_market.change_amount'), dataIndex: ['stock_realtime_market.change_amount'], key: 'stock_realtime_market.change_amount', width: 100, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v?.toFixed(2)}</Text> },
             { title: t('stock_realtime_market.volume'), dataIndex: ['stock_realtime_market.volume'], key: 'stock_realtime_market.volume', width: 120 },
-            { title: t('stock_realtime_market.turnover'), dataIndex: ['stock_realtime_market.turnover'], key: 'stock_realtime_market.turnover', width: 120, render: (v: number) => v != null ? (v / 10000).toFixed(2) + t('units.ten_thousand') : '-' },
+            { title: t('stock_realtime_market.turnover'), dataIndex: ['stock_realtime_market.turnover'], key: 'stock_realtime_market.turnover', width: 120, render: (v: number) => v != null ? formatNumber(v) : '-' },
             { title: t('stock_realtime_market.change_60days'), dataIndex: ['stock_realtime_market.change_60days'], key: 'stock_realtime_market.change_60days', width: 120, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v != null ? v.toFixed(2) + '%' : '-'}</Text> },
             { title: t('stock_realtime_market.change_ytd'), dataIndex: ['stock_realtime_market.change_ytd'], key: 'stock_realtime_market.change_ytd', width: 120, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v != null ? v.toFixed(2) + '%' : '-'}</Text> },
-            { title: t('stock_realtime_market.main_net_inflow_today'), dataIndex: ['stock_realtime_market.main_net_inflow_today'], key: 'stock_realtime_market.main_net_inflow_today', width: 140, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v != null ? (v / 10000).toFixed(2) + t('units.ten_thousand') : '-'}</Text> },
-            { title: t('stock_realtime_market.main_net_inflow_5d'), dataIndex: ['stock_realtime_market.main_net_inflow_5d'], key: 'stock_realtime_market.main_net_inflow_5d', width: 140, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v != null ? (v / 10000).toFixed(2) + t('units.ten_thousand') : '-'}</Text> },
-            { title: t('stock_realtime_market.main_net_inflow_10d'), dataIndex: ['stock_realtime_market.main_net_inflow_10d'], key: 'stock_realtime_market.main_net_inflow_10d', width: 140, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v != null ? (v / 10000).toFixed(2) + t('units.ten_thousand') : '-'}</Text> },
+            { title: t('stock_realtime_market.main_net_inflow_today'), dataIndex: ['stock_realtime_market.main_net_inflow_today'], key: 'stock_realtime_market.main_net_inflow_today', width: 140, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v != null ? formatNumber(v) : '-'}</Text> },
+            { title: t('stock_realtime_market.main_net_inflow_5d'), dataIndex: ['stock_realtime_market.main_net_inflow_5d'], key: 'stock_realtime_market.main_net_inflow_5d', width: 140, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v != null ? formatNumber(v) : '-'}</Text> },
+            { title: t('stock_realtime_market.main_net_inflow_10d'), dataIndex: ['stock_realtime_market.main_net_inflow_10d'], key: 'stock_realtime_market.main_net_inflow_10d', width: 140, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v != null ? formatNumber(v) : '-'}</Text> },
             { title: t('stock_realtime_market.high'), dataIndex: ['stock_realtime_market.high'], key: 'stock_realtime_market.high', width: 100, render: (v: number) => v?.toFixed(2) },
             { title: t('stock_realtime_market.low'), dataIndex: ['stock_realtime_market.low'], key: 'stock_realtime_market.low', width: 100, render: (v: number) => v?.toFixed(2) },
             { title: t('stock_realtime_market.open'), dataIndex: ['stock_realtime_market.open'], key: 'stock_realtime_market.open', width: 100, render: (v: number) => v?.toFixed(2) },
@@ -1041,7 +1049,7 @@ export const DataManagerPage: React.FC = () => {
             { title: t('stock_realtime_market.turnover_rate'), dataIndex: ['stock_realtime_market.turnover_rate'], key: 'stock_realtime_market.turnover_rate', width: 100, render: (v: number) => v != null ? v.toFixed(2) + '%' : '-' },
             { title: t('stock_realtime_market.pe_dynamic'), dataIndex: ['stock_realtime_market.pe_dynamic'], key: 'stock_realtime_market.pe_dynamic', width: 100, render: (v: number) => v?.toFixed(2) },
             { title: t('stock_realtime_market.pb_ratio'), dataIndex: ['stock_realtime_market.pb_ratio'], key: 'stock_realtime_market.pb_ratio', width: 100, render: (v: number) => v?.toFixed(2) },
-            { title: t('stock_realtime_market.total_market_cap'), dataIndex: ['stock_realtime_market.total_market_cap'], key: 'stock_realtime_market.total_market_cap', width: 150, render: (v: number) => v != null ? (v / 100000000).toFixed(2) + t('units.billion') : '-' },
+            { title: t('stock_realtime_market.total_market_cap'), dataIndex: ['stock_realtime_market.total_market_cap'], key: 'stock_realtime_market.total_market_cap', width: 150, render: (v: number) => v != null ? formatNumber(v) : '-' },
             { title: t('stock_realtime_market.timestamp'), dataIndex: ['stock_realtime_market.timestamp'], key: 'stock_realtime_market.timestamp', width: 180, render: (t: string) => t ? dayjs(t).format('YYYY-MM-DD HH:mm:ss') : '-' },
         ],
         industry: [
@@ -1051,7 +1059,7 @@ export const DataManagerPage: React.FC = () => {
             { title: t('industry_data.latest_price'), dataIndex: ['industry_data.latest_price'], key: 'industry_data.latest_price', width: 100 },
             { title: t('industry_data.change_percent'), dataIndex: ['industry_data.change_percent'], key: 'industry_data.change_percent', width: 100, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v?.toFixed(2)}%</Text> },
             { title: t('industry_data.change_amount'), dataIndex: ['industry_data.change_amount'], key: 'industry_data.change_amount', width: 100, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v?.toFixed(2)}</Text> },
-            { title: t('industry_data.total_market_cap'), dataIndex: ['industry_data.total_market_cap'], key: 'industry_data.total_market_cap', width: 150, render: (v: number) => (v / 100000000).toFixed(2) + t('units.billion') },
+            { title: t('industry_data.total_market_cap'), dataIndex: ['industry_data.total_market_cap'], key: 'industry_data.total_market_cap', width: 150, render: (v: number) => formatNumber(v) },
             { title: t('industry_data.turnover_rate'), dataIndex: ['industry_data.turnover_rate'], key: 'industry_data.turnover_rate', width: 100, render: (v: number) => v?.toFixed(2) + '%' },
             { title: t('industry_data.rising_stocks_count'), dataIndex: ['industry_data.rising_stocks_count'], key: 'industry_data.rising_stocks_count', width: 100, render: (v: number) => <Text type="danger">{v}</Text> },
             { title: t('industry_data.falling_stocks_count'), dataIndex: ['industry_data.falling_stocks_count'], key: 'industry_data.falling_stocks_count', width: 100, render: (v: number) => <Text type="success">{v}</Text> },
@@ -1065,9 +1073,9 @@ export const DataManagerPage: React.FC = () => {
             { title: t('stock_limit_up_pool.stock_name'), dataIndex: ['stock_limit_up_pool.stock_name'], key: 'stock_limit_up_pool.stock_name' },
             { title: t('stock_limit_up_pool.limit_up_price'), dataIndex: ['stock_limit_up_pool.limit_up_price'], key: 'stock_limit_up_pool.limit_up_price', render: (v: number) => v != null ? v.toFixed(2) : '-' },
             { title: t('stock_limit_up_pool.pct_chg'), dataIndex: ['stock_limit_up_pool.pct_chg'], key: 'stock_limit_up_pool.pct_chg', render: (v: number) => v != null ? <Text type={v > 0 ? 'danger' : 'success'}>{v.toFixed(3)}%</Text> : '-' },
-            { title: t('stock_limit_up_pool.turnover'), dataIndex: ['stock_limit_up_pool.turnover'], key: 'stock_limit_up_pool.turnover', render: (v: number) => v != null ? `¥${(v / 100000000).toFixed(2)}亿` : '-' },
+            { title: t('stock_limit_up_pool.turnover'), dataIndex: ['stock_limit_up_pool.turnover'], key: 'stock_limit_up_pool.turnover', render: (v: number) => v != null ? formatNumber(v) : '-' },
             { title: t('stock_limit_up_pool.turnover_rate'), dataIndex: ['stock_limit_up_pool.turnover_rate'], key: 'stock_limit_up_pool.turnover_rate', render: (v: number) => v != null ? `${v.toFixed(2)}%` : '-' },
-            { title: t('stock_limit_up_pool.fund_amount'), dataIndex: ['stock_limit_up_pool.fund_amount'], key: 'stock_limit_up_pool.fund_amount', render: (v: number) => v != null ? `¥${(v / 10000).toFixed(0)}万` : '-' },
+            { title: t('stock_limit_up_pool.fund_amount'), dataIndex: ['stock_limit_up_pool.fund_amount'], key: 'stock_limit_up_pool.fund_amount', render: (v: number) => v != null ? formatNumber(v, 0) : '-' },
             { title: t('stock_limit_up_pool.first_limit_up_time'), dataIndex: ['stock_limit_up_pool.first_limit_up_time'], key: 'stock_limit_up_pool.first_limit_up_time' },
             { title: t('stock_limit_up_pool.last_limit_up_time'), dataIndex: ['stock_limit_up_pool.last_limit_up_time'], key: 'stock_limit_up_pool.last_limit_up_time' },
             { title: t('stock_limit_up_pool.open_times'), dataIndex: ['stock_limit_up_pool.open_times'], key: 'stock_limit_up_pool.open_times' },
@@ -1081,10 +1089,10 @@ export const DataManagerPage: React.FC = () => {
             { title: t('stock_limit_down_pool.stock_name'), dataIndex: ['stock_limit_down_pool.stock_name'], key: 'stock_limit_down_pool.stock_name' },
             { title: t('stock_limit_down_pool.limit_down_price'), dataIndex: ['stock_limit_down_pool.limit_down_price'], key: 'stock_limit_down_pool.limit_down_price', render: (v: number) => v != null ? v.toFixed(2) : '-' },
             { title: t('stock_limit_down_pool.pct_chg'), dataIndex: ['stock_limit_down_pool.pct_chg'], key: 'stock_limit_down_pool.pct_chg', render: (v: number) => v != null ? <Text type={v > 0 ? 'danger' : 'success'}>{v.toFixed(3)}%</Text> : '-' },
-            { title: t('stock_limit_down_pool.turnover'), dataIndex: ['stock_limit_down_pool.turnover'], key: 'stock_limit_down_pool.turnover', render: (v: number) => v != null ? `¥${(v / 100000000).toFixed(2)}亿` : '-' },
+            { title: t('stock_limit_down_pool.turnover'), dataIndex: ['stock_limit_down_pool.turnover'], key: 'stock_limit_down_pool.turnover', render: (v: number) => v != null ? formatNumber(v) : '-' },
             { title: t('stock_limit_down_pool.turnover_rate'), dataIndex: ['stock_limit_down_pool.turnover_rate'], key: 'stock_limit_down_pool.turnover_rate', render: (v: number) => v != null ? `${v.toFixed(2)}%` : '-' },
-            { title: t('stock_limit_down_pool.fund_amount'), dataIndex: ['stock_limit_down_pool.fund_amount'], key: 'stock_limit_down_pool.fund_amount', render: (v: number) => v != null ? `¥${(v / 10000).toFixed(0)}万` : '-' },
-            { title: t('stock_limit_down_pool.board_turnover'), dataIndex: ['stock_limit_down_pool.board_turnover'], key: 'stock_limit_down_pool.board_turnover', render: (v: number) => v != null ? `¥${(v / 100000000).toFixed(2)}亿` : '-' },
+            { title: t('stock_limit_down_pool.fund_amount'), dataIndex: ['stock_limit_down_pool.fund_amount'], key: 'stock_limit_down_pool.fund_amount', render: (v: number) => v != null ? formatNumber(v, 0) : '-' },
+            { title: t('stock_limit_down_pool.board_turnover'), dataIndex: ['stock_limit_down_pool.board_turnover'], key: 'stock_limit_down_pool.board_turnover', render: (v: number) => v != null ? formatNumber(v) : '-' },
             { title: t('stock_limit_down_pool.first_limit_down_time'), dataIndex: ['stock_limit_down_pool.first_limit_down_time'], key: 'stock_limit_down_pool.first_limit_down_time' },
             { title: t('stock_limit_down_pool.last_limit_down_time'), dataIndex: ['stock_limit_down_pool.last_limit_down_time'], key: 'stock_limit_down_pool.last_limit_down_time' },
             { title: t('stock_limit_down_pool.open_times'), dataIndex: ['stock_limit_down_pool.open_times'], key: 'stock_limit_down_pool.open_times' },
@@ -1099,7 +1107,7 @@ export const DataManagerPage: React.FC = () => {
             { title: t('stock_zhaban_pool.stock_name'), dataIndex: ['stock_zhaban_pool.stock_name'], key: 'stock_zhaban_pool.stock_name' },
             { title: t('stock_zhaban_pool.latest_price'), dataIndex: ['stock_zhaban_pool.latest_price'], key: 'stock_zhaban_pool.latest_price', render: (v: number) => v != null ? v.toFixed(2) : '-' },
             { title: t('stock_zhaban_pool.pct_chg'), dataIndex: ['stock_zhaban_pool.pct_chg'], key: 'stock_zhaban_pool.pct_chg', render: (v: number) => v != null ? <Text type={v > 0 ? 'danger' : 'success'}>{v.toFixed(3)}%</Text> : '-' },
-            { title: t('stock_zhaban_pool.turnover'), dataIndex: ['stock_zhaban_pool.turnover'], key: 'stock_zhaban_pool.turnover', render: (v: number) => v != null ? `¥${(v / 100000000).toFixed(2)}亿` : '-' },
+            { title: t('stock_zhaban_pool.turnover'), dataIndex: ['stock_zhaban_pool.turnover'], key: 'stock_zhaban_pool.turnover', render: (v: number) => v != null ? formatNumber(v) : '-' },
             { title: t('stock_zhaban_pool.turnover_rate'), dataIndex: ['stock_zhaban_pool.turnover_rate'], key: 'stock_zhaban_pool.turnover_rate', render: (v: number) => v != null ? `${v.toFixed(2)}%` : '-' },
             { title: t('stock_zhaban_pool.limit_up_price'), dataIndex: ['stock_zhaban_pool.limit_up_price'], key: 'stock_zhaban_pool.limit_up_price', render: (v: number) => v != null ? v.toFixed(2) : '-' },
             { title: t('stock_zhaban_pool.first_limit_up_time'), dataIndex: ['stock_zhaban_pool.first_limit_up_time'], key: 'stock_zhaban_pool.first_limit_up_time' },
@@ -1115,24 +1123,24 @@ export const DataManagerPage: React.FC = () => {
             { title: t('stock_money_flow.close_price'), dataIndex: ['stock_money_flow.close_price'], key: 'close_price', width: 100, render: (v: number) => v?.toFixed(2) },
             { title: t('stock_money_flow.change_pct'), dataIndex: ['stock_money_flow.change_pct'], key: 'change_pct', width: 100, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v?.toFixed(2)}%</Text> },
 
-            { title: t('stock_money_flow.net_inflow_main'), dataIndex: ['stock_money_flow.net_inflow_main'], key: 'net_inflow_main', width: 120, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? (v / 10000).toFixed(2) + t('units.ten_thousand') : '-'}</Text> },
+            { title: t('stock_money_flow.net_inflow_main'), dataIndex: ['stock_money_flow.net_inflow_main'], key: 'net_inflow_main', width: 120, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? formatNumber(v) : '-'}</Text> },
             { title: t('stock_money_flow.net_inflow_ratio_main'), dataIndex: ['stock_money_flow.net_inflow_ratio_main'], key: 'net_inflow_ratio_main', width: 100, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v?.toFixed(2)}%</Text> },
 
-            { title: t('stock_money_flow.net_inflow_huge'), dataIndex: ['stock_money_flow.net_inflow_huge'], key: 'net_inflow_huge', width: 120, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? (v / 10000).toFixed(2) + t('units.ten_thousand') : '-'}</Text> },
+            { title: t('stock_money_flow.net_inflow_huge'), dataIndex: ['stock_money_flow.net_inflow_huge'], key: 'net_inflow_huge', width: 120, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? formatNumber(v) : '-'}</Text> },
             { title: t('stock_money_flow.net_inflow_ratio_huge'), dataIndex: ['stock_money_flow.net_inflow_ratio_huge'], key: 'net_inflow_ratio_huge', width: 100, render: (v: number) => v?.toFixed(2) + '%' },
 
-            { title: t('stock_money_flow.net_inflow_large'), dataIndex: ['stock_money_flow.net_inflow_large'], key: 'net_inflow_large', width: 120, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? (v / 10000).toFixed(2) + t('units.ten_thousand') : '-'}</Text> },
+            { title: t('stock_money_flow.net_inflow_large'), dataIndex: ['stock_money_flow.net_inflow_large'], key: 'net_inflow_large', width: 120, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? formatNumber(v) : '-'}</Text> },
             { title: t('stock_money_flow.net_inflow_ratio_large'), dataIndex: ['stock_money_flow.net_inflow_ratio_large'], key: 'net_inflow_ratio_large', width: 100, render: (v: number) => v?.toFixed(2) + '%' },
 
-            { title: t('stock_money_flow.net_inflow_medium'), dataIndex: ['stock_money_flow.net_inflow_medium'], key: 'net_inflow_medium', width: 120, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? (v / 10000).toFixed(2) + t('units.ten_thousand') : '-'}</Text> },
+            { title: t('stock_money_flow.net_inflow_medium'), dataIndex: ['stock_money_flow.net_inflow_medium'], key: 'net_inflow_medium', width: 120, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? formatNumber(v) : '-'}</Text> },
             { title: t('stock_money_flow.net_inflow_ratio_medium'), dataIndex: ['stock_money_flow.net_inflow_ratio_medium'], key: 'net_inflow_ratio_medium', width: 100, render: (v: number) => v?.toFixed(2) + '%' },
 
-            { title: t('stock_money_flow.net_inflow_small'), dataIndex: ['stock_money_flow.net_inflow_small'], key: 'net_inflow_small', width: 120, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? (v / 10000).toFixed(2) + t('units.ten_thousand') : '-'}</Text> },
+            { title: t('stock_money_flow.net_inflow_small'), dataIndex: ['stock_money_flow.net_inflow_small'], key: 'net_inflow_small', width: 120, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? formatNumber(v) : '-'}</Text> },
             { title: t('stock_money_flow.net_inflow_ratio_small'), dataIndex: ['stock_money_flow.net_inflow_ratio_small'], key: 'net_inflow_ratio_small', width: 100, render: (v: number) => v?.toFixed(2) + '%' },
 
-            { title: t('stock_money_flow.net_inflow_main_3d'), dataIndex: ['stock_money_flow.net_inflow_main_3d'], key: 'net_inflow_main_3d', width: 130, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? (v / 10000).toFixed(2) + t('units.ten_thousand') : '-'}</Text> },
-            { title: t('stock_money_flow.net_inflow_main_5d'), dataIndex: ['stock_money_flow.net_inflow_main_5d'], key: 'net_inflow_main_5d', width: 130, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? (v / 10000).toFixed(2) + t('units.ten_thousand') : '-'}</Text> },
-            { title: t('stock_money_flow.net_inflow_main_10d'), dataIndex: ['stock_money_flow.net_inflow_main_10d'], key: 'net_inflow_main_10d', width: 130, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? (v / 10000).toFixed(2) + t('units.ten_thousand') : '-'}</Text> },
+            { title: t('stock_money_flow.net_inflow_main_3d'), dataIndex: ['stock_money_flow.net_inflow_main_3d'], key: 'net_inflow_main_3d', width: 130, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? formatNumber(v) : '-'}</Text> },
+            { title: t('stock_money_flow.net_inflow_main_5d'), dataIndex: ['stock_money_flow.net_inflow_main_5d'], key: 'net_inflow_main_5d', width: 130, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? formatNumber(v) : '-'}</Text> },
+            { title: t('stock_money_flow.net_inflow_main_10d'), dataIndex: ['stock_money_flow.net_inflow_main_10d'], key: 'net_inflow_main_10d', width: 130, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? formatNumber(v) : '-'}</Text> },
         ],
         stock_shareholder_count: [
             { title: t('stock_shareholder_count.end_date'), dataIndex: ['stock_shareholder_count.end_date'], key: 'end_date', width: 110, fixed: 'left' },
@@ -1142,12 +1150,12 @@ export const DataManagerPage: React.FC = () => {
             { title: t('stock_shareholder_count.holder_count_change'), dataIndex: ['stock_shareholder_count.holder_count_change'], key: 'holder_count_change', width: 100, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v}</Text> },
             { title: t('stock_shareholder_count.holder_count_change_ratio'), dataIndex: ['stock_shareholder_count.holder_count_change_ratio'], key: 'holder_count_change_ratio', width: 110, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v?.toFixed(2)}%</Text> },
             { title: t('stock_shareholder_count.avg_hold_shares'), dataIndex: ['stock_shareholder_count.avg_hold_shares'], key: 'avg_hold_shares', width: 100, render: (v: number) => v?.toFixed(0) },
-            { title: t('stock_shareholder_count.avg_hold_value'), dataIndex: ['stock_shareholder_count.avg_hold_value'], key: 'avg_hold_value', width: 120, render: (v: number) => v ? (v / 10000).toFixed(2) + t('units.ten_thousand') : '-' },
+            { title: t('stock_shareholder_count.avg_hold_value'), dataIndex: ['stock_shareholder_count.avg_hold_value'], key: 'avg_hold_value', width: 120, render: (v: number) => v ? formatNumber(v) : '-' },
             { title: t('stock_shareholder_count.price_at_end'), dataIndex: ['stock_shareholder_count.price_at_end'], key: 'price_at_end', width: 100, render: (v: number) => v?.toFixed(2) },
             { title: t('stock_shareholder_count.price_change_ratio'), dataIndex: ['stock_shareholder_count.price_change_ratio'], key: 'price_change_ratio', width: 110, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v?.toFixed(2)}%</Text> },
-            { title: t('stock_shareholder_count.total_mv'), dataIndex: ['stock_shareholder_count.total_mv'], key: 'total_mv', width: 120, render: (v: number) => v ? (v / 10000).toFixed(2) + t('units.ten_thousand_long') : '-' },
-            { title: t('stock_shareholder_count.total_share'), dataIndex: ['stock_shareholder_count.total_share'], key: 'total_share', width: 120, render: (v: number) => v ? (v / 10000).toFixed(2) + t('units.ten_thousand_long') : '-' },
-            { title: t('stock_shareholder_count.share_change'), dataIndex: ['stock_shareholder_count.share_change'], key: 'share_change', width: 120, render: (v: number) => v ? (v / 10000).toFixed(2) + t('units.ten_thousand_long') : '-' },
+            { title: t('stock_shareholder_count.total_mv'), dataIndex: ['stock_shareholder_count.total_mv'], key: 'total_mv', width: 120, render: (v: number) => v ? formatNumber(v) : '-' },
+            { title: t('stock_shareholder_count.total_share'), dataIndex: ['stock_shareholder_count.total_share'], key: 'total_share', width: 120, render: (v: number) => v ? formatNumber(v) : '-' },
+            { title: t('stock_shareholder_count.share_change'), dataIndex: ['stock_shareholder_count.share_change'], key: 'share_change', width: 120, render: (v: number) => v ? formatNumber(v) : '-' },
             { title: t('stock_shareholder_count.share_change_reason'), dataIndex: ['stock_shareholder_count.share_change_reason'], key: 'share_change_reason', width: 150 },
         ],
         stock_pledge_risk: [
@@ -1164,12 +1172,12 @@ export const DataManagerPage: React.FC = () => {
             { title: t('stock_pledge_summary.stock_code'), dataIndex: ['stock_pledge_summary.stock_code'], key: 'stock_code', fixed: 'left' as const, width: 100 },
             { title: t('stock_pledge_summary.trade_date'), dataIndex: ['stock_pledge_summary.trade_date'], key: 'trade_date', width: 110 },
             { title: t('stock_pledge_summary.pledge_ratio'), dataIndex: ['stock_pledge_summary.pledge_ratio'], key: 'pledge_ratio', width: 100, render: (v: number) => v != null ? <Text type={v > 50 ? 'danger' : v > 20 ? 'warning' : undefined}>{v.toFixed(2)}%</Text> : '-' },
-            { title: t('stock_pledge_summary.pledge_shares'), dataIndex: ['stock_pledge_summary.pledge_shares'], key: 'pledge_shares', width: 120, render: (v: number) => v != null ? `${v.toFixed(2)}${t('units.shares_10k')}` : '-' },
-            { title: t('stock_pledge_summary.pledge_market_value'), dataIndex: ['stock_pledge_summary.pledge_market_value'], key: 'pledge_market_value', width: 120, render: (v: number) => v != null ? `${v.toFixed(2)}${t('units.money_10k')}` : '-' },
+            { title: t('stock_pledge_summary.pledge_shares'), dataIndex: ['stock_pledge_summary.pledge_shares'], key: 'pledge_shares', width: 120, render: (v: number) => v != null ? formatNumber(v) : '-' },
+            { title: t('stock_pledge_summary.pledge_market_value'), dataIndex: ['stock_pledge_summary.pledge_market_value'], key: 'pledge_market_value', width: 120, render: (v: number) => v != null ? formatNumber(v) : '-' },
             { title: t('stock_pledge_summary.pledge_count'), dataIndex: ['stock_pledge_summary.pledge_count'], key: 'pledge_count', width: 100 },
-            { title: t('stock_pledge_summary.unrestricted_pledge_shares'), dataIndex: ['stock_pledge_summary.unrestricted_pledge_shares'], key: 'unrestricted_pledge_shares', width: 120, render: (v: number) => v != null ? `${v.toFixed(2)}${t('units.shares_10k')}` : '-' },
-            { title: t('stock_pledge_summary.restricted_pledge_shares'), dataIndex: ['stock_pledge_summary.restricted_pledge_shares'], key: 'restricted_pledge_shares', width: 120, render: (v: number) => v != null ? `${v.toFixed(2)}${t('units.shares_10k')}` : '-' },
-            { title: t('stock_pledge_summary.total_share'), dataIndex: ['stock_pledge_summary.total_share'], key: 'total_share', width: 120, render: (v: number) => v != null ? `${v.toFixed(2)}${t('units.shares_10k')}` : '-' },
+            { title: t('stock_pledge_summary.unrestricted_pledge_shares'), dataIndex: ['stock_pledge_summary.unrestricted_pledge_shares'], key: 'unrestricted_pledge_shares', width: 120, render: (v: number) => v != null ? formatNumber(v) : '-' },
+            { title: t('stock_pledge_summary.restricted_pledge_shares'), dataIndex: ['stock_pledge_summary.restricted_pledge_shares'], key: 'restricted_pledge_shares', width: 120, render: (v: number) => v != null ? formatNumber(v) : '-' },
+            { title: t('stock_pledge_summary.total_share'), dataIndex: ['stock_pledge_summary.total_share'], key: 'total_share', width: 120, render: (v: number) => v != null ? formatNumber(v) : '-' },
             { title: t('stock_pledge_summary.industry'), dataIndex: ['stock_pledge_summary.industry'], key: 'industry', width: 150 },
             { title: t('stock_pledge_summary.price_change_1y'), dataIndex: ['stock_pledge_summary.price_change_1y'], key: 'price_change_1y', width: 120, render: (v: number) => v != null ? <Text type={v > 0 ? 'danger' : 'success'}>{v.toFixed(2)}%</Text> : '-' },
         ],
@@ -1199,20 +1207,20 @@ export const DataManagerPage: React.FC = () => {
             { title: t('stock_earnings_forecast.ann_date'), dataIndex: ['stock_earnings_forecast.ann_date'], key: 'ann_date' },
             { title: t('stock_earnings_forecast.stock_code'), dataIndex: ['stock_earnings_forecast.stock_code'], key: 'stock_code' },
             { title: t('stock_earnings_forecast.forecast_type'), dataIndex: ['stock_earnings_forecast.forecast_type'], key: 'forecast_type', render: (v: string) => <Tag color="blue">{v}</Tag> },
-            { title: t('stock_earnings_forecast.net_profit_min'), dataIndex: ['stock_earnings_forecast.net_profit_min'], key: 'net_profit_min', render: (v: number) => v != null ? (v / 100000000).toFixed(2) + t('units.billion') : '-' },
-            { title: t('stock_earnings_forecast.net_profit_max'), dataIndex: ['stock_earnings_forecast.net_profit_max'], key: 'net_profit_max', render: (v: number) => v != null ? (v / 100000000).toFixed(2) + t('units.billion') : '-' },
+            { title: t('stock_earnings_forecast.net_profit_min'), dataIndex: ['stock_earnings_forecast.net_profit_min'], key: 'net_profit_min', render: (v: number) => v != null ? formatNumber(v) : '-' },
+            { title: t('stock_earnings_forecast.net_profit_max'), dataIndex: ['stock_earnings_forecast.net_profit_max'], key: 'net_profit_max', render: (v: number) => v != null ? formatNumber(v) : '-' },
             { title: t('stock_earnings_forecast.growth_min'), dataIndex: ['stock_earnings_forecast.growth_min'], key: 'growth_min', render: (v: number) => v != null ? <Text type={v > 0 ? 'danger' : 'success'}>{v}%</Text> : '-' },
             { title: t('stock_earnings_forecast.growth_max'), dataIndex: ['stock_earnings_forecast.growth_max'], key: 'growth_max', render: (v: number) => v != null ? <Text type={v > 0 ? 'danger' : 'success'}>{v}%</Text> : '-' },
-            { title: t('stock_earnings_forecast.prev_year_profit'), dataIndex: ['stock_earnings_forecast.prev_year_profit'], key: 'prev_year_profit', render: (v: number) => v != null ? (v / 100000000).toFixed(2) + t('units.billion') : '-' },
+            { title: t('stock_earnings_forecast.prev_year_profit'), dataIndex: ['stock_earnings_forecast.prev_year_profit'], key: 'prev_year_profit', render: (v: number) => v != null ? formatNumber(v) : '-' },
             { title: t('stock_earnings_forecast.forecast_content'), dataIndex: ['stock_earnings_forecast.forecast_content'], key: 'forecast_content', ellipsis: true, width: 200 },
         ],
         stock_margin_data: [
             { title: t('stock_margin_data.trade_date'), dataIndex: ['stock_margin_data.trade_date'], key: 'trade_date' },
             { title: t('stock_margin_data.stock_code'), dataIndex: ['stock_margin_data.stock_code'], key: 'stock_code' },
-            { title: t('stock_margin_data.margin_balance'), dataIndex: ['stock_margin_data.margin_balance'], key: 'margin_balance', render: (v: number) => (v / 100000000).toFixed(2) + t('units.billion') },
-            { title: t('stock_margin_data.margin_buy_amount'), dataIndex: ['stock_margin_data.margin_buy_amount'], key: 'margin_buy_amount', render: (v: number) => (v / 10000).toFixed(2) + t('units.ten_thousand') },
-            { title: t('stock_margin_data.short_balance'), dataIndex: ['stock_margin_data.short_balance'], key: 'short_balance', render: (v: number) => (v / 10000).toFixed(2) + t('units.ten_thousand') },
-            { title: t('stock_margin_data.margin_short_balance'), dataIndex: ['stock_margin_data.margin_short_balance'], key: 'margin_short_balance', render: (v: number) => (v / 100000000).toFixed(2) + t('units.billion') },
+            { title: t('stock_margin_data.margin_balance'), dataIndex: ['stock_margin_data.margin_balance'], key: 'margin_balance', render: (v: number) => formatNumber(v) },
+            { title: t('stock_margin_data.margin_buy_amount'), dataIndex: ['stock_margin_data.margin_buy_amount'], key: 'margin_buy_amount', render: (v: number) => formatNumber(v) },
+            { title: t('stock_margin_data.short_balance'), dataIndex: ['stock_margin_data.short_balance'], key: 'short_balance', render: (v: number) => formatNumber(v) },
+            { title: t('stock_margin_data.margin_short_balance'), dataIndex: ['stock_margin_data.margin_short_balance'], key: 'margin_short_balance', render: (v: number) => formatNumber(v) },
             { title: t('stock_margin_data.data_source'), dataIndex: ['stock_margin_data.data_source'], key: 'data_source', render: (v: string) => <Tag color="blue">{v}</Tag> },
         ],
         stock_block_trade: [
@@ -1231,19 +1239,19 @@ export const DataManagerPage: React.FC = () => {
             { title: t('sector_money_flow.sector_name'), dataIndex: ['sector_money_flow.sector_name'], key: 'sector_name', width: 150, fixed: 'left' as const },
             { title: t('sector_money_flow.close_price'), dataIndex: ['sector_money_flow.close_price'], key: 'close_price', width: 100, render: (v: number) => v?.toFixed(2) },
             { title: t('sector_money_flow.change_percent'), dataIndex: ['sector_money_flow.change_percent'], key: 'change_percent', width: 100, render: (v: number) => <Text type={v > 0 ? 'danger' : v < 0 ? 'success' : undefined}>{v != null ? v.toFixed(2) + '%' : '-'}</Text> },
-            { title: t('sector_money_flow.net_inflow'), dataIndex: ['sector_money_flow.net_inflow'], key: 'net_inflow', width: 130, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? (v / 100000000).toFixed(2) + t('units.billion') : '-'}</Text> },
+            { title: t('sector_money_flow.net_inflow'), dataIndex: ['sector_money_flow.net_inflow'], key: 'net_inflow', width: 130, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? formatNumber(v) : '-'}</Text> },
             { title: t('sector_money_flow.net_inflow_rate'), dataIndex: ['sector_money_flow.net_inflow_rate'], key: 'net_inflow_rate', width: 110, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v != null ? (v * 100).toFixed(2) + '%' : '-'}</Text> },
 
-            { title: t('sector_money_flow.huge_net_inflow'), dataIndex: ['sector_money_flow.huge_net_inflow'], key: 'huge_net_inflow', width: 130, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? (v / 100000000).toFixed(2) + t('units.billion') : '-'}</Text> },
+            { title: t('sector_money_flow.huge_net_inflow'), dataIndex: ['sector_money_flow.huge_net_inflow'], key: 'huge_net_inflow', width: 130, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? formatNumber(v) : '-'}</Text> },
             { title: t('sector_money_flow.huge_net_inflow_rate'), dataIndex: ['sector_money_flow.huge_net_inflow_rate'], key: 'huge_net_inflow_rate', width: 110, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v != null ? v.toFixed(2) + '%' : '-'}</Text> },
 
-            { title: t('sector_money_flow.large_net_inflow'), dataIndex: ['sector_money_flow.large_net_inflow'], key: 'large_net_inflow', width: 130, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? (v / 100000000).toFixed(2) + t('units.billion') : '-'}</Text> },
+            { title: t('sector_money_flow.large_net_inflow'), dataIndex: ['sector_money_flow.large_net_inflow'], key: 'large_net_inflow', width: 130, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? formatNumber(v) : '-'}</Text> },
             { title: t('sector_money_flow.large_net_inflow_rate'), dataIndex: ['sector_money_flow.large_net_inflow_rate'], key: 'large_net_inflow_rate', width: 110, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v != null ? v.toFixed(2) + '%' : '-'}</Text> },
 
-            { title: t('sector_money_flow.medium_net_inflow'), dataIndex: ['sector_money_flow.medium_net_inflow'], key: 'medium_net_inflow', width: 130, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? (v / 100000000).toFixed(2) + t('units.billion') : '-'}</Text> },
+            { title: t('sector_money_flow.medium_net_inflow'), dataIndex: ['sector_money_flow.medium_net_inflow'], key: 'medium_net_inflow', width: 130, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? formatNumber(v) : '-'}</Text> },
             { title: t('sector_money_flow.medium_net_inflow_rate'), dataIndex: ['sector_money_flow.medium_net_inflow_rate'], key: 'medium_net_inflow_rate', width: 110, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v != null ? v.toFixed(2) + '%' : '-'}</Text> },
 
-            { title: t('sector_money_flow.small_net_inflow'), dataIndex: ['sector_money_flow.small_net_inflow'], key: 'small_net_inflow', width: 130, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? (v / 100000000).toFixed(2) + t('units.billion') : '-'}</Text> },
+            { title: t('sector_money_flow.small_net_inflow'), dataIndex: ['sector_money_flow.small_net_inflow'], key: 'small_net_inflow', width: 130, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v ? formatNumber(v) : '-'}</Text> },
             { title: t('sector_money_flow.small_net_inflow_rate'), dataIndex: ['sector_money_flow.small_net_inflow_rate'], key: 'small_net_inflow_rate', width: 110, render: (v: number) => <Text type={v > 0 ? 'danger' : 'success'}>{v != null ? v.toFixed(2) + '%' : '-'}</Text> },
 
             { title: t('sector_money_flow.data_source'), dataIndex: ['sector_money_flow.data_source'], key: 'data_source', width: 100, render: (s: string) => <Tag color="blue">{s}</Tag> },
@@ -1259,7 +1267,7 @@ export const DataManagerPage: React.FC = () => {
                 dataIndex: ['stock_top_holders.hold_amount'],
                 key: 'hold_amount',
                 width: 130,
-                render: (v: number) => v ? (v / 10000).toFixed(2) + t('units.ten_thousand') : '-'
+                render: (v: number) => v ? formatNumber(v) : '-'
             },
             {
                 title: t('stock_top_holders.hold_ratio'),
@@ -1975,8 +1983,8 @@ export const DataManagerPage: React.FC = () => {
                             // Generic Render for values
                             const valueRender = (v: any) => {
                                 if (typeof v === 'number') {
-                                    if (Math.abs(v) > 100000000) return (v / 100000000).toFixed(2) + t('units.billion');
-                                    // if (Math.abs(v) > 10000) return (v / 10000).toFixed(2) + t('units.ten_thousand');
+                                    if (Math.abs(v) > 100000000) return formatNumber(v);
+                                    // if (Math.abs(v) > 10000) return formatNumber(v);
                                     return v.toFixed(2);
                                 }
                                 return v ?? '-';

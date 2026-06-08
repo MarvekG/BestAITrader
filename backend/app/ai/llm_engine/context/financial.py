@@ -1,5 +1,4 @@
 from typing import Dict, Any, Optional
-from sqlalchemy import desc
 from sqlalchemy.orm import Session
 from app.ai.llm_engine.context.section_wrappers import status_payload, wrap_snapshot_section
 from app.data.metadata.field_units import format_payload_values
@@ -12,6 +11,10 @@ from app.data.metadata.financial_report_localizer import (
 
 class FinancialSource:
     """Builds latest-snapshot financial context for AI analysis."""
+
+    _INCOME_STATEMENT_TABLE = "data.stock_income_statement"
+    _BALANCE_SHEET_TABLE = "data.stock_balance_sheet"
+    _CASHFLOW_STATEMENT_TABLE = "data.stock_cashflow_statement"
 
     def _wrap_snapshot_section(self, payload: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         return wrap_snapshot_section(payload)
@@ -50,59 +53,121 @@ class FinancialSource:
         """
         return self._append_financial_units(payload)
 
-    def _serialize_income_statement(self, income_record: Any) -> Dict[str, Any]:
-        if not income_record or not income_record.data:
+    def _format_statement_data_for_context(self, data: Dict[str, Any], table: str) -> Dict[str, Any]:
+        """先按标准字段键补全财报字段单位。
+
+        Args:
+            data: 财务报表 ``data`` 字段中的标准字段键值。
+            table: 标准财务报表表名。
+
+        Returns:
+            已删除空值并补单位的标准字段报表数据。
+        """
+        return format_payload_values(table, self._drop_nulls(data.copy()))
+
+    def _serialize_statement(
+        self,
+        statement_record: Any,
+        table: str,
+        *,
+        format_for_context: bool = True,
+    ) -> Dict[str, Any]:
+        """序列化单期财务报表记录。
+
+        Args:
+            statement_record: SQLAlchemy 财务报表记录。
+            table: 标准财务报表表名。
+            format_for_context: 是否输出面向 AI 上下文的单位和翻译展示值。
+
+        Returns:
+            包含 ``data`` 和 ``meta`` 的报表快照；缺少数据时返回空字典。
+        """
+        if not statement_record or not statement_record.data:
             return {}
 
-        data = self._localize_raw_data(income_record.data.copy(), "data.stock_income_statement") or {}
+        raw_data = self._drop_nulls(statement_record.data.copy())
+        data = (
+            self._format_statement_data_for_context(raw_data, table)
+            if format_for_context
+            else raw_data
+        )
         result = {
             "data": data,
             "meta": {
-                "report_date": str(income_record.report_date),
-                "announcement_date": str(income_record.announcement_date) if income_record.announcement_date else None,
-                "report_type": income_record.report_type,
-                "currency": income_record.currency,
-                "is_audit": income_record.is_audit,
-                "data_source": income_record.data_source,
+                "report_date": str(statement_record.report_date),
+                "announcement_date": str(statement_record.announcement_date) if statement_record.announcement_date else None,
+                "report_type": statement_record.report_type,
+                "currency": statement_record.currency,
+                "is_audit": statement_record.is_audit,
+                "data_source": statement_record.data_source,
             }
         }
+        if format_for_context:
+            return self._localize_raw_data(result, table) or {}
         return self._drop_nulls(result)
 
-    def _serialize_balance_sheet(self, balance_record: Any) -> Dict[str, Any]:
-        if not balance_record or not balance_record.data:
-            return {}
+    def _serialize_income_statement(
+        self,
+        income_record: Any,
+        *,
+        format_for_context: bool = True,
+    ) -> Dict[str, Any]:
+        """序列化利润表记录。
 
-        data = self._localize_raw_data(balance_record.data.copy(), "data.stock_balance_sheet") or {}
-        result = {
-            "data": data,
-            "meta": {
-                "report_date": str(balance_record.report_date),
-                "announcement_date": str(balance_record.announcement_date) if balance_record.announcement_date else None,
-                "report_type": balance_record.report_type,
-                "currency": balance_record.currency,
-                "is_audit": balance_record.is_audit,
-                "data_source": balance_record.data_source,
-            }
-        }
-        return self._drop_nulls(result)
+        Args:
+            income_record: 利润表 SQLAlchemy 记录。
+            format_for_context: 是否输出面向 AI 上下文的单位和翻译展示值。
 
-    def _serialize_cashflow_statement(self, cashflow_record: Any) -> Dict[str, Any]:
-        if not cashflow_record or not cashflow_record.data:
-            return {}
+        Returns:
+            利润表快照；缺少数据时返回空字典。
+        """
+        return self._serialize_statement(
+            income_record,
+            self._INCOME_STATEMENT_TABLE,
+            format_for_context=format_for_context,
+        )
 
-        data = self._localize_raw_data(cashflow_record.data.copy(), "data.stock_cashflow_statement") or {}
-        result = {
-            "data": data,
-            "meta": {
-                "report_date": str(cashflow_record.report_date),
-                "announcement_date": str(cashflow_record.announcement_date) if cashflow_record.announcement_date else None,
-                "report_type": cashflow_record.report_type,
-                "currency": cashflow_record.currency,
-                "is_audit": cashflow_record.is_audit,
-                "data_source": cashflow_record.data_source,
-            }
-        }
-        return self._drop_nulls(result)
+    def _serialize_balance_sheet(
+        self,
+        balance_record: Any,
+        *,
+        format_for_context: bool = True,
+    ) -> Dict[str, Any]:
+        """序列化资产负债表记录。
+
+        Args:
+            balance_record: 资产负债表 SQLAlchemy 记录。
+            format_for_context: 是否输出面向 AI 上下文的单位和翻译展示值。
+
+        Returns:
+            资产负债表快照；缺少数据时返回空字典。
+        """
+        return self._serialize_statement(
+            balance_record,
+            self._BALANCE_SHEET_TABLE,
+            format_for_context=format_for_context,
+        )
+
+    def _serialize_cashflow_statement(
+        self,
+        cashflow_record: Any,
+        *,
+        format_for_context: bool = True,
+    ) -> Dict[str, Any]:
+        """序列化现金流量表记录。
+
+        Args:
+            cashflow_record: 现金流量表 SQLAlchemy 记录。
+            format_for_context: 是否输出面向 AI 上下文的单位和翻译展示值。
+
+        Returns:
+            现金流量表快照；缺少数据时返回空字典。
+        """
+        return self._serialize_statement(
+            cashflow_record,
+            self._CASHFLOW_STATEMENT_TABLE,
+            format_for_context=format_for_context,
+        )
 
     def _get_latest_financials(self, db: Session, stock_code: str) -> Dict[str, Any]:
         formatted_code = StockCodeStandardizer.standardize(stock_code)
@@ -152,7 +217,23 @@ class FinancialSource:
             }))
         return history
 
-    def _get_latest_income_statement(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    def _get_latest_income_statement(
+        self,
+        db: Session,
+        stock_code: str,
+        *,
+        format_for_context: bool = True,
+    ) -> Dict[str, Any]:
+        """读取最新一期利润表。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+            format_for_context: 是否输出面向 AI 上下文的单位和翻译展示值。
+
+        Returns:
+            最新一期利润表快照；缺少数据时返回空字典。
+        """
         formatted_code = StockCodeStandardizer.standardize(stock_code)
 
         income_record = db.query(StockIncomeStatement).filter(
@@ -166,9 +247,27 @@ class FinancialSource:
         if not income_record or not income_record.data:
             return {}
 
-        return self._serialize_income_statement(income_record)
+        return self._serialize_income_statement(income_record, format_for_context=format_for_context)
 
-    def _get_income_statement_summary(self, db: Session, stock_code: str, limit: int = 8) -> list[Dict[str, Any]]:
+    def _get_income_statement_summary(
+        self,
+        db: Session,
+        stock_code: str,
+        limit: int = 8,
+        *,
+        format_for_context: bool = True,
+    ) -> list[Dict[str, Any]]:
+        """读取利润表最近多期摘要。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+            limit: 返回期数上限。
+            format_for_context: 是否输出面向 AI 上下文的单位和翻译展示值。
+
+        Returns:
+            按报告期倒序排列的利润表摘要列表。
+        """
         formatted_code = StockCodeStandardizer.standardize(stock_code)
         rows = db.query(StockIncomeStatement).filter(
             StockIncomeStatement.stock_code == formatted_code
@@ -181,10 +280,26 @@ class FinancialSource:
         return [
             payload
             for row in rows
-            if (payload := self._serialize_income_statement(row))
+            if (payload := self._serialize_income_statement(row, format_for_context=format_for_context))
         ]
 
-    def _get_latest_balance_sheet(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    def _get_latest_balance_sheet(
+        self,
+        db: Session,
+        stock_code: str,
+        *,
+        format_for_context: bool = True,
+    ) -> Dict[str, Any]:
+        """读取最新一期资产负债表。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+            format_for_context: 是否输出面向 AI 上下文的单位和翻译展示值。
+
+        Returns:
+            最新一期资产负债表快照；缺少数据时返回空字典。
+        """
         formatted_code = StockCodeStandardizer.standardize(stock_code)
 
         balance_record = db.query(StockBalanceSheet).filter(
@@ -198,9 +313,27 @@ class FinancialSource:
         if not balance_record or not balance_record.data:
             return {}
 
-        return self._serialize_balance_sheet(balance_record)
+        return self._serialize_balance_sheet(balance_record, format_for_context=format_for_context)
 
-    def _get_balance_sheet_history(self, db: Session, stock_code: str, limit: int = 8) -> list[Dict[str, Any]]:
+    def _get_balance_sheet_history(
+        self,
+        db: Session,
+        stock_code: str,
+        limit: int = 8,
+        *,
+        format_for_context: bool = True,
+    ) -> list[Dict[str, Any]]:
+        """读取资产负债表最近多期摘要。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+            limit: 返回期数上限。
+            format_for_context: 是否输出面向 AI 上下文的单位和翻译展示值。
+
+        Returns:
+            按报告期倒序排列的资产负债表摘要列表。
+        """
         formatted_code = StockCodeStandardizer.standardize(stock_code)
         rows = db.query(StockBalanceSheet).filter(
             StockBalanceSheet.stock_code == formatted_code
@@ -214,10 +347,26 @@ class FinancialSource:
         for row in rows:
             if not row or not row.data:
                 continue
-            history.append(self._serialize_balance_sheet(row))
+            history.append(self._serialize_balance_sheet(row, format_for_context=format_for_context))
         return history
 
-    def _get_latest_cashflow_statement(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    def _get_latest_cashflow_statement(
+        self,
+        db: Session,
+        stock_code: str,
+        *,
+        format_for_context: bool = True,
+    ) -> Dict[str, Any]:
+        """读取最新一期现金流量表。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+            format_for_context: 是否输出面向 AI 上下文的单位和翻译展示值。
+
+        Returns:
+            最新一期现金流量表快照；缺少数据时返回空字典。
+        """
         formatted_code = StockCodeStandardizer.standardize(stock_code)
 
         cashflow_record = db.query(StockCashflowStatement).filter(
@@ -231,9 +380,27 @@ class FinancialSource:
         if not cashflow_record or not cashflow_record.data:
             return {}
 
-        return self._serialize_cashflow_statement(cashflow_record)
+        return self._serialize_cashflow_statement(cashflow_record, format_for_context=format_for_context)
 
-    def _get_cashflow_statement_history(self, db: Session, stock_code: str, limit: int = 8) -> list[Dict[str, Any]]:
+    def _get_cashflow_statement_history(
+        self,
+        db: Session,
+        stock_code: str,
+        limit: int = 8,
+        *,
+        format_for_context: bool = True,
+    ) -> list[Dict[str, Any]]:
+        """读取现金流量表最近多期摘要。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+            limit: 返回期数上限。
+            format_for_context: 是否输出面向 AI 上下文的单位和翻译展示值。
+
+        Returns:
+            按报告期倒序排列的现金流量表摘要列表。
+        """
         formatted_code = StockCodeStandardizer.standardize(stock_code)
         rows = db.query(StockCashflowStatement).filter(
             StockCashflowStatement.stock_code == formatted_code
@@ -247,5 +414,5 @@ class FinancialSource:
         for row in rows:
             if not row or not row.data:
                 continue
-            history.append(self._serialize_cashflow_statement(row))
+            history.append(self._serialize_cashflow_statement(row, format_for_context=format_for_context))
         return history

@@ -195,6 +195,15 @@ class FundamentalSource:
             return None
 
         def get_gross_margin() -> Optional[float]:
+            """提取销售毛利率，优先使用新采集口径。
+
+            Returns:
+                销售毛利率百分比；缺少可用数据时返回 None。
+            """
+            grossprofit_margin = get_clean_pct(["grossprofit_margin"])
+            if grossprofit_margin is not None:
+                return grossprofit_margin
+
             gross_margin = get_clean_pct(["gross_margin"])
             if gross_margin is not None:
                 return gross_margin
@@ -783,6 +792,18 @@ class FundamentalSource:
             return value
 
         def extract_gross_margin(ind) -> Optional[float]:
+            """提取趋势模块使用的销售毛利率。
+
+            Args:
+                ind: 财务指标记录。
+
+            Returns:
+                销售毛利率百分比；缺少可用数据时返回 None。
+            """
+            grossprofit_margin = extract_clean_pct(ind, ["grossprofit_margin"])
+            if grossprofit_margin is not None:
+                return grossprofit_margin
+
             gross_margin = extract_clean_pct(ind, ["gross_margin"])
             if gross_margin is not None:
                 return gross_margin

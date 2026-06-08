@@ -1,13 +1,18 @@
 import os
+import json
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
 
 os.environ.setdefault("TUSHARE_TOKEN", "test-token")
 os.environ.setdefault("TUSHARE_API", "http://test.invalid")
 
 from app.core.config import settings
 from app.data.metadata.field_units import format_payload_values
+from app.ai.llm_engine.context.providers import SnapshotProvider
 from app.ai.llm_engine.context.readers import FinancialReader, FundamentalReader
 from app.ai.llm_engine.context.capital_flow import CapitalFlowSource
 from app.models.data_storage import (
@@ -16,6 +21,9 @@ from app.models.data_storage import (
     StockFundHolding,
     StockBasic,
     StockBlockTrade,
+    StockBalanceSheet,
+    StockCashflowStatement,
+    StockIncomeStatement,
     StockMoneyFlow,
     IndustryData,
     StockInsider,
@@ -24,6 +32,7 @@ from app.models.data_storage import (
     StockValuationHistory,
     StockSEO,
     StockTopHolders,
+    FinancialIndicator,
 )
 
 
@@ -73,12 +82,18 @@ class ModelMapSession:
 def test_format_payload_values_uses_i18n_unit_suffix(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "zh")
     assert format_payload_values("common_units", {"cny": 8.5})["cny"] == "8.5元"
+    assert format_payload_values("common_units", {"ten_thousand_cny": 4455.6})["ten_thousand_cny"] == "4455.6万元"
+    assert format_payload_values("common_units", {"hundred_million_cny": 12.3})["hundred_million_cny"] == "12.3亿元"
 
     monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "en")
     assert format_payload_values("common_units", {"cny": 8.5})["cny"] == "8.5 CNY"
     assert (
         format_payload_values("common_units", {"ten_thousand_cny": 4455.6})["ten_thousand_cny"]
-        == "4455.6 10k CNY"
+        == "44.56 million CNY"
+    )
+    assert (
+        format_payload_values("common_units", {"hundred_million_cny": 12.3})["hundred_million_cny"]
+        == "1.23 billion CNY"
     )
 
 
@@ -87,16 +102,48 @@ def test_format_payload_values_uses_table_unit_config(monkeypatch):
 
     financial = format_payload_values(
         "data.financial_indicator",
-        {"net_profit_dedt_yoy": -0.27, "gross_margin": 27.4158, "gross_profit": 11779497981},
+        {
+            "net_profit_dedt_yoy": -0.27,
+            "gross_margin": 11779497981,
+            "grossprofit_margin": 27.4158,
+            "eps": 1.09,
+            "asset_turnover": 0.1115,
+        },
     )
     position = format_payload_values("portfolio.position", {"current_position": 0.19})
     unknown = format_payload_values("unknown.table", {"unknown_field": 8.5})
 
     assert financial["net_profit_dedt_yoy"] == "-0.27%"
-    assert financial["gross_margin"] == 27.4158
-    assert financial["gross_profit"] == 11779497981
+    assert financial["gross_margin"] == "117.79亿元"
+    assert financial["grossprofit_margin"] == "27.42%"
+    assert financial["eps"] == "1.09元"
+    assert financial["asset_turnover"] == "0.11次"
     assert position["current_position"] == "19%"
     assert unknown["unknown_field"] == 8.5
+
+
+def test_format_payload_values_uses_default_ref_for_financial_statements(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "zh")
+
+    income = format_payload_values(
+        "data.stock_income_statement",
+        {"total_revenue": 12_300_000_000, "basic_eps": 1.23456, "report_date": "2025-12-31"},
+    )
+    balance = format_payload_values(
+        "data.stock_balance_sheet",
+        {"total_assets": 67_890_000_000, "total_share": 100_000_000},
+    )
+    cashflow = format_payload_values(
+        "data.stock_cashflow_statement",
+        {"n_cashflow_act": 3_210_000_000},
+    )
+
+    assert income["total_revenue"] == "123亿元"
+    assert income["basic_eps"] == "1.2346元"
+    assert income["report_date"] == "2025-12-31"
+    assert balance["total_assets"] == "678.9亿元"
+    assert balance["total_share"] == "100000000股"
+    assert cashflow["n_cashflow_act"] == "32.1亿元"
 
 
 def test_format_payload_values_recursively_uses_table_unit_config(monkeypatch):
@@ -104,7 +151,8 @@ def test_format_payload_values_recursively_uses_table_unit_config(monkeypatch):
 
     payload = {
         "data": {
-            "gross_margin": 27.4158,
+            "gross_margin": 11779497981,
+            "grossprofit_margin": 27.4158,
             "q_gsprofit_margin": 27.4158,
             "gross_profit": 11779497981,
             "nested": {"net_profit_dedt_yoy": -0.27},
@@ -115,12 +163,156 @@ def test_format_payload_values_recursively_uses_table_unit_config(monkeypatch):
 
     result = format_payload_values("data.financial_indicator", payload)
 
-    assert result["data"]["gross_margin"] == 27.4158
-    assert result["data"]["q_gsprofit_margin"] == 27.4158
+    assert result["data"]["gross_margin"] == "117.79亿元"
+    assert result["data"]["grossprofit_margin"] == "27.42%"
+    assert result["data"]["q_gsprofit_margin"] == "27.42%"
     assert result["data"]["gross_profit"] == 11779497981
     assert result["data"]["nested"]["net_profit_dedt_yoy"] == "-0.27%"
-    assert result["data"]["items"][0]["roe"] == 4.0826
+    assert result["data"]["items"][0]["roe"] == "4.08%"
     assert result["meta"]["report_date"] == "2026-03-31"
+
+
+def test_format_payload_values_uses_language_specific_unit_and_scale(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "zh")
+
+    payload = {"ten_thousand_cny": 10000, "hundred_million_cny": 10, "roe": 4.0826}
+
+    zh_common = format_payload_values("common_units", payload)
+    en_common = format_payload_values("common_units", payload, language="en")
+    en_financial = format_payload_values("data.financial_indicator", payload, language="en")
+
+    assert zh_common["ten_thousand_cny"] == "10000万元"
+    assert zh_common["hundred_million_cny"] == "10亿元"
+    assert en_common["ten_thousand_cny"] == "100 million CNY"
+    assert en_common["hundred_million_cny"] == "1 billion CNY"
+    assert en_financial["roe"] == "4.08%"
+
+
+def test_format_payload_values_covers_ai_context_unit_audit_fields(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "zh")
+
+    valuation = format_payload_values(
+        "fundamental.valuation",
+        {"total_mv": 1_602_492_105_138, "float_mv": 215_430_064_799},
+    )
+    northbound = format_payload_values(
+        "capital_flow.northbound",
+        {"net_buy_amount": 5_342_126_250, "hold_ratio": 0.0469},
+    )
+    northbound_snapshot = format_payload_values(
+        "fundamental.northbound_flow",
+        {"net_buy_amount_10k_cny": 534_212.625, "hold_ratio_pct": 0.0469},
+    )
+    dragon_tiger_activity = format_payload_values(
+        "fundamental.dragon_tiger_activity",
+        {"cumulative_net_buy_10k_cny": 5400, "price_change_percent": 9.8},
+    )
+    financial = format_payload_values(
+        "data.financial_indicator",
+        {
+            "operating_income": 44_029_000_000,
+            "eps": 1.09,
+            "roe": 4.0826,
+            "asset_turnover": 0.1115,
+            "gross_margin": 7_954_015_105,
+            "grossprofit_margin": 15.5957,
+        },
+    )
+
+    assert valuation["total_mv"] == "16024.92亿元"
+    assert valuation["float_mv"] == "2154.3亿元"
+    assert northbound["net_buy_amount"] == "53.42亿元"
+    assert northbound["hold_ratio"] == "4.69%"
+    assert northbound_snapshot["net_buy_amount_10k_cny"] == "534212.62万元"
+    assert northbound_snapshot["hold_ratio_pct"] == "4.69%"
+    assert dragon_tiger_activity["cumulative_net_buy_10k_cny"] == "5400万元"
+    assert dragon_tiger_activity["price_change_percent"] == "9.8%"
+    assert financial["operating_income"] == "440.29亿元"
+    assert financial["eps"] == "1.09元"
+    assert financial["roe"] == "4.08%"
+    assert financial["asset_turnover"] == "0.11次"
+    assert financial["gross_margin"] == "79.54亿元"
+    assert financial["grossprofit_margin"] == "15.6%"
+
+
+def test_format_payload_values_formats_realtime_market_units(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "zh")
+
+    result = format_payload_values(
+        "technical.realtime_market",
+        {
+            "price": 1262.98,
+            "pct_chg": -0.7762,
+            "turnover_rate": 1.23,
+            "volume_ratio": 0.88,
+            "pb": 5.89,
+            "pe": 19.08,
+            "amount": 3_898_027_116,
+            "volume": 3_082_836,
+            "turnover": 3_898_027_116,
+            "total_market_cap": 1_578_828_060_431,
+            "circulating_market_cap": 1_578_828_060_431,
+        },
+    )
+
+    assert result["price"] == "1262.98元"
+    assert result["pct_chg"] == "-0.78%"
+    assert result["turnover_rate"] == "1.23%"
+    assert result["volume_ratio"] == "0.88倍"
+    assert result["pb"] == "5.89倍"
+    assert result["amount"] == "38.98亿元"
+    assert result["volume"] == "3082836股"
+    assert result["turnover"] == "38.98亿元"
+    assert result["total_market_cap"] == "15788.28亿元"
+
+
+def test_table_field_units_use_language_specific_schema():
+    config_path = Path(__file__).resolve().parents[1] / "app" / "data" / "metadata" / "table_field_units.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    total_assets = config["portfolio.overview"]["total_assets"]
+    ten_thousand_cny = config["common_units"]["ten_thousand_cny"]
+    hundred_million_cny = config["common_units"]["hundred_million_cny"]
+    unit_values = []
+
+    def collect_units(value):
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if key == "unit":
+                    unit_values.append(item)
+                else:
+                    collect_units(item)
+        elif isinstance(value, list):
+            for item in value:
+                collect_units(item)
+
+    collect_units(config)
+
+    assert "display_scale" not in json.dumps(config, ensure_ascii=False)
+    assert "units.million_cny" not in unit_values
+    assert "units.wanyuan" not in unit_values
+    assert total_assets == {
+        "zh": {"unit": "units.cny", "scale": 1},
+        "en": {"unit": "units.cny", "scale": 1},
+        "precision": 2,
+    }
+    assert ten_thousand_cny == {
+        "zh": {"unit": ["units.ten_thousand", "units.cny"], "scale": 1},
+        "en": {"unit": ["units.million", "units.cny"], "scale": "0.01"},
+        "precision": 2,
+    }
+    assert hundred_million_cny == {
+        "zh": {"unit": ["units.yi", "units.cny"], "scale": 1},
+        "en": {"unit": ["units.billion", "units.cny"], "scale": "0.1"},
+        "precision": 2,
+    }
+
+
+def test_format_payload_values_does_not_fallback_to_other_language(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "fr")
+
+    result = format_payload_values("common_units", {"cny": 8.5})
+
+    assert result["cny"] == 8.5
 
 
 class FundHoldingFakeSession:
@@ -183,7 +375,7 @@ def test_fundamental_financial_calculation_uses_standard_keys_for_600519():
             "total_revenue_yoy": 12.5,
             "net_profit_yoy": 18.8,
             "roe": 31.2,
-            "gross_margin": 91.5,
+            "grossprofit_margin": 91.5,
             "net_profit_margin": 52.4,
             "debt_to_assets_ratio": 18.6,
             "eps": 67.8,
@@ -196,10 +388,10 @@ def test_fundamental_financial_calculation_uses_standard_keys_for_600519():
     assert result["report_date"] == "2025-12-31"
     assert result["total_revenue_yoy"] == "12.5%"
     assert result["net_profit_yoy"] == "18.8%"
-    assert result["roe"] == 31.2
-    assert result["gross_margin"] == 91.5
-    assert result["net_margin"] == 52.4
-    assert result["debt_to_asset"] == 18.6
+    assert result["roe"] == "31.2%"
+    assert result["gross_margin"] == "91.5%"
+    assert result["net_margin"] == "52.4%"
+    assert result["debt_to_asset"] == "18.6%"
     assert result["eps"] == 67.8
 
 
@@ -235,7 +427,23 @@ def test_fundamental_financials_falls_back_to_cogs_ratio_for_gross_margin():
     builder = FundamentalReader()
     result = builder.financials(FakeSession([record]), "600519.SH")
 
-    assert result["gross_margin"] == 91.29
+    assert result["gross_margin"] == "91.29%"
+
+
+def test_fundamental_financials_prefers_grossprofit_margin_for_new_mapping():
+    record = SimpleNamespace(
+        report_date=date(2025, 12, 31),
+        announcement_date=date(2026, 1, 15),
+        data={
+            "gross_margin": 11_779_497_981.0,
+            "grossprofit_margin": 27.4158,
+        },
+    )
+
+    builder = FundamentalReader()
+    result = builder.financials(FakeSession([record]), "000651.SZ")
+
+    assert result["gross_margin"] == "27.42%"
 
 
 def test_fundamental_financials_falls_back_to_operating_cost_for_gross_margin():
@@ -251,7 +459,7 @@ def test_fundamental_financials_falls_back_to_operating_cost_for_gross_margin():
     builder = FundamentalReader()
     result = builder.financials(FakeSession([record]), "600519.SH")
 
-    assert result["gross_margin"] == 68
+    assert result["gross_margin"] == "68%"
 
 
 def test_fundamental_financials_keeps_small_percentage_as_reported():
@@ -279,7 +487,7 @@ def test_financial_history_and_dupont_use_standard_keys_for_601988():
             "total_equity": 1200.0,
             "total_revenue_yoy": 5.6,
             "net_profit_yoy": 4.2,
-            "gross_margin": 48.3,
+            "grossprofit_margin": 48.3,
             "roe": 9.7,
             "net_profit_margin": 25.0,
             "debt_to_assets_ratio": 88.0,
@@ -301,7 +509,7 @@ def test_financial_history_and_dupont_use_standard_keys_for_601988():
             "net_profit": 460.0,
             "total_revenue_yoy": 4.9,
             "net_profit_yoy": 3.8,
-            "gross_margin": 47.5,
+            "grossprofit_margin": 47.5,
             "roe": 9.2,
         },
     )
@@ -316,7 +524,7 @@ def test_financial_history_and_dupont_use_standard_keys_for_601988():
     assert history[0]["data"]["net_profit"] == 500.0
     assert history[0]["data"]["total_revenue_yoy"] == 5.6
     assert history[0]["data"]["net_profit_yoy"] == 4.2
-    assert history[0]["data"]["gross_margin"] == 48.3
+    assert history[0]["data"]["grossprofit_margin"] == 48.3
 
 def test_top_holders_use_latest_period_only_and_mark_staleness():
     latest_date = date.today() - timedelta(days=220)
@@ -414,7 +622,7 @@ def test_northbound_flow_returns_structured_foreign_sentiment():
         date=date.today() - timedelta(days=20),
         hold_shares=12_500_000.0,
         hold_value=18_750_000_000.0,
-        hold_ratio=1.85,
+        hold_ratio=0.0185,
         close_price=1500.0,
         change_percent=1.2,
         net_buy_volume=350_000.0,
@@ -426,7 +634,7 @@ def test_northbound_flow_returns_structured_foreign_sentiment():
         date=date.today() - timedelta(days=120),
         hold_shares=11_800_000.0,
         hold_value=17_900_000_000.0,
-        hold_ratio=1.62,
+        hold_ratio=0.0162,
         close_price=1480.0,
         change_percent=-0.5,
         net_buy_volume=-50_000.0,
@@ -438,7 +646,7 @@ def test_northbound_flow_returns_structured_foreign_sentiment():
         date=date.today() - timedelta(days=400),
         hold_shares=10_400_000.0,
         hold_value=15_300_000_000.0,
-        hold_ratio=1.35,
+        hold_ratio=0.0135,
         close_price=1350.0,
         change_percent=0.4,
         net_buy_volume=80_000.0,
@@ -457,7 +665,7 @@ def test_northbound_flow_returns_structured_foreign_sentiment():
     assert result["overview"]["reference_status"] == "active"
     assert result["latest_position"]["hold_ratio_pct"] == "1.85%"
     assert result["quarter_change"]["hold_ratio_change_pct"] == "0.23%"
-    assert result["quarter_change"]["net_buy_amount_10k_cny"] == 6800.0
+    assert result["quarter_change"]["net_buy_amount_10k_cny"] == "6800万元"
     assert result["signal"]["flow_label"] == "accumulating"
     assert result["signal"]["foreign_sentiment_label"] == "positive"
     assert result["recent_records"][0]["date"] == str(latest.date)
@@ -469,7 +677,7 @@ def test_capital_flow_northbound_formats_decimal_holding_ratio_as_percent():
         stock_code="600519.SH",
         date=date.today() - timedelta(days=20),
         hold_shares=12_500_000.0,
-        hold_ratio=4.38,
+        hold_ratio=0.0438,
         net_buy_amount=68_000_000.0,
         net_buy_volume=350_000.0,
     )
@@ -477,7 +685,7 @@ def test_capital_flow_northbound_formats_decimal_holding_ratio_as_percent():
         stock_code="600519.SH",
         date=date.today() - timedelta(days=120),
         hold_shares=12_000_000.0,
-        hold_ratio=4.28,
+        hold_ratio=0.0428,
         net_buy_amount=8_000_000.0,
         net_buy_volume=50_000.0,
     )
@@ -489,6 +697,7 @@ def test_capital_flow_northbound_formats_decimal_holding_ratio_as_percent():
     trend_result = source._get_northbound_trend(session, "600519.SH")
 
     assert latest_result["hold_ratio"] == "4.38%"
+    assert latest_result["net_buy_amount"] == "0.68亿元"
     assert trend_result["latest_hold_ratio"] == "4.38%"
     assert trend_result["prev_hold_ratio"] == "4.28%"
     assert trend_result["ratio_change"] == "0.1%"
@@ -548,10 +757,17 @@ def test_dragon_tiger_activity_returns_structured_trading_signal():
     assert result["overview"]["event_count"] == 3
     assert result["overview"]["unique_stock_count"] == 3
     assert result["overview"]["unique_trade_date_count"] == 3
-    assert result["overview"]["cumulative_net_buy_10k_cny"] == 5400.0
+    assert result["overview"]["cumulative_net_buy_10k_cny"] == "5400万元"
     assert result["signal"]["activity_label"] == "sporadic"
     assert result["signal"]["market_sentiment_label"] == "market_buying_bias"
     assert result["all_records"][0]["stock_code"] == "600519.SH"
+    assert result["all_records"][0]["net_buy_amount_10k_cny"] == "4200万元"
+    assert result["all_records"][0]["buy_amount_10k_cny"] == "12000万元"
+    assert result["all_records"][0]["sell_amount_10k_cny"] == "7800万元"
+    assert result["all_records"][0]["price_change_percent"] == "9.8%"
+    assert result["all_records"][0]["net_buy_ratio_pct"] == "4.6%"
+    assert result["all_records"][0]["post_1_day_price_change_percent"] == "1.2%"
+    assert result["all_records"][0]["post_5_day_price_change_percent"] == "3.4%"
     assert result["all_records"][1]["stock_code"] == "002594.SZ"
     assert result["aggregates"]["positive_event_count"] == 2
     assert result["aggregates"]["negative_event_count"] == 1
@@ -577,12 +793,12 @@ def test_block_trade_values_append_units_without_extra_unit_fields():
         "000651.SZ",
     )
 
-    assert result["total_amount"] == 4455.6
-    assert result["avg_premium"] == -3.25
-    assert result["recent_trades"][0]["price"] == 37.13
+    assert result["total_amount"] == "4455.6万元"
+    assert result["avg_premium"] == "-3.25%"
+    assert result["recent_trades"][0]["price"] == "37.13元"
     assert result["recent_trades"][0]["volume"] == "120万股"
-    assert result["recent_trades"][0]["amount"] == 4455.6
-    assert result["recent_trades"][0]["premium_rate"] == -3.25
+    assert result["recent_trades"][0]["amount"] == "4455.6万元"
+    assert result["recent_trades"][0]["premium_rate"] == "-3.25%"
     assert "amount_unit" not in result["recent_trades"][0]
 
 
@@ -993,16 +1209,16 @@ def test_financial_trend_uses_gross_margin_fallbacks():
     assert result["overview"]["quarters_analyzed"] == 8
     assert result["overview"]["recent_quarters_used"] == 8
     assert result["profitability_trend"]["direction"] == "improving"
-    assert result["profitability_trend"]["series"]["gross_margin"][0]["gross_margin"] == 92.0
-    assert result["profitability_trend"]["series"]["gross_margin"][1]["gross_margin"] == 90.0
-    assert result["profitability_trend"]["series"]["gross_margin"][2]["gross_margin"] == 85.0
-    assert result["profitability_trend"]["series"]["gross_margin"][3]["gross_margin"] == 80.0
-    assert result["profitability_trend"]["series"]["gross_margin"][7]["gross_margin"] == 72.0
+    assert result["profitability_trend"]["series"]["gross_margin"][0]["gross_margin"] == "92%"
+    assert result["profitability_trend"]["series"]["gross_margin"][1]["gross_margin"] == "90%"
+    assert result["profitability_trend"]["series"]["gross_margin"][2]["gross_margin"] == "85%"
+    assert result["profitability_trend"]["series"]["gross_margin"][3]["gross_margin"] == "80%"
+    assert result["profitability_trend"]["series"]["gross_margin"][7]["gross_margin"] == "72%"
     assert result["growth_trend"]["direction"] == "improving"
     assert result["leverage_trend"]["direction"] == "improving"
-    assert result["recent_quarters"][0]["roe"] == 20.0
-    assert result["recent_quarters"][0]["gross_margin"] == 92.0
-    assert result["recent_quarters"][7]["debt_to_asset"] == 44.0
+    assert result["recent_quarters"][0]["roe"] == "20%"
+    assert result["recent_quarters"][0]["gross_margin"] == "92%"
+    assert result["recent_quarters"][7]["debt_to_asset"] == "44%"
 
 
 def test_financial_trend_keeps_extreme_growth_rates_and_uses_non_null_latest():
@@ -1063,7 +1279,7 @@ def test_financial_trend_keeps_extreme_growth_rates_and_uses_non_null_latest():
     assert result["growth_trend"]["direction"] == "improving"
     assert result["growth_trend"]["series"]["total_revenue_yoy"][0]["total_revenue_yoy"] == "1500%"
     assert result["growth_trend"]["latest"]["net_profit_yoy"] == "1200%"
-    assert result["growth_trend"]["change_vs_oldest"] == 1100.0
+    assert result["growth_trend"]["change_vs_oldest"] == "1100%"
     assert result["growth_trend"]["quarters_used"] == 7
 
 
@@ -1074,7 +1290,8 @@ def test_financial_context_localizes_raw_data_keys_by_system_language(monkeypatc
         {
             "eps": 1.74,
             "roe": 11.5953,
-            "gross_margin": 21.9753,
+            "gross_margin": 7_954_015_105,
+            "grossprofit_margin": 21.9753,
             "capital_reserve_ps": 1.7286,
         },
         "data.financial_indicator",
@@ -1082,7 +1299,8 @@ def test_financial_context_localizes_raw_data_keys_by_system_language(monkeypatc
 
     assert localized["每股收益"] == 1.74
     assert localized["净资产收益率"] == 11.5953
-    assert localized["毛利率"] == 21.9753
+    assert localized["毛利"] == 7_954_015_105
+    assert localized["销售毛利率"] == 21.9753
     assert localized["每股资本公积金"] == 1.7286
 
 
@@ -1113,6 +1331,38 @@ def test_financial_context_recursively_localizes_data_and_meta(monkeypatch):
     assert localized["meta"]["数据源"] == "tushare"
 
 
+def test_financial_context_localizes_tushare_optional_indicator_fields(monkeypatch):
+    monkeypatch.setattr(settings, "SYSTEM_LANGUAGE", "zh")
+
+    raw_payload = {
+        "data": {
+            "q_eps": 0.38,
+            "inv_turn": 0.72,
+            "q_gr_qoq": -6.64,
+            "ocf_to_or": 0.953,
+            "op_to_ebt": 102.5,
+            "q_dtprofit": 123456789.0,
+            "q_opincome": 234567890.0,
+            "roic_yearly": 8.91,
+            "update_flag": "1",
+        },
+        "meta": {"report_date": "2025-09-30"},
+    }
+
+    formatted = format_payload_values("data.financial_indicator", raw_payload)
+    localized = FinancialReader().localize_raw_data(formatted, "data.financial_indicator")
+
+    assert localized["data"]["单季度每股收益"] == "0.38元"
+    assert localized["data"]["存货周转率"] == "0.72次"
+    assert localized["data"]["单季度营业总收入环比增长率"] == "-6.64%"
+    assert localized["data"]["经营活动现金流净额/营业收入"] == "0.95倍"
+    assert localized["data"]["营业利润/利润总额"] == "102.5%"
+    assert localized["data"]["单季度扣非净利润"] == "1.23亿元"
+    assert localized["data"]["单季度经营活动净收益"] == "2.35亿元"
+    assert localized["data"]["年化投入资本回报率"] == "8.91%"
+    assert localized["data"]["更新标识"] == "1"
+
+
 def test_financial_context_includes_localized_balance_sheet_data(monkeypatch):
     monkeypatch.setattr(settings, "SYSTEM_LANGUAGE", "zh")
 
@@ -1125,8 +1375,8 @@ def test_financial_context_includes_localized_balance_sheet_data(monkeypatch):
         is_audit=True,
         data_source="tushare",
         data={
-            "total_revenue": 1000.0,
-            "net_profit": 500.0,
+            "total_revenue": 10_000_000_000.0,
+            "basic_eps": 1.23456,
         },
     )
     balance_record = SimpleNamespace(
@@ -1138,8 +1388,9 @@ def test_financial_context_includes_localized_balance_sheet_data(monkeypatch):
         is_audit=True,
         data_source="tushare",
         data={
-            "money_cap": 123.45,
-            "total_assets": 678.9,
+            "money_cap": 12_345_000_000.0,
+            "total_assets": 67_890_000_000.0,
+            "total_share": 100_000_000.0,
         },
     )
     cashflow_record = SimpleNamespace(
@@ -1151,22 +1402,107 @@ def test_financial_context_includes_localized_balance_sheet_data(monkeypatch):
         is_audit=True,
         data_source="tushare",
         data={
-            "n_cashflow_act": 321.0,
-            "n_cashflow_inv_act": -45.6,
+            "n_cashflow_act": 32_100_000_000.0,
+            "n_cashflow_inv_act": -4_560_000_000.0,
         },
     )
 
     builder = FinancialReader()
-    _ = builder.latest_income_statement(FakeSession([income_record]), "600519.SH")
-    _ = builder.income_statement_summary(FakeSession([income_record]), "600519.SH")
+    latest_income = builder.latest_income_statement(FakeSession([income_record]), "600519.SH")
+    income_history = builder.income_statement_summary(FakeSession([income_record]), "600519.SH")
     latest_balance = builder.latest_balance_sheet(FakeSession([balance_record]), "600519.SH")
     balance_history = builder.balance_sheet_history(FakeSession([balance_record]), "600519.SH")
     latest_cashflow = builder.latest_cashflow_statement(FakeSession([cashflow_record]), "600519.SH")
     cashflow_history = builder.cashflow_statement_history(FakeSession([cashflow_record]), "600519.SH")
 
-    assert latest_balance["data"]["货币资金"] == 123.45
-    assert latest_balance["data"]["资产总计"] == 678.9
-    assert latest_balance["meta"]["report_date"] == "2025-12-31"
-    assert balance_history[0]["data"]["货币资金"] == 123.45
-    assert latest_cashflow["data"]["经营活动产生的现金流量净额"] == 321.0
-    assert cashflow_history[0]["data"]["投资活动产生的现金流量净额"] == -45.6
+    assert latest_income["data"]["营业总收入"] == "100亿元"
+    assert latest_income["data"]["基本每股收益"] == "1.2346元"
+    assert income_history[0]["data"]["营业总收入"] == "100亿元"
+    assert latest_balance["data"]["货币资金"] == "123.45亿元"
+    assert latest_balance["data"]["资产总计"] == "678.9亿元"
+    assert latest_balance["data"]["实收资本(或股本)"] == "100000000股"
+    assert latest_balance["meta"]["报告期"] == "2025-12-31"
+    assert balance_history[0]["data"]["货币资金"] == "123.45亿元"
+    assert latest_cashflow["data"]["经营活动产生的现金流量净额"] == "321亿元"
+    assert cashflow_history[0]["data"]["投资活动产生的现金流量净额"] == "-45.6亿元"
+
+
+@pytest.mark.asyncio
+async def test_snapshot_context_exposes_financial_statements_with_units(monkeypatch):
+    monkeypatch.setattr(settings, "SYSTEM_LANGUAGE", "zh")
+
+    financial_record = SimpleNamespace(
+        report_date=date(2025, 12, 31),
+        announcement_date=date(2026, 1, 10),
+        data={"eps": 1.2345},
+    )
+    income_record = SimpleNamespace(
+        report_date=date(2025, 12, 31),
+        announcement_date=date(2026, 1, 10),
+        updated_at=date(2026, 1, 10),
+        report_type="合并报表",
+        currency="CNY",
+        is_audit=True,
+        data_source="tushare",
+        data={"total_revenue": 10_000_000_000.0, "basic_eps": 1.23456},
+    )
+    balance_record = SimpleNamespace(
+        report_date=date(2025, 12, 31),
+        announcement_date=date(2026, 1, 10),
+        updated_at=date(2026, 1, 10),
+        report_type="合并报表",
+        currency="CNY",
+        is_audit=True,
+        data_source="tushare",
+        data={"total_assets": 67_890_000_000.0},
+    )
+    cashflow_record = SimpleNamespace(
+        report_date=date(2025, 12, 31),
+        announcement_date=date(2026, 1, 10),
+        updated_at=date(2026, 1, 10),
+        report_type="合并报表",
+        currency="CNY",
+        is_audit=True,
+        data_source="tushare",
+        data={"n_cashflow_act": 32_100_000_000.0},
+    )
+    db = ModelMapSession(
+        {
+            FinancialIndicator: [financial_record],
+            StockIncomeStatement: [income_record],
+            StockBalanceSheet: [balance_record],
+            StockCashflowStatement: [cashflow_record],
+        }
+    )
+
+    class EmptyReader:
+        def __getattr__(self, _name):
+            return lambda *_args, **_kwargs: {}
+
+    class Runtime:
+        stock_code = "600519.SH"
+        readers = SimpleNamespace(
+            financial=FinancialReader(),
+            fundamental=EmptyReader(),
+            capital_flow=EmptyReader(),
+        )
+
+        def db_session(self):
+            class SessionContext:
+                def __enter__(self):
+                    return db
+
+                def __exit__(self, *_args):
+                    return False
+
+            return SessionContext()
+
+    layer = await SnapshotProvider().build(Runtime(), {})
+    statements = layer.payload["financial_statements"]
+
+    assert statements["status"] == "available"
+    assert statements["financial_indicator_latest"]["data"]["每股收益"] == "1.2345元"
+    assert statements["income_statement_latest"]["data"]["营业总收入"] == "100亿元"
+    assert statements["income_statement_latest"]["data"]["基本每股收益"] == "1.2346元"
+    assert statements["balance_sheet_latest"]["data"]["资产总计"] == "678.9亿元"
+    assert statements["cashflow_statement_latest"]["data"]["经营活动产生的现金流量净额"] == "321亿元"
