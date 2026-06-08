@@ -195,7 +195,7 @@
     "main_net_inflow_rank_10d": "10日主力净流入排名"
   },
   "errors": {
-    "tushare_pledge_summary_requires_stock_code": "TuShare 质押汇总接口需要股票代码，全量获取不支持，将使用 AkShare"
+    "tushare_pledge_summary_requires_stock_code": "TuShare 质押汇总接口需要股票代码，不支持全量获取"
   },
   "stock_realtime": {
     "latest_price": "最新价",

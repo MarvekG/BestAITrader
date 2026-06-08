@@ -71,7 +71,15 @@ class StockCodeStandardizer:
 
     @staticmethod
     def to_number(code: str) -> str:
-        """转换为 AkShare 部分接口需要的 6 位纯数字"""
+        """
+        转换为 6 位纯数字股票代码。
+
+        Args:
+            code: 原始股票代码。
+
+        Returns:
+            去除市场后缀后的数字股票代码。
+        """
         std_code = StockCodeStandardizer.standardize(code)
         if '.' in std_code:
             return std_code.split('.')[0]
@@ -111,46 +119,3 @@ class StockCodeStandardizer:
         # 3. 其他情况保持原样返回
         # 不调用 standardize() 以免混用个股规则
         return code
-
-    @staticmethod
-    def to_prefix(code: str) -> str:
-        """
-        转换为 AkShare 部分接口需要的带前缀代码 (shxxxxxx, szxxxxxx)
-        """
-        std_code = StockCodeStandardizer.standardize(code)
-        if '.' in std_code:
-            num, market = std_code.split('.')
-            return f"{market.lower()}{num}"
-        return code
-
-    @staticmethod
-    def to_prefix_index(code: str) -> str:
-        """
-        转换为 AkShare 指数接口需要的代码 (sh000xxx, sz399xxx)
-        """
-        if code is None:
-            return None
-
-        code = str(code).strip().lower()
-
-        # 如果已经是 sh/sz/bj 开头且不含后缀
-        if code.startswith(('sh', 'sz', 'bj')) and '.' not in code:
-            return code
-
-        # 提取数字部分和可能存在的后缀
-        num_part = code
-        market = ""
-        if '.' in code:
-            parts = code.split('.')
-            num_part = parts[0]
-            market = parts[1].lower()
-
-        # 根据已知后市场或者数字前缀推断
-        if market == 'sh' or num_part.startswith('000'):
-            return f"sh{num_part}"
-        elif market == 'sz' or num_part.startswith('399'):
-            return f"sz{num_part}"
-        elif market == 'bj':
-            return f"bj{num_part}"
-        else:
-            return f"sh{num_part}"

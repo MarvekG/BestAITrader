@@ -25,8 +25,13 @@ class RiskSource:
 
     def _analyze_financial_risks(self, fin_ctx: Dict[str, Any]) -> Dict[str, Any]:
         """
-        从财务上下文中提取风险预警信号
-        Extract financial risk warning signals from financial context
+        从财务上下文中提取风险预警信号。
+
+        Args:
+            fin_ctx: 财务上下文字典，包含最新财务指标、资产负债表和现金流量表片段。
+
+        Returns:
+            标准化后的风险预警上下文字典。
         """
         def pick(data: Dict[str, Any], *keys: str) -> Any:
             for key in keys:
@@ -65,10 +70,10 @@ class RiskSource:
         total_assets = pick(latest, "total_assets", "资产总计") or 1  # 避免除零
         goodwill_ratio = round(goodwill / total_assets * 100, 2)
 
-        # 2. 负债率 (Debt Ratio) - AkShare/"资产负债率"→debt_to_assets_ratio, Tushare/debt_to_assets→debt_to_assets_ratio
+        # 2. 负债率 (Debt Ratio)
         raw_debt_ratio = pick(
             latest,
-            "debt_to_assets_ratio",   # AkShare & Tushare 统一映射目标
+            "debt_to_assets_ratio",   # 统一映射目标
             "debt_to_assets",         # Tushare 原始字段 (兜底)
             "debt_to_asset",
             "al_ratio",
@@ -82,22 +87,22 @@ class RiskSource:
             debt_ratio = (total_liab / total_assets * 100) if total_assets and total_assets > 1 else 0
 
         # 3. 经营现金流质量 (Earnings Quality - Cash Profit Ratio)
-        # 优先级: 总量值(AkShare) > ocfps反推(Tushare) > ocf比率判断(Tushare)
-        # 净利润: AkShare "归母净利润"→net_profit_attributable_to_parent | Tushare 无直接净利润 (fina_indicator 只有 recurring_profit)
+        # 优先级: 现金流总量 > ocfps 反推 > ocf 比率判断
+        # Tushare fina_indicator 无直接净利润字段，优先读取已标准化的归母净利润字段。
         net_profit_raw = pick(
             latest,
-            "net_profit_attributable_to_parent",   # AkShare 归母净利润
+            "net_profit_attributable_to_parent",
             "n_income_attr_p",                     # Tushare cashflow 表 (若有)
-            "net_profit",                          # AkShare "净利润"
+            "net_profit",
             "n_income",
             "归属于母公司所有者的净利润",
             "净利润",
             "归母净利润",
         )
-        # 经营性现金流总量 (AkShare 有): 经营活动产生的现金流量净额→net_cash_flow_from_operating_activities
+        # 经营性现金流总量: 经营活动产生的现金流量净额。
         ocf_absolute = pick(
             latest,
-            "net_cash_flow_from_operating_activities",  # AkShare
+            "net_cash_flow_from_operating_activities",
             "n_cashflow_act",                           # Tushare cashflow 表
             "n_cash_flows_oper",
             "经营活动产生的现金流量净额",

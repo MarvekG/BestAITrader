@@ -195,7 +195,7 @@
     "main_net_inflow_rank_10d": "10d Main Inflow Rank"
   },
   "errors": {
-    "tushare_pledge_summary_requires_stock_code": "TuShare pledge_stat API requires stock_code, bulk fetch not supported, using AkShare fallback"
+    "tushare_pledge_summary_requires_stock_code": "TuShare pledge_stat API requires stock_code; bulk fetch is not supported"
   },
   "stock_realtime": {
     "latest_price": "Last Price",
