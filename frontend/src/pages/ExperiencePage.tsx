@@ -943,7 +943,12 @@ export const ExperiencePage: React.FC = () => {
       )}
 
       <Card title={t('experience.tool_trace')}>
-        <div className="experience-scroll-panel experience-tool-trace-scroll">
+        <div
+          aria-label={t('experience.tool_trace')}
+          className="experience-scroll-panel experience-tool-trace-scroll"
+          role="region"
+          tabIndex={0}
+        >
           {hasLiveProgress ? (
             <Space direction="vertical" size={8} style={{ width: '100%', marginBottom: 16 }}>
               {liveEvents.map((event, index) => (

@@ -69,6 +69,11 @@ code {
   padding-right: 8px;
 }
 
+.experience-scroll-panel:focus-visible {
+  outline: 2px solid var(--app-primary);
+  outline-offset: 2px;
+}
+
 .experience-review-candidate-scroll {
   max-height: 360px;
 }

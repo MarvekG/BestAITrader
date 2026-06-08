@@ -115,16 +115,6 @@ backend/app/data/metadata/
 ```json
 {
   "data.financial_indicator": {
-    "gross_profit": {
-      "unit": "units.cny",
-      "display_scale": 1,
-      "precision": 2
-    },
-    "gross_margin": {
-      "unit": "units.percent",
-      "display_scale": 1,
-      "precision": 2
-    },
     "net_profit_dedt_yoy": {
       "unit": "units.percent",
       "display_scale": 1,
@@ -243,16 +233,16 @@ Tushare 财务指标数据：
 source field: gross_margin = 11779497981.0
 source plugin mapping: gross_margin -> gross_profit
 canonical record: gross_profit = 11779497981.0
-unit config: data.financial_indicator.gross_profit -> units.cny
-LLM context: 毛利 = 11779497981元
+unit config: none, because the Tushare fina_indicator document does not explicitly specify a display unit
+LLM context: 毛利 = 11779497981.0
 ```
 
 ```text
 source field: grossprofit_margin = 27.4158
 source plugin mapping: grossprofit_margin -> gross_margin
 canonical record: gross_margin = 27.4158
-unit config: data.financial_indicator.gross_margin -> units.percent
-LLM context: 毛利率 = 27.42%
+unit config: none, because the Tushare fina_indicator document does not explicitly specify a display unit
+LLM context: 毛利率 = 27.4158
 ```
 
 资金流数据：
@@ -273,14 +263,14 @@ LLM context: 主力净流入 = -14843.47万元
 
 - 新增 `backend/app/data/metadata/table_field_units.json`。
 - 新增 `backend/app/data/metadata/field_units.py`。
-- 在 `field_units.py` 中实现字段单位配置加载、数字格式化、单位 i18n 和反解析。
-- 给 `data.financial_indicator`、`data.stock_realtime_market`、`data.stock_money_flow`、`data.stock_block_trade` 增加第一批单位配置。
+- 在 `field_units.py` 中实现字段单位配置加载、数字格式化和单位 i18n。
+- 给官方文档明确单位或代码显式归一化的字段增加第一批单位配置。
 - 添加配置加载和单字段格式化测试。
 
 验收标准：
 
-- `format_payload_values("data.financial_indicator", {"gross_margin": 27.4158})` 返回 `{"gross_margin": "27.42%"}`。
-- `format_payload_values("data.financial_indicator", {"gross_profit": 11779497981})` 返回带 `元` 的展示值。
+- `format_payload_values("data.financial_indicator", {"net_profit_yoy": 3.01})` 返回 `{"net_profit_yoy": "3.01%"}`。
+- `format_payload_values("data.financial_indicator", {"gross_margin": 27.4158, "gross_profit": 11779497981})` 保持原值。
 - 未配置字段保持原值。
 - 中英文单位由 `settings.SYSTEM_LANGUAGE` 或传入 `language` 控制。
 

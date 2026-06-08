@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import date, datetime
 from operator import add
 from typing import Annotated, Dict, Any, TypedDict, List, Optional
 from uuid import UUID
@@ -87,7 +88,7 @@ def _get_latest_position_price(db: Any, stock_code: str, fallback_price: float) 
         fallback_price: 持仓表中的备选价格。
 
     Returns:
-        ``(价格, 来源, 来源时间)``；优先实时行情，其次最新日 K 收盘价，最后使用持仓快照价。
+        ``(价格, 来源, 来源时间)``；优先使用新于最新日 K 的实时行情，其次最新日 K 收盘价，最后使用持仓快照价。
     """
     from sqlalchemy import desc
 
@@ -96,19 +97,29 @@ def _get_latest_position_price(db: Any, stock_code: str, fallback_price: float) 
     latest_market = db.query(StockRealtimeMarket).filter(
         StockRealtimeMarket.stock_code == stock_code
     ).order_by(desc(StockRealtimeMarket.timestamp)).first()
-    if latest_market:
-        market_price = _safe_float(latest_market.current_price)
-        if market_price is not None and market_price > 0:
-            return market_price, "realtime_market", _safe_isoformat(latest_market.timestamp)
 
     latest_kline = db.query(KlineData).filter(
         KlineData.stock_code == stock_code,
         KlineData.freq == "D",
     ).order_by(desc(KlineData.date)).first()
+
+    close_price = None
+    kline_date = None
     if latest_kline:
         close_price = _safe_float(latest_kline.close)
-        if close_price is not None and close_price > 0:
-            return close_price, "daily_kline_close", _safe_isoformat(latest_kline.date)
+        kline_date = _safe_date(latest_kline.date)
+
+    if latest_market:
+        market_price = _safe_float(latest_market.current_price)
+        if market_price is not None and market_price > 0:
+            market_date = _safe_date(latest_market.timestamp)
+            if close_price is None or close_price <= 0:
+                return market_price, "realtime_market", _safe_isoformat(latest_market.timestamp)
+            if market_date is not None and (kline_date is None or market_date > kline_date):
+                return market_price, "realtime_market", _safe_isoformat(latest_market.timestamp)
+
+    if close_price is not None and close_price > 0:
+        return close_price, "daily_kline_close", _safe_isoformat(latest_kline.date)
 
     return fallback_price, "position_snapshot", None
 
@@ -531,6 +542,28 @@ def _safe_isoformat(value: Any) -> str | None:
     return str(value)
 
 
+def _safe_date(value: Any) -> date | None:
+    """安全提取日期口径。
+
+    Args:
+        value: 数据库日期、日期时间或可解析为日期的字符串。
+
+    Returns:
+        日期对象；无法提取或解析时返回 None。
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        text = str(value)
+        return date.fromisoformat(text[:10])
+    except (TypeError, ValueError):
+        return None
+
+
 def _build_pm_history_item(debate_msg: Any, session_obj: Any, execution_summary: Dict[str, Any]) -> Dict[str, Any]:
     """构建同股历史 PM 决策摘要。
 
@@ -619,6 +652,22 @@ def _build_trade_history_item(trade: Any, order_by_id: Dict[str, Any]) -> Dict[s
         "net_amount": _safe_float(trade.net_amount),
         "order_realized_pnl": _safe_float(order.realized_pnl) if order else None,
     }
+
+
+def _is_actual_sell_execution(item: Dict[str, Any]) -> bool:
+    """判断订单摘要是否代表实际卖出成交。
+
+    Args:
+        item: `_build_order_history_item` 构建的订单摘要。
+
+    Returns:
+        订单方向为卖出且状态或成交数量表明已有实际成交时返回 True。
+    """
+    if str(item.get("action") or "").lower() != "sell":
+        return False
+    if int(item.get("filled_shares") or 0) > 0:
+        return True
+    return str(item.get("status") or "").lower() == "filled"
 
 
 def _build_pm_review_focus() -> list[str]:
@@ -753,7 +802,7 @@ def _get_same_stock_history(
             recent_trades = [_build_trade_history_item(trade, order_by_id) for trade in trades]
             realized_pnls = [item["realized_pnl"] for item in recent_orders if item["realized_pnl"] is not None]
             loss_orders = [item for item in recent_orders if (item["realized_pnl"] or 0) < 0]
-            sell_orders = [item for item in recent_orders if str(item.get("action") or "").lower() == "sell"]
+            executed_sell_orders = [item for item in recent_orders if _is_actual_sell_execution(item)]
             recent_realized_pnl = round(sum(realized_pnls), 4) if realized_pnls else 0.0
             has_recent_realized_loss = any(value < 0 for value in realized_pnls)
 
@@ -771,9 +820,9 @@ def _get_same_stock_history(
                     "recent_trade_count": len(recent_trades),
                     "recent_realized_pnl": recent_realized_pnl,
                     "has_recent_realized_loss": has_recent_realized_loss,
-                    "latest_exit_order": sell_orders[0] if sell_orders else None,
+                    "latest_exit_order": executed_sell_orders[0] if executed_sell_orders else None,
                     "latest_loss_order": loss_orders[0] if loss_orders else None,
-                    "new_edge_review_required": has_recent_realized_loss or bool(sell_orders),
+                    "new_edge_review_required": has_recent_realized_loss or bool(executed_sell_orders),
                     "pm_review_focus": _build_pm_review_focus(),
                 },
                 "recent_orders": recent_orders,

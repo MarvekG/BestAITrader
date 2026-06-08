@@ -405,6 +405,36 @@ class TestTushareIngestor:
 
             assert result is True, "无数据时应该返回 True"
 
+    @pytest.mark.asyncio
+    async def test_fetch_stock_lockup_release_converts_tushare_float_share_to_raw_shares(
+        self, test_stock_code
+    ):
+        """测试 Tushare 限售股解禁数量按万股归一化为股。"""
+        ingestor = ingestor_manager.get_ingestor('tushare')
+        mock_df = pd.DataFrame({
+            'ts_code': [test_stock_code],
+            'float_date': ['20260630'],
+            'float_share': [500.0],
+            'float_ratio': [1.2],
+            'share_type': ['首发原股东'],
+            'holder_name': ['Test Holder'],
+        })
+        mock_pro = Mock()
+        mock_pro.share_float = Mock(return_value=mock_df)
+
+        with patch.object(ingestor, 'pro', mock_pro):
+            with patch.object(ingestor.ingestion_service, 'write_dataframe', new_callable=Mock) as mock_write:
+                mock_write.return_value = True
+                result = await ingestor.fetch_and_ingest_stock_lockup_release(test_stock_code)
+
+        assert result is True
+        mock_pro.share_float.assert_called_once()
+        mock_write.assert_called_once()
+        call_args = mock_write.call_args
+        assert call_args[0][0] == 'share_float'
+        df_arg = call_args[0][1]
+        assert df_arg['release_shares'].iloc[0] == 5_000_000
+
 
 class TestFailoverMechanism:
     """测试灾备切换机制"""

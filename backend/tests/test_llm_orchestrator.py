@@ -16,7 +16,7 @@ from app.ai.llm_engine.orchestrator import (
 from app.ai.llm_engine.models import PMDecision
 from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER, AGENT_ROLE_PORTFOLIO_MANAGER
 from app.models.account import Account
-from app.models.data_storage import StockBasic, StockRealtimeMarket
+from app.models.data_storage import KlineData, StockBasic, StockRealtimeMarket
 from app.models.debate_message import DebateMessage
 from app.models.order import Order
 from app.models.position import Position
@@ -213,6 +213,8 @@ async def test_fetch_context_revalues_position_with_latest_realtime_price(initia
     )
     db_session.add(account)
     db_session.flush()
+    db_session.add(StockBasic(stock_code="000001.SZ", name="平安银行", industry="银行"))
+    db_session.flush()
     session = DebateSession(
         user_id=user.id,
         stock_code="000001.SZ",
@@ -223,7 +225,6 @@ async def test_fetch_context_revalues_position_with_latest_realtime_price(initia
     db_session.add_all(
         [
             session,
-            StockBasic(stock_code="000001.SZ", name="平安银行", industry="银行"),
             Position(
                 account_id=account.account_id,
                 stock_code="000001.SZ",
@@ -260,6 +261,79 @@ async def test_fetch_context_revalues_position_with_latest_realtime_price(initia
     assert position["current_position"] == "8.5%"
     assert position["profit_loss"] == "-1500元"
     assert position["profit_loss_pct"] == "-15%"
+
+
+@pytest.mark.asyncio
+async def test_fetch_context_ignores_stale_realtime_price_when_daily_close_is_newer(initial_state, db_session):
+    user = User(
+        username="pm_revalue_stale_realtime_user",
+        email="pm_revalue_stale_realtime_user@example.com",
+        password_hash="hashed",
+    )
+    db_session.add(user)
+    db_session.flush()
+    account = Account(
+        user_id=user.id,
+        total_assets=Decimal("100000.00"),
+        available_cash=Decimal("50000.00"),
+        frozen_cash=Decimal("0.00"),
+        market_value=Decimal("50000.00"),
+        initial_capital=Decimal("100000.00"),
+        total_profit_loss=Decimal("0.00"),
+    )
+    db_session.add(account)
+    db_session.flush()
+    db_session.add(StockBasic(stock_code="000001.SZ", name="平安银行", industry="银行"))
+    db_session.flush()
+    session = DebateSession(
+        user_id=user.id,
+        stock_code="000001.SZ",
+        trading_frequency="swing",
+        trading_strategy="momentum",
+        status="active",
+    )
+    db_session.add_all(
+        [
+            session,
+            Position(
+                account_id=account.account_id,
+                stock_code="000001.SZ",
+                total_shares=1000,
+                available_shares=900,
+                avg_cost=Decimal("10.0000"),
+                current_price=Decimal("11.0000"),
+                market_value=Decimal("11000.0000"),
+                profit_loss=Decimal("1000.0000"),
+                profit_loss_pct=Decimal("0.1000"),
+            ),
+            StockRealtimeMarket(
+                stock_code="000001.SZ",
+                current_price=Decimal("8.5000"),
+                timestamp=datetime(2026, 6, 5, 14, 58),
+            ),
+            KlineData(
+                stock_code="000001.SZ",
+                date=datetime(2026, 6, 6).date(),
+                close=9.2,
+                freq="D",
+            ),
+        ]
+    )
+    db_session.commit()
+    initial_state["session_id"] = session.session_id
+
+    with patch("app.ai.llm_engine.orchestrator.AIContextService") as MockService, \
+         patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
+        mock_service = MockService.return_value
+        mock_service.build = AsyncMock(return_value=MOCK_CONTEXT)
+
+        result = await fetch_context(initial_state)
+
+    position = result["static_context"]["portfolio_info"]["position"]
+    assert position["current_price"] == "9.2元"
+    assert position["current_position"] == "9.2%"
+    assert position["profit_loss"] == "-800元"
+    assert position["profit_loss_pct"] == "-8%"
 
 @pytest.mark.asyncio
 async def test_sentiment_analysis_node(initial_state):
@@ -734,6 +808,70 @@ def test_get_same_stock_history_includes_trades_pnl_and_stop_loss(db_session):
     assert result["recent_trades"][0]["order_realized_pnl"] == -4916.02
     assert result["recent_pm_decisions"][0]["stop_loss"] == 29.5
     assert result["recent_pm_decisions"][0]["execution_summary"]["realized_pnl"] == -4916.02
+
+
+def test_get_same_stock_history_does_not_treat_rejected_sell_as_exit(db_session):
+    user = User(
+        username="same_stock_rejected_sell_user",
+        email="same_stock_rejected_sell_user@example.com",
+        password_hash="hashed",
+    )
+    db_session.add(user)
+    db_session.flush()
+    account = Account(
+        user_id=user.id,
+        total_assets=Decimal("1000000.00"),
+        available_cash=Decimal("500000.00"),
+        frozen_cash=Decimal("0.00"),
+        market_value=Decimal("500000.00"),
+        initial_capital=Decimal("1000000.00"),
+    )
+    db_session.add(account)
+    db_session.flush()
+    previous_session = DebateSession(
+        user_id=user.id,
+        stock_code="000001.SZ",
+        trading_frequency="swing",
+        trading_strategy="trend_following",
+        status="completed",
+    )
+    current_session = DebateSession(
+        user_id=user.id,
+        stock_code="000001.SZ",
+        trading_frequency="swing",
+        trading_strategy="trend_following",
+        status="active",
+    )
+    db_session.add_all([previous_session, current_session])
+    db_session.flush()
+    db_session.add(
+        Order(
+            session_id=previous_session.session_id,
+            account_id=account.account_id,
+            stock_code="000001.SZ",
+            action="sell",
+            order_type="market",
+            price=Decimal("28.62"),
+            shares=900,
+            status="rejected",
+            filled_shares=0,
+            avg_fill_price=None,
+            realized_pnl=None,
+            created_at=datetime(2026, 6, 4, 14, 48),
+            source=f"ai:{previous_session.session_id}",
+        )
+    )
+    db_session.commit()
+
+    with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
+        result = _get_same_stock_history(current_session.session_id, "000001.SZ")
+
+    summary = result["recent_execution_summary"]
+    assert summary["has_orders"] is True
+    assert summary["has_trades"] is False
+    assert summary["latest_exit_order"] is None
+    assert summary["new_edge_review_required"] is False
+    assert result["recent_orders"][0]["status"] == "rejected"
 
 
 def test_pm_review_focus_uses_system_language(monkeypatch):

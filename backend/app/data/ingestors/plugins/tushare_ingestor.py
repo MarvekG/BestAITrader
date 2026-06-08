@@ -1170,6 +1170,9 @@ class TushareIngestor(BaseIngestor):
 
                 if 'release_date' in df.columns:
                     df['release_date'] = pd.to_datetime(df['release_date'], errors='coerce')
+                if 'release_shares' in df.columns:
+                    # Tushare share_float.float_share uses 万股; canonical storage uses raw shares.
+                    df['release_shares'] = pd.to_numeric(df['release_shares'], errors='coerce') * 10000
 
                 await self._run_in_executor(
                     self.ingestion_service.write_dataframe,
