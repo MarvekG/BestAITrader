@@ -12,6 +12,7 @@ AGENT_NAME_BEARISH_RESEARCHER: Final[str] = "Bearish Researcher"
 AGENT_NAME_AGGRESSIVE_ANALYST: Final[str] = "Aggressive Analyst"
 AGENT_NAME_CONSERVATIVE_ANALYST: Final[str] = "Conservative Analyst"
 AGENT_NAME_NEUTRAL_ANALYST: Final[str] = "Neutral Analyst"
+AGENT_NAME_FACT_ARBITRATOR: Final[str] = "Fact Arbitrator"
 AGENT_NAME_PORTFOLIO_MANAGER: Final[str] = "Portfolio Manager"
 
 AGENT_ROLE_FUNDAMENTAL: Final[str] = "fundamental"
@@ -26,6 +27,7 @@ AGENT_ROLE_BEAR: Final[str] = "bear"
 AGENT_ROLE_AGGRESSIVE: Final[str] = "aggressive"
 AGENT_ROLE_CONSERVATIVE: Final[str] = "conservative"
 AGENT_ROLE_NEUTRAL: Final[str] = "neutral"
+AGENT_ROLE_FACT_ARBITRATION: Final[str] = "fact_arbitration"
 AGENT_ROLE_PORTFOLIO_MANAGER: Final[str] = "portfolio_manager"
 
 MEMORY_ENABLED_AGENT_NAMES: Final[frozenset[str]] = frozenset(

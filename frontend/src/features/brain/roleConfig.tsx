@@ -1,4 +1,4 @@
-import { ArrowDownOutlined, ArrowUpOutlined, RobotOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { ArrowDownOutlined, ArrowUpOutlined, AuditOutlined, RobotOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import type { TFunction } from 'i18next';
 import type { ReactNode } from 'react';
 
@@ -23,6 +23,7 @@ export const getRoleConfig = (role: string, t: TFunction): RoleConfig => {
   if (r.includes('aggressive')) return { color: '#f5222d', icon: <ThunderboltOutlined />, title: t('ai_analyst.agents.aggressive') };
   if (r.includes('conservative')) return { color: '#52c41a', icon: <RobotOutlined />, title: t('ai_analyst.agents.conservative') };
   if (r.includes('neutral')) return { color: '#1890ff', icon: <RobotOutlined />, title: t('ai_analyst.agents.neutral') };
+  if (r.includes('fact_arbitration')) return { color: '#531dab', icon: <AuditOutlined />, title: t('ai_analyst.agents.fact_arbitrator', { defaultValue: '事实仲裁员' }) };
   if (r.includes('pm') || r.includes('portfolio_manager')) return { color: '#1890ff', icon: <ThunderboltOutlined />, title: t('ai_analyst.agents.portfolio_manager') };
   return { color: '#8c8c8c', icon: <RobotOutlined />, title: role };
 };

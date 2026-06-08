@@ -18,7 +18,7 @@ from app.ai.llm_engine.agents.specialists import (
     FundamentalAgent, TechnicalAgent, CapitalFlowAgent, SentimentAgent, RiskAgent, NewsAgent, PolicyAgent
 )
 from app.ai.llm_engine.agents.strategic import (
-    BullAgent, BearAgent, AggressiveAgent, ConservativeAgent, NeutralAgent
+    BullAgent, BearAgent, AggressiveAgent, ConservativeAgent, NeutralAgent, FactArbitrationAgent
 )
 from app.ai.llm_engine.agents.governance import (
     PortfolioManagerAgent
@@ -32,6 +32,7 @@ from app.ai.llm_engine.roles import (
     AGENT_ROLE_BULL,
     AGENT_ROLE_CAPITAL_FLOW,
     AGENT_ROLE_CONSERVATIVE,
+    AGENT_ROLE_FACT_ARBITRATION,
     AGENT_ROLE_FUNDAMENTAL,
     AGENT_ROLE_NEUTRAL,
     AGENT_ROLE_NEWS_ANALYST,
@@ -40,6 +41,7 @@ from app.ai.llm_engine.roles import (
     AGENT_ROLE_RISK,
     AGENT_ROLE_SENTIMENT,
     AGENT_ROLE_TECHNICAL,
+    AGENT_NAME_FACT_ARBITRATOR,
 )
 
 logger = get_logger(__name__)
@@ -151,6 +153,7 @@ class AnalystState(TypedDict):
     vertical_reports: Dict[str, str]
     strategic_reports: Dict[str, str]
     strategic_round_2_1_reports: Dict[str, str]  # Round 2.1 intermediate reports
+    fact_arbitration_report: Optional[str]
     pm_decision: str
     post_trade_reflection: Dict[str, Any]
     errors: Annotated[List[str], add]
@@ -1106,6 +1109,50 @@ async def strategic_round_2_rebuttal(state: AnalystState) -> Dict[str, Any]:
     return {"strategic_reports": merged_reports}
 
 
+async def fact_arbitration(state: AnalystState) -> Dict[str, Any]:
+    """仲裁关键事实冲突，向 PM 提供 Markdown 摘要。
+
+    Args:
+        state: 当前 Debate 工作流状态，包含一层分析、战略层报告和运行上下文。
+
+    Returns:
+        包含 `fact_arbitration_report` 的状态更新；失败时返回工作流错误。
+    """
+    static_context = state.get("static_context", {})
+    session_id = state.get("session_id")
+    layer1_reports = _build_layer1_reports(
+        state.get("vertical_reports", {}),
+        state.get("sentiment_report"),
+        state.get("news_report"),
+        state.get("policy_report"),
+    )
+    runtime_context = _build_runtime_context(
+        state,
+        {
+            "layer1_analysis": layer1_reports,
+            "strategic_debate": state.get("strategic_reports", {}),
+            "strategic_round_2_1": state.get("strategic_round_2_1_reports", {}),
+        },
+    )
+
+    agent = FactArbitrationAgent(state=state)
+    try:
+        report = await agent.run(static_context, runtime_context)
+        await persist_agent_report(
+            session_id=session_id,
+            stage="fact_arbitration",
+            round_number=3,
+            agent_name=i18n_service.get("ai_analyst.agents.fact_arbitrator", AGENT_NAME_FACT_ARBITRATOR),
+            agent_role=AGENT_ROLE_FACT_ARBITRATION,
+            report_content=report,
+            prompt_input=agent.last_prompt,
+        )
+        return {"fact_arbitration_report": report}
+    except Exception as e:
+        logger.exception("%s execution failed", AGENT_NAME_FACT_ARBITRATOR)
+        return {"errors": [_build_error_message(AGENT_NAME_FACT_ARBITRATOR, e)]}
+
+
 async def portfolio_management(state: AnalystState) -> Dict[str, Any]:
     static_context = state.get("static_context", {})
     session_id = state.get("session_id")
@@ -1121,6 +1168,7 @@ async def portfolio_management(state: AnalystState) -> Dict[str, Any]:
             "same_stock_history": same_stock_history,
             "vertical_views": state.get("vertical_reports", {}),
             "strategic_debate": state.get("strategic_reports", {}),
+            "fact_arbitration_report": state.get("fact_arbitration_report", ""),
         },
     )
 
@@ -1202,6 +1250,7 @@ def create_analyst_workflow():
     workflow.add_node("layer1_gate", layer1_gate)
     workflow.add_node("strategic_round_1", strategic_round_1)
     workflow.add_node("strategic_round_2_1", strategic_round_2_1)
+    workflow.add_node("fact_arbitration", fact_arbitration)
     workflow.add_node("portfolio_management", portfolio_management)
 
     workflow.set_entry_point("fetch_context")
@@ -1253,6 +1302,14 @@ def create_analyst_workflow():
     )
     workflow.add_conditional_edges(
         "strategic_round_2_1",
+        lambda state: _halt_on_errors(state, "fact_arbitration"),
+        {
+            END: END,
+            "fact_arbitration": "fact_arbitration",
+        },
+    )
+    workflow.add_conditional_edges(
+        "fact_arbitration",
         lambda state: _halt_on_errors(state, "portfolio_management"),
         {
             END: END,

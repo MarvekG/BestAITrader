@@ -116,6 +116,7 @@ def initial_state():
         "vertical_reports": {},
         "strategic_reports": {},
         "strategic_round_2_1_reports": {},
+        "fact_arbitration_report": "",
         "pm_decision": {},
         "post_trade_reflection": {},
         "errors": [],
@@ -164,7 +165,7 @@ async def test_current_workflow_runs_with_mocked_agents(initial_state):
     assert final_state["pm_decision"]["decision"] == "buy"
     assert final_state["pm_decision"]["target_position"] == 0.5
     assert not final_state["errors"]
-    assert mock_persist.call_count == 13
+    assert mock_persist.call_count == 14
 
 
 @pytest.mark.asyncio
@@ -344,7 +345,8 @@ async def test_portfolio_management_returns_current_pm_decision_schema(initial_s
 
     with patch("app.ai.llm_engine.orchestrator.PortfolioManagerAgent") as mock_pm_agent, \
             patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock) as mock_persist, \
-            patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={"decision": "hold"}):
+            patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={"decision": "hold"}), \
+            patch("app.ai.llm_engine.orchestrator._get_same_stock_history", return_value={}):
         agent = mock_pm_agent.return_value
         agent.last_prompt = "pm prompt"
         agent.run = AsyncMock(return_value=pm_decision)

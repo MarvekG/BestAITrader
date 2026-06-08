@@ -9,7 +9,7 @@ import pytest
 from app.ai.llm_engine.orchestrator import (
     AnalystState, fetch_context, sentiment_analysis, vertical_analysis,
     strategic_round_1, strategic_round_2_1, strategic_round_2_rebuttal,
-    portfolio_management, persist_agent_report,
+    fact_arbitration, portfolio_management, persist_agent_report,
     create_analyst_workflow, _get_previous_pm_decision, _get_same_stock_history,
     _build_pm_review_focus, _build_portfolio_field_descriptions
 )
@@ -110,6 +110,7 @@ def initial_state():
         "vertical_reports": {},
         "strategic_reports": {},
         "strategic_round_2_1_reports": {},
+        "fact_arbitration_report": "",
         "pm_decision": {},
         "post_trade_reflection": {},
         "user_id": None,
@@ -436,6 +437,21 @@ async def test_strategic_round_nodes(initial_state):
             assert aggressive_runtime_context["debate_round_1"] == res1["strategic_reports"]
             assert mock_persist_2.call_count == 3
 
+        initial_state["strategic_reports"] = res2["strategic_reports"]
+        initial_state["strategic_round_2_1_reports"] = res2["strategic_round_2_1_reports"]
+        with patch("app.ai.llm_engine.orchestrator.FactArbitrationAgent") as MockFact, \
+             patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock) as mock_persist_fact:
+
+            MockFact.return_value.run = AsyncMock(return_value="# 事实冲突仲裁摘要")
+
+            res3 = await fact_arbitration(initial_state)
+            assert res3["fact_arbitration_report"] == "# 事实冲突仲裁摘要"
+            fact_snapshot, fact_runtime_context = MockFact.return_value.run.await_args.args
+            assert fact_snapshot == _expected_static_context()
+            assert fact_runtime_context["strategic_debate"] == res2["strategic_reports"]
+            assert fact_runtime_context["strategic_round_2_1"] == res2["strategic_round_2_1_reports"]
+            assert mock_persist_fact.call_count == 1
+
 @pytest.mark.asyncio
 async def test_full_workflow_integration(initial_state):
     """Integration test for the full graph flow using mocks for all external calls"""
@@ -487,13 +503,14 @@ async def test_full_workflow_integration(initial_state):
         assert "vertical_reports" in final_state
         assert len(final_state["vertical_reports"]) == 4
         assert len(final_state["strategic_reports"]) == 5
+        assert final_state["fact_arbitration_report"] == "Test Report"
         assert "pm_decision" in final_state
         assert "trader_execution" not in final_state
         assert not final_state["errors"]
         
         # Total persists: 1 (news) + 1 (policy) + 1 (sentiment) + 4 (vertical) + 2 (round 1)
-        # + 3 (round 2.1) + 1 (PM) = 13
-        assert mock_persist.call_count == 13
+        # + 3 (round 2.1) + 1 (fact arbitration) + 1 (PM) = 14
+        assert mock_persist.call_count == 14
 
 
 @pytest.mark.asyncio
@@ -629,6 +646,7 @@ async def test_persist_agent_report_saves_pm_report():
 async def test_portfolio_management_passes_expected_top_level_keys(initial_state):
     initial_state["vertical_reports"] = {"fundamental": "F"}
     initial_state["strategic_reports"] = {"bull": "B"}
+    initial_state["fact_arbitration_report"] = "Fact arbitration"
     portfolio_info = {"account": {"total_assets": 1000000}, "position": {}}
     initial_state["static_context"] = _expected_static_context(portfolio_info)
 
@@ -659,9 +677,11 @@ async def test_portfolio_management_passes_expected_top_level_keys(initial_state
             "same_stock_history",
             "vertical_views",
             "strategic_debate",
+            "fact_arbitration_report",
         }
         assert pm_runtime_context["previous_pm_decision"]["decision"] == "buy"
         assert pm_runtime_context["same_stock_history"]["recent_execution_summary"]["recent_realized_pnl"] == -100.0
+        assert pm_runtime_context["fact_arbitration_report"] == "Fact arbitration"
 
 
 def test_get_same_stock_history_includes_trades_pnl_and_stop_loss(db_session):
