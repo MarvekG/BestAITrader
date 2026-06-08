@@ -443,15 +443,15 @@ class TestTushareIngestor:
             assert result is True, "无数据时应该返回 True"
 
     @pytest.mark.asyncio
-    async def test_fetch_stock_lockup_release_converts_tushare_float_share_to_raw_shares(
+    async def test_fetch_stock_lockup_release_preserves_tushare_raw_shares(
         self, test_stock_code
     ):
-        """测试 Tushare 限售股解禁数量按万股归一化为股。"""
+        """测试 Tushare 限售股解禁数量按官方股数单位写入。"""
         ingestor = ingestor_manager.get_ingestor('tushare')
         mock_df = pd.DataFrame({
             'ts_code': [test_stock_code],
             'float_date': ['20260630'],
-            'float_share': [500.0],
+            'float_share': [5_000_000.0],
             'float_ratio': [1.2],
             'share_type': ['首发原股东'],
             'holder_name': ['Test Holder'],
