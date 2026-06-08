@@ -65,6 +65,8 @@ const getStepMessagesFor = (allMessages: AuditMessage[], stepIndex: number) => {
         m.stage === 'strategic_round_2_1' || m.stage === 'strategic_round_2_2'
       );
     case 4:
+      return allMessages.filter(m => m.stage === 'fact_arbitration');
+    case 5:
       return allMessages.filter(m => m.stage === 'portfolio_management');
     default:
       return [];
@@ -121,7 +123,8 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
       setMessages(auditMessages);
 
       // 默认选中最新的有数据的步骤
-      if (getStepMessagesFor(auditMessages, 4).length > 0) setCurrentStep(4);
+      if (getStepMessagesFor(auditMessages, 5).length > 0) setCurrentStep(5);
+      else if (getStepMessagesFor(auditMessages, 4).length > 0) setCurrentStep(4);
       else if (getStepMessagesFor(auditMessages, 3).length > 0) setCurrentStep(3);
       else if (getStepMessagesFor(auditMessages, 2).length > 0) setCurrentStep(2);
       else if (getStepMessagesFor(auditMessages, 1).length > 0) setCurrentStep(1);
@@ -214,6 +217,7 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
     { key: 'expert', title: t('debate.technical'), icon: <RobotOutlined />, stages: ['vertical_analysis'] },
     { key: 'strategic', title: t('debate.analysis.synthesis_title'), icon: <BarChartOutlined />, stages: ['strategic_round_1'] },
     { key: 'cross', title: t('debate.analysis.cross_analysis_title'), icon: <MessageOutlined />, stages: ['strategic_round_2_1', 'strategic_round_2_2'] },
+    { key: 'fact_arbitration', title: t('debate.analysis.fact_arbitration_title', { defaultValue: '事实仲裁' }), icon: <AuditOutlined />, stages: ['fact_arbitration'] },
     { key: 'decision', title: t('debate.decision_tab'), icon: <AuditOutlined />, stages: ['portfolio_management'] },
   ];
 
