@@ -662,3 +662,35 @@ pytest backend/tests/test_financial_standard_keys.py
 不要为了处理中文字段名，在格式化器里匹配中文 key。正确顺序是先用标准字段名格式化，再本地化字段名。
 
 不要对 `*_10k_cny` 再做 `display_scale=0.0001`。这些字段已经预先除以 `10000`。
+
+## 2026-06-08 续修进展
+
+本轮已完成：
+
+| 项 | 处理结果 |
+| --- | --- |
+| `fundamental.valuation.total_mv/float_mv` | 改为 `亿元` 展示 |
+| `capital_flow.northbound.net_buy_amount` | 改为 `亿元` 展示 |
+| 北向 `hold_ratio` 系列 | 按数据库 ratio 口径展示为百分比 |
+| `fundamental.northbound_flow.*_10k_cny` | 保持万元数值，只补 `万元` 单位 |
+| `data.financial_indicator` 金额/每股/百分比/天数/次数字段 | 补齐第一批单位配置 |
+| `gross_margin/grossprofit_margin` 新采集口径 | 保留原始字段语义：`gross_margin` 为毛利金额，`grossprofit_margin` 为销售毛利率 |
+| `fundamental.financial_trend` | 趋势百分比字段补 `%` |
+| `capital_flow.block_trade` | 大宗交易金额、价格、折溢价率补单位 |
+| `capital_flow.dragon_tiger` | 龙虎榜金额补 `亿元`，涨跌/换手补 `%` |
+| `fundamental.dragon_tiger_activity` | 预先除以 1 万的字段只补 `万元`，百分比字段补 `%` |
+
+已验证命令：
+
+```bash
+python -m json.tool backend/app/data/metadata/table_field_units.json
+python -m json.tool backend/app/data/metadata/table_field_labels.json
+pytest backend/tests/test_financial_standard_keys.py backend/tests/test_column_mapping_config.py backend/tests/test_data_source_ingestors.py
+git diff --check
+```
+
+暂未处理：
+
+| 项 | 原因 |
+| --- | --- |
+| `snapshot.company.industry_rank.market_cap.total_market_cap_cny` | 当前 Tushare `dc_index.total_mv` 入库前没有明确换算；本轮不猜单位，需用真实样本或官方接口文档确认后再决定是否缩放 |

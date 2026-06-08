@@ -28,8 +28,8 @@ def test_financial_indicator_standard_key_loaded_from_json():
     assert ColumnMapper.get_financial_indicator_standard_key("dt_eps", "tushare_fina_indicator") == "diluted_eps"
     assert ColumnMapper.get_financial_indicator_standard_key("ar_turn", "tushare_fina_indicator") == "accounts_receivable_turnover"
     assert ColumnMapper.get_financial_indicator_standard_key("assets_turn", "tushare_fina_indicator") == "asset_turnover"
-    assert ColumnMapper.get_financial_indicator_standard_key("gross_margin", "tushare_fina_indicator") == "gross_profit"
-    assert ColumnMapper.get_financial_indicator_standard_key("grossprofit_margin", "tushare_fina_indicator") == "gross_margin"
+    assert ColumnMapper.get_financial_indicator_standard_key("gross_margin", "tushare_fina_indicator") == "gross_margin"
+    assert ColumnMapper.get_financial_indicator_standard_key("grossprofit_margin", "tushare_fina_indicator") == "grossprofit_margin"
     assert ColumnMapper.get_financial_indicator_standard_key("total_revenue_ps", "tushare_fina_indicator") == "total_revenue_ps"
     assert ColumnMapper.get_financial_indicator_standard_key("revenue_ps", "tushare_fina_indicator") == "revenue_ps"
     assert ColumnMapper.get_financial_indicator_standard_key("capital_rese_ps", "tushare_fina_indicator") == "capital_reserve_ps"
@@ -57,6 +57,12 @@ def test_tushare_income_statement_mapping_includes_optional_fields():
         assert mapping[field] == field
 
 
+def test_tushare_earnings_forecast_ignores_update_flag():
+    mapping = ColumnMapper.get_table_mapping("data.stock_earnings_forecast", "tushare")
+    assert mapping["update_flag"] == "_unused_update_flag"
+
+
 def test_get_table_field_label_prefers_table_labels():
     assert get_table_field_label("data.financial_indicator", "diluted_eps") == "稀释每股收益"
-    assert get_table_field_label("data.financial_indicator", "gross_profit") == "毛利"
+    assert get_table_field_label("data.financial_indicator", "gross_margin") == "毛利"
+    assert get_table_field_label("data.financial_indicator", "grossprofit_margin") == "销售毛利率"

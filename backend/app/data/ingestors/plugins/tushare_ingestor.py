@@ -1187,8 +1187,13 @@ class TushareIngestor(BaseIngestor):
             return False
 
     async def fetch_and_ingest_stock_earnings_forecast(self, stock_code: str) -> bool:
-        """
-        [NEW] 采集业绩预告数据 (Tushare forecast 接口)
+        """采集单只股票的业绩预告数据并写入标准表。
+
+        Args:
+            stock_code: 标准股票代码。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或写入失败返回 False。
         """
         try:
             if not self.pro:
@@ -1199,7 +1204,9 @@ class TushareIngestor(BaseIngestor):
             )
 
             if df is not None and not df.empty:
-                df = ColumnMapper.map_columns(df, 'data.stock_earnings_forecast', source=self.source)
+                df = ColumnMapper.map_columns(
+                    df, 'data.stock_earnings_forecast', source=self.source, strict=False
+                )
                 df['data_source'] = self.source
                 df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
 

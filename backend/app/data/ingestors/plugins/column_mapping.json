@@ -606,7 +606,7 @@
         "summary": "forecast_content",
         "change_reason": "forecast_content",
         "first_ann_date": "first_ann_date",
-        "update_flag": "update_flag"
+        "update_flag": "_unused_update_flag"
       }
     },
     "data.stock_margin_data": {
@@ -694,7 +694,7 @@
         "undist_profit_ps": "undistributed_profit_ps",
         "extra_item": "extra_item",
         "profit_dedt": "recurring_profit",
-        "gross_margin": "gross_profit",
+        "gross_margin": "gross_margin",
         "current_ratio": "current_ratio",
         "quick_ratio": "quick_ratio",
         "cash_ratio": "cash_ratio",
@@ -724,7 +724,7 @@
         "ebit_ps": "ebit_ps",
         "fcff_ps": "fcff_ps",
         "fcfe_ps": "fcfe_ps",
-        "grossprofit_margin": "gross_margin",
+        "grossprofit_margin": "grossprofit_margin",
         "netprofit_margin": "net_profit_margin",
         "cogs_of_sales": "cogs_ratio",
         "expense_of_sales": "expense_ratio",
