@@ -1,6 +1,5 @@
 import asyncio
 from collections.abc import Awaitable, Callable
-from datetime import date, datetime
 from operator import add
 from typing import Annotated, Dict, Any, TypedDict, List, Optional
 from uuid import UUID
@@ -14,6 +13,7 @@ from app.data.metadata.field_units import format_payload_values
 from app.core.config import settings
 from app.core.i18n import i18n_service
 from app.core.logger import get_logger
+from app.core.utils.converters import safe_date, safe_float, safe_isoformat
 from app.ai.llm_engine.agents.specialists import (
     FundamentalAgent, TechnicalAgent, CapitalFlowAgent, SentimentAgent, RiskAgent, NewsAgent, PolicyAgent
 )
@@ -106,20 +106,20 @@ def _get_latest_position_price(db: Any, stock_code: str, fallback_price: float) 
     close_price = None
     kline_date = None
     if latest_kline:
-        close_price = _safe_float(latest_kline.close)
-        kline_date = _safe_date(latest_kline.date)
+        close_price = safe_float(latest_kline.close)
+        kline_date = safe_date(latest_kline.date)
 
     if latest_market:
-        market_price = _safe_float(latest_market.current_price)
+        market_price = safe_float(latest_market.current_price)
         if market_price is not None and market_price > 0:
-            market_date = _safe_date(latest_market.timestamp)
+            market_date = safe_date(latest_market.timestamp)
             if close_price is None or close_price <= 0:
-                return market_price, "realtime_market", _safe_isoformat(latest_market.timestamp)
+                return market_price, "realtime_market", safe_isoformat(latest_market.timestamp)
             if market_date is not None and (kline_date is None or market_date > kline_date):
-                return market_price, "realtime_market", _safe_isoformat(latest_market.timestamp)
+                return market_price, "realtime_market", safe_isoformat(latest_market.timestamp)
 
     if close_price is not None and close_price > 0:
-        return close_price, "daily_kline_close", _safe_isoformat(latest_kline.date)
+        return close_price, "daily_kline_close", safe_isoformat(latest_kline.date)
 
     return fallback_price, "position_snapshot", None
 
@@ -332,7 +332,7 @@ async def fetch_context(state: AnalystState) -> Dict[str, Any]:
                         ).first()
                         if position:
                             # PM 决策必须使用最新可用行情重估持仓，不能依赖可能滞后的 positions 快照价。
-                            snapshot_price = _safe_float(position.current_price) or 0
+                            snapshot_price = safe_float(position.current_price) or 0
                             curr_price, price_source, price_reference_time = _get_latest_position_price(
                                 db,
                                 stock_code,
@@ -352,7 +352,7 @@ async def fetch_context(state: AnalystState) -> Dict[str, Any]:
                             # 计算当前该股仓位比例 (current_position = 市值 / 总资产)
                             total_assets = float(account.total_assets or 0)
                             total_shares = int(position.total_shares or 0)
-                            avg_cost = _safe_float(position.avg_cost) or 0
+                            avg_cost = safe_float(position.avg_cost) or 0
                             market_value = total_shares * curr_price
                             profit_loss = (curr_price - avg_cost) * total_shares
                             profit_loss_pct = (curr_price - avg_cost) / avg_cost if avg_cost > 0 else 0
@@ -509,61 +509,6 @@ def _build_previous_execution_summary(db, session_id: UUID) -> Dict[str, Any]:
     }
 
 
-def _safe_float(value: Any) -> float | None:
-    """安全转换数值为浮点数。
-
-    Args:
-        value: 可能来自数据库的 Decimal、int、float、字符串或空值。
-
-    Returns:
-        转换后的浮点数；无法转换或为空时返回 None。
-    """
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _safe_isoformat(value: Any) -> str | None:
-    """安全格式化日期时间字段。
-
-    Args:
-        value: 可能具备 `isoformat` 方法的日期时间对象。
-
-    Returns:
-        ISO 格式时间字符串；字段为空或不支持格式化时返回 None。
-    """
-    if value is None:
-        return None
-    if hasattr(value, "isoformat"):
-        return value.isoformat()
-    return str(value)
-
-
-def _safe_date(value: Any) -> date | None:
-    """安全提取日期口径。
-
-    Args:
-        value: 数据库日期、日期时间或可解析为日期的字符串。
-
-    Returns:
-        日期对象；无法提取或解析时返回 None。
-    """
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    try:
-        text = str(value)
-        return date.fromisoformat(text[:10])
-    except (TypeError, ValueError):
-        return None
-
-
 def _build_pm_history_item(debate_msg: Any, session_obj: Any, execution_summary: Dict[str, Any]) -> Dict[str, Any]:
     """构建同股历史 PM 决策摘要。
 
@@ -578,7 +523,7 @@ def _build_pm_history_item(debate_msg: Any, session_obj: Any, execution_summary:
     analysis = debate_msg.analysis if isinstance(debate_msg.analysis, dict) else {}
     return {
         "session_id": str(session_obj.session_id),
-        "created_at": _safe_isoformat(debate_msg.created_at),
+        "created_at": safe_isoformat(debate_msg.created_at),
         "trading_frequency": session_obj.trading_frequency,
         "trading_strategy": session_obj.trading_strategy,
         "decision": debate_msg.decision or analysis.get("decision"),
@@ -607,16 +552,16 @@ def _build_order_history_item(order: Any, pm_by_session: Dict[str, Dict[str, Any
     return {
         "order_id": str(order.order_id),
         "session_id": session_id,
-        "created_at": _safe_isoformat(order.created_at),
-        "filled_at": _safe_isoformat(order.filled_at),
+        "created_at": safe_isoformat(order.created_at),
+        "filled_at": safe_isoformat(order.filled_at),
         "action": order.action,
         "order_type": order.order_type,
         "status": order.status,
-        "price": _safe_float(order.price),
+        "price": safe_float(order.price),
         "shares": int(order.shares or 0),
         "filled_shares": int(order.filled_shares or 0),
-        "avg_fill_price": _safe_float(order.avg_fill_price),
-        "realized_pnl": _safe_float(order.realized_pnl),
+        "avg_fill_price": safe_float(order.avg_fill_price),
+        "realized_pnl": safe_float(order.realized_pnl),
         "source": order.source,
         "pm_decision": pm_snapshot.get("decision"),
         "pm_stop_loss": pm_snapshot.get("stop_loss"),
@@ -641,16 +586,16 @@ def _build_trade_history_item(trade: Any, order_by_id: Dict[str, Any]) -> Dict[s
         "trade_id": str(trade.trade_id),
         "order_id": order_id,
         "session_id": str(trade.session_id) if trade.session_id else None,
-        "trade_time": _safe_isoformat(trade.trade_time),
+        "trade_time": safe_isoformat(trade.trade_time),
         "action": trade.action,
         "quantity": int(trade.quantity or 0),
-        "fill_price": _safe_float(trade.fill_price),
-        "commission": _safe_float(trade.commission),
-        "stamp_duty": _safe_float(trade.stamp_duty),
-        "transfer_fee": _safe_float(trade.transfer_fee),
-        "total_fees": _safe_float(trade.total_fees),
-        "net_amount": _safe_float(trade.net_amount),
-        "order_realized_pnl": _safe_float(order.realized_pnl) if order else None,
+        "fill_price": safe_float(trade.fill_price),
+        "commission": safe_float(trade.commission),
+        "stamp_duty": safe_float(trade.stamp_duty),
+        "transfer_fee": safe_float(trade.transfer_fee),
+        "total_fees": safe_float(trade.total_fees),
+        "net_amount": safe_float(trade.net_amount),
+        "order_realized_pnl": safe_float(order.realized_pnl) if order else None,
     }
 
 

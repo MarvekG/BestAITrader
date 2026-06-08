@@ -14,6 +14,7 @@ from app.ai.llm_engine.context.service import AIContextService
 from app.data.metadata.field_labels import get_table_field_label
 from app.data.storage import data_storage_service
 from app.core.utils.formatters import StockCodeStandardizer
+from app.core.utils.converters import safe_float
 from app.core.utils.json_utils import sanitize_for_json
 
 
@@ -1217,19 +1218,11 @@ async def get_db_stock_detail(
         if not isinstance(fundamentals, dict):
             fundamentals = {}
 
-        # Helper to safely get float
-        def safe_float(val):
-            try:
-                if val is None: return 0.0
-                return float(val)
-            except (ValueError, TypeError):
-                return 0.0
-
         # Create defaults from market_data
         defaults = {
-            "pe_ttm": safe_float(market_data.get("pe_ttm")),
-            "pb": safe_float(market_data.get("pb")),
-            "total_market_value": safe_float(market_data.get("market_cap")),
+            "pe_ttm": safe_float(market_data.get("pe_ttm"), 0.0),
+            "pb": safe_float(market_data.get("pb"), 0.0),
+            "total_market_value": safe_float(market_data.get("market_cap"), 0.0),
         }
 
         # Try to get growth rates from financial_indicators
@@ -1238,28 +1231,29 @@ async def get_db_stock_detail(
         profit_growth = 0.0
 
         if isinstance(financials, list) and financials:
-             # Financials is a list of indicator objects {indicator_name, indicator_value, ...}
-             # We need to find the latest value for revenue growth and profit growth
-             for item in financials:
-                 if not isinstance(item, dict): continue
+            # Financials is a list of indicator objects {indicator_name, indicator_value, ...}
+            # We need to find the latest value for revenue growth and profit growth
+            for item in financials:
+                if not isinstance(item, dict):
+                    continue
 
-                 name = item.get("indicator_name", "")
-                 val = safe_float(item.get("indicator_value", 0))
+                name = item.get("indicator_name", "")
+                val = safe_float(item.get("indicator_value", 0), 0.0)
 
-                 # Check for revenue growth
-                 if rev_growth == 0.0 and name == "total_revenue_yoy":
-                     rev_growth = val
+                # Check for revenue growth
+                if rev_growth == 0.0 and name == "total_revenue_yoy":
+                    rev_growth = val
 
-                 # Check for profit growth
-                 if profit_growth == 0.0 and name == "net_profit_yoy":
-                     profit_growth = val
+                # Check for profit growth
+                if profit_growth == 0.0 and name == "net_profit_yoy":
+                    profit_growth = val
 
-                 if rev_growth != 0.0 and profit_growth != 0.0:
-                     break
+                if rev_growth != 0.0 and profit_growth != 0.0:
+                    break
 
         elif isinstance(financials, dict):
-            rev_growth = safe_float(financials.get("total_revenue_yoy", 0))
-            profit_growth = safe_float(financials.get("net_profit_yoy", 0))
+            rev_growth = safe_float(financials.get("total_revenue_yoy", 0), 0.0)
+            profit_growth = safe_float(financials.get("net_profit_yoy", 0), 0.0)
 
         defaults["total_revenue_yoy"] = rev_growth
         defaults["net_profit_yoy"] = profit_growth

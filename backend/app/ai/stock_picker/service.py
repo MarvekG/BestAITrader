@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-import math
 from typing import Any, Dict, Iterable, List, Literal, Optional, TypedDict
 from uuid import UUID
 
@@ -29,6 +28,7 @@ from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.i18n import i18n_service
 from app.core.logger import get_logger
+from app.core.utils.converters import safe_float
 from app.crud.llm_usage_log import record_llm_usage
 from app.models.data_storage import KlineData, StockBasic, StockValuationHistory
 from app.data.analytics.core_index import get_core_index_constituent_codes
@@ -1162,7 +1162,11 @@ class StockPickerService:
             "stock_indicators.kdj_j": indicators.kdj_j if indicators else None,
             "stock_indicators.atr": indicators.atr if indicators else None,
         }
-        missing_fields = [field_name for field_name, value in raw_values.items() if self._strict_num(value) is None]
+        missing_fields = [
+            field_name
+            for field_name, value in raw_values.items()
+            if safe_float(value, allow_non_finite=False) is None
+        ]
         if missing_fields:
             raise ValueError(
                 self._t(
@@ -1173,30 +1177,30 @@ class StockPickerService:
                 )
             )
 
-        close = self._strict_num(raw_values["kline.close"])
-        atr = self._strict_num(raw_values["stock_indicators.atr"])
-        macd = self._strict_num(raw_values["stock_indicators.macd"])
-        macd_signal = self._strict_num(raw_values["stock_indicators.macd_signal"])
+        close = safe_float(raw_values["kline.close"], allow_non_finite=False)
+        atr = safe_float(raw_values["stock_indicators.atr"], allow_non_finite=False)
+        macd = safe_float(raw_values["stock_indicators.macd"], allow_non_finite=False)
+        macd_signal = safe_float(raw_values["stock_indicators.macd_signal"], allow_non_finite=False)
         assert close is not None
         assert atr is not None
         assert macd is not None
         assert macd_signal is not None
 
         return {
-            "pe": self._strict_num(raw_values["valuation.pe_ttm"]) or 0.0,
-            "pb": self._strict_num(raw_values["valuation.pb"]) or 0.0,
-            "ps_ttm": self._strict_num(raw_values["valuation.ps_ttm"]) or 0.0,
-            "dividend_yield": self._strict_num(raw_values["valuation.dividend_yield"]) or 0.0,
-            "market_cap": self._strict_num(raw_values["valuation.total_market_value"]) or 0.0,
+            "pe": safe_float(raw_values["valuation.pe_ttm"], allow_non_finite=False) or 0.0,
+            "pb": safe_float(raw_values["valuation.pb"], allow_non_finite=False) or 0.0,
+            "ps_ttm": safe_float(raw_values["valuation.ps_ttm"], allow_non_finite=False) or 0.0,
+            "dividend_yield": safe_float(raw_values["valuation.dividend_yield"], allow_non_finite=False) or 0.0,
+            "market_cap": safe_float(raw_values["valuation.total_market_value"], allow_non_finite=False) or 0.0,
             "close": close,
-            "volume": self._strict_num(raw_values["kline.volume"]) or 0.0,
-            "turnover_amount": self._strict_num(raw_values["kline.turnover"]) or 0.0,
+            "volume": safe_float(raw_values["kline.volume"], allow_non_finite=False) or 0.0,
+            "turnover_amount": safe_float(raw_values["kline.turnover"], allow_non_finite=False) or 0.0,
             "macd": macd,
             "macd_signal": macd_signal,
             "macd_hist": macd - macd_signal,
-            "rsi_12": self._strict_num(raw_values["stock_indicators.rsi_12"]) or 0.0,
-            "rsi_24": self._strict_num(raw_values["stock_indicators.rsi_24"]) or 0.0,
-            "kdj_j": self._strict_num(raw_values["stock_indicators.kdj_j"]) or 0.0,
+            "rsi_12": safe_float(raw_values["stock_indicators.rsi_12"], allow_non_finite=False) or 0.0,
+            "rsi_24": safe_float(raw_values["stock_indicators.rsi_24"], allow_non_finite=False) or 0.0,
+            "kdj_j": safe_float(raw_values["stock_indicators.kdj_j"], allow_non_finite=False) or 0.0,
             "atr": atr,
             "atr_pct": (atr / close * 100.0) if close > 0 else 0.0,
         }
@@ -1624,7 +1628,7 @@ class StockPickerService:
             if decision not in {"keep", "watch", "drop"}:
                 decision = "watch"
 
-            ai_score = max(0.0, min(100.0, self._safe_num(raw_item.get("ai_score"), base.factor_score)))
+            ai_score = max(0.0, min(100.0, safe_float(raw_item.get("ai_score"), base.factor_score)))
             risks = raw_item.get("risks")
             catalysts = raw_item.get("catalysts")
             research_payload = dict(base.research_payload)
@@ -1804,8 +1808,8 @@ class StockPickerService:
         }
 
     def _combine_priority_score(self, ai_score: float, factor_score: float) -> float:
-        normalized_ai = max(0.0, min(100.0, self._safe_num(ai_score, 0.0)))
-        normalized_factor = max(0.0, min(100.0, self._safe_num(factor_score, 0.0)))
+        normalized_ai = max(0.0, min(100.0, safe_float(ai_score, 0.0)))
+        normalized_factor = max(0.0, min(100.0, safe_float(factor_score, 0.0)))
         return round(normalized_ai * AI_PRIMARY_WEIGHT + normalized_factor * FACTOR_AUX_WEIGHT, 2)
 
     def _replace_candidates(self, db: Session, run_id: UUID, ranked: Iterable[RankedCandidate], scope: str, style: str) -> None:
@@ -1878,27 +1882,6 @@ class StockPickerService:
         if style in {"value", "defensive"}:
             return "mid_long_term"
         return "mid_term"
-
-    @staticmethod
-    def _safe_num(value: Optional[float], default: float) -> float:
-        try:
-            if value is None:
-                return default
-            return float(value)
-        except (TypeError, ValueError):
-            return default
-
-    @staticmethod
-    def _strict_num(value: Optional[float]) -> Optional[float]:
-        try:
-            if value is None:
-                return None
-            number = float(value)
-        except (TypeError, ValueError):
-            return None
-        if math.isnan(number) or math.isinf(number):
-            return None
-        return number
 
     @staticmethod
     def _now() -> datetime:

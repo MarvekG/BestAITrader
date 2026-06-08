@@ -24,6 +24,7 @@ from app.ai.experience.index_service import experience_index_service
 from app.core.database import SessionLocal
 from app.core.i18n import i18n_service
 from app.core.logger import get_logger
+from app.core.utils.converters import safe_float, safe_isoformat
 from app.ai.experience.workflow import create_experience_workflow
 from app.ai.llm_engine.roles import AGENT_ROLE_PORTFOLIO_MANAGER
 from app.models.data_storage import KlineData, StockBasic
@@ -44,22 +45,8 @@ ACTIVE_REVIEW_STATUSES = {"started", "running"}
 STALE_REVIEW_TIMEOUT = timedelta(hours=2)
 
 
-def _safe_num(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _decimal_or_none(value: Any) -> float | None:
-    try:
-        return float(value) if value is not None else None
-    except (TypeError, ValueError):
-        return None
-
-
 def _normalize_confidence(value: Any) -> float:
-    numeric = _safe_num(value, 0.0)
+    numeric = safe_float(value, 0.0)
     if 0 <= numeric <= 1:
         numeric *= 100
     return max(0.0, min(100.0, numeric))
@@ -74,14 +61,6 @@ def _style_bucket_from_frequency(trading_frequency: str | None) -> str:
     if any(token in text for token in ("long", "长线")):
         return "long_term"
     return "position"
-
-
-def _safe_date_iso(value: Any) -> str | None:
-    if value is None:
-        return None
-    if hasattr(value, "isoformat"):
-        return value.isoformat()
-    return str(value)
 
 
 def _normalize_memory_importance(value: Any) -> str:
@@ -125,7 +104,7 @@ def _weighted_buy_fill_price(trades: List[TradeRecord]) -> float | None:
         if str(trade.action or "").lower() != "buy":
             continue
         quantity = int(trade.quantity or 0)
-        fill_price = _decimal_or_none(trade.fill_price)
+        fill_price = safe_float(trade.fill_price)
         if quantity <= 0 or fill_price is None or fill_price <= 0:
             continue
         total_quantity += quantity
@@ -1151,12 +1130,12 @@ class ExperienceService:
                     "stage": message.stage,
                     "agent_role": message.agent_role,
                     "conclusion_text": _extract_original_conclusion(message),
-                    "created_at": _safe_date_iso(message.created_at),
+                    "created_at": safe_isoformat(message.created_at),
                 }
             )
 
         pm_decision = str(pm_message.decision or pm_analysis.get("decision") or "hold").lower()
-        target_position = _safe_num(pm_analysis.get("target_position"), 0.0)
+        target_position = safe_float(pm_analysis.get("target_position"), 0.0)
         buy_fill_price = _weighted_buy_fill_price(trades)
         market_outcome = self._build_market_outcome_summary(
             db=db,
@@ -1177,8 +1156,8 @@ class ExperienceService:
                 "status": session_obj.status,
                 "trading_frequency": session_obj.trading_frequency,
                 "trading_strategy": session_obj.trading_strategy,
-                "created_at": _safe_date_iso(session_obj.created_at),
-                "updated_at": _safe_date_iso(session_obj.updated_at),
+                "created_at": safe_isoformat(session_obj.created_at),
+                "updated_at": safe_isoformat(session_obj.updated_at),
             },
             "pm_decision": {
                 "message_id": str(pm_message.message_id),
@@ -1195,7 +1174,7 @@ class ExperienceService:
                 "investment_plan": pm_analysis.get("investment_plan"),
                 "execution_details": pm_analysis.get("execution_details"),
                 "risk_assessment": pm_analysis.get("risk_assessment"),
-                "created_at": _safe_date_iso(pm_message.created_at),
+                "created_at": safe_isoformat(pm_message.created_at),
             },
             "debate_timeline": debate_timeline,
             "agent_position_summary": {
@@ -1235,7 +1214,7 @@ class ExperienceService:
                 "reasoning": message.reasoning or "",
                 "analysis": analysis,
                 "prompt_input": message.prompt_input or "",
-                "created_at": _safe_date_iso(message.created_at),
+                "created_at": safe_isoformat(message.created_at),
             }
             if not state["portfolio_info"] and isinstance(analysis.get("portfolio_info"), dict):
                 state["portfolio_info"] = analysis.get("portfolio_info") or {}
@@ -1267,7 +1246,7 @@ class ExperienceService:
             "message_id": str(pm_message.message_id),
             "agent_role": pm_message.agent_role,
             "stage": pm_message.stage,
-            "created_at": _safe_date_iso(pm_message.created_at),
+            "created_at": safe_isoformat(pm_message.created_at),
             "prompt_input": pm_message.prompt_input or "",
             "analysis": pm_analysis,
             "context_from_db": pm_context_payload or {},
@@ -1497,7 +1476,7 @@ class ExperienceService:
 
     def _build_execution_summary(self, orders: List[Order], trades: List[TradeRecord]) -> Dict[str, Any]:
         filled_orders = [item for item in orders if item.status == "filled"]
-        fill_prices = [value for value in (_decimal_or_none(item.fill_price) for item in trades) if value is not None]
+        fill_prices = [value for value in (safe_float(item.fill_price) for item in trades) if value is not None]
         return {
             "order_count": len(orders),
             "filled_order_count": len(filled_orders),
@@ -1505,10 +1484,14 @@ class ExperienceService:
             "actions": [str(item.action or "").lower() for item in trades[-10:]],
             "avg_fill_price": mean(fill_prices) if fill_prices else None,
             "total_quantity": sum(int(item.quantity or 0) for item in trades),
-            "total_fees": sum(_safe_num(item.total_fees) for item in trades),
-            "realized_pnl": sum(_safe_num(item.realized_pnl) for item in orders if getattr(item, "realized_pnl", None) is not None),
-            "latest_trade_time": _safe_date_iso(trades[-1].trade_time if trades else None),
-            "latest_order_time": _safe_date_iso(orders[-1].created_at if orders else None),
+            "total_fees": sum(safe_float(item.total_fees, 0.0) for item in trades),
+            "realized_pnl": sum(
+                safe_float(item.realized_pnl, 0.0)
+                for item in orders
+                if getattr(item, "realized_pnl", None) is not None
+            ),
+            "latest_trade_time": safe_isoformat(trades[-1].trade_time if trades else None),
+            "latest_order_time": safe_isoformat(orders[-1].created_at if orders else None),
         }
 
     def _normalize_action(self, value: Any) -> str:
@@ -1573,7 +1556,7 @@ class ExperienceService:
         return {
             "original_judgment": {
                 "verdict": verdict,
-                "score": max(0.0, min(100.0, _safe_num(original.get("score"), 50.0))),
+                "score": max(0.0, min(100.0, safe_float(original.get("score"), 50.0))),
                 "pm_decision": str(original.get("pm_decision") or original_pm.get("decision") or ""),
                 "outcome_basis": str(original.get("outcome_basis") or ""),
                 "reasoning": str(original.get("reasoning") or ""),
@@ -1703,7 +1686,7 @@ class ExperienceService:
         )
         normalized["experience_tags"] = self._normalize_experience_tags(normalized.get("experience_tags"))
         normalized["recommended_action"] = self._normalize_action(normalized.get("recommended_action"))
-        normalized["confidence_score"] = max(0.0, min(100.0, _safe_num(normalized.get("confidence_score"), 55.0)))
+        normalized["confidence_score"] = max(0.0, min(100.0, safe_float(normalized.get("confidence_score"), 55.0)))
         normalized["risk_flags"] = self._normalize_string_list(normalized.get("risk_flags"))
         normalized["memory_evidence_used"] = self._normalize_string_list(normalized.get("memory_evidence_used"))
         normalized["similar_success_patterns"] = self._normalize_string_list(normalized.get("similar_success_patterns"))
@@ -1731,7 +1714,7 @@ class ExperienceService:
             if str(normalized.get("debate_correctness") or "").strip().lower() in CORRECTNESS_BUCKETS
             else "inconclusive"
         )
-        normalized["correctness_score"] = max(0.0, min(100.0, _safe_num(normalized.get("correctness_score"), 50.0)))
+        normalized["correctness_score"] = max(0.0, min(100.0, safe_float(normalized.get("correctness_score"), 50.0)))
         normalized["correctness_reasoning"] = str(normalized.get("correctness_reasoning") or "")
         normalized["process_improvement_summary"] = str(normalized.get("process_improvement_summary") or "")
         normalized["reviewed_pm_decision"] = self._normalize_action(
@@ -1742,11 +1725,15 @@ class ExperienceService:
         )
         revised_target_position = normalized.get("revised_target_position")
         normalized["revised_target_position"] = (
-            max(0.0, min(1.0, _safe_num(revised_target_position))) if revised_target_position not in (None, "") else None
+            max(0.0, min(1.0, safe_float(revised_target_position, 0.0)))
+            if revised_target_position not in (None, "")
+            else None
         )
         original_target_position = normalized.get("original_target_position", original_pm.get("target_position"))
         normalized["original_target_position"] = (
-            max(0.0, min(1.0, _safe_num(original_target_position))) if original_target_position not in (None, "") else None
+            max(0.0, min(1.0, safe_float(original_target_position, 0.0)))
+            if original_target_position not in (None, "")
+            else None
         )
         normalized["revised_stop_loss"] = str(normalized.get("revised_stop_loss") or "")
         normalized["tool_invocation_summary"] = normalized.get("tool_invocation_summary") or []
@@ -1810,8 +1797,8 @@ class ExperienceService:
             "style_bucket": result.get("style_bucket"),
             "trading_frequency": result.get("trading_frequency"),
             "trading_strategy": result.get("trading_strategy"),
-            "analysis_date": _safe_date_iso(result.get("analysis_date")),
-            "reviewed_at": _safe_date_iso(result.get("reviewed_at")),
+            "analysis_date": safe_isoformat(result.get("analysis_date")),
+            "reviewed_at": safe_isoformat(result.get("reviewed_at")),
             "analysis_payload": result.get("analysis_payload") or {},
             "tool_trace": result.get("tool_trace") or [],
         }
@@ -1896,8 +1883,8 @@ class ExperienceService:
             "style_bucket": style_bucket,
             "trading_frequency": session_obj.trading_frequency,
             "trading_strategy": session_obj.trading_strategy,
-            "analysis_date": _safe_date_iso(pm_message.created_at if pm_message else completed_at),
-            "reviewed_at": _safe_date_iso(completed_at),
+            "analysis_date": safe_isoformat(pm_message.created_at if pm_message else completed_at),
+            "reviewed_at": safe_isoformat(completed_at),
             "analysis_payload": analysis_payload,
             "tool_trace": tool_trace,
         }
