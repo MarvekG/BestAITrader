@@ -7,6 +7,7 @@ from typing import Any, Dict, Generator, Optional
 from app.core.database import SessionLocal
 from app.core.request_context import get_current_user_id
 from app.ai.llm_engine.context.readers import ContextReaders
+from app.data.metadata.field_units import format_payload_values
 from app.models.data_storage import FinancialCalendar, StockBasic
 from app.core.utils.formatters import StockCodeStandardizer
 
@@ -82,12 +83,13 @@ class AIContextRuntime:
             return {"status": "missing"}
 
         days_left = (next_event.actual_date - self.generated_at.date()).days
-        return {
+        payload = {
             "status": "available",
             "next_disclosure_date": str(next_event.actual_date),
             "report_period": next_event.report_period,
             "days_countdown": max(0, days_left),
         }
+        return format_payload_values("events.earnings_countdown", payload)
 
     def record_error(self, provider: str, exc: Exception) -> None:
         self.errors.append({"provider": provider, "message": str(exc)})

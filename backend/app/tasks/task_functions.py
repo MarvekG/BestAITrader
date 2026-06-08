@@ -815,9 +815,15 @@ async def sync_pledge_summary_func(
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
     """
-    同步股权质押汇总数据任务
-    Uses ingestor_manager for proper failover support.
-    Note: AkShare supports bulk fetch, TuShare requires stock_code per query.
+    同步股权质押汇总数据任务。
+
+    Args:
+        task_name: 任务名称，用于任务系统标识。
+        stock_code: 可选股票代码；TuShare pledge_stat 需要按股票代码查询。
+        allow_concurrent: 是否允许并发运行同类任务。
+
+    Returns:
+        包含同步状态和提示信息的任务结果字典。
     """
     from app.data.ingestors.manager import ingestor_manager
 

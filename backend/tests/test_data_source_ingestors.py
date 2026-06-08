@@ -63,8 +63,8 @@ class TestIngestorRegistration:
 
     def test_get_ingestor(self):
         """测试获取采集器"""
-        akshare_ingestor = ingestor_manager.get_ingestor('akshare')
-        assert akshare_ingestor is None, "akshare 采集器已移除，不应被注册"
+        removed_ingestor = ingestor_manager.get_ingestor('removed_source')
+        assert removed_ingestor is None, "已移除的数据源不应被注册"
 
         tushare_ingestor = ingestor_manager.get_ingestor('tushare')
         assert tushare_ingestor is not None, "无法获取 tushare 采集器"
@@ -210,6 +210,8 @@ class TestTushareIngestor:
             'undist_profit_ps': [5.67],
             'retainedps': [4.56],
             'assets_turn': [0.88],
+            'gross_margin': [123456.78],
+            'grossprofit_margin': [27.5],
             'netprofit_yoy': [22.5],
         }))
 
@@ -241,6 +243,8 @@ class TestTushareIngestor:
         assert payload['undistributed_profit_ps'] == 5.67
         assert payload['retained_earnings_ps'] == 4.56
         assert payload['asset_turnover'] == 0.88
+        assert payload['gross_profit'] == 123456.78
+        assert payload['gross_margin'] == 27.5
         assert payload['net_profit_yoy'] == 22.5
         assert '_indicator_definitions' not in payload
 
@@ -401,12 +405,42 @@ class TestTushareIngestor:
 
             assert result is True, "无数据时应该返回 True"
 
+    @pytest.mark.asyncio
+    async def test_fetch_stock_lockup_release_converts_tushare_float_share_to_raw_shares(
+        self, test_stock_code
+    ):
+        """测试 Tushare 限售股解禁数量按万股归一化为股。"""
+        ingestor = ingestor_manager.get_ingestor('tushare')
+        mock_df = pd.DataFrame({
+            'ts_code': [test_stock_code],
+            'float_date': ['20260630'],
+            'float_share': [500.0],
+            'float_ratio': [1.2],
+            'share_type': ['首发原股东'],
+            'holder_name': ['Test Holder'],
+        })
+        mock_pro = Mock()
+        mock_pro.share_float = Mock(return_value=mock_df)
+
+        with patch.object(ingestor, 'pro', mock_pro):
+            with patch.object(ingestor.ingestion_service, 'write_dataframe', new_callable=Mock) as mock_write:
+                mock_write.return_value = True
+                result = await ingestor.fetch_and_ingest_stock_lockup_release(test_stock_code)
+
+        assert result is True
+        mock_pro.share_float.assert_called_once()
+        mock_write.assert_called_once()
+        call_args = mock_write.call_args
+        assert call_args[0][0] == 'share_float'
+        df_arg = call_args[0][1]
+        assert df_arg['release_shares'].iloc[0] == 5_000_000
+
 
 class TestFailoverMechanism:
     """测试灾备切换机制"""
 
     @pytest.mark.asyncio
-    async def test_failover_skips_removed_default_source(
+    async def test_failover_skips_unregistered_default_source(
         self, test_stock_code, test_date_range
     ):
         """测试默认源不可用时仍可使用 tushare"""
@@ -415,7 +449,7 @@ class TestFailoverMechanism:
         tushare_ingestor = ingestor_manager.get_ingestor('tushare')
 
         with patch('app.data.ingestors.manager.settings.ENABLE_DATA_SOURCE_FAILOVER', True):
-            with patch.object(ingestor_manager, 'default_source', 'akshare'):
+            with patch.object(ingestor_manager, 'default_source', 'removed_source'):
                 with patch.object(settings, 'TUSHARE_TOKEN', 'test-token'):
                     with patch.object(
                         tushare_ingestor,
@@ -430,7 +464,7 @@ class TestFailoverMechanism:
                         )
 
                         mock_tushare.assert_called_once()
-                        assert result is True, "tushare 应该在 akshare 移除后可用"
+                        assert result is True, "tushare 应该在默认源不可用时可用"
 
     @pytest.mark.asyncio
     async def test_failover_all_sources_failed(

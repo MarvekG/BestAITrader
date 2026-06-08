@@ -670,58 +670,60 @@ export const ExperiencePage: React.FC = () => {
           </Button>
         )}
       >
-        {reviewRuns.length ? (
-          <List
-            size="small"
-            dataSource={reviewRuns}
-            renderItem={(item) => (
-              <List.Item
-                actions={[
-                  <Button
-                    key="inspect"
-                    size="small"
-                    loading={runActionLoadingId === item.review_run_id}
-                    onClick={() => void handleInspectReviewRun(item)}
-                  >
-                    {t('experience.inspect_run')}
-                  </Button>,
-                  <Button
-                    key="delete"
-                    size="small"
-                    danger
-                    loading={runActionLoadingId === item.review_run_id}
-                    onClick={() => handleDeleteReviewRun(item)}
-                  >
-                    {t('experience.delete_run')}
-                  </Button>,
-                ]}
-              >
-                <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                  <Space wrap>
-                    <Tag>{item.stock_code}</Tag>
-                    {item.stock_name ? <Tag>{item.stock_name}</Tag> : null}
-                    {item.recommended_action ? (
-                      <Tag color={actionColorMap[item.recommended_action] || 'default'}>
-                        {getActionLabel(item.recommended_action)}
-                      </Tag>
-                    ) : null}
-                    {item.debate_correctness ? (
-                      <Tag color={correctnessColorMap[item.debate_correctness] || 'default'}>
-                        {getCorrectnessLabel(item.debate_correctness)}
-                      </Tag>
-                    ) : null}
-                    <Tag color={getRunStatusColor(item.status)}>{item.status}</Tag>
+        <div className="experience-scroll-panel experience-review-runs-scroll">
+          {reviewRuns.length ? (
+            <List
+              size="small"
+              dataSource={reviewRuns}
+              renderItem={(item) => (
+                <List.Item
+                  actions={[
+                    <Button
+                      key="inspect"
+                      size="small"
+                      loading={runActionLoadingId === item.review_run_id}
+                      onClick={() => void handleInspectReviewRun(item)}
+                    >
+                      {t('experience.inspect_run')}
+                    </Button>,
+                    <Button
+                      key="delete"
+                      size="small"
+                      danger
+                      loading={runActionLoadingId === item.review_run_id}
+                      onClick={() => handleDeleteReviewRun(item)}
+                    >
+                      {t('experience.delete_run')}
+                    </Button>,
+                  ]}
+                >
+                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                    <Space wrap>
+                      <Tag>{item.stock_code}</Tag>
+                      {item.stock_name ? <Tag>{item.stock_name}</Tag> : null}
+                      {item.recommended_action ? (
+                        <Tag color={actionColorMap[item.recommended_action] || 'default'}>
+                          {getActionLabel(item.recommended_action)}
+                        </Tag>
+                      ) : null}
+                      {item.debate_correctness ? (
+                        <Tag color={correctnessColorMap[item.debate_correctness] || 'default'}>
+                          {getCorrectnessLabel(item.debate_correctness)}
+                        </Tag>
+                      ) : null}
+                      <Tag color={getRunStatusColor(item.status)}>{item.status}</Tag>
+                    </Space>
+                    <Text type="secondary">
+                      {renderEventMessage(item)} · {dayjs(item.updated_at).format('YYYY-MM-DD HH:mm')}
+                    </Text>
                   </Space>
-                  <Text type="secondary">
-                    {renderEventMessage(item)} · {dayjs(item.updated_at).format('YYYY-MM-DD HH:mm')}
-                  </Text>
-                </Space>
-              </List.Item>
-            )}
-          />
-        ) : (
-          <Empty description={t('experience.no_review_runs')} />
-        )}
+                </List.Item>
+              )}
+            />
+          ) : (
+            <Empty description={t('experience.no_review_runs')} />
+          )}
+        </div>
       </Card>
 
       {analyzeResult ? (
@@ -941,53 +943,60 @@ export const ExperiencePage: React.FC = () => {
       )}
 
       <Card title={t('experience.tool_trace')}>
-        {hasLiveProgress ? (
-          <Space direction="vertical" size={8} style={{ width: '100%', marginBottom: 16 }}>
-            {liveEvents.map((event, index) => (
-              <Tag key={`${event.stage}-${event.status}-${index}`} color={event.stage === 'tool_call' ? getToolColor(getToolName(event.payload)) : 'processing'}>
-                {renderEventMessage(event)}
-              </Tag>
-            ))}
-          </Space>
-        ) : null}
-        {toolTrace.length ? (
-          <List
-            size="small"
-            header={(
-              <Space wrap>
-                <Tag>{t('experience.tool_call_count', { count: toolTrace.length })}</Tag>
-                <Tag color={writeMemoryCount > 0 ? 'green' : 'default'}>
-                  {t('experience.tool_write_memory_count', { count: writeMemoryCount })}
+        <div
+          aria-label={t('experience.tool_trace')}
+          className="experience-scroll-panel experience-tool-trace-scroll"
+          role="region"
+          tabIndex={0}
+        >
+          {hasLiveProgress ? (
+            <Space direction="vertical" size={8} style={{ width: '100%', marginBottom: 16 }}>
+              {liveEvents.map((event, index) => (
+                <Tag key={`${event.stage}-${event.status}-${index}`} color={event.stage === 'tool_call' ? getToolColor(getToolName(event.payload)) : 'processing'}>
+                  {renderEventMessage(event)}
                 </Tag>
-                <Tag color={recallMemoryCount > 0 ? 'blue' : 'default'}>
-                  {t('experience.tool_recall_memory_count', { count: recallMemoryCount })}
-                </Tag>
-                <Tag color={externalToolCount > 0 ? 'cyan' : 'default'}>
-                  {t('experience.tool_external_search_count', { count: externalToolCount })}
-                </Tag>
-              </Space>
-            )}
-            dataSource={toolTrace}
-            renderItem={(item, index) => (
-              <List.Item>
-                <Space direction="vertical" size={2} style={{ width: '100%' }}>
-                  <Space wrap>
-                    <Text strong>{`${index + 1}.`}</Text>
-                    <Tag color={getToolColor(item.name)}>{item.name || '-'}</Tag>
-                    {item.name === 'write_memory' ? (
-                      <Tag color="gold">{t('experience.tool_key_step')}</Tag>
-                    ) : null}
-                  </Space>
-                  <Paragraph code style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
-                    {JSON.stringify(item.args || {}, null, 2)}
-                  </Paragraph>
+              ))}
+            </Space>
+          ) : null}
+          {toolTrace.length ? (
+            <List
+              size="small"
+              header={(
+                <Space wrap>
+                  <Tag>{t('experience.tool_call_count', { count: toolTrace.length })}</Tag>
+                  <Tag color={writeMemoryCount > 0 ? 'green' : 'default'}>
+                    {t('experience.tool_write_memory_count', { count: writeMemoryCount })}
+                  </Tag>
+                  <Tag color={recallMemoryCount > 0 ? 'blue' : 'default'}>
+                    {t('experience.tool_recall_memory_count', { count: recallMemoryCount })}
+                  </Tag>
+                  <Tag color={externalToolCount > 0 ? 'cyan' : 'default'}>
+                    {t('experience.tool_external_search_count', { count: externalToolCount })}
+                  </Tag>
                 </Space>
-              </List.Item>
-            )}
-          />
-        ) : (
-          <Empty description={t('experience.no_tool_trace')} />
-        )}
+              )}
+              dataSource={toolTrace}
+              renderItem={(item, index) => (
+                <List.Item>
+                  <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                    <Space wrap>
+                      <Text strong>{`${index + 1}.`}</Text>
+                      <Tag color={getToolColor(item.name)}>{item.name || '-'}</Tag>
+                      {item.name === 'write_memory' ? (
+                        <Tag color="gold">{t('experience.tool_key_step')}</Tag>
+                      ) : null}
+                    </Space>
+                    <Paragraph code style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
+                      {JSON.stringify(item.args || {}, null, 2)}
+                    </Paragraph>
+                  </Space>
+                </List.Item>
+              )}
+            />
+          ) : (
+            <Empty description={t('experience.no_tool_trace')} />
+          )}
+        </div>
       </Card>
 
       <Drawer

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.core.i18n import i18n_service
 from app.ai.llm_engine.context import constants as ctx_const
+from app.data.metadata.field_units import format_payload_values
 from app.ai.llm_engine.context.section_wrappers import status_payload
 from app.models.data_storage import (
     StockBasic, FinancialIndicator, StockValuationHistory,
@@ -14,13 +15,14 @@ from app.models.data_storage import (
     NorthboundData, DragonTigerData,
     StockInsider, StockRelease, StockPledge,
     StockSEO, StockPledgeSummary,
-    StockMargin, StockRealtimeMarket,
+    StockMargin,
     StockLimitDownPool
 )
 
 
 class FundamentalSource:
     """
+
     Builds context for Fundamental Analyst.
     Fetches:
     - Basic stock info
@@ -122,14 +124,15 @@ class FundamentalSource:
         stock = db.query(StockBasic).filter(StockBasic.stock_code == stock_code).first()
         if not stock:
             return {}
-        return {
+        payload = {
             "name": stock.name,
             "industry": stock.industry,
             "area": stock.area,
             "list_date": str(stock.list_date) if stock.list_date else None,
             "total_share": stock.total_share,
-            "float_share": stock.float_share
+            "float_share": stock.float_share,
         }
+        return payload
 
     def _get_financials(self, db: Session, stock_code: str) -> Dict[str, Any]:
         # Get latest financial indicator
@@ -206,7 +209,7 @@ class FundamentalSource:
                 return None
             return round((revenue - operating_cost) / revenue * 100, 2)
 
-        return {
+        payload = {
             "report_date": str(indicator.report_date),
             "total_revenue_yoy": get_clean_pct(["total_revenue_yoy"]),
             "net_profit_yoy": get_clean_pct(["net_profit_yoy"]),
@@ -216,6 +219,7 @@ class FundamentalSource:
             "debt_to_asset": get_clean_pct(["debt_to_assets_ratio"]),
             "eps": get_clean_pct(["eps"])
         }
+        return format_payload_values("fundamental.financials", payload)
 
     def _get_valuation(self, db: Session, stock_code: str) -> Dict[str, Any]:
         # Get latest valuation (from EM or other sources)
@@ -226,7 +230,7 @@ class FundamentalSource:
         if not val:
             return {}
 
-        return {
+        payload = {
             "date": str(val.data_date),
             "pe_ttm": val.pe_ttm,
             "pb": val.pb,
@@ -234,8 +238,9 @@ class FundamentalSource:
             "peg": val.peg,
             "dividend_yield": val.dividend_yield,
             "total_mv": val.total_market_value,
-            "float_mv": val.circulating_market_value
+            "float_mv": val.circulating_market_value,
         }
+        return format_payload_values("fundamental.valuation", payload)
 
     def _load_latest_forecast_record(self, db: Session, stock_code: str):
         two_years_ago = (datetime.now() - timedelta(days=730)).date()
@@ -321,7 +326,7 @@ class FundamentalSource:
         if direction_label == "mixed":
             risk_flags.append("Guidance range crosses zero growth")
 
-        return {
+        payload = {
             "overview": {
                 "window": "latest",
                 "report_date": str(forecast.report_date),
@@ -334,7 +339,6 @@ class FundamentalSource:
             "profit_guidance_latest": {
                 "metric": "net_profit",
                 "window": "latest",
-                "unit": "10k_cny",
                 "min": round(net_profit_min, 2) if net_profit_min is not None else None,
                 "max": round(net_profit_max, 2) if net_profit_max is not None else None,
                 "midpoint": profit_midpoint,
@@ -342,7 +346,6 @@ class FundamentalSource:
             "growth_guidance_latest": {
                 "metric": "net_profit_growth",
                 "window": "latest",
-                "unit": "pct",
                 "min_pct": round(growth_min, 2) if growth_min is not None else None,
                 "max_pct": round(growth_max, 2) if growth_max is not None else None,
                 "midpoint_pct": growth_midpoint,
@@ -355,6 +358,7 @@ class FundamentalSource:
             "risk_flags": risk_flags,
             "content_summary": forecast.forecast_content[:200] if forecast.forecast_content else "",
         }
+        return format_payload_values("fundamental.forecast", payload)
 
     def _get_northbound_flow(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """北向资金最近 12 条记录，适合 LLM 判断外资情绪变化"""
@@ -413,17 +417,17 @@ class FundamentalSource:
         for record in records:
             recent_records.append({
                 "date": str(record.date) if record.date else None,
-                "hold_shares": round(record.hold_shares, 2) if record.hold_shares is not None else None,
-                "hold_value_10k_cny": round((record.hold_value or 0) / 10000, 2) if record.hold_value is not None else None,
-                "hold_ratio_pct": round(record.hold_ratio, 4) if record.hold_ratio is not None else None,
-                "close_price_cny": round(record.close_price, 2) if record.close_price is not None else None,
-                "change_percent": round(record.change_percent, 2) if record.change_percent is not None else None,
-                "net_buy_volume": round(record.net_buy_volume, 2) if record.net_buy_volume is not None else None,
-                "net_buy_amount_10k_cny": round((record.net_buy_amount or 0) / 10000, 2) if record.net_buy_amount is not None else None,
-                "hold_value_change_10k_cny": round((record.hold_value_change or 0) / 10000, 2) if record.hold_value_change is not None else None,
+                "hold_shares": record.hold_shares,
+                "hold_value_10k_cny": (record.hold_value or 0) / 10000 if record.hold_value is not None else None,
+                "hold_ratio_pct": record.hold_ratio,
+                "close_price_cny": record.close_price,
+                "change_percent": record.change_percent,
+                "net_buy_volume": record.net_buy_volume,
+                "net_buy_amount_10k_cny": (record.net_buy_amount or 0) / 10000 if record.net_buy_amount is not None else None,
+                "hold_value_change_10k_cny": (record.hold_value_change or 0) / 10000 if record.hold_value_change is not None else None,
             })
 
-        return {
+        payload = {
             "overview": {
                 "scope": "stock_specific",
                 "window": "latest_12_records",
@@ -436,17 +440,17 @@ class FundamentalSource:
                 "age_days": age_days,
             },
             "latest_position": {
-                "hold_shares": round(latest.hold_shares, 2) if latest.hold_shares is not None else None,
-                "hold_value_10k_cny": round((latest.hold_value or 0) / 10000, 2) if latest.hold_value is not None else None,
-                "hold_ratio_pct": round(latest_hold_ratio, 4) if latest_hold_ratio is not None else None,
-                "close_price_cny": round(latest.close_price, 2) if latest.close_price is not None else None,
-                "change_percent": round(latest.change_percent, 2) if latest.change_percent is not None else None,
+                "hold_shares": latest.hold_shares,
+                "hold_value_10k_cny": (latest.hold_value or 0) / 10000 if latest.hold_value is not None else None,
+                "hold_ratio_pct": latest_hold_ratio,
+                "close_price_cny": latest.close_price,
+                "change_percent": latest.change_percent,
             },
             "quarter_change": {
                 "hold_ratio_change_pct": hold_ratio_change,
-                "net_buy_volume": round(latest.net_buy_volume, 2) if latest.net_buy_volume is not None else None,
-                "net_buy_amount_10k_cny": round(net_buy_amount / 10000, 2) if latest.net_buy_amount is not None else None,
-                "hold_value_change_10k_cny": round((latest.hold_value_change or 0) / 10000, 2) if latest.hold_value_change is not None else None,
+                "net_buy_volume": latest.net_buy_volume,
+                "net_buy_amount_10k_cny": net_buy_amount / 10000 if latest.net_buy_amount is not None else None,
+                "hold_value_change_10k_cny": (latest.hold_value_change or 0) / 10000 if latest.hold_value_change is not None else None,
             },
             "signal": {
                 "flow_label": flow_label,
@@ -455,6 +459,7 @@ class FundamentalSource:
             "risk_flags": risk_flags,
             "recent_records": recent_records,
         }
+        return format_payload_values("fundamental.northbound_flow", payload)
 
     def _get_market_wide_dragon_tiger_activity(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """龙虎榜近 3 日全市场快照，供 LLM 判断市场短线博弈热度。"""
@@ -501,7 +506,7 @@ class FundamentalSource:
 
         latest_record = records[0]
         latest_trade_date = latest_record.trade_date if records else None
-        return {
+        payload = {
             "overview": {
                 "window": "3day",
                 "scope": "market_wide",
@@ -509,7 +514,7 @@ class FundamentalSource:
                 "unique_stock_count": unique_stock_count,
                 "unique_trade_date_count": unique_trade_dates,
                 "latest_trade_date": str(latest_trade_date) if latest_trade_date else None,
-                "cumulative_net_buy_10k_cny": round(cumulative_net_buy / 10000, 2),
+                "cumulative_net_buy_10k_cny": cumulative_net_buy / 10000,
             },
             "signal": {
                 "activity_label": activity_label,
@@ -525,25 +530,19 @@ class FundamentalSource:
                     "stock_code": record.stock_code,
                     "stock_name": record.stock_name,
                     "listing_reason": record.listing_reason,
-                    "net_buy_amount_10k_cny": round((record.net_buy_amount or 0) / 10000, 2)
-                    if record.net_buy_amount is not None else None,
-                    "buy_amount_10k_cny": round((record.buy_amount or 0) / 10000, 2)
-                    if record.buy_amount is not None else None,
-                    "sell_amount_10k_cny": round((record.sell_amount or 0) / 10000, 2)
-                    if record.sell_amount is not None else None,
-                    "price_change_percent": round(record.price_change_percent, 2)
-                    if record.price_change_percent is not None else None,
-                    "net_buy_ratio_pct": round(record.net_buy_ratio, 2)
-                    if record.net_buy_ratio is not None else None,
-                    "post_1_day_price_change_percent": round(record.post_1_day_price_change_percent, 2)
-                    if record.post_1_day_price_change_percent is not None else None,
-                    "post_5_day_price_change_percent": round(record.post_5_day_price_change_percent, 2)
-                    if record.post_5_day_price_change_percent is not None else None,
+                    "net_buy_amount_10k_cny": (record.net_buy_amount or 0) / 10000 if record.net_buy_amount is not None else None,
+                    "buy_amount_10k_cny": (record.buy_amount or 0) / 10000 if record.buy_amount is not None else None,
+                    "sell_amount_10k_cny": (record.sell_amount or 0) / 10000 if record.sell_amount is not None else None,
+                    "price_change_percent": record.price_change_percent,
+                    "net_buy_ratio_pct": record.net_buy_ratio,
+                    "post_1_day_price_change_percent": record.post_1_day_price_change_percent,
+                    "post_5_day_price_change_percent": record.post_5_day_price_change_percent,
                 }
                 for record in records
             ],
             "risk_flags": risk_flags,
         }
+        return format_payload_values("fundamental.dragon_tiger_activity", payload)
 
     def _get_top_holders(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """获取十大股东持仓信息"""
@@ -596,7 +595,7 @@ class FundamentalSource:
                 "rank": h.holder_rank
             })
 
-        return {
+        payload = {
             "overview": {
                 "report_date": str(latest_report_date) if latest_report_date else None,
                 "reference_status": "stale" if is_stale else "active",
@@ -615,6 +614,7 @@ class FundamentalSource:
             },
             "holders_latest": holder_list[:10]
         }
+        return format_payload_values("fundamental.top_holders", payload)
 
     def _get_fund_holding(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """获取公募基金持仓信息，含环比变化 | Get fund holdings with QoQ change"""
@@ -743,7 +743,7 @@ class FundamentalSource:
                 "signal": qoq_signal
             }
 
-        return result
+        return format_payload_values("fundamental.fund_holding", result)
 
     def _get_financial_trend(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """
@@ -780,8 +780,6 @@ class FundamentalSource:
                 return None
             if absurd_limit is not None and abs(value) > absurd_limit:
                 return None
-            if 0 < abs(value) < 1:
-                return value * 100
             return value
 
         def extract_gross_margin(ind) -> Optional[float]:
@@ -805,7 +803,7 @@ class FundamentalSource:
                 value = resolver(ind)
                 series.append({
                     "date": str(ind.report_date),
-                    metric_name: round(value, 2) if value is not None else None,
+                    metric_name: value,
                 })
             return series
 
@@ -959,7 +957,7 @@ class FundamentalSource:
         else:
             overview_level = "Insufficient"
 
-        return {
+        result = {
             "overview": {
                 "level": overview_level,
                 "quarters_analyzed": len(indicators),
@@ -970,6 +968,7 @@ class FundamentalSource:
             "leverage_trend": leverage_trend,
             "recent_quarters": recent_quarters,
         }
+        return format_payload_values("fundamental.financial_trend", result)
 
     def _get_industry_rank(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """
@@ -1024,7 +1023,7 @@ class FundamentalSource:
         else:
             breadth_label = "mixed"
 
-        return {
+        payload = {
             "overview": {
                 "industry": industry_name,
                 "window": "latest",
@@ -1053,6 +1052,7 @@ class FundamentalSource:
                 "total_market_cap_cny": round(industry_info.total_market_cap, 2) if industry_info.total_market_cap is not None else None,
             },
         }
+        return format_payload_values("fundamental.industry_rank", payload)
 
     def _get_insider_activity(self, db: Session, stock_code: str, months: int = 6) -> Dict[str, Any]:
         """
@@ -1165,7 +1165,7 @@ class FundamentalSource:
             reverse=True,
         )
 
-        return {
+        payload = {
             "overview": {
                 "window": f"{months}month",
                 "record_count": len(records),
@@ -1185,6 +1185,7 @@ class FundamentalSource:
             "recent_events": activities[:5],
             "risk_flags": risk_flags,
         }
+        return format_payload_values("fundamental.insider_activity", payload)
 
     def _get_lockup_release(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """
@@ -1252,7 +1253,7 @@ class FundamentalSource:
         if total_upcoming_ratio_to_float >= 5:
             risk_flags.append("Upcoming lockup ratio is meaningful relative to float")
 
-        return {
+        payload = {
             "overview": {
                 "window": "past90day_to_next12month",
                 "recent_release_count": len(recent_releases),
@@ -1268,6 +1269,7 @@ class FundamentalSource:
             "recent_releases": list(reversed(recent_releases[-3:])),
             "risk_flags": risk_flags,
         }
+        return format_payload_values("fundamental.lockup_release", payload)
 
     def _get_seo_history(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """
@@ -1328,7 +1330,7 @@ class FundamentalSource:
         if latest_age_days is not None and latest_age_days <= 365:
             risk_flags.append("Recent equity financing may still weigh on dilution expectations")
 
-        return {
+        payload = {
             "overview": {
                 "window": "latest5_alltime",
                 "record_count": len(records),
@@ -1342,6 +1344,7 @@ class FundamentalSource:
             "recent_offerings": offerings,
             "risk_flags": risk_flags,
         }
+        return format_payload_values("fundamental.seo_history", payload)
 
     def _get_pledge_info(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """
@@ -1384,11 +1387,11 @@ class FundamentalSource:
         latest_margin = margin_records[0]
 
         market_cap = 0
-        realtime = db.query(StockRealtimeMarket).filter(
-            StockRealtimeMarket.stock_code == stock_code
-        ).first()
-        if realtime:
-            market_cap = (realtime.total_market_cap or 0) * 10000
+        valuation = db.query(StockValuationHistory).filter(
+            StockValuationHistory.stock_code == stock_code
+        ).order_by(desc(StockValuationHistory.data_date)).first()
+        if valuation:
+            market_cap = valuation.total_market_value or 0
 
         margin_balance = latest_margin.margin_balance or 0
         short_balance = latest_margin.short_balance or 0
@@ -1437,7 +1440,7 @@ class FundamentalSource:
         if change_5d_pct is not None and change_5d_pct >= 10:
             risk_flags.append("Margin balance expanded quickly over the last 5 trading days")
 
-        return {
+        payload = {
             "overview": {
                 "trade_date": str(latest_margin.trade_date) if latest_margin.trade_date else None,
                 "market_cap_cny": round(market_cap, 2) if market_cap > 0 else None,
@@ -1461,3 +1464,4 @@ class FundamentalSource:
             },
             "risk_flags": risk_flags,
         }
+        return format_payload_values("fundamental.margin_analysis", payload)

@@ -195,7 +195,7 @@
     "main_net_inflow_rank_10d": "10d Main Inflow Rank"
   },
   "errors": {
-    "tushare_pledge_summary_requires_stock_code": "TuShare pledge_stat API requires stock_code, bulk fetch not supported, using AkShare fallback"
+    "tushare_pledge_summary_requires_stock_code": "TuShare pledge_stat API requires stock_code; bulk fetch is not supported"
   },
   "stock_realtime": {
     "latest_price": "Last Price",
@@ -678,7 +678,6 @@
     },
     "panel_title": "Market Data",
     "valuation_history": "Valuation History",
-    "sync_akshare": "Sync from AkShare",
     "refresh": "Refresh",
     "realtime": "Real-time",
     "quote_data": "Quote Data",
@@ -945,7 +944,22 @@
     "ten_thousand_long": " (10k)",
     "shares_10k": "10k Shares",
     "money_10k": "10k CNY",
-    "hand": "Hand"
+    "hand": "Hand",
+    "cny": " CNY",
+    "cny_per_share": " CNY/share",
+    "shares": " shares",
+    "ten_thousand_shares": " 10k shares",
+    "lots": " lots",
+    "ten_thousand_cny": " 10k CNY",
+    "thousand_cny": " thousand CNY",
+    "hundred_million_cny": " 100m CNY",
+    "multiple": "x",
+    "points": " pts",
+    "days": " days",
+    "times": " times",
+    "households": " holders",
+    "percentage_points": " pp",
+    "percent": "%"
   },
   "trading": {
     "order_updated": "Order updated",
@@ -1507,13 +1521,11 @@
     "system_test": "System Function Test",
     "test_redis": "Redis",
     "test_db": "Database",
-    "test_akshare": "AkShare",
     "test_tushare": "TuShare",
     "test_tavily": "Tavily",
     "test_ai": "AI Test",
     "redis_test_title": "Redis Connection Test",
     "db_test_title": "Database Connection Test",
-    "akshare_test_title": "AkShare API Test",
     "tushare_test_title": "TuShare API Test",
     "tavily_test_title": "Tavily API Test",
     "execute_test": "Execute Test",
@@ -1855,6 +1867,12 @@
       "portfolio_manager": "Portfolio Manager",
       "news_analyst": "News Analyst",
       "policy_analyst": "Policy Analyst"
+    },
+    "pm_review_focus": {
+      "actual_trades": "What was actually bought or sold historically",
+      "realized_pnl": "How much those trades actually made or lost",
+      "latest_exit_reference": "Where the latest stop-loss or liquidation reference was",
+      "new_verifiable_edge": "Whether this round has new verifiable edge versus the losing trade"
     },
     "stages": {
       "fetch_context": "Market Context Fetching",
@@ -2262,9 +2280,6 @@
     "redis_failed": "Redis connection failed: {error}",
     "db_success": "Database connection successful",
     "db_failed": "Database connection failed: {error}",
-    "akshare_success": "AkShare connection successful",
-    "akshare_empty": "AkShare returned empty data",
-    "akshare_failed": "AkShare connection failed: {error}",
     "tushare_no_token": "TuShare token not configured",
     "tushare_success": "TuShare connection successful",
     "tushare_empty": "TuShare returned empty data",

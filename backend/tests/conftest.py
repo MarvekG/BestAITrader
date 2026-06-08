@@ -222,9 +222,11 @@ def sqlite_test_schema(sqlite_test_engine):
 
 @pytest.fixture
 def test_db(sqlite_test_schema, sqlite_session_factory):
+    from app.core.config import settings
     import app.core.database as db_module
     from app.core.database import get_db
 
+    original_system_language = settings.SYSTEM_LANGUAGE
     original_db_session_local = db_module.SessionLocal
     db_module.SessionLocal = sqlite_session_factory
 
@@ -262,6 +264,7 @@ def test_db(sqlite_test_schema, sqlite_session_factory):
         async_task_runner_module.SessionLocal = original_async_task_runner_session_local
         app_main_module.SessionLocal = original_main_session_local
         db_module.SessionLocal = original_db_session_local
+        settings.SYSTEM_LANGUAGE = original_system_language
         _clear_sqlite_tables(sqlite_session_factory)
 
 

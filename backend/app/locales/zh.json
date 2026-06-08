@@ -195,7 +195,7 @@
     "main_net_inflow_rank_10d": "10日主力净流入排名"
   },
   "errors": {
-    "tushare_pledge_summary_requires_stock_code": "TuShare 质押汇总接口需要股票代码，全量获取不支持，将使用 AkShare"
+    "tushare_pledge_summary_requires_stock_code": "TuShare 质押汇总接口需要股票代码，不支持全量获取"
   },
   "stock_realtime": {
     "latest_price": "最新价",
@@ -678,7 +678,6 @@
     },
     "panel_title": "市场数据",
     "valuation_history": "估值历史",
-    "sync_akshare": "从 AkShare 同步",
     "refresh": "刷新",
     "realtime": "实时",
     "quote_data": "行情数据",
@@ -945,7 +944,22 @@
     "ten_thousand_long": "万",
     "shares_10k": "万股",
     "money_10k": "万元",
-    "hand": "手"
+    "hand": "手",
+    "cny": "元",
+    "cny_per_share": "元/股",
+    "shares": "股",
+    "ten_thousand_shares": "万股",
+    "lots": "手",
+    "ten_thousand_cny": "万元",
+    "thousand_cny": "千元",
+    "hundred_million_cny": "亿元",
+    "multiple": "倍",
+    "points": "点",
+    "days": "天",
+    "times": "次",
+    "households": "户",
+    "percentage_points": "百分点",
+    "percent": "%"
   },
   "trading": {
     "order_updated": "订单已更新",
@@ -1507,13 +1521,11 @@
     "system_test": "系统功能测试",
     "test_redis": "Redis",
     "test_db": "数据库",
-    "test_akshare": "Akshare",
     "test_tushare": "TuShare",
     "test_tavily": "Tavily",
     "test_ai": "AI测试",
     "redis_test_title": "Redis 连接测试",
     "db_test_title": "数据库连接测试",
-    "akshare_test_title": "AkShare 接口测试",
     "tushare_test_title": "TuShare 接口测试",
     "tavily_test_title": "Tavily 接口测试",
     "execute_test": "执行测试",
@@ -1855,6 +1867,12 @@
       "portfolio_manager": "投资经理",
       "news_analyst": "新闻分析师",
       "policy_analyst": "政策分析师"
+    },
+    "pm_review_focus": {
+      "actual_trades": "历史上实际买卖了什么",
+      "realized_pnl": "这些交易实际赚亏多少",
+      "latest_exit_reference": "上一轮止损或清仓参考在哪里",
+      "new_verifiable_edge": "本轮相对亏损交易是否有新增可验证优势"
     },
     "stages": {
       "fetch_context": "获取市场环境",
@@ -2262,9 +2280,6 @@
     "redis_failed": "Redis 连接失败: {error}",
     "db_success": "数据库连接成功",
     "db_failed": "数据库连接失败: {error}",
-    "akshare_success": "AkShare 连接成功",
-    "akshare_empty": "AkShare 返回数据为空",
-    "akshare_failed": "AkShare 连接失败: {error}",
     "tushare_no_token": "TuShare 未配置 Token",
     "tushare_success": "TuShare 连接成功",
     "tushare_empty": "TuShare 返回数据为空",
@@ -2783,7 +2798,7 @@
       "research_payload_missing_list": "LLM 个股研究结果缺少 research 列表",
       "research_payload_invalid_with_reason": "LLM 个股研究结果不合法：{reason}",
       "recommendation_count_mismatch": "应用当前约束后推荐股票不足：期望 {expected} 只，实际 {actual} 只",
-      "run_interrupted_by_restart": "服务重启，未完成的智能选股任务已标记为失败",
+      "run_interrupted_by_restart": "服务重启，未完成的 AI 智能选股任务已标记为失败",
       "fragments": {
         "factor_completeness_ratio": "因子数据完整股票 {complete_count}/{total_count}，完整率 {completeness_ratio}%，低于要求的 {required_ratio}%",
         "missing_quant_fields": "{stock_code} {stock_name} 缺少 {fields}",

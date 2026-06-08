@@ -3,6 +3,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 from app.core.i18n import i18n_service
 from app.ai.llm_engine.context.section_wrappers import status_payload
+from app.data.metadata.field_units import format_payload_values
 from app.models.data_storage import (
     StockPledge, StockInsider, StockRelease, StockShareholder, StockPledgeSummary
 )
@@ -24,8 +25,13 @@ class RiskSource:
 
     def _analyze_financial_risks(self, fin_ctx: Dict[str, Any]) -> Dict[str, Any]:
         """
-        从财务上下文中提取风险预警信号
-        Extract financial risk warning signals from financial context
+        从财务上下文中提取风险预警信号。
+
+        Args:
+            fin_ctx: 财务上下文字典，包含最新财务指标、资产负债表和现金流量表片段。
+
+        Returns:
+            标准化后的风险预警上下文字典。
         """
         def pick(data: Dict[str, Any], *keys: str) -> Any:
             for key in keys:
@@ -64,10 +70,10 @@ class RiskSource:
         total_assets = pick(latest, "total_assets", "资产总计") or 1  # 避免除零
         goodwill_ratio = round(goodwill / total_assets * 100, 2)
 
-        # 2. 负债率 (Debt Ratio) - AkShare/"资产负债率"→debt_to_assets_ratio, Tushare/debt_to_assets→debt_to_assets_ratio
+        # 2. 负债率 (Debt Ratio)
         raw_debt_ratio = pick(
             latest,
-            "debt_to_assets_ratio",   # AkShare & Tushare 统一映射目标
+            "debt_to_assets_ratio",   # 统一映射目标
             "debt_to_assets",         # Tushare 原始字段 (兜底)
             "debt_to_asset",
             "al_ratio",
@@ -81,22 +87,22 @@ class RiskSource:
             debt_ratio = (total_liab / total_assets * 100) if total_assets and total_assets > 1 else 0
 
         # 3. 经营现金流质量 (Earnings Quality - Cash Profit Ratio)
-        # 优先级: 总量值(AkShare) > ocfps反推(Tushare) > ocf比率判断(Tushare)
-        # 净利润: AkShare "归母净利润"→net_profit_attributable_to_parent | Tushare 无直接净利润 (fina_indicator 只有 recurring_profit)
+        # 优先级: 现金流总量 > ocfps 反推 > ocf 比率判断
+        # Tushare fina_indicator 无直接净利润字段，优先读取已标准化的归母净利润字段。
         net_profit_raw = pick(
             latest,
-            "net_profit_attributable_to_parent",   # AkShare 归母净利润
+            "net_profit_attributable_to_parent",
             "n_income_attr_p",                     # Tushare cashflow 表 (若有)
-            "net_profit",                          # AkShare "净利润"
+            "net_profit",
             "n_income",
             "归属于母公司所有者的净利润",
             "净利润",
             "归母净利润",
         )
-        # 经营性现金流总量 (AkShare 有): 经营活动产生的现金流量净额→net_cash_flow_from_operating_activities
+        # 经营性现金流总量: 经营活动产生的现金流量净额。
         ocf_absolute = pick(
             latest,
-            "net_cash_flow_from_operating_activities",  # AkShare
+            "net_cash_flow_from_operating_activities",
             "n_cashflow_act",                           # Tushare cashflow 表
             "n_cash_flows_oper",
             "经营活动产生的现金流量净额",
@@ -139,7 +145,7 @@ class RiskSource:
             else "NO"
         )
 
-        return {
+        payload = {
             "data_status": "available",
             "status": "AVAILABLE",
             "data_scope": "latest_financial_snapshot",
@@ -150,6 +156,7 @@ class RiskSource:
             "double_high_risk": double_high,
             "latest_report_date": latest_meta.get("report_date") or latest_meta.get("报告期")
         }
+        return format_payload_values("risk.financial_warning", payload)
 
     def _get_pledge(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """获取质押信息，优先使用汇总数据，并辅以明细数据"""
@@ -182,7 +189,7 @@ class RiskSource:
             "current_price": pledge_detail.current_price if pledge_detail else None,
             "liquidate_price": pledge_detail.liquidate_price if pledge_detail else None
         }
-        return res
+        return format_payload_values("risk.pledge", res)
 
     def _get_insider(self, db: Session,
                      stock_code: str) -> List[Dict[str, Any]]:
@@ -203,7 +210,7 @@ class RiskSource:
                 "avg_price": i.change_avg_price,  # 减持均价
                 "shares_after": i.shares_after_change  # 减持后剩余
             })
-        return results
+        return format_payload_values("risk.insider", results)
 
     def _get_lockup(self, db: Session,
                     stock_code: str) -> List[Dict[str, Any]]:
@@ -228,7 +235,7 @@ class RiskSource:
                 "release_type": r.release_type,  # 解禁类型
                 "market_value": r.release_market_value  # 解禁市值
             })
-        return results
+        return format_payload_values("risk.lockup_release", results)
 
     def _get_shareholder(self, db: Session, stock_code: str) -> Dict[str, Any]:
         sh = db.query(StockShareholder).filter(
@@ -238,12 +245,13 @@ class RiskSource:
         if not sh:
             return {}
 
-        return {
+        payload = {
             "end_date": str(sh.end_date),
             "count": sh.holder_count,
             "change_ratio": sh.holder_count_change_ratio,
             "avg_shares": sh.avg_hold_shares
         }
+        return format_payload_values("risk.shareholder", payload)
 
     def _get_shareholder_trend(
             self, db: Session, stock_code: str) -> Dict[str, Any]:
@@ -309,7 +317,7 @@ class RiskSource:
         else:
             total_change_pct = 0
 
-        return {
+        payload = {
             "trend_signal": trend_signal,
             "consecutive_decrease": consecutive_decrease,
             "consecutive_increase": consecutive_increase,
@@ -317,3 +325,4 @@ class RiskSource:
             "quarters_analyzed": len(changes),
             "recent_changes": changes[:4]  # 最近4个季度
         }
+        return format_payload_values("risk.shareholder", payload)

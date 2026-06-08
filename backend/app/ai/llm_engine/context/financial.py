@@ -2,6 +2,7 @@ from typing import Dict, Any, Optional
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 from app.ai.llm_engine.context.section_wrappers import status_payload, wrap_snapshot_section
+from app.data.metadata.field_units import format_payload_values
 from app.models.data_storage import FinancialIndicator, StockIncomeStatement, StockBalanceSheet, StockCashflowStatement
 from app.core.utils.formatters import StockCodeStandardizer
 from app.data.metadata.financial_report_localizer import (
@@ -26,6 +27,28 @@ class FinancialSource:
     @staticmethod
     def _localize_raw_data(raw_data: Optional[Dict[str, Any]], table: str) -> Optional[Dict[str, Any]]:
         return localize_financial_report_payload(raw_data, table)
+
+    def _append_financial_units(self, value: Any) -> Any:
+        """按标准字段单位配置格式化财务快照数据。
+
+        Args:
+            value: 财务快照原始字典或嵌套值。
+
+        Returns:
+            已按 ``table_field_units.json`` 补单位的展示数据；未配置单位的字段保持原样。
+        """
+        return format_payload_values("data.financial_indicator", value)
+
+    def _format_latest_financials_for_context(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """格式化最新财务指标快照给 LLM 展示。
+
+        Args:
+            payload: ``_get_latest_financials`` 返回的原始财务快照。
+
+        Returns:
+            字段结构不变、已按标准字段单位配置格式化的上下文字典。
+        """
+        return self._append_financial_units(payload)
 
     def _serialize_income_statement(self, income_record: Any) -> Dict[str, Any]:
         if not income_record or not income_record.data:

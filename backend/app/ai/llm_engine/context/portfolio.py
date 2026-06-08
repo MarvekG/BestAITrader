@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from app.data.metadata.field_units import format_payload_values
 from app.models.account import Account
 from app.risk_control.service import portfolio_risk_control_service, serialize_config
 
@@ -36,16 +37,18 @@ def format_portfolio_risk_control_summary(config: dict[str, Any]) -> dict[str, A
         f"rule policies {rule_policies}."
     )
 
+    summary = {
+        "enabled": enabled,
+        "max_single_position_pct": max_single_position_pct,
+        "max_industry_position_pct": max_industry_position_pct,
+        "min_cash_pct": min_cash_pct,
+        "require_stop_loss": require_stop_loss,
+        "stop_loss_warning_pct": stop_loss_warning_pct,
+        "rule_policies": rule_policies,
+    }
+
     return {
-        "summary": {
-            "enabled": enabled,
-            "max_single_position_pct": max_single_position_pct,
-            "max_industry_position_pct": max_industry_position_pct,
-            "min_cash_pct": min_cash_pct,
-            "require_stop_loss": require_stop_loss,
-            "stop_loss_warning_pct": stop_loss_warning_pct,
-            "rule_policies": rule_policies,
-        },
+        "summary": format_payload_values("portfolio.risk_control", summary),
         "text": text,
     }
 

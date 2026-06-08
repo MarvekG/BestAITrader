@@ -69,7 +69,16 @@ code {
   padding-right: 8px;
 }
 
+.experience-scroll-panel:focus-visible {
+  outline: 2px solid var(--app-primary);
+  outline-offset: 2px;
+}
+
 .experience-review-candidate-scroll {
+  max-height: 360px;
+}
+
+.experience-review-runs-scroll {
   max-height: 360px;
 }
 
@@ -77,8 +86,28 @@ code {
   max-height: 640px;
 }
 
+.experience-tool-trace-scroll {
+  max-height: 480px;
+}
+
 .experience-triad-card-scroll {
   max-height: 460px;
+}
+
+@media (max-height: 760px) {
+  .experience-review-candidate-scroll,
+  .experience-review-runs-scroll {
+    max-height: 280px;
+  }
+
+  .experience-analysis-result-scroll {
+    max-height: 460px;
+  }
+
+  .experience-tool-trace-scroll,
+  .experience-triad-card-scroll {
+    max-height: 340px;
+  }
 }
 
 .experience-analysis-descriptions .ant-descriptions-view table {
