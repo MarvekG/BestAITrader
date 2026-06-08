@@ -85,6 +85,24 @@ class TushareIngestor(BaseIngestor):
             end_date: str,
             period: str = "daily",
             adjust: str = "qfq") -> bool:
+        """
+        采集单只股票 K 线行情并写入标准行情表。
+
+        官方文档:
+            - daily: https://tushare.pro/document/2?doc_id=27
+            - weekly: https://tushare.pro/document/2?doc_id=144
+            - monthly: https://tushare.pro/document/2?doc_id=145
+
+        Args:
+            stock_code: 股票代码。
+            start_date: 开始日期，支持 YYYY-MM-DD 或 YYYYMMDD。
+            end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD。
+            period: 行情周期，支持 daily、weekly、monthly。
+            adjust: 复权参数，当前实现不传递给 Tushare Pro 接口。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
+        """
         try:
             if not self.pro:
                 return False
@@ -145,6 +163,18 @@ class TushareIngestor(BaseIngestor):
             return False
 
     async def fetch_and_ingest_stock_info(self, stock_code: str) -> bool:
+        """
+        采集单只股票基础信息并写入股票基础表。
+
+        官方文档:
+            - stock_basic: https://tushare.pro/document/2?doc_id=25
+
+        Args:
+            stock_code: Tushare 标准股票代码。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
+        """
         try:
             if not self.pro:
                 return False
@@ -175,6 +205,20 @@ class TushareIngestor(BaseIngestor):
             stock_code: str,
             start_date: Optional[str] = None,
             end_date: Optional[str] = None) -> bool:
+        """
+        采集单只股票每日估值与基础行情指标并写入估值历史表。
+
+        官方文档:
+            - daily_basic: https://tushare.pro/document/2?doc_id=32
+
+        Args:
+            stock_code: 股票代码。
+            start_date: 开始日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时默认最近一年。
+            end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时默认今天。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
+        """
         try:
             if not self.pro:
                 return False
@@ -238,8 +282,18 @@ class TushareIngestor(BaseIngestor):
             start_date: Optional[str] = None,
             end_date: Optional[str] = None) -> bool:
         """
-        [NEW] 同步财务指标 (Tushare fina_indicator 接口)
-        支持单只股票同步
+        采集单只股票财务指标并写入标准财务指标表。
+
+        官方文档:
+            - fina_indicator: https://tushare.pro/document/2?doc_id=79
+
+        Args:
+            stock_code: 股票代码。
+            start_date: 开始日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时默认最近一年。
+            end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时默认今天。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -364,6 +418,19 @@ class TushareIngestor(BaseIngestor):
             return False
 
     async def fetch_and_ingest_northbound(self, stock_code: str) -> bool:
+        """
+        采集单只股票沪深港股通持股明细，并补充日线价格用于派生指标。
+
+        官方文档:
+            - hk_hold: https://tushare.pro/document/2?doc_id=188
+            - daily: https://tushare.pro/document/2?doc_id=27
+
+        Args:
+            stock_code: Tushare 标准股票代码。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
+        """
         try:
             if not self.pro:
                 return False
@@ -462,6 +529,18 @@ class TushareIngestor(BaseIngestor):
             return False
 
     async def fetch_and_ingest_company_profile(self, stock_code: str) -> bool:
+        """
+        采集上市公司基础资料并写入数据表。
+
+        官方文档:
+            - stock_company: https://tushare.pro/document/2?doc_id=112
+
+        Args:
+            stock_code: Tushare 标准股票代码。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
+        """
         try:
             if not self.pro:
                 return False
@@ -485,8 +564,13 @@ class TushareIngestor(BaseIngestor):
     @backoff(max_tries=3, base_delay=2.0, retry_on=(Exception,))
     async def fetch_and_ingest_all_stock_basic(self) -> bool:
         """
-        [NEW] 全量同步 A 股基础信息
-        调用 Tushare stock_basic 接口（不传 ts_code）
+        全量采集 A 股基础信息并写入股票基础表。
+
+        官方文档:
+            - stock_basic: https://tushare.pro/document/2?doc_id=25
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         import time
         if not self.pro:
@@ -548,8 +632,18 @@ class TushareIngestor(BaseIngestor):
         end_date: str
     ) -> bool:
         """
-        采集大盘指数日线数据 (Tushare)
-        Api: index_daily
+        采集大盘指数日线行情并写入指数日线表。
+
+        官方文档:
+            - index_daily: https://tushare.pro/document/2?doc_id=95
+
+        Args:
+            index_code: 指数代码。
+            start_date: 开始日期，支持 YYYY-MM-DD 或 YYYYMMDD。
+            end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         if not self.pro:
             return False
@@ -594,8 +688,16 @@ class TushareIngestor(BaseIngestor):
 
     async def fetch_and_ingest_realtime_market(self, stock_code: str) -> bool:
         """
-        采集实时行情数据 (Tushare SDK 接口)
-        Fetch realtime market data using Tushare SDK
+        采集单只股票实时行情并写入实时行情表。
+
+        官方文档:
+            - get_realtime_quotes: https://tushare.org/trading.html
+
+        Args:
+            stock_code: 股票代码。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
             # 1. 准备查询代码 (get_realtime_quotes 接收 6 位数字代码或列表)
@@ -659,7 +761,17 @@ class TushareIngestor(BaseIngestor):
 
     async def fetch_and_ingest_dragon_tiger(self, start_date: str, end_date: str = None) -> bool:
         """
-        [NEW] 同步龙虎榜数据 (Tushare top_list 接口)
+        按日期范围采集龙虎榜每日统计数据并写入龙虎榜表。
+
+        官方文档:
+            - top_list: https://tushare.pro/document/2?doc_id=106
+
+        Args:
+            start_date: 开始日期，支持 YYYY-MM-DD 或 YYYYMMDD。
+            end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时只采集开始日期。
+
+        Returns:
+            任一交易日采集并写入成功返回 True；全部无数据、配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -730,8 +842,14 @@ class TushareIngestor(BaseIngestor):
 
     async def fetch_and_ingest_board_industry(self) -> bool:
         """
-        [NEW] 采集外部行业板块数据
-        优先使用 dc_index 接口，并合并 dc_daily 纠正/补充价格数据
+        采集外部行业板块数据，并合并行情数据补充价格指标。
+
+        官方文档:
+            - dc_index: https://tushare.pro/document/2?doc_id=362
+            - dc_daily: https://tushare.pro/document/2?doc_id=382
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -805,7 +923,16 @@ class TushareIngestor(BaseIngestor):
 
     async def fetch_and_ingest_stock_money_flow(self, stock_code: str) -> bool:
         """
-        [NEW] 采集个股资金流向 (Tushare moneyflow 接口)
+        采集单只股票资金流向并写入个股资金流表。
+
+        官方文档:
+            - moneyflow: https://tushare.pro/document/2?doc_id=170
+
+        Args:
+            stock_code: Tushare 标准股票代码。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -870,7 +997,17 @@ class TushareIngestor(BaseIngestor):
 
     async def fetch_and_ingest_stock_shareholder_count(self, stock_code: str) -> bool:
         """
-        [NEW] 采集股东人数变动 (Tushare stk_holdernumber 接口)
+        采集单只股票股东人数变动，并补充每日指标用于派生持股数据。
+
+        官方文档:
+            - stk_holdernumber: https://tushare.pro/document/2?doc_id=166
+            - daily_basic: https://tushare.pro/document/2?doc_id=32
+
+        Args:
+            stock_code: Tushare 标准股票代码。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -1003,7 +1140,16 @@ class TushareIngestor(BaseIngestor):
 
     async def fetch_and_ingest_stock_pledge_risk(self, stock_code: str) -> bool:
         """
-        [NEW] 采集股权质押明细数据 (Tushare pledge_detail 接口)
+        采集单只股票股权质押明细数据并写入质押风险表。
+
+        官方文档:
+            - pledge_detail: https://tushare.pro/document/2?doc_id=111
+
+        Args:
+            stock_code: 股票代码。
+
+        Returns:
+            采集并写入成功返回 True；无数据视为成功；配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -1064,8 +1210,16 @@ class TushareIngestor(BaseIngestor):
 
     async def fetch_and_ingest_all_pledge_summary(self, stock_code: str = None) -> bool:
         """
-        [NEW] 采集股权质押汇总数据 (Tushare pledge_stat 接口)
-        Supports both single stock and bulk fetch.
+        采集单只或全市场股权质押汇总数据并写入质押汇总表。
+
+        官方文档:
+            - pledge_stat: https://tushare.pro/document/2?doc_id=110
+
+        Args:
+            stock_code: 股票代码；为空时采集全市场最新质押汇总。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -1142,7 +1296,16 @@ class TushareIngestor(BaseIngestor):
 
     async def fetch_and_ingest_stock_lockup_release(self, stock_code: str) -> bool:
         """
-        [NEW] 采集限售股解禁数据 (Tushare share_float 接口)
+        采集单只股票未来限售股解禁数据并写入解禁表。
+
+        官方文档:
+            - share_float: https://tushare.pro/document/2?doc_id=160
+
+        Args:
+            stock_code: Tushare 标准股票代码。
+
+        Returns:
+            采集并写入成功返回 True；无数据视为成功；配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -1171,8 +1334,8 @@ class TushareIngestor(BaseIngestor):
                 if 'release_date' in df.columns:
                     df['release_date'] = pd.to_datetime(df['release_date'], errors='coerce')
                 if 'release_shares' in df.columns:
-                    # Tushare share_float.float_share uses 万股; canonical storage uses raw shares.
-                    df['release_shares'] = pd.to_numeric(df['release_shares'], errors='coerce') * 10000
+                    # Tushare share_float.float_share already uses raw shares.
+                    df['release_shares'] = pd.to_numeric(df['release_shares'], errors='coerce')
 
                 await self._run_in_executor(
                     self.ingestion_service.write_dataframe,
@@ -1187,13 +1350,17 @@ class TushareIngestor(BaseIngestor):
             return False
 
     async def fetch_and_ingest_stock_earnings_forecast(self, stock_code: str) -> bool:
-        """采集单只股票的业绩预告数据并写入标准表。
+        """
+        采集单只股票业绩预告数据并写入标准表。
+
+        官方文档:
+            - forecast: https://tushare.pro/document/2?doc_id=45
 
         Args:
-            stock_code: 标准股票代码。
+            stock_code: Tushare 标准股票代码。
 
         Returns:
-            采集并写入成功返回 True；无数据、配置缺失或写入失败返回 False。
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -1228,7 +1395,16 @@ class TushareIngestor(BaseIngestor):
 
     async def fetch_and_ingest_stock_margin_data(self, stock_code: str) -> bool:
         """
-        [NEW] 采集融资融券数据 (Tushare margin_detail 接口)
+        采集单只股票融资融券明细数据并写入两融表。
+
+        官方文档:
+            - margin_detail: https://tushare.pro/document/2?doc_id=59
+
+        Args:
+            stock_code: Tushare 标准股票代码。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -1259,7 +1435,16 @@ class TushareIngestor(BaseIngestor):
 
     async def fetch_and_ingest_stock_limit_up_pool(self, trade_date: str = None) -> bool:
         """
-        [NEW] 采集每日涨停池数据 (Tushare limit_list_d 接口)
+        采集每日涨停池数据并写入涨停池表。
+
+        官方文档:
+            - limit_list_d: https://tushare.pro/document/2?doc_id=298
+
+        Args:
+            trade_date: 交易日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时尝试最近 3 天。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -1334,8 +1519,16 @@ class TushareIngestor(BaseIngestor):
 
     async def fetch_and_ingest_stock_limit_down_pool(self, trade_date: str = None) -> bool:
         """
-        [NEW] 采集每日跌停池数据 (Tushare limit_list_d 接口)
-        Ingest daily limit-down pool data
+        采集每日跌停池数据并写入跌停池表。
+
+        官方文档:
+            - limit_list_d: https://tushare.pro/document/2?doc_id=298
+
+        Args:
+            trade_date: 交易日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时尝试最近 3 天。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -1409,8 +1602,16 @@ class TushareIngestor(BaseIngestor):
 
     async def fetch_and_ingest_stock_zhaban_pool(self, trade_date: str = None) -> bool:
         """
-        [NEW] 采集每日炸板池数据 (Tushare limit_list_d limit_type='Z')
-        Ingest daily zhaban (fried board) pool data
+        采集每日炸板池数据并写入炸板池表。
+
+        官方文档:
+            - limit_list_d: https://tushare.pro/document/2?doc_id=298
+
+        Args:
+            trade_date: 交易日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时尝试最近 3 天。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -1483,8 +1684,16 @@ class TushareIngestor(BaseIngestor):
             return False
     async def fetch_and_ingest_stock_insider_trading(self, stock_code: str) -> bool:
         """
-        [NEW] 采集高管及相关人员持股变动数据
-        Uses Tushare `holder_trade` interface
+        采集高管及相关人员持股变动数据并写入内部人交易表。
+
+        官方文档:
+            - stk_holdertrade: https://tushare.pro/document/2?doc_id=175
+
+        Args:
+            stock_code: 股票代码。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -1538,7 +1747,18 @@ class TushareIngestor(BaseIngestor):
         self, stock_code: str, start_date: str = None, end_date: str = None
     ) -> bool:
         """
-        [NEW] 采集个股大宗交易数据 (Tushare block_trade)
+        采集个股或全市场大宗交易数据并写入大宗交易表。
+
+        官方文档:
+            - block_trade: https://tushare.pro/document/2?doc_id=161
+
+        Args:
+            stock_code: 股票代码；为空时按日期范围采集全市场数据。
+            start_date: 开始日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时默认最近 3 天。
+            end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时默认今天。
+
+        Returns:
+            采集并写入成功返回 True；无数据视为成功；配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -1609,7 +1829,17 @@ class TushareIngestor(BaseIngestor):
 
     async def fetch_and_ingest_sector_money_flow(self, stock_code: str) -> bool:
         """
-        [NEW] 采集行业板块资金流 (Tushare moneyflow_ind_ths)
+        采集股票所属行业的板块资金流并写入行业资金流表。
+
+        官方文档:
+            - stock_basic: https://tushare.pro/document/2?doc_id=25
+            - moneyflow_ind_dc: https://tushare.pro/document/2?doc_id=344
+
+        Args:
+            stock_code: 股票代码。
+
+        Returns:
+            采集并写入成功返回 True；行业无匹配数据视为成功；配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -1683,7 +1913,16 @@ class TushareIngestor(BaseIngestor):
 
     async def fetch_and_ingest_stock_top_holders(self, stock_code: str) -> bool:
         """
-        获取股票十大股东数据 (Tushare)
+        采集股票前十大股东数据并写入十大股东表。
+
+        官方文档:
+            - top10_holders: https://tushare.pro/document/2?doc_id=61
+
+        Args:
+            stock_code: 股票代码。
+
+        Returns:
+            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
             ts_code = StockCodeStandardizer.to_standard(stock_code)
@@ -1739,9 +1978,19 @@ class TushareIngestor(BaseIngestor):
         end_date: Optional[str] = None
     ) -> bool:
         """
-        同步互动问答数据。
-        SH: irm_qa_sh
-        SZ: irm_qa_sz
+        采集上证或深证互动问答数据并写入互动问答表。
+
+        官方文档:
+            - irm_qa_sh: https://tushare.pro/document/2?doc_id=366
+            - irm_qa_sz: https://tushare.pro/document/2?doc_id=367
+
+        Args:
+            stock_code: 股票代码。
+            start_date: 开始日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时默认最近 180 天。
+            end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时默认今天。
+
+        Returns:
+            采集并写入成功返回 True；无数据、市场不支持、配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -1826,7 +2075,18 @@ class TushareIngestor(BaseIngestor):
             start_date: Optional[str] = None,
             end_date: Optional[str] = None) -> bool:
         """
-        同步单只股票利润表，使用 Tushare income 接口。
+        采集单只股票利润表并写入标准利润表。
+
+        官方文档:
+            - income: https://tushare.pro/document/2?doc_id=33
+
+        Args:
+            stock_code: 股票代码。
+            start_date: 开始日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时默认最近一年。
+            end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时默认今天。
+
+        Returns:
+            采集并写入成功返回 True；无数据、参数缺失、配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -1950,7 +2210,18 @@ class TushareIngestor(BaseIngestor):
             start_date: str,
             end_date: str) -> bool:
         """
-        同步单只股票资产负债表，使用 Tushare balancesheet 接口。
+        采集单只股票资产负债表并写入标准资产负债表。
+
+        官方文档:
+            - balancesheet: https://tushare.pro/document/2?doc_id=36
+
+        Args:
+            stock_code: 股票代码。
+            start_date: 开始日期，支持 YYYY-MM-DD 或 YYYYMMDD。
+            end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD。
+
+        Returns:
+            采集并写入成功返回 True；无数据、参数缺失、配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
@@ -2081,7 +2352,18 @@ class TushareIngestor(BaseIngestor):
             start_date: str,
             end_date: str) -> bool:
         """
-        同步单只股票现金流量表，使用 Tushare cashflow 接口。
+        采集单只股票现金流量表并写入标准现金流量表。
+
+        官方文档:
+            - cashflow: https://tushare.pro/document/2?doc_id=44
+
+        Args:
+            stock_code: 股票代码。
+            start_date: 开始日期，支持 YYYY-MM-DD 或 YYYYMMDD。
+            end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD。
+
+        Returns:
+            采集并写入成功返回 True；无数据、参数缺失、配置缺失或异常返回 False。
         """
         try:
             if not self.pro:
