@@ -23,6 +23,7 @@ from app.ai.llm_routing import get_research_usage_lane
 from app.ai.json_utils import stable_json_dumps
 from app.core.config import settings
 from app.core.logger import get_logger
+from app.core.utils.converters import safe_isoformat
 from app.crud.llm_usage_log import record_llm_usage
 from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER
 from app.websocket.manager import ws_manager
@@ -207,7 +208,7 @@ def _extract_written_memories(tool_trace: List[Dict[str, Any]]) -> List[Dict[str
     return items
 
 
-def _safe_iso_text(value: Any) -> str:
+def _memory_time_text(value: Any) -> str:
     """把时间值转换为稳定的 ISO 文本。
 
     Args:
@@ -216,10 +217,12 @@ def _safe_iso_text(value: Any) -> str:
     Returns:
         可写入记忆正文的时间文本；无法识别时返回空字符串。
     """
-    if isinstance(value, datetime):
-        return value.isoformat()
+    if value is None:
+        return ""
     if isinstance(value, str):
         return value.strip()
+    if hasattr(value, "isoformat"):
+        return safe_isoformat(value) or ""
     return ""
 
 
@@ -235,8 +238,8 @@ def _build_memory_time_prefix(state: ExperienceWorkflowState) -> str:
     full_context = state.get("full_context") or {}
     pm_decision = full_context.get("pm_decision") if isinstance(full_context.get("pm_decision"), dict) else {}
     session = full_context.get("session") if isinstance(full_context.get("session"), dict) else {}
-    decision_time = _safe_iso_text(pm_decision.get("created_at") or session.get("created_at"))
-    reviewed_at = _safe_iso_text(state.get("reviewed_at") or datetime.now())
+    decision_time = _memory_time_text(pm_decision.get("created_at") or session.get("created_at"))
+    reviewed_at = _memory_time_text(state.get("reviewed_at") or datetime.now())
     review_horizon = str(state.get("review_horizon") or "").strip()
 
     parts = []

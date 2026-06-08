@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
+from app.core.utils.converters import safe_string, safe_uuid
 from app.models.experience_index import ExperienceIndex
 from app.models.experience_review_event import ExperienceReviewEvent
 
@@ -20,39 +21,6 @@ TAG_KEYS = (
     "signal_tags",
     "market_regime_tags",
 )
-
-
-def _safe_string(value: Any) -> str | None:
-    """将输入值转换为去空白字符串。
-
-    Args:
-        value: 需要转换的原始值。
-
-    Returns:
-        去空白后的字符串；空值返回 ``None``。
-    """
-    text = str(value or "").strip()
-    return text or None
-
-
-def _safe_uuid(value: Any) -> UUID | None:
-    """将输入值转换为 UUID。
-
-    Args:
-        value: UUID 对象或可解析为 UUID 的字符串。
-
-    Returns:
-        UUID 对象；无法解析时返回 ``None``。
-    """
-    if isinstance(value, UUID):
-        return value
-    text = _safe_string(value)
-    if not text:
-        return None
-    try:
-        return UUID(text)
-    except ValueError:
-        return None
 
 
 class ExperienceIndexService:
@@ -88,7 +56,7 @@ class ExperienceIndexService:
         """
         if memory.get("error"):
             return False
-        status = _safe_string(memory.get("status"))
+        status = safe_string(memory.get("status"))
         return status in (None, "success", "accepted")
 
     def _build_summary(self, memory: dict[str, Any]) -> str:
@@ -100,7 +68,7 @@ class ExperienceIndexService:
         Returns:
             最长 240 字符的展示摘要。
         """
-        content = _safe_string(memory.get("content")) or "-"
+        content = safe_string(memory.get("content")) or "-"
         return content[:240]
 
     def _outcome_label(self, result: dict[str, Any], memory: dict[str, Any]) -> str:
@@ -141,8 +109,8 @@ class ExperienceIndexService:
         Returns:
             已存在的经验索引；没有匹配时返回 ``None``。
         """
-        observation_id = _safe_string(memory.get("observation_id"))
-        source_id = _safe_string(memory.get("source_id"))
+        observation_id = safe_string(memory.get("observation_id"))
+        source_id = safe_string(memory.get("source_id"))
         filters = []
         if observation_id:
             filters.append(ExperienceIndex.memory_observation_id == observation_id)
@@ -166,18 +134,18 @@ class ExperienceIndexService:
         payload = result.get("analysis_payload") if isinstance(result.get("analysis_payload"), dict) else {}
         return {
             "user_id": user_id,
-            "memory_observation_id": _safe_string(memory.get("observation_id")),
-            "memory_source_id": _safe_string(memory.get("source_id")),
+            "memory_observation_id": safe_string(memory.get("observation_id")),
+            "memory_source_id": safe_string(memory.get("source_id")),
             "review_run_id": str(result.get("review_run_id") or ""),
-            "session_id": _safe_uuid(result.get("session_id")),
-            "stock_code": _safe_string(memory.get("stock_code")) or _safe_string(result.get("stock_code")),
-            "stock_name": _safe_string(memory.get("stock_name")) or _safe_string(result.get("stock_name")),
-            "industry": _safe_string(result.get("industry")),
-            "strategy": _safe_string(result.get("trading_strategy")),
-            "review_horizon": _safe_string(result.get("review_horizon")),
+            "session_id": safe_uuid(result.get("session_id")),
+            "stock_code": safe_string(memory.get("stock_code")) or safe_string(result.get("stock_code")),
+            "stock_name": safe_string(memory.get("stock_name")) or safe_string(result.get("stock_name")),
+            "industry": safe_string(result.get("industry")),
+            "strategy": safe_string(result.get("trading_strategy")),
+            "review_horizon": safe_string(result.get("review_horizon")),
             "outcome_label": self._outcome_label(result, memory),
-            "correctness": _safe_string(payload.get("debate_correctness")),
-            "importance": _safe_string(memory.get("importance")) or "medium",
+            "correctness": safe_string(payload.get("debate_correctness")),
+            "importance": safe_string(memory.get("importance")) or "medium",
             "summary": self._build_summary(memory),
             "tags": self._normalize_tags(payload.get("experience_tags")),
         }
@@ -256,7 +224,7 @@ class ExperienceIndexService:
         Returns:
             可用于 ILIKE 的模式；空输入返回 ``None``。
         """
-        normalized = _safe_string(value)
+        normalized = safe_string(value)
         return f"%{normalized}%" if normalized else None
 
     def _text_matches(self, value: Any, keyword: str | None) -> bool:
@@ -269,10 +237,10 @@ class ExperienceIndexService:
         Returns:
             文本大小写不敏感包含片段时返回 ``True``。
         """
-        normalized_keyword = _safe_string(keyword)
+        normalized_keyword = safe_string(keyword)
         if not normalized_keyword:
             return True
-        normalized_value = _safe_string(value)
+        normalized_value = safe_string(value)
         return bool(normalized_value and normalized_keyword.casefold() in normalized_value.casefold())
 
     def _matches_tag(self, row: ExperienceIndex, tag: str | None) -> bool:
@@ -285,7 +253,7 @@ class ExperienceIndexService:
         Returns:
             任一标签分组包含该片段时返回 ``True``。
         """
-        normalized_tag = _safe_string(tag)
+        normalized_tag = safe_string(tag)
         if not normalized_tag:
             return True
         tags = row.tags if isinstance(row.tags, dict) else {}
@@ -392,7 +360,7 @@ class ExperienceIndexService:
         rows = query.order_by(ExperienceIndex.created_at.desc()).all()
         if tag:
             rows = [row for row in rows if self._matches_tag(row, tag)]
-        keyword_text = _safe_string(keyword)
+        keyword_text = safe_string(keyword)
         if keyword_text:
             rows = [
                 row
