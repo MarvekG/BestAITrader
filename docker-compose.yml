@@ -147,9 +147,7 @@ services:
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      WEB_CLOAKBROWSER_MAX_PAGES: 10
-      WEB_PATCHRIGHT_MAX_PAGES: 4
-      WEB_CAMOUFOX_MAX_PAGES: 2
+      WEB_MAX_PAGES: 4
       WEB_RELOAD: "false"
       WEB_RUNTIME_DIR: /runtime
       CLOAKBROWSER_CACHE_DIR: /runtime/cloakbrowser/cache

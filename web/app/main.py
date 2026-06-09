@@ -14,6 +14,7 @@ from app.engines.cloakbrowser_engine import CloakBrowserEngine
 from app.engines.patchright_engine import PatchrightEngine
 from app.schemas import EngineType, FetchRequest, FetchResponse, ReturnType
 from app.services.cleaner import clean_markdown, compile_markdown_patterns, normalize_fetch_url
+from app.services.limiter import EngineLimiter
 from app.services.renderer import convert_html_to_markdown
 
 logger = logging.getLogger(__name__)
@@ -25,14 +26,15 @@ class EngineRegistry:
     def __init__(self) -> None:
         """初始化引擎注册表。"""
         settings = get_settings()
+        limiter = EngineLimiter(settings.WEB_MAX_PAGES)
         self._engines: dict[EngineType, BrowserEngine] = {
-            EngineType.CLOAKBROWSER: CloakBrowserEngine(settings.WEB_CLOAKBROWSER_MAX_PAGES),
+            EngineType.CLOAKBROWSER: CloakBrowserEngine(limiter),
             EngineType.PATCHRIGHT: PatchrightEngine(
-                settings.WEB_PATCHRIGHT_MAX_PAGES,
+                limiter,
                 headless=settings.WEB_PATCHRIGHT_HEADLESS,
             ),
             EngineType.CAMOUFOX: CamoufoxEngine(
-                settings.WEB_CAMOUFOX_MAX_PAGES,
+                limiter,
                 headless=settings.WEB_CAMOUFOX_HEADLESS,
             ),
         }

@@ -13,7 +13,7 @@ COPY requirements.txt .
 
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update \
-    && apt-get install -y --no-install-recommends curl ca-certificates tzdata \
+    && apt-get install -y --no-install-recommends curl ca-certificates tzdata libgtk-3-0t64 libx11-xcb1 libasound2t64 \
     && pip install uv -i https://mirrors.aliyun.com/pypi/simple/ \
     && useradd -m webfetch \
     && mkdir -p /runtime/browsers/ms-playwright /runtime/cache /runtime/cloakbrowser/cache \

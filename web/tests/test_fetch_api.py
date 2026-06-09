@@ -1,5 +1,8 @@
 from fastapi.testclient import TestClient
 
+from app.engines.camoufox_engine import CamoufoxEngine
+from app.engines.cloakbrowser_engine import CloakBrowserEngine
+from app.engines.patchright_engine import PatchrightEngine
 from app.engines.base import RenderedPage
 from app.main import app, engine_registry
 from app.schemas import EngineType
@@ -149,3 +152,15 @@ def test_health_returns_ok() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_engine_registry_uses_shared_limiter() -> None:
+    cloakbrowser_engine = engine_registry._engines[EngineType.CLOAKBROWSER]
+    patchright_engine = engine_registry._engines[EngineType.PATCHRIGHT]
+    camoufox_engine = engine_registry._engines[EngineType.CAMOUFOX]
+
+    assert isinstance(cloakbrowser_engine, CloakBrowserEngine)
+    assert isinstance(patchright_engine, PatchrightEngine)
+    assert isinstance(camoufox_engine, CamoufoxEngine)
+    assert cloakbrowser_engine._limiter is patchright_engine._limiter
+    assert patchright_engine._limiter is camoufox_engine._limiter

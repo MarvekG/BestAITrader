@@ -29,7 +29,6 @@ def main() -> None:
         "app.main:app",
         host="0.0.0.0",
         port=8010,
-        loop="asyncio",
         reload=reload_enabled,
         reload_dirs=["/app"] if reload_enabled else None,
     )

@@ -179,7 +179,7 @@ CloakBrowser 引擎必须原封不动迁移现有已验证逻辑：
 - `launch_context_async(headless=True, viewport={"width": 1365, "height": 900}, locale="zh-CN", timezone="Asia/Shanghai")`
 - 进程级共享 browser context。
 - 使用 `asyncio.Lock` 保护 context 启动。
-- 使用 `asyncio.BoundedSemaphore` 限制并发 page 数。
+- 使用共享 `asyncio.BoundedSemaphore` 限制全容器并发 page 数。
 - 记录 `_active_pages`，容器 shutdown 时逐个关闭。
 - `page.goto(..., wait_until="domcontentloaded", timeout=timeout_ms)`。
 - `wait_after_ms` 非零时调用 `page.wait_for_timeout(wait_after_ms)`。
@@ -207,21 +207,19 @@ Camoufox 作为 Firefox 反检测备选引擎实现：
 
 ## 7. 引擎限流
 
-每个引擎独立限流，不共享同一个全局 semaphore。
+三个浏览器引擎共享同一个全局 semaphore，避免同时切换多种引擎时叠加并发页面数把主机打满。
 
 环境变量：
 
 ```env
-WEB_CLOAKBROWSER_MAX_PAGES=10
-WEB_PATCHRIGHT_MAX_PAGES=4
-WEB_CAMOUFOX_MAX_PAGES=2
+WEB_MAX_PAGES=4
 WEB_DEFAULT_TIMEOUT_MS=60000
 WEB_DEFAULT_WAIT_AFTER_MS=5000
 ```
 
 限流策略：
 
-- 请求进入 `/fetch` 后，根据 `engine` 获取对应 `BoundedSemaphore`。
+- 请求进入 `/fetch` 后，所有 `engine` 都争用同一个 `BoundedSemaphore`。
 - 获取 semaphore 后才创建 page/context。
 - 超过并发上限时请求等待，而不是直接拒绝。
 - 后续如需要防止堆积，可增加 `WEB_ENGINE_ACQUIRE_TIMEOUT_MS`，超时返回 `429`。
@@ -272,9 +270,7 @@ web:
   restart: unless-stopped
   environment:
     TZ: Asia/Shanghai
-    WEB_CLOAKBROWSER_MAX_PAGES: 10
-    WEB_PATCHRIGHT_MAX_PAGES: 4
-    WEB_CAMOUFOX_MAX_PAGES: 2
+    WEB_MAX_PAGES: 4
     WEB_RELOAD: "false"
     WEB_RUNTIME_DIR: /runtime
     CLOAKBROWSER_CACHE_DIR: /runtime/cloakbrowser/cache
@@ -298,7 +294,7 @@ volumes:
   - web_runtime_data:/runtime
 ```
 
-`run.py` 统一封装 Uvicorn 启动参数：固定监听 `0.0.0.0:8010`，固定使用 `asyncio` loop；开发 Compose 通过 `WEB_RELOAD=true` 开启 `/app` 热重载，生产 Compose 默认关闭热重载。
+`run.py` 统一封装 Uvicorn 启动参数：固定监听 `0.0.0.0:8010`；开发 Compose 通过 `WEB_RELOAD=true` 开启 `/app` 热重载，生产 Compose 默认关闭热重载。
 
 `web_runtime_data` 是唯一持久化卷，浏览器安装文件和运行 cache 都归到该卷：
 
@@ -307,8 +303,6 @@ volumes:
 - CloakBrowser cache：`/runtime/cloakbrowser/cache`
 
 Patchright Chromium、Camoufox 浏览器和 CloakBrowser Chromium 在镜像构建阶段下载到 `/runtime`。Docker 首次把空的 `web_runtime_data` 命名卷挂载到 `/runtime` 时，会自动把镜像目录内已有内容复制进卷；后续重建容器会复用同一个卷，避免反复下载浏览器安装文件。
-
-`run.py` 显式使用 `loop="asyncio"`，避免 `uvicorn[standard]` 默认启用 `uvloop` 时影响 CloakBrowser 子进程管道。
 
 如果 `web_runtime_data` 已经在旧版本中创建且内容为空，Docker 不会再次从新镜像回填；需要删除该卷或手动重新创建后再启动 `web` 服务。
 
@@ -346,7 +340,7 @@ WEB_FETCH_DEFAULT_ENGINE=cloakbrowser
 - URL normalize：协议补全、非法协议、缺 hostname。
 - selector normalize：空值、重复参数、空白过滤。
 - markdown regex：多规则顺序清理、非法正则返回错误。
-- engine limiter：不同 engine 使用不同 semaphore。
+- engine limiter：不同 engine 共享同一个 semaphore。
 - CloakBrowser 迁移逻辑：context 复用、page 自动关闭、shutdown 关闭 active pages。
 
 集成测试：
@@ -383,7 +377,7 @@ curl -X POST 'http://localhost:8010/fetch' \
 
 - 新增 Patchright 引擎。
 - 新增 Camoufox 引擎。
-- 每个引擎独立限流。
+- 三个引擎共享全局限流。
 - 对静态页面、动态页面和 selector 提取场景做手工验证。
 
 ### 阶段三：主后端切换

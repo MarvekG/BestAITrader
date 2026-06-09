@@ -16,15 +16,15 @@ from app.services.renderer import (
 class CamoufoxEngine:
     """使用 Camoufox 渲染网页的引擎。"""
 
-    def __init__(self, max_pages: int, headless: bool = True) -> None:
+    def __init__(self, limiter: EngineLimiter, headless: bool = True) -> None:
         """
         初始化 Camoufox 引擎。
 
         Args:
-            max_pages: 最大并发页面数。
+            limiter: 共享页面并发限流器。
             headless: 是否使用 headless 模式。
         """
-        self._limiter = EngineLimiter(max_pages)
+        self._limiter = limiter
         self._headless = headless
 
     async def render(

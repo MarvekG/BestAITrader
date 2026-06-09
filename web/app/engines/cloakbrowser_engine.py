@@ -18,16 +18,16 @@ from app.services.renderer import (
 class CloakBrowserEngine:
     """使用 CloakBrowser 渲染网页的引擎。"""
 
-    def __init__(self, max_pages: int) -> None:
+    def __init__(self, limiter: EngineLimiter) -> None:
         """
         初始化 CloakBrowser 引擎。
 
         Args:
-            max_pages: 最大并发页面数。
+            limiter: 共享页面并发限流器。
         """
         self._browser_context: Any | None = None
         self._browser_context_lock = asyncio.Lock()
-        self._limiter = EngineLimiter(max_pages)
+        self._limiter = limiter
         self._active_pages: set[Any] = set()
         self._browser_context_closing_reason: str | None = None
 
