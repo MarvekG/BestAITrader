@@ -213,6 +213,7 @@ Camoufox 作为 Firefox 反检测备选引擎实现：
 
 ```env
 WEB_MAX_PAGES=4
+WEB_ENGINE_ACQUIRE_TIMEOUT_MS=30000
 WEB_DEFAULT_TIMEOUT_MS=60000
 WEB_DEFAULT_WAIT_AFTER_MS=5000
 ```
@@ -221,8 +222,8 @@ WEB_DEFAULT_WAIT_AFTER_MS=5000
 
 - 请求进入 `/fetch` 后，所有 `engine` 都争用同一个 `BoundedSemaphore`。
 - 获取 semaphore 后才创建 page/context。
-- 超过并发上限时请求等待，而不是直接拒绝。
-- 后续如需要防止堆积，可增加 `WEB_ENGINE_ACQUIRE_TIMEOUT_MS`，超时返回 `429`。
+- 超过并发上限时请求最多等待 `WEB_ENGINE_ACQUIRE_TIMEOUT_MS`。
+- 等待超时后不再创建 page/context，`/fetch` 返回 `success=false` 和限流超时错误。
 
 ## 8. 内容转换与清理
 
@@ -271,6 +272,7 @@ web:
   environment:
     TZ: Asia/Shanghai
     WEB_MAX_PAGES: 4
+    WEB_ENGINE_ACQUIRE_TIMEOUT_MS: 30000
     WEB_RELOAD: "false"
     WEB_RUNTIME_DIR: /runtime
     CLOAKBROWSER_CACHE_DIR: /runtime/cloakbrowser/cache

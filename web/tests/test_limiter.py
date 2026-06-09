@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from app.services.limiter import EngineLimiter
+from app.services.limiter import EngineLimiter, EngineLimiterTimeoutError
 
 
 @pytest.mark.asyncio
@@ -29,3 +29,13 @@ async def test_engine_limiter_waits_when_limit_is_reached() -> None:
     release.set()
     await asyncio.wait_for(second_started.wait(), timeout=1)
     await asyncio.gather(first_task, second_task)
+
+
+@pytest.mark.asyncio
+async def test_engine_limiter_raises_when_wait_times_out() -> None:
+    limiter = EngineLimiter(max_pages=1, acquire_timeout_ms=10)
+
+    async with limiter.acquire():
+        with pytest.raises(EngineLimiterTimeoutError):
+            async with limiter.acquire():
+                pass

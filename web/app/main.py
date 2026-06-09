@@ -14,7 +14,7 @@ from app.engines.cloakbrowser_engine import CloakBrowserEngine
 from app.engines.patchright_engine import PatchrightEngine
 from app.schemas import EngineType, FetchRequest, FetchResponse, ReturnType
 from app.services.cleaner import clean_markdown, compile_markdown_patterns, normalize_fetch_url
-from app.services.limiter import EngineLimiter
+from app.services.limiter import EngineLimiter, EngineLimiterTimeoutError
 from app.services.renderer import convert_html_to_markdown
 
 logger = logging.getLogger(__name__)
@@ -26,7 +26,7 @@ class EngineRegistry:
     def __init__(self) -> None:
         """初始化引擎注册表。"""
         settings = get_settings()
-        limiter = EngineLimiter(settings.WEB_MAX_PAGES)
+        limiter = EngineLimiter(settings.WEB_MAX_PAGES, settings.WEB_ENGINE_ACQUIRE_TIMEOUT_MS)
         self._engines: dict[EngineType, BrowserEngine] = {
             EngineType.CLOAKBROWSER: CloakBrowserEngine(limiter),
             EngineType.PATCHRIGHT: PatchrightEngine(
@@ -148,6 +148,8 @@ async def fetch_page(request: FetchRequest) -> FetchResponse:
             timeout_ms=timeout_ms,
             wait_after_ms=wait_after_ms,
         )
+    except EngineLimiterTimeoutError as exc:
+        return _build_error_response(request, normalized_url, f"{type(exc).__name__}: {exc}")
     except Exception as exc:
         logger.exception(
             "web fetch render failed",

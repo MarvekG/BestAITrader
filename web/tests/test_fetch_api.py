@@ -6,6 +6,7 @@ from app.engines.patchright_engine import PatchrightEngine
 from app.engines.base import RenderedPage
 from app.main import app, engine_registry
 from app.schemas import EngineType
+from app.services.limiter import EngineLimiterTimeoutError
 
 
 class FakeEngine:
@@ -48,6 +49,37 @@ class FakeEngine:
             html="<main><h1>Example</h1><p>正文</p><p>广告内容结束</p></main>",
             selected_element_count=len(selectors) if selectors else None,
         )
+
+    async def close(self) -> None:
+        """关闭测试引擎。"""
+
+
+class TimeoutEngine:
+    """测试用限流超时引擎。"""
+
+    async def render(
+        self,
+        url: str,
+        selectors: list[str],
+        timeout_ms: int,
+        wait_after_ms: int,
+    ) -> RenderedPage:
+        """
+        模拟等待引擎并发额度超时。
+
+        Args:
+            url: 已规范化 URL。
+            selectors: CSS selector 列表。
+            timeout_ms: 页面导航超时时间。
+            wait_after_ms: 导航后等待时间。
+
+        Returns:
+            不会返回。
+
+        Raises:
+            EngineLimiterTimeoutError: 始终抛出限流等待超时。
+        """
+        raise EngineLimiterTimeoutError("engine concurrency slot wait timed out after 1ms")
 
     async def close(self) -> None:
         """关闭测试引擎。"""
@@ -116,6 +148,31 @@ def test_fetch_returns_html() -> None:
     assert payload["success"] is True
     assert payload["content_source"] == "rendered_dom_html"
     assert payload["content"] == "<main><h1>Example</h1><p>正文</p><p>广告内容结束</p></main>"
+
+
+def test_fetch_returns_failure_when_limiter_times_out() -> None:
+    timeout_engine = TimeoutEngine()
+    original_engine = engine_registry._engines[EngineType.CAMOUFOX]
+    engine_registry._engines[EngineType.CAMOUFOX] = timeout_engine
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/fetch",
+                json={
+                    "url": "https://example.com/page",
+                    "engine": "camoufox",
+                    "return_type": "markdown",
+                    "wait_after_ms": 0,
+                },
+            )
+    finally:
+        engine_registry._engines[EngineType.CAMOUFOX] = original_engine
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["success"] is False
+    assert "EngineLimiterTimeoutError" in payload["error"]
+    assert "timed out" in payload["error"]
 
 
 def test_fetch_rejects_invalid_regex() -> None:

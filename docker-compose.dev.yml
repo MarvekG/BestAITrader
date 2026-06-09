@@ -155,6 +155,7 @@ services:
     environment:
       TZ: Asia/Shanghai
       WEB_MAX_PAGES: 4
+      WEB_ENGINE_ACQUIRE_TIMEOUT_MS: 30000
       WEB_RELOAD: "true"
       WEB_RUNTIME_DIR: /runtime
       CLOAKBROWSER_CACHE_DIR: /runtime/cloakbrowser/cache
