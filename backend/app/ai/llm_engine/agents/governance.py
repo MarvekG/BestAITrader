@@ -4,7 +4,10 @@ from app.ai.llm_engine.agents.base import BaseAgent
 from app.ai.llm_engine.models import PMDecision
 from app.ai.llm_engine.prompts import templates
 from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER
-from app.ai.agentic.tools import execute_trading_order as execute_trading_order_core
+from app.ai.agentic.tools import (
+    execute_trading_order as execute_trading_order_core,
+    get_pm_order_type_guidance,
+)
 
 
 class PortfolioManagerAgent(BaseAgent):
@@ -71,6 +74,7 @@ class PortfolioManagerAgent(BaseAgent):
                 order_id=order_id,
             )
 
+        tools.append(get_pm_order_type_guidance)
         tools.append(execute_trading_order)
         return tools
 

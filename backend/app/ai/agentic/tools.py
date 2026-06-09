@@ -87,6 +87,75 @@ def _build_trade_gate_rejection(reason: str, message: str, details: Dict[str, An
     )
 
 
+def _resolve_latest_stock_price(stock_code: str) -> Dict[str, Any]:
+    """查询股票最新价，供 PM 下单前确定限价基准。
+
+    Args:
+        stock_code: 股票代码。
+
+    Returns:
+        包含最新价格、行情时间和查询成功状态的字典。
+    """
+    from app.data.storage import data_storage_service
+
+    try:
+        market_data = data_storage_service.get_stock_realtime_market(stock_code)
+    except Exception as exc:
+        logger.exception("Failed to query latest stock price", extra={"stock_code": stock_code, "error": str(exc)})
+        return {"success": False, "latest_price": None, "market_time": None}
+
+    latest_price = market_data.get("latest_price") if market_data else None
+    try:
+        price = float(latest_price) if latest_price not in (None, "") else None
+    except (TypeError, ValueError):
+        price = None
+    if price is None or price <= 0:
+        return {"success": False, "latest_price": None, "market_time": market_data.get("update_time") if market_data else None}
+    return {"success": True, "latest_price": price, "market_time": market_data.get("update_time") if market_data else None}
+
+
+@tool
+async def get_pm_order_type_guidance(stock_code: str) -> Dict[str, Any]:
+    """查询 PM 当前应使用市价单还是限价单。
+
+    Args:
+        stock_code: 本轮准备交易的股票代码。
+
+    Returns:
+        当前是否交易时间、建议订单类型，以及非交易时间可直接使用的限价价格。
+    """
+    from app.data.market_utils import is_trading_time
+
+    stock_code = str(stock_code or "").strip()
+    if not stock_code:
+        return {
+            "success": False,
+            "reason": "missing_stock_code",
+            "message": "stock_code is required to determine order type guidance.",
+        }
+
+    trading_time = bool(is_trading_time())
+    price_result = _resolve_latest_stock_price(stock_code)
+    latest_price = price_result.get("latest_price")
+    recommended_order_type = "market" if trading_time else "limit"
+    return {
+        "success": bool(trading_time or price_result["success"]),
+        "stock_code": stock_code,
+        "is_trading_time": trading_time,
+        "market_order_allowed": trading_time,
+        "recommended_order_type": recommended_order_type,
+        "latest_price": latest_price,
+        "limit_price": latest_price if not trading_time else None,
+        "market_time": price_result.get("market_time"),
+        "message": (
+            "Trading time: use a market order for immediate execution."
+            if trading_time else
+            "Not trading time: use a limit order with limit_price set to latest_price."
+        ),
+        "reason": None if trading_time or price_result["success"] else "latest_price_unavailable",
+    }
+
+
 def _evaluate_pm_trade_gate(
     *,
     action: str,
