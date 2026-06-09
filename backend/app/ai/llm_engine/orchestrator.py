@@ -540,6 +540,20 @@ def _build_pm_history_item(debate_msg: Any, session_obj: Any, execution_summary:
     }
 
 
+def _llm_order_id(order_id: Any) -> str | None:
+    """生成给 LLM 使用的订单 ID。
+
+    Args:
+        order_id: 订单 UUID 或可转字符串的订单 ID。
+
+    Returns:
+        供交易工具识别的订单 ID；缺失时返回 None。
+    """
+    if not order_id:
+        return None
+    return str(order_id).replace("-", "")[:8]
+
+
 def _build_order_history_item(order: Any, pm_by_session: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     """构建同股历史订单摘要。
 
@@ -553,7 +567,7 @@ def _build_order_history_item(order: Any, pm_by_session: Dict[str, Dict[str, Any
     session_id = str(order.session_id) if order.session_id else None
     pm_snapshot = pm_by_session.get(session_id or "", {})
     return {
-        "order_id": str(order.order_id),
+        "order_id": _llm_order_id(order.order_id),
         "session_id": session_id,
         "created_at": safe_isoformat(order.created_at),
         "filled_at": safe_isoformat(order.filled_at),
@@ -573,6 +587,30 @@ def _build_order_history_item(order: Any, pm_by_session: Dict[str, Dict[str, Any
     }
 
 
+def _build_pending_order_item(order: Any) -> Dict[str, Any]:
+    """构建 PM 当前待成交订单摘要。
+
+    Args:
+        order: 订单数据库记录。
+
+    Returns:
+        包含订单 ID 和委托信息的订单摘要。
+    """
+    return {
+        "order_id": _llm_order_id(order.order_id),
+        "session_id": str(order.session_id) if order.session_id else None,
+        "stock_code": order.stock_code,
+        "action": order.action,
+        "order_type": order.order_type,
+        "status": order.status,
+        "price": safe_float(order.price),
+        "shares": int(order.shares or 0),
+        "filled_shares": int(order.filled_shares or 0),
+        "created_at": safe_isoformat(order.created_at),
+        "source": order.source,
+    }
+
+
 def _build_trade_history_item(trade: Any, order_by_id: Dict[str, Any]) -> Dict[str, Any]:
     """构建同股历史成交摘要。
 
@@ -583,11 +621,11 @@ def _build_trade_history_item(trade: Any, order_by_id: Dict[str, Any]) -> Dict[s
     Returns:
         包含实际成交方向、成交数量、成交价、费用和订单盈亏的摘要。
     """
-    order_id = str(trade.order_id) if trade.order_id else None
-    order = order_by_id.get(order_id or "")
+    raw_order_id = str(trade.order_id) if trade.order_id else None
+    order = order_by_id.get(raw_order_id or "")
     return {
         "trade_id": str(trade.trade_id),
-        "order_id": order_id,
+        "order_id": _llm_order_id(trade.order_id),
         "session_id": str(trade.session_id) if trade.session_id else None,
         "trade_time": safe_isoformat(trade.trade_time),
         "action": trade.action,
@@ -780,6 +818,44 @@ def _get_same_stock_history(
         except Exception:
             logger.exception("Failed to fetch same-stock history")
             return {}
+
+
+def _get_pending_orders_for_pm(session_id: Optional[UUID], limit: int = 20) -> list[dict[str, Any]]:
+    """获取当前用户账户下待成交订单，供 PM 撤单或改挂参考。
+
+    Args:
+        session_id: 当前投研会话 ID。
+        limit: 最多返回的待成交订单数量。
+
+    Returns:
+        待成交订单摘要列表，包含给 LLM 使用的订单 ID。
+    """
+    if not session_id:
+        return []
+
+    from app.core.database import SessionLocal
+    from app.models.account import Account
+    from app.models.order import Order
+    from app.models.session import Session as SessionModel
+
+    with SessionLocal() as db:
+        try:
+            current_session = db.query(SessionModel).filter(SessionModel.session_id == session_id).first()
+            if not current_session:
+                return []
+
+            account = db.query(Account).filter(Account.user_id == current_session.user_id).first()
+            if not account:
+                return []
+
+            orders = db.query(Order).filter(
+                Order.account_id == account.account_id,
+                Order.status == "pending",
+            ).order_by(Order.created_at.desc(), Order.order_id.desc()).limit(limit).all()
+            return [_build_pending_order_item(order) for order in orders]
+        except Exception:
+            logger.exception("Failed to fetch PM pending orders")
+            return []
 
 
 def _get_previous_pm_decision(
@@ -1158,6 +1234,7 @@ async def portfolio_management(state: AnalystState) -> Dict[str, Any]:
     session_id = state.get("session_id")
     previous_pm_decision = _get_previous_pm_decision(session_id, state["stock_code"])
     same_stock_history = _get_same_stock_history(session_id, state["stock_code"])
+    pending_orders = _get_pending_orders_for_pm(session_id)
     runtime_context = _build_runtime_context(
         state,
         {
@@ -1166,6 +1243,7 @@ async def portfolio_management(state: AnalystState) -> Dict[str, Any]:
             "policy_report": state.get("policy_report", ""),
             "previous_pm_decision": previous_pm_decision,
             "same_stock_history": same_stock_history,
+            "pending_orders": pending_orders,
             "vertical_views": state.get("vertical_reports", {}),
             "strategic_debate": state.get("strategic_reports", {}),
             "fact_arbitration_report": state.get("fact_arbitration_report", ""),

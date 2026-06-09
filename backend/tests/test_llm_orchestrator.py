@@ -11,7 +11,7 @@ from app.ai.llm_engine.orchestrator import (
     strategic_round_1, strategic_round_2_1, strategic_round_2_rebuttal,
     fact_arbitration, portfolio_management, persist_agent_report,
     create_analyst_workflow, _get_previous_pm_decision, _get_same_stock_history,
-    _build_pm_review_focus, _build_portfolio_field_descriptions
+    _get_pending_orders_for_pm, _build_pm_review_focus, _build_portfolio_field_descriptions
 )
 from app.ai.llm_engine.models import PMDecision
 from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER, AGENT_ROLE_PORTFOLIO_MANAGER
@@ -659,6 +659,10 @@ async def test_portfolio_management_passes_expected_top_level_keys(initial_state
          patch(
              "app.ai.llm_engine.orchestrator._get_same_stock_history",
              return_value={"recent_execution_summary": {"recent_realized_pnl": -100.0}},
+         ), \
+         patch(
+             "app.ai.llm_engine.orchestrator._get_pending_orders_for_pm",
+             return_value=[],
          ):
         mock_agent = MockPM.return_value
         mock_agent.last_prompt = "test prompt"
@@ -675,12 +679,14 @@ async def test_portfolio_management_passes_expected_top_level_keys(initial_state
             "policy_report",
             "previous_pm_decision",
             "same_stock_history",
+            "pending_orders",
             "vertical_views",
             "strategic_debate",
             "fact_arbitration_report",
         }
         assert pm_runtime_context["previous_pm_decision"]["decision"] == "buy"
         assert pm_runtime_context["same_stock_history"]["recent_execution_summary"]["recent_realized_pnl"] == -100.0
+        assert pm_runtime_context["pending_orders"] == []
         assert pm_runtime_context["fact_arbitration_report"] == "Fact arbitration"
 
 
@@ -824,7 +830,9 @@ def test_get_same_stock_history_includes_trades_pnl_and_stop_loss(db_session):
     assert summary["new_edge_review_required"] is True
     assert summary["latest_exit_order"]["action"] == "sell"
     assert summary["latest_exit_order"]["pm_stop_loss"] == 29.5
+    assert result["recent_orders"][0]["order_id"] == str(sell_order.order_id).replace("-", "")[:8]
     assert result["recent_orders"][0]["realized_pnl"] == -4916.02
+    assert result["recent_trades"][0]["order_id"] == str(sell_order.order_id).replace("-", "")[:8]
     assert result["recent_trades"][0]["order_realized_pnl"] == -4916.02
     assert result["recent_pm_decisions"][0]["stop_loss"] == 29.5
     assert result["recent_pm_decisions"][0]["execution_summary"]["realized_pnl"] == -4916.02
@@ -1085,6 +1093,69 @@ def test_get_previous_pm_decision_orders_execution_summary_by_order_time(db_sess
 
     assert result["execution_summary"]["first_order_time"] == "2026-01-01T15:01:00"
     assert result["execution_summary"]["latest_order_time"] == "2026-01-01T15:03:00"
+
+
+def test_get_pending_orders_for_pm_returns_llm_order_ids(db_session):
+    user = User(
+        username="pending_order_context_user",
+        email="pending_order_context_user@example.com",
+        password_hash="hashed",
+    )
+    db_session.add(user)
+    db_session.flush()
+    account = Account(
+        user_id=user.id,
+        total_assets=Decimal("100000.0000"),
+        available_cash=Decimal("90000.0000"),
+        frozen_cash=Decimal("10000.0000"),
+        market_value=Decimal("0.0000"),
+        total_profit_loss=Decimal("0.0000"),
+    )
+    current_session = DebateSession(
+        user_id=user.id,
+        stock_code="000001.SZ",
+        trading_frequency="swing",
+        trading_strategy="momentum",
+        status="active",
+    )
+    db_session.add_all([account, current_session])
+    db_session.flush()
+    order_id = uuid4()
+    db_session.add(
+        Order(
+            order_id=order_id,
+            session_id=current_session.session_id,
+            account_id=account.account_id,
+            stock_code="000001.SZ",
+            action="buy",
+            order_type="limit",
+            price=Decimal("10.5000"),
+            shares=100,
+            filled_shares=0,
+            status="pending",
+            created_at=datetime(2026, 1, 1, 15, 1),
+        )
+    )
+    db_session.commit()
+
+    with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
+        result = _get_pending_orders_for_pm(current_session.session_id)
+
+    assert result == [
+        {
+            "order_id": str(order_id).replace("-", "")[:8],
+            "session_id": str(current_session.session_id),
+            "stock_code": "000001.SZ",
+            "action": "buy",
+            "order_type": "limit",
+            "status": "pending",
+            "price": 10.5,
+            "shares": 100,
+            "filled_shares": 0,
+            "created_at": "2026-01-01T15:01:00",
+            "source": None,
+        }
+    ]
 
 
 def test_get_previous_pm_decision_marks_missing_execution(db_session):

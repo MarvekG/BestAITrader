@@ -21,11 +21,15 @@ class PortfolioManagerAgent(BaseAgent):
         # 定义一个闭包工具，LLM 只需看到必要的三个参数
         @tool
         async def execute_trading_order(
-            stock_code: str,
-            action: str,
-            target_position: float,
-            stop_loss: float,
-            take_profit: float,
+            stock_code: str = "",
+            action: str = "buy",
+            target_position: float = 0.0,
+            stop_loss: float = 0.0,
+            take_profit: float = 0.0,
+            operation: str = "place",
+            order_type: str = "market",
+            limit_price: float | None = None,
+            order_id: str | None = None,
         ):
             """
             执行股票交易下单工具 (Execute stock trading order).
@@ -41,6 +45,10 @@ class PortfolioManagerAgent(BaseAgent):
               - target_position = 0 即为全额清仓。
             - stop_loss: 最终止损价，必填。系统会在成交后直接写入持仓。
             - take_profit: 最终止盈价或目标价，必填。买入时必须高于当前价。
+            - operation: place 表示下单，cancel 表示撤销待成交订单。
+            - order_type: market 表示市价单，limit 表示限价挂单。
+            - limit_price: 限价挂单委托价，限价单必填。
+            - order_id: 撤单目标订单 ID，撤单必填。
 
             注意:
             1. 自动执行 A 股交易规则：买入必须是 100 的整数倍；卖出减仓时尽量取 100 倍数。
@@ -57,6 +65,10 @@ class PortfolioManagerAgent(BaseAgent):
                 session_id=self.session_id,
                 stop_loss=stop_loss,
                 take_profit=take_profit,
+                operation=operation,
+                order_type=order_type,
+                limit_price=limit_price,
+                order_id=order_id,
             )
 
         tools.append(execute_trading_order)

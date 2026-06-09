@@ -34,7 +34,9 @@ import { PortfolioOverviewTab } from '../features/trading/PortfolioOverviewTab';
 
 interface OrderFormValues {
     action: 'buy' | 'sell';
+    order_type: 'market' | 'limit';
     stock_code: string;
+    price?: number;
     shares: number;
     stop_loss_pct?: number;
 }
@@ -68,6 +70,7 @@ export const SimulatedTradingPage: React.FC = () => {
     const [submittingOrder, setSubmittingOrder] = useState(false);
     const [savingRiskControl, setSavingRiskControl] = useState(false);
     const orderAction = Form.useWatch('action', orderForm);
+    const orderType = Form.useWatch('order_type', orderForm);
     const riskPolicyOptions = [
         { value: 'block', label: t('trading_center.risk_control.policies.block') },
         { value: 'off', label: t('trading_center.risk_control.policies.off') },
@@ -122,7 +125,9 @@ export const SimulatedTradingPage: React.FC = () => {
         if (stockCode) {
             orderForm.setFieldsValue({
                 action: 'buy',
+                order_type: 'market',
                 stock_code: stockCode,
+                price: undefined,
                 shares: 100,
                 stop_loss_pct: undefined,
             });
@@ -147,34 +152,38 @@ export const SimulatedTradingPage: React.FC = () => {
     });
 
     // Order Modal Handler
-    const resolveStopLossPrice = async (stockCode: string, stopLossPct?: number) => {
+    const resolveStopLossPrice = async (values: OrderFormValues) => {
+        const stopLossPct = values.stop_loss_pct;
         if (!stopLossPct || stopLossPct <= 0) {
             return undefined;
         }
 
-        const response = await marketApi.getRealtimeMarket({ stock_code: stockCode, limit: 1 });
-        const latestPrice = Number(response.items?.[0]?.current_price);
-
-        if (!Number.isFinite(latestPrice) || latestPrice <= 0) {
-            throw new Error('无法获取最新价，不能计算止损价');
+        let basePrice = Number(values.price);
+        if (values.order_type !== 'limit') {
+            const response = await marketApi.getRealtimeMarket({ stock_code: values.stock_code, limit: 1 });
+            basePrice = Number(response.items?.[0]?.current_price);
         }
 
-        return Number((latestPrice * (1 - stopLossPct / 100)).toFixed(2));
+        if (!Number.isFinite(basePrice) || basePrice <= 0) {
+            throw new Error('无法获取有效价格，不能计算止损价');
+        }
+
+        return Number((basePrice * (1 - stopLossPct / 100)).toFixed(2));
     };
 
     const handlePlaceOrder = async (values: OrderFormValues) => {
         setSubmittingOrder(true);
         try {
             const stopLoss = values.action === 'buy'
-                ? await resolveStopLossPrice(values.stock_code, values.stop_loss_pct)
+                ? await resolveStopLossPrice(values)
                 : undefined;
             const orderPayload: OrderRequest = {
                 // session_id is deliberately omitted for global manual orders
                 stock_code: values.stock_code,
                 stock_name: '', // Optional/Omitted: Let backend fill or use symbol
                 action: values.action,
-                order_type: 'market',
-                price: 0, // Market order doesn't need price
+                order_type: values.order_type,
+                price: values.order_type === 'limit' ? Number(values.price) : 0,
                 shares: values.shares,
                 stop_loss: stopLoss,
             };
@@ -200,6 +209,20 @@ export const SimulatedTradingPage: React.FC = () => {
         setIsOrderModalVisible(false);
         orderForm.resetFields();
         loadData(false);
+    };
+
+    const handleCancelOrder = async (record: OrderHistory) => {
+        try {
+            const result = await tradingApi.cancelOrder(record.id);
+            if (result.success) {
+                message.success('已撤单');
+                loadData(false);
+                return;
+            }
+            message.error(result.message || '撤单失败');
+        } catch (error) {
+            message.error(`撤单失败: ${getApiErrorMessage(error, '未知错误')}`);
+        }
     };
 
     const translateRiskControlParam = (value: string) => {
@@ -299,7 +322,9 @@ export const SimulatedTradingPage: React.FC = () => {
         );
         orderForm.setFieldsValue({
             action: 'sell',
+            order_type: 'market',
             stock_code: record.stock_code,
+            price: undefined,
             shares: executableShares,
             stop_loss_pct: undefined,
         });
@@ -309,7 +334,9 @@ export const SimulatedTradingPage: React.FC = () => {
     const handleFastBuy = (record: Position) => {
         orderForm.setFieldsValue({
             action: 'buy',
+            order_type: 'market',
             stock_code: record.stock_code,
+            price: undefined,
             shares: 100,
             stop_loss_pct: undefined,
         });
@@ -461,12 +488,14 @@ export const SimulatedTradingPage: React.FC = () => {
         },
         {
             title: t('trading_center.orders.price'),
-            dataIndex: 'avg_fill_price',
-            key: 'avg_fill_price',
-            render: (val: number | null) => {
-                const num = Number(val);
-                return !isNaN(num) && num !== 0 ? num.toFixed(2) : '-';
-            }
+            key: 'price',
+            render: (_: unknown, record: OrderHistory) => {
+                const orderPrice = Number(record.price);
+                const fillPrice = Number(record.avg_fill_price);
+                const orderText = !isNaN(orderPrice) && orderPrice > 0 ? orderPrice.toFixed(2) : '-';
+                const fillText = !isNaN(fillPrice) && fillPrice > 0 ? fillPrice.toFixed(2) : '-';
+                return `${orderText} / ${fillText}`;
+            },
         },
         {
             title: t('trading_center.orders.quantity'),
@@ -526,6 +555,15 @@ export const SimulatedTradingPage: React.FC = () => {
                 return remark || '-';
             }
         },
+        {
+            title: t('trading_center.positions.actions'),
+            key: 'actions',
+            render: (_: unknown, record: OrderHistory) => (
+                record.status === 'pending'
+                    ? <a style={{ color: '#cf1322' }} onClick={() => handleCancelOrder(record)}>撤单</a>
+                    : '-'
+            ),
+        },
     ];
 
     return (
@@ -544,7 +582,7 @@ export const SimulatedTradingPage: React.FC = () => {
                     </Button>
                     <Button type="primary" icon={<PlusOutlined />} onClick={() => {
                         orderForm.resetFields();
-                        orderForm.setFieldsValue({ action: 'buy', shares: 100, stop_loss_pct: undefined });
+                        orderForm.setFieldsValue({ action: 'buy', order_type: 'market', price: undefined, shares: 100, stop_loss_pct: undefined });
                         setIsOrderModalVisible(true);
                     }}>
                         {t('trading_center.place_order')}
@@ -799,19 +837,51 @@ export const SimulatedTradingPage: React.FC = () => {
                         if (changedValues.action === 'sell') {
                             orderForm.setFieldValue('stop_loss_pct', undefined);
                         }
+                        if (changedValues.order_type === 'market') {
+                            orderForm.setFieldValue('price', undefined);
+                        }
                     }}
                     style={{ marginTop: 24 }}
                 >
-                    <Form.Item label={t('trading_center.modals.place_order.direction')} name="action" rules={[{ required: true }]}>
+                    <Form.Item
+                        label={t('trading_center.modals.place_order.direction')}
+                        name="action"
+                        rules={[{ required: true }]}
+                    >
                         <Radio.Group buttonStyle="solid">
                             <Radio.Button value="buy" style={{ color: '#1890ff', borderColor: '#1890ff' }}>{t('trading_center.modals.place_order.buy')}</Radio.Button>
                             <Radio.Button value="sell" style={{ color: '#cf1322', borderColor: '#cf1322' }}>{t('trading_center.modals.place_order.sell')}</Radio.Button>
                         </Radio.Group>
                     </Form.Item>
 
-                    <Form.Item label={t('trading_center.modals.place_order.symbol')} name="stock_code" rules={[{ required: true }]}>
+                    <Form.Item
+                        label="订单类型"
+                        name="order_type"
+                        rules={[{ required: true }]}
+                    >
+                        <Radio.Group buttonStyle="solid">
+                            <Radio.Button value="market">市价</Radio.Button>
+                            <Radio.Button value="limit">限价</Radio.Button>
+                        </Radio.Group>
+                    </Form.Item>
+
+                    <Form.Item
+                        label={t('trading_center.modals.place_order.symbol')}
+                        name="stock_code"
+                        rules={[{ required: true }]}
+                    >
                         <Input placeholder={t('trading_center.modals.place_order.symbol_placeholder')} />
                     </Form.Item>
+
+                    {orderType === 'limit' && (
+                        <Form.Item
+                            label="限价"
+                            name="price"
+                            rules={[{ required: true, type: 'number', min: 0.01, message: '请输入有效限价' }]}
+                        >
+                            <InputNumber min={0.01} precision={2} step={0.01} style={{ width: '100%' }} />
+                        </Form.Item>
+                    )}
 
                     <Form.Item
                         label={t('trading_center.modals.place_order.quantity')}

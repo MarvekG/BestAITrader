@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 class OrderStatus(str, Enum):
     """订单状态枚举"""
     pending = "pending"
-    partial = "partial"
     filled = "filled"
     cancelled = "cancelled"
     rejected = "rejected"
