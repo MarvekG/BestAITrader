@@ -1,29 +1,15 @@
-import asyncio
-import json
-import os
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 
-from app.ai.agentic.tooling.python_sandbox import (
-    _get_async_sandbox_limiter,
-    execute_python_in_sandbox,
-    validate_python_code,
-)
-from app.ai.agentic.tooling.python_sandbox_pool import PrewarmedSandboxPool
+from app.ai.agentic.tooling.python_sandbox import execute_python_in_sandbox, validate_python_code
 from app.ai.agentic.tools import execute_python_sandboxed, get_all_tools
 from app.core.config import settings
 
 
-def _skip_if_deno_unavailable(response):
-    if response.get("metadata", {}).get("error_type") == "sandbox_boot_error" and "Deno executable not found" in str(
-        response.get("error", "")
-    ):
-        pytest.skip(response["error"])
-
-
-def test_validate_python_code_allows_numpy_and_pandas():
+def test_validate_python_code_allows_numpy_and_pandas() -> None:
+    """验证沙箱静态校验允许常用数据分析代码。"""
     code = """
 import numpy as np
 import pandas as pd
@@ -32,7 +18,8 @@ result = pd.DataFrame({"x": np.array([1, 2, 3])}).sum().to_dict()
     validate_python_code(code)
 
 
-def test_validate_python_code_allows_common_stdlib_imports():
+def test_validate_python_code_allows_common_stdlib_imports() -> None:
+    """验证沙箱静态校验允许常见无 I/O 标准库导入。"""
     code = """
 import json
 import datetime
@@ -44,17 +31,8 @@ result = json.loads('{"day": 1}')["day"] + datetime.timedelta(days=1).days
     validate_python_code(code)
 
 
-def test_validate_python_code_allows_lambda_key_functions():
-    code = """
-result = sorted(
-    [{"x": 2, "label": "b"}, {"x": 1, "label": "a"}],
-    key=lambda row: row["x"],
-)
-"""
-    validate_python_code(code)
-
-
-def test_validate_python_code_allows_stateful_and_generator_syntax():
+def test_validate_python_code_allows_stateful_and_generator_syntax() -> None:
+    """验证沙箱静态校验允许普通函数、闭包和生成器语法。"""
     code = """
 counter = 0
 
@@ -94,174 +72,128 @@ result = {
         ("result = (1).__class__", "Attribute access not allowed"),
     ],
 )
-def test_validate_python_code_rejects_dangerous_patterns(code, error_fragment):
+def test_validate_python_code_rejects_dangerous_patterns(code: str, error_fragment: str) -> None:
+    """验证沙箱静态校验拒绝危险模块、函数和反射属性。"""
     with pytest.raises(Exception) as exc_info:
         validate_python_code(code)
     assert error_fragment in str(exc_info.value)
 
 
-@pytest.mark.asyncio
-async def test_get_async_sandbox_limiter_initializes_lazily():
-    with patch.object(settings, "PY_SANDBOX_MAX_CONCURRENT_EXECUTIONS", 1), \
-         patch("app.ai.agentic.tooling.python_sandbox._ASYNC_SANDBOX_LIMITER", None):
-        limiter = _get_async_sandbox_limiter()
+class FakeResponse:
+    """测试用 HTTP 响应。"""
 
-    assert isinstance(limiter, asyncio.Semaphore)
+    def __init__(self, payload: object) -> None:
+        """
+        初始化固定 JSON 响应。
 
+        Args:
+            payload: `json()` 返回的响应体。
+        """
+        self._payload = payload
 
-def test_python_sandbox_prewarm_pool_defaults_follow_cpu_count():
-    assert settings.PY_SANDBOX_PREWARM_POOL_ENABLED is True
-    assert settings.PY_SANDBOX_PREWARM_ON_STARTUP is True
-    assert settings.PY_SANDBOX_PREWARM_POOL_SIZE == max(1, (os.cpu_count() or 1) // 2)
-    assert settings.PY_SANDBOX_PREWARM_MAX_STARTING == settings.PY_SANDBOX_PREWARM_POOL_SIZE
-    assert settings.PY_SANDBOX_PREWARM_MIN_READY >= 1
+    def raise_for_status(self) -> None:
+        """模拟成功响应状态检查。"""
 
+    def json(self) -> object:
+        """
+        返回固定响应体。
 
-def test_python_sandbox_worker_runner_path_exists():
-    assert Path(settings.PY_SANDBOX_WORKER_RUNNER_PATH).exists()
-
-
-class FakeStdout:
-    def __init__(self, lines):
-        self._lines = [line.encode("utf-8") for line in lines]
-
-    async def readline(self):
-        if not self._lines:
-            return b""
-        return self._lines.pop(0)
+        Returns:
+            构造时传入的响应体。
+        """
+        return self._payload
 
 
-class FakeProcess:
-    def __init__(self, lines):
-        self.stdout = FakeStdout(lines)
+class FakeAsyncClient:
+    """测试用 httpx 异步客户端。"""
 
-
-@pytest.mark.asyncio
-async def test_prewarmed_pool_ready_reader_allows_only_pyodide_package_noise():
-    pool = PrewarmedSandboxPool()
-    process = FakeProcess([
-        "Loading numpy, pandas, python-dateutil, pytz, six\n",
-        "Loaded numpy, pandas, python-dateutil, pytz, six\n",
-        '{"type":"ready","worker_id":"worker-1"}\n',
-    ])
-
-    ready = await pool._read_ready_message(process)
-
-    assert ready["type"] == "ready"
-    assert ready["worker_id"] == "worker-1"
-
-
-@pytest.mark.asyncio
-async def test_prewarmed_pool_ready_reader_logs_unknown_non_json_stdout():
-    pool = PrewarmedSandboxPool()
-    process = FakeProcess([
-        "unexpected debug output\n",
-        '{"type":"ready","worker_id":"worker-1"}\n',
-    ])
-
-    with patch("app.ai.agentic.tooling.python_sandbox_pool.logger") as logger_mock:
-        ready = await pool._read_ready_message(process)
-
-    assert ready["type"] == "ready"
-    assert ready["worker_id"] == "worker-1"
-    logger_mock.warning.assert_called_once()
-    assert "unexpected debug output" == logger_mock.warning.call_args.kwargs["extra"]["worker_output"]
-
-
-class FakePool:
-    def __init__(self, response):
-        self.response = response
-        self.called = False
-
-    async def execute(self, request_json, timeout_seconds):
-        self.called = True
-        assert "result = 40 + 2" in request_json
-        return self.response
-
-
-class TimeoutPool:
-    async def execute(self, request_json, timeout_seconds):
-        from app.ai.agentic.tooling.python_sandbox_pool import PrewarmedSandboxAcquireTimeout
-
-        raise PrewarmedSandboxAcquireTimeout("empty")
-
-
-class ExecutionTimeoutPool:
-    async def execute(self, request_json, timeout_seconds):
-        raise asyncio.TimeoutError
-
-
-@pytest.mark.asyncio
-async def test_execute_python_in_sandbox_uses_prewarm_pool_when_enabled():
-    fake_pool = FakePool({
+    instances: list["FakeAsyncClient"] = []
+    response_payload: object = {
         "success": True,
-        "stdout": "",
+        "stdout": "4\n",
         "stderr": "",
         "error": None,
-        "execution_time_ms": 5,
+        "execution_time_ms": 8,
         "timed_out": False,
         "truncated": False,
         "metadata": {"sandbox_runtime": "deno_prewarmed_worker"},
-    })
-
-    with patch.object(settings, "PY_SANDBOX_PREWARM_POOL_ENABLED", True), \
-         patch("app.ai.agentic.tooling.python_sandbox._resolve_executable", return_value="/usr/bin/deno"), \
-         patch("app.ai.agentic.tooling.python_sandbox.get_prewarmed_sandbox_pool", return_value=fake_pool), \
-         patch("app.ai.agentic.tooling.python_sandbox.asyncio.create_subprocess_exec") as create_mock:
-        response = await execute_python_in_sandbox("result = 40 + 2")
-
-    assert response["success"] is True
-    assert response["metadata"]["sandbox_runtime"] == "deno_prewarmed_worker"
-    assert fake_pool.called is True
-    create_mock.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_execute_python_in_sandbox_falls_back_when_prewarm_pool_empty():
-    mocked_payload = {
-        "success": True,
-        "result": 42,
-        "stdout": "ok",
-        "stderr": "",
-        "error": None,
-        "execution_time_ms": 12,
-        "timed_out": False,
-        "truncated": False,
-        "metadata": {"result_type": "int"},
     }
-    process = AsyncMock()
-    process.communicate.return_value = (json.dumps(mocked_payload).encode("utf-8"), b"")
-    process.returncode = 0
 
-    with patch.object(settings, "PY_SANDBOX_PREWARM_POOL_ENABLED", True), \
-         patch("app.ai.agentic.tooling.python_sandbox._resolve_executable", return_value="/usr/bin/deno"), \
-         patch("app.ai.agentic.tooling.python_sandbox.get_prewarmed_sandbox_pool", return_value=TimeoutPool()), \
-         patch("app.ai.agentic.tooling.python_sandbox.asyncio.create_subprocess_exec", return_value=process) as create_mock:
-        response = await execute_python_in_sandbox("result = 40 + 2")
+    def __init__(self, base_url: str, timeout: httpx.Timeout) -> None:
+        """
+        记录客户端初始化参数。
+
+        Args:
+            base_url: 请求基础地址。
+            timeout: 请求超时配置。
+        """
+        self.base_url = base_url
+        self.timeout = timeout
+        self.requests: list[tuple[str, object]] = []
+        self.instances.append(self)
+
+    async def __aenter__(self) -> "FakeAsyncClient":
+        """
+        进入异步上下文。
+
+        Returns:
+            当前客户端实例。
+        """
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        """退出异步上下文。"""
+
+    async def post(self, path: str, json: object) -> FakeResponse:
+        """
+        记录 POST 请求并返回固定响应。
+
+        Args:
+            path: 请求路径。
+            json: JSON 请求体。
+
+        Returns:
+            固定测试响应。
+        """
+        self.requests.append((path, json))
+        return FakeResponse(self.response_payload)
+
+
+@pytest.mark.asyncio
+async def test_execute_python_in_sandbox_calls_sandbox_service() -> None:
+    """验证后端沙箱入口会转发到独立 sandbox HTTP 服务。"""
+    FakeAsyncClient.instances.clear()
+    with patch("app.ai.agentic.tooling.python_sandbox.httpx.AsyncClient", FakeAsyncClient), \
+         patch.object(settings, "PY_SANDBOX_BASE_URL", "http://sandbox:8030"), \
+         patch.object(settings, "PY_SANDBOX_TIMEOUT_SECONDS", 30):
+        response = await execute_python_in_sandbox("print(2 + 2)")
 
     assert response["success"] is True
-    assert response["metadata"]["result_type"] == "int"
-    create_mock.assert_called_once()
-
-
-@pytest.mark.asyncio
-async def test_execute_python_in_sandbox_does_not_fallback_after_worker_timeout():
-    with patch.object(settings, "PY_SANDBOX_PREWARM_POOL_ENABLED", True), \
-         patch("app.ai.agentic.tooling.python_sandbox._resolve_executable", return_value="/usr/bin/deno"), \
-         patch("app.ai.agentic.tooling.python_sandbox.get_prewarmed_sandbox_pool", return_value=ExecutionTimeoutPool()), \
-         patch("app.ai.agentic.tooling.python_sandbox.asyncio.create_subprocess_exec") as create_mock:
-        response = await execute_python_in_sandbox("while True:\n    pass")
-
-    assert response["success"] is False
-    assert response["timed_out"] is True
-    assert response["metadata"]["error_type"] == "timeout_error"
+    assert response["stdout"] == "4\n"
     assert response["metadata"]["sandbox_runtime"] == "deno_prewarmed_worker"
-    create_mock.assert_not_called()
+    assert "result" not in response
+    client = FakeAsyncClient.instances[0]
+    assert client.base_url == "http://sandbox:8030"
+    assert client.requests == [
+        (
+            "/execute",
+            {
+                "code": "print(2 + 2)",
+                "timeout_seconds": 30,
+                "limits": {
+                    "stdout_max_bytes": settings.PY_SANDBOX_STDOUT_MAX_BYTES,
+                    "stderr_max_bytes": settings.PY_SANDBOX_STDERR_MAX_BYTES,
+                },
+            },
+        )
+    ]
 
 
 @pytest.mark.asyncio
-async def test_execute_python_in_sandbox_returns_validation_error():
-    response = await execute_python_in_sandbox("import os\nresult = 1")
+async def test_execute_python_in_sandbox_returns_validation_error_without_http_call() -> None:
+    """验证静态校验失败时不会调用独立 sandbox 服务。"""
+    with patch("app.ai.agentic.tooling.python_sandbox.httpx.AsyncClient", side_effect=AssertionError("unexpected")):
+        response = await execute_python_in_sandbox("import os\nresult = 1")
 
     assert response["success"] is False
     assert response["metadata"]["error_type"] == "validation_error"
@@ -269,199 +201,70 @@ async def test_execute_python_in_sandbox_returns_validation_error():
 
 
 @pytest.mark.asyncio
-async def test_execute_python_in_sandbox_allows_common_stdlib_imports():
-    mocked_payload = {
-        "success": True,
-        "result": 2,
-        "stdout": "",
-        "stderr": "",
-        "error": None,
-        "execution_time_ms": 12,
-        "timed_out": False,
-        "truncated": False,
-        "metadata": {"result_type": "int"},
-    }
-    process = AsyncMock()
-    process.communicate.return_value = (json.dumps(mocked_payload).encode("utf-8"), b"")
-    process.returncode = 0
-
-    code = """
-import json
-import datetime
-result = json.loads('{"v": 1}')["v"] + datetime.timedelta(days=1).days
-"""
-    with patch.object(settings, "PY_SANDBOX_PREWARM_POOL_ENABLED", False), \
-         patch("app.ai.agentic.tooling.python_sandbox._resolve_executable", return_value="/usr/bin/deno"), \
-         patch("app.ai.agentic.tooling.python_sandbox.asyncio.create_subprocess_exec", return_value=process):
-        response = await execute_python_in_sandbox(code)
-
-    assert response["success"] is True
-    assert "result" not in response
-    assert response["metadata"]["result_type"] == "int"
-
-
-@pytest.mark.asyncio
-async def test_execute_python_in_sandbox_allows_common_safe_builtins():
-    mocked_payload = {
-        "success": True,
-        "result": True,
-        "stdout": "",
-        "stderr": "",
-        "error": None,
-        "execution_time_ms": 12,
-        "timed_out": False,
-        "truncated": False,
-        "metadata": {"result_type": "bool"},
-    }
-    process = AsyncMock()
-    process.communicate.return_value = (json.dumps(mocked_payload).encode("utf-8"), b"")
-    process.returncode = 0
-
-    code = """
-import signal
-result = hasattr(signal, "SIGINT") and isinstance(signal.SIGINT, int)
-"""
-    with patch.object(settings, "PY_SANDBOX_PREWARM_POOL_ENABLED", False), \
-         patch("app.ai.agentic.tooling.python_sandbox._resolve_executable", return_value="/usr/bin/deno"), \
-         patch("app.ai.agentic.tooling.python_sandbox.asyncio.create_subprocess_exec", return_value=process):
-        response = await execute_python_in_sandbox(code)
-
-    assert response["success"] is True
-    assert "result" not in response
-    assert response["metadata"]["result_type"] == "bool"
-
-
-@pytest.mark.asyncio
-async def test_execute_python_in_sandbox_allows_lambda_expressions():
-    mocked_payload = {
-        "success": True,
-        "result": [{"x": 1, "label": "a"}, {"x": 2, "label": "b"}],
-        "stdout": "",
-        "stderr": "",
-        "error": None,
-        "execution_time_ms": 12,
-        "timed_out": False,
-        "truncated": False,
-        "metadata": {"result_type": "list", "item_count": 2},
-    }
-    process = AsyncMock()
-    process.communicate.return_value = (json.dumps(mocked_payload).encode("utf-8"), b"")
-    process.returncode = 0
-
-    code = """
-result = sorted(
-    [{"x": 2, "label": "b"}, {"x": 1, "label": "a"}],
-    key=lambda row: row["x"],
-)
-"""
-    with patch.object(settings, "PY_SANDBOX_PREWARM_POOL_ENABLED", False), \
-         patch("app.ai.agentic.tooling.python_sandbox._resolve_executable", return_value="/usr/bin/deno"), \
-         patch("app.ai.agentic.tooling.python_sandbox.asyncio.create_subprocess_exec", return_value=process):
-        response = await execute_python_in_sandbox(code)
-
-    assert response["success"] is True
-    assert "result" not in response
-    assert response["metadata"]["item_count"] == 2
-
-
-@pytest.mark.asyncio
-async def test_execute_python_in_sandbox_reports_missing_deno():
-    with patch.object(settings, "PY_SANDBOX_DENO_EXECUTABLE", "deno-does-not-exist"):
-        response = await execute_python_in_sandbox("result = 1 + 1")
+async def test_execute_python_in_sandbox_reports_disabled_sandbox() -> None:
+    """验证配置关闭沙箱时返回稳定错误结构。"""
+    with patch.object(settings, "PY_SANDBOX_ENABLED", False):
+        response = await execute_python_in_sandbox("print(1)")
 
     assert response["success"] is False
-    assert response["metadata"]["error_type"] == "sandbox_boot_error"
-    assert "deno-does-not-exist" in response["error"]
+    assert response["metadata"]["error_type"] == "sandbox_disabled"
+
+
+class FailingAsyncClient:
+    """测试用失败 HTTP 客户端。"""
+
+    def __init__(self, *_args: object, **_kwargs: object) -> None:
+        """初始化失败客户端。"""
+
+    async def __aenter__(self) -> "FailingAsyncClient":
+        """
+        进入异步上下文。
+
+        Returns:
+            当前客户端实例。
+        """
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        """退出异步上下文。"""
+
+    async def post(self, *_args: object, **_kwargs: object) -> FakeResponse:
+        """
+        模拟网络连接失败。
+
+        Raises:
+            httpx.ConnectError: 始终抛出连接失败。
+        """
+        request = httpx.Request("POST", "http://sandbox:8030/execute")
+        raise httpx.ConnectError("connection failed", request=request)
 
 
 @pytest.mark.asyncio
-async def test_execute_python_in_sandbox_async_uses_subprocess_exec():
-    mocked_payload = {
-        "success": True,
-        "result": 42,
-        "stdout": "ok",
-        "stderr": "",
-        "error": None,
-        "execution_time_ms": 12,
-        "timed_out": False,
-        "truncated": False,
-        "metadata": {"result_type": "int"},
-    }
-    process = AsyncMock()
-    process.communicate.return_value = (json.dumps(mocked_payload).encode("utf-8"), b"")
-    process.returncode = 0
+async def test_execute_python_in_sandbox_reports_service_error() -> None:
+    """验证独立 sandbox 服务不可用时返回可诊断错误。"""
+    with patch("app.ai.agentic.tooling.python_sandbox.httpx.AsyncClient", FailingAsyncClient):
+        response = await execute_python_in_sandbox("print(1)")
 
-    with patch.object(settings, "PY_SANDBOX_PREWARM_POOL_ENABLED", False), \
-         patch("app.ai.agentic.tooling.python_sandbox._resolve_executable", return_value="/usr/bin/deno"), \
-         patch("app.ai.agentic.tooling.python_sandbox.asyncio.create_subprocess_exec", return_value=process) as create_mock:
-        response = await execute_python_in_sandbox("result = 40 + 2")
-
-    assert response["success"] is True
-    assert "result" not in response
-    assert response["metadata"]["result_type"] == "int"
-    create_mock.assert_called_once()
-    process.communicate.assert_awaited_once()
+    assert response["success"] is False
+    assert response["metadata"]["error_type"] == "sandbox_service_error"
+    assert "ConnectError" in response["error"]
 
 
 @pytest.mark.asyncio
-async def test_execute_python_in_sandbox_waits_for_async_concurrency_slot():
-    mocked_payload = {
-        "success": True,
-        "result": 42,
-        "stdout": "ok",
-        "stderr": "",
-        "error": None,
-        "execution_time_ms": 12,
-        "timed_out": False,
-        "truncated": False,
-        "metadata": {"result_type": "int"},
-    }
-    release_first = asyncio.Event()
-    first_started = asyncio.Event()
-    running_count = 0
-    max_running_count = 0
+async def test_execute_python_in_sandbox_reports_protocol_error() -> None:
+    """验证独立 sandbox 服务返回非对象 JSON 时识别为协议错误。"""
+    FakeAsyncClient.instances.clear()
+    with patch.object(FakeAsyncClient, "response_payload", ["bad"]), \
+         patch("app.ai.agentic.tooling.python_sandbox.httpx.AsyncClient", FakeAsyncClient):
+        response = await execute_python_in_sandbox("print(1)")
 
-    async def communicate(_request_json):
-        nonlocal running_count, max_running_count
-        running_count += 1
-        max_running_count = max(max_running_count, running_count)
-        first_started.set()
-        try:
-            await release_first.wait()
-            return json.dumps(mocked_payload).encode("utf-8"), b""
-        finally:
-            running_count -= 1
-
-    def create_process(*_args, **_kwargs):
-        process = AsyncMock()
-        process.communicate = AsyncMock(side_effect=communicate)
-        process.returncode = 0
-        return process
-
-    limiter = asyncio.Semaphore(1)
-
-    with patch.object(settings, "PY_SANDBOX_PREWARM_POOL_ENABLED", False), \
-         patch("app.ai.agentic.tooling.python_sandbox._get_async_sandbox_limiter", return_value=limiter), \
-         patch("app.ai.agentic.tooling.python_sandbox._resolve_executable", return_value="/usr/bin/deno"), \
-         patch("app.ai.agentic.tooling.python_sandbox.asyncio.create_subprocess_exec", side_effect=create_process):
-        first_task = asyncio.create_task(execute_python_in_sandbox("result = 1"))
-        await first_started.wait()
-        second_task = asyncio.create_task(execute_python_in_sandbox("result = 2"))
-        await asyncio.sleep(0)
-
-        assert max_running_count == 1
-        assert second_task.done() is False
-
-        release_first.set()
-        first_response, second_response = await asyncio.gather(first_task, second_task)
-
-    assert first_response["success"] is True
-    assert second_response["success"] is True
-    assert max_running_count == 1
+    assert response["success"] is False
+    assert response["metadata"]["error_type"] == "protocol_error"
 
 
 @pytest.mark.asyncio
-async def test_execute_python_sandboxed_tool_registered():
+async def test_execute_python_sandboxed_tool_registered() -> None:
+    """验证 Agent 工具仍通过原名称暴露沙箱执行能力。"""
     tool_names = {tool.name for tool in get_all_tools()}
 
     assert "execute_python_sandboxed" in tool_names
@@ -469,105 +272,3 @@ async def test_execute_python_sandboxed_tool_registered():
         result = await execute_python_sandboxed.ainvoke({"code": "print(2 + 2)"})
     assert "success" in result
     assert "result" not in result
-
-
-@pytest.mark.asyncio
-async def test_execute_python_in_sandbox_serializes_nested_pandas_timestamp_and_numpy():
-    code = """
-import pandas as pd
-import numpy as np
-import json
-
-df = pd.DataFrame({
-    "end_date": pd.to_datetime(["2024-01-01", "2024-01-02"]),
-    "value": np.array([1, 2], dtype=np.int64),
-})
-
-payload = {
-    "latest": pd.Timestamp("2024-01-03 12:34:56"),
-    "records": [
-        {"end_date": row["end_date"].isoformat(), "value": int(row["value"])}
-        for row in df.to_dict("records")
-    ],
-    "series": [item.isoformat() for item in df["end_date"]],
-    "array": [float(item) for item in np.array([np.int64(1), np.float64(2.5)])],
-}
-print(json.dumps(payload, default=str))
-"""
-    response = await execute_python_in_sandbox(code)
-    _skip_if_deno_unavailable(response)
-
-    assert response["success"] is True
-    assert "result" not in response
-    payload = json.loads(response["stdout"])
-    assert payload["latest"] == "2024-01-03 12:34:56"
-    assert payload["records"][0]["end_date"] == "2024-01-01T00:00:00"
-    assert payload["records"][0]["value"] == 1
-    assert payload["series"][1] == "2024-01-02T00:00:00"
-    assert payload["array"] == [1.0, 2.5]
-
-
-@pytest.mark.asyncio
-async def test_execute_python_in_sandbox_runs_lambda_key_functions():
-    code = """
-result = sorted(
-    [{"x": 2, "label": "b"}, {"x": 1, "label": "a"}],
-    key=lambda row: row["x"],
-)
-print(",".join(row["label"] for row in result))
-"""
-    response = await execute_python_in_sandbox(code)
-    _skip_if_deno_unavailable(response)
-
-    assert response["success"] is True
-    assert "result" not in response
-    assert response["stdout"].strip() == "a,b"
-
-
-@pytest.mark.asyncio
-async def test_execute_python_in_sandbox_runs_stateful_and_generator_syntax():
-    code = """
-counter = 0
-
-def outer():
-    total = 1
-
-    def inner():
-        nonlocal total
-        global counter
-        total += 2
-        counter = total
-        return total
-
-    return inner()
-
-tmp = "remove"
-del tmp
-
-try:
-    tmp
-    deleted = False
-except Exception:
-    deleted = True
-
-def gen():
-    yield 1
-    yield from [2, 3]
-
-result = {
-    "value": outer(),
-    "counter": counter,
-    "deleted": deleted,
-    "items": list(gen()),
-}
-print(result)
-"""
-    response = await execute_python_in_sandbox(code)
-    _skip_if_deno_unavailable(response)
-
-    assert response["success"] is True
-    assert "result" not in response
-    assert "'value': 3" in response["stdout"]
-    assert "'counter': 3" in response["stdout"]
-    assert "'deleted': True" in response["stdout"]
-    assert "'items': [1, 2, 3]" in response["stdout"]

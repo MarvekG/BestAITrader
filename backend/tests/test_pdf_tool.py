@@ -8,9 +8,9 @@ from app.data.pdf_parser import PDFParserService
 
 
 @pytest.mark.asyncio
-async def test_download_pdf_with_web_fetch_rejects_pdf_viewer_html(monkeypatch):
-    """PDF 下载工具拒绝 web 服务返回的 HTML 内容。"""
-    monkeypatch.setattr(pdf_tool.settings, "WEB_FETCH_TIMEOUT_SECONDS", 123.0)
+async def test_download_pdf_with_webfetch_rejects_pdf_viewer_html(monkeypatch):
+    """PDF 下载工具拒绝 webfetch 服务返回的 HTML 内容。"""
+    monkeypatch.setattr(pdf_tool.settings, "WEBFETCH_TIMEOUT_SECONDS", 123.0)
 
     class FakeResponse:
         status = 200
@@ -20,7 +20,7 @@ async def test_download_pdf_with_web_fetch_rejects_pdf_viewer_html(monkeypatch):
             "x-final-url": "https://example.com/report.pdf",
             "x-source-status": "200",
         }
-        url = "http://web:8010/download"
+        url = "http://webfetch:8010/download"
 
         async def __aenter__(self):
             return self
@@ -59,11 +59,11 @@ async def test_download_pdf_with_web_fetch_rejects_pdf_viewer_html(monkeypatch):
     monkeypatch.setattr(pdf_tool.httpx, "AsyncClient", FakeClient)
 
     with pytest.raises(RuntimeError, match="not a valid PDF"):
-        await pdf_tool._download_pdf_with_web_fetch("https://example.com/report.pdf", 5.0)
+        await pdf_tool._download_pdf_with_webfetch("https://example.com/report.pdf", 5.0)
 
 
 @pytest.mark.asyncio
-async def test_download_pdf_with_web_fetch_writes_stream_to_temp_file(monkeypatch):
+async def test_download_pdf_with_webfetch_writes_stream_to_temp_file(monkeypatch):
     """PDF 下载工具将响应流直接写入临时文件。"""
     class FakeResponse:
         status = 200
@@ -73,7 +73,7 @@ async def test_download_pdf_with_web_fetch_writes_stream_to_temp_file(monkeypatc
             "x-final-url": "https://example.com/report.pdf",
             "x-source-status": "200",
         }
-        url = "http://web:8010/download"
+        url = "http://webfetch:8010/download"
 
         async def __aenter__(self):
             return self
@@ -108,7 +108,7 @@ async def test_download_pdf_with_web_fetch_writes_stream_to_temp_file(monkeypatc
 
     monkeypatch.setattr(pdf_tool.httpx, "AsyncClient", FakeClient)
 
-    pdf_path, final_url, status, content_type = await pdf_tool._download_pdf_with_web_fetch(
+    pdf_path, final_url, status, content_type = await pdf_tool._download_pdf_with_webfetch(
         "https://example.com/report.pdf",
         7.5,
     )
@@ -139,7 +139,7 @@ async def test_parse_pdf_to_markdown_tool_uses_word_pipeline(monkeypatch):
         def clean_markdown_content(self, markdown: str) -> str:
             return markdown.strip()
 
-    monkeypatch.setattr(pdf_tool, "_download_pdf_with_web_fetch", fake_download)
+    monkeypatch.setattr(pdf_tool, "_download_pdf_with_webfetch", fake_download)
     monkeypatch.setattr(pdf_tool, "PDFParserService", FakePDFParserService)
 
     result = await parse_pdf_to_markdown.ainvoke(
@@ -165,7 +165,7 @@ async def test_parse_pdf_to_markdown_default_limit_is_about_10000_tokens(monkeyp
     async def fake_download(url: str, timeout: float):
         return "/tmp/fake-report.pdf", url, 200, "application/pdf"
 
-    monkeypatch.setattr(pdf_tool, "_download_pdf_with_web_fetch", fake_download)
+    monkeypatch.setattr(pdf_tool, "_download_pdf_with_webfetch", fake_download)
     monkeypatch.setattr(
         pdf_tool,
         "_parse_pdf_file_to_clean_markdown",
@@ -189,7 +189,7 @@ async def test_parse_pdf_to_markdown_runs_parser_in_thread(monkeypatch):
         assert args[1] == "word"
         return "# Threaded report\n\nRevenue and profit."
 
-    monkeypatch.setattr(pdf_tool, "_download_pdf_with_web_fetch", fake_download)
+    monkeypatch.setattr(pdf_tool, "_download_pdf_with_webfetch", fake_download)
     monkeypatch.setattr(pdf_tool.asyncio, "to_thread", fake_to_thread)
 
     result = await parse_pdf_to_markdown.ainvoke(

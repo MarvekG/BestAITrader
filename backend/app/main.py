@@ -152,28 +152,10 @@ async def lifespan(app: Any):
     except Exception as e:
         logger.error(f"Failed to start async task scheduler: {e}")
 
-    try:
-        if settings.PY_SANDBOX_PREWARM_POOL_ENABLED and settings.PY_SANDBOX_PREWARM_ON_STARTUP:
-            from app.ai.agentic.tooling.python_sandbox_pool import get_prewarmed_sandbox_pool
-
-            await get_prewarmed_sandbox_pool().prewarm()
-            logger.info("Python sandbox prewarmed worker pool started")
-    except Exception as e:
-        logger.error("Failed to start Python sandbox prewarmed worker pool", extra={"error": str(e)})
-
     yield
 
     # Shutdown logic
     logger.info("Application shutting down, stopping background tasks")
-
-    try:
-        if settings.PY_SANDBOX_PREWARM_POOL_ENABLED:
-            from app.ai.agentic.tooling.python_sandbox_pool import get_prewarmed_sandbox_pool
-
-            await get_prewarmed_sandbox_pool().shutdown()
-            logger.info("Python sandbox prewarmed worker pool stopped")
-    except Exception as e:
-        logger.error("Failed to stop Python sandbox prewarmed worker pool", extra={"error": str(e)})
 
     # Stop data refresh scheduler
     try:

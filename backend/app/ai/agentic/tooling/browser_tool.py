@@ -58,7 +58,7 @@ def _normalize_content_selectors(content_selectors: list[str] | None) -> list[st
     return [str(selector).strip() for selector in content_selectors if str(selector).strip()]
 
 
-def _build_web_fetch_payload(
+def _build_webfetch_payload(
     normalized_url: str,
     content_format: ContentFormat,
     timeout_ms: int,
@@ -66,7 +66,7 @@ def _build_web_fetch_payload(
     content_selectors: list[str] | None,
 ) -> dict[str, Any]:
     """
-    构建发送给 web fetch 服务的请求体。
+    构建发送给 webfetch 服务的请求体。
 
     Args:
         normalized_url: 标准化后的目标 URL。
@@ -76,7 +76,7 @@ def _build_web_fetch_payload(
         content_selectors: 可选 CSS selector 列表。
 
     Returns:
-        web fetch 服务请求体。
+        webfetch 服务请求体。
     """
     return {
         "url": normalized_url,
@@ -87,17 +87,17 @@ def _build_web_fetch_payload(
     }
 
 
-def _map_web_fetch_response(
+def _map_webfetch_response(
     payload: dict[str, Any],
     normalized_url: str,
     content_format: ContentFormat,
     content_selectors: list[str] | None,
 ) -> dict[str, Any]:
     """
-    将 web fetch 响应映射为浏览工具原有返回结构。
+    将 webfetch 响应映射为浏览工具原有返回结构。
 
     Args:
-        payload: web fetch 服务响应体。
+        payload: webfetch 服务响应体。
         normalized_url: 标准化后的目标 URL。
         content_format: 请求的内容格式。
         content_selectors: 原始 selector 列表。
@@ -118,7 +118,7 @@ def _map_web_fetch_response(
     if not payload.get("success"):
         return {
             "url": normalized_url,
-            "error": str(payload.get("error") or "web fetch failed"),
+            "error": str(payload.get("error") or "webfetch failed"),
             "content_source": payload.get("content_source") or f"rendered_dom_{content_format}",
         }
 
@@ -142,27 +142,27 @@ def _map_web_fetch_response(
 
 async def _fetch_web_page(payload: dict[str, Any]) -> dict[str, Any]:
     """
-    调用独立 web fetch 服务渲染网页。
+    调用独立 webfetch 服务渲染网页。
 
     Args:
-        payload: web fetch 服务请求体。
+        payload: webfetch 服务请求体。
 
     Returns:
-        web fetch 服务响应 JSON。
+        webfetch 服务响应 JSON。
 
     Raises:
         httpx.HTTPError: 请求失败或服务返回非 2xx 响应。
         ValueError: 响应体不是 JSON 对象。
     """
-    base_url = settings.WEB_FETCH_BASE_URL.rstrip("/")
-    timeout = httpx.Timeout(settings.WEB_FETCH_TIMEOUT_SECONDS)
+    base_url = settings.WEBFETCH_BASE_URL.rstrip("/")
+    timeout = httpx.Timeout(settings.WEBFETCH_TIMEOUT_SECONDS)
     async with httpx.AsyncClient(base_url=base_url, timeout=timeout) as client:
         response = await client.post("/fetch", json=payload)
         response.raise_for_status()
         result = response.json()
 
     if not isinstance(result, dict):
-        raise ValueError(f"web fetch response must be an object, got {type(result).__name__}")
+        raise ValueError(f"webfetch response must be an object, got {type(result).__name__}")
     return result
 
 
@@ -187,7 +187,7 @@ def _build_error_result(normalized_url: str, error: str, content_format: Content
 
 def _log_render_failure(normalized_url: str, exc: Exception) -> None:
     """
-    记录 web fetch 调用失败日志。
+    记录 webfetch 调用失败日志。
 
     Args:
         normalized_url: 标准化后的目标 URL。
@@ -207,7 +207,7 @@ async def render_web_page_html(
     content_selectors: list[str] | None = None,
 ) -> Dict[str, Any]:
     """
-    调用独立 web fetch 服务渲染网页，并返回浏览器当前 DOM HTML 或 Markdown。
+    调用独立 webfetch 服务渲染网页，并返回浏览器当前 DOM HTML 或 Markdown。
 
     Args:
         url: 要浏览的网页 URL。
@@ -224,7 +224,7 @@ async def render_web_page_html(
     except ValueError as exc:
         return _build_error_result(url, str(exc), content_format)
 
-    request_payload = _build_web_fetch_payload(
+    request_payload = _build_webfetch_payload(
         normalized_url=normalized_url,
         content_format=content_format,
         timeout_ms=timeout_ms,
@@ -233,7 +233,7 @@ async def render_web_page_html(
     )
     try:
         response_payload = await _fetch_web_page(request_payload)
-        return _map_web_fetch_response(response_payload, normalized_url, content_format, content_selectors)
+        return _map_webfetch_response(response_payload, normalized_url, content_format, content_selectors)
     except Exception as exc:
         _log_render_failure(normalized_url, exc)
         return _build_error_result(normalized_url, f"{type(exc).__name__}: {exc}", content_format)
@@ -248,13 +248,13 @@ async def browse_web_page_html(
     content_selectors: list[str] | None = None,
 ) -> Dict[str, Any]:
     """
-    调用 web fetch 服务打开网页，执行页面 JavaScript，并返回渲染后的 HTML 或 Markdown。
+    调用 webfetch 服务打开网页，执行页面 JavaScript，并返回渲染后的 HTML 或 Markdown。
 
     Args:
         url: 要浏览的网页 URL；缺少协议时默认按 https:// 处理。
         content_format: 返回内容格式，默认html，可选markdown。html 返回浏览器当前 DOM HTML；markdown 将同一份渲染后 HTML 转成
             Markdown，并在 Markdown 开头写入 Source URL。
-        timeout_ms: web fetch 服务的导航超时时间，单位毫秒。
+        timeout_ms: webfetch 服务的导航超时时间，单位毫秒。
         wait_after_ms: 导航完成后额外等待前端 JS 渲染的时间，单位毫秒。
         content_selectors: 可选 CSS selector 列表；为空时返回完整页面，非空时只返回匹配区域。
 

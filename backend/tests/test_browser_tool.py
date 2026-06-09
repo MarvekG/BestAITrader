@@ -6,14 +6,14 @@ from app.ai.agentic.tooling import browser_tool
 from app.ai.agentic.tooling.browser_tool import browse_web_page_html, render_web_page_html
 
 
-def _web_fetch_response(
+def _webfetch_response(
     content: str,
     return_type: str = "html",
     content_source: str | None = None,
     **overrides: object,
 ) -> dict[str, object]:
     """
-    构造测试用 web fetch 响应。
+    构造测试用 webfetch 响应。
 
     Args:
         content: 返回内容。
@@ -22,7 +22,7 @@ def _web_fetch_response(
         **overrides: 覆盖字段。
 
     Returns:
-        web fetch 响应字典。
+        webfetch 响应字典。
     """
     payload: dict[str, object] = {
         "success": True,
@@ -30,7 +30,7 @@ def _web_fetch_response(
         "final_url": "https://example.com/final",
         "status": 200,
         "title": "Example",
-        "engine": "web",
+        "engine": "webfetch",
         "return_type": return_type,
         "selectors": [],
         "selected_element_count": None,
@@ -46,9 +46,9 @@ def _web_fetch_response(
 
 @pytest.mark.asyncio
 async def test_render_web_page_html_returns_rendered_dom_html() -> None:
-    """网页浏览工具将 web fetch HTML 响应映射为旧返回结构。"""
+    """网页浏览工具将 webfetch HTML 响应映射为旧返回结构。"""
     fetch_mock = AsyncMock(
-        return_value=_web_fetch_response(
+        return_value=_webfetch_response(
             "<html><body>Example rendered page</body></html>",
             final_url="https://example.com/final",
         )
@@ -85,9 +85,9 @@ async def test_render_web_page_html_returns_rendered_dom_html() -> None:
 
 @pytest.mark.asyncio
 async def test_render_web_page_html_normalizes_host_with_port() -> None:
-    """网页浏览工具保留 URL 主机端口并传给 web fetch 服务。"""
+    """网页浏览工具保留 URL 主机端口并传给 webfetch 服务。"""
     fetch_mock = AsyncMock(
-        return_value=_web_fetch_response(
+        return_value=_webfetch_response(
             "<html></html>",
             final_url="https://example.com:443/path",
         )
@@ -102,10 +102,10 @@ async def test_render_web_page_html_normalizes_host_with_port() -> None:
 
 
 @pytest.mark.asyncio
-async def test_render_web_page_html_allows_local_addresses_to_web_fetch() -> None:
-    """网页浏览工具允许本地 HTTP 地址由 web fetch 服务访问。"""
+async def test_render_web_page_html_allows_local_addresses_to_webfetch() -> None:
+    """网页浏览工具允许本地 HTTP 地址由 webfetch 服务访问。"""
     fetch_mock = AsyncMock(
-        return_value=_web_fetch_response(
+        return_value=_webfetch_response(
             "<html></html>",
             final_url="http://127.0.0.1:8000",
         )
@@ -120,7 +120,7 @@ async def test_render_web_page_html_allows_local_addresses_to_web_fetch() -> Non
 
 @pytest.mark.asyncio
 async def test_render_web_page_html_rejects_non_http_url_scheme() -> None:
-    """网页浏览工具在调用 web fetch 前拒绝非 HTTP 协议。"""
+    """网页浏览工具在调用 webfetch 前拒绝非 HTTP 协议。"""
     fetch_mock = AsyncMock()
 
     with patch("app.ai.agentic.tooling.browser_tool._fetch_web_page", fetch_mock):
@@ -134,10 +134,10 @@ async def test_render_web_page_html_rejects_non_http_url_scheme() -> None:
 
 @pytest.mark.asyncio
 async def test_render_web_page_html_can_return_markdown_with_source_url() -> None:
-    """网页浏览工具将 web fetch Markdown 响应映射为 markdown 字段。"""
+    """网页浏览工具将 webfetch Markdown 响应映射为 markdown 字段。"""
     markdown = "# Example Title\n\nSource URL: https://example.com/final\n\n## Section\n\n[Link](https://example.com/a)"
     fetch_mock = AsyncMock(
-        return_value=_web_fetch_response(
+        return_value=_webfetch_response(
             markdown,
             return_type="markdown",
             final_url="https://example.com/final",
@@ -162,9 +162,9 @@ async def test_render_web_page_html_can_return_markdown_with_source_url() -> Non
 
 @pytest.mark.asyncio
 async def test_render_web_page_html_can_select_multiple_content_regions_once() -> None:
-    """网页浏览工具将清理后的 selector 传给 web fetch 服务。"""
+    """网页浏览工具将清理后的 selector 传给 webfetch 服务。"""
     fetch_mock = AsyncMock(
-        return_value=_web_fetch_response(
+        return_value=_webfetch_response(
             "# Example Title\n\n## Main\n\nNews",
             return_type="markdown",
             selected_element_count=2,
@@ -187,13 +187,13 @@ async def test_render_web_page_html_can_select_multiple_content_regions_once() -
 
 
 @pytest.mark.asyncio
-async def test_render_web_page_html_returns_web_fetch_error_without_logging_exception() -> None:
-    """web fetch 返回业务失败时直接映射错误，不记录异常日志。"""
+async def test_render_web_page_html_returns_webfetch_error_without_logging_exception() -> None:
+    """webfetch 返回业务失败时直接映射错误，不记录异常日志。"""
     fetch_mock = AsyncMock(
         return_value={
             "success": False,
             "url": "https://example.com",
-            "engine": "web",
+            "engine": "webfetch",
             "return_type": "html",
             "selectors": [],
             "content_source": None,
@@ -214,9 +214,9 @@ async def test_render_web_page_html_returns_web_fetch_error_without_logging_exce
 
 
 @pytest.mark.asyncio
-async def test_render_web_page_html_returns_error_when_web_fetch_request_fails() -> None:
-    """web fetch HTTP 调用异常时返回兼容错误结构。"""
-    fetch_mock = AsyncMock(side_effect=RuntimeError("web unavailable"))
+async def test_render_web_page_html_returns_error_when_webfetch_request_fails() -> None:
+    """webfetch HTTP 调用异常时返回兼容错误结构。"""
+    fetch_mock = AsyncMock(side_effect=RuntimeError("webfetch unavailable"))
 
     with patch("app.ai.agentic.tooling.browser_tool._fetch_web_page", fetch_mock), \
          patch.object(browser_tool.logger, "exception") as log_exception:
@@ -224,7 +224,7 @@ async def test_render_web_page_html_returns_error_when_web_fetch_request_fails()
 
     assert result == {
         "url": "https://example.com",
-        "error": "RuntimeError: web unavailable",
+        "error": "RuntimeError: webfetch unavailable",
         "content_source": "rendered_dom_html",
     }
     log_exception.assert_called_once()

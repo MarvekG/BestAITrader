@@ -27,9 +27,12 @@ jobs:
           - component: frontend
             context: ./frontend
             dockerfile: ./frontend/Dockerfile
-          - component: web
-            context: ./web
-            dockerfile: ./web/Dockerfile
+          - component: webfetch
+            context: ./webfetch
+            dockerfile: ./webfetch/Dockerfile
+          - component: sandbox
+            context: ./sandbox
+            dockerfile: ./sandbox/Dockerfile
 
     steps:
       - name: Checkout
