@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional
 from app.config import SANDBOX_ROOT, get_settings
 from app.core.logger import get_logger
 from app.schemas import SandboxLimits
+from app.services.pooled_sandbox_pool import PooledSandboxAcquireTimeout, get_pooled_sandbox_pool
 from app.services.validator import SandboxValidationError, validate_python_code
 from app.services.python_sandbox_pool import (
     PrewarmedSandboxAcquireTimeout,
@@ -125,11 +126,27 @@ def _normalize_response(payload: Dict[str, Any], started_at: float, limits: Sand
     response["metadata"].setdefault("sandbox_runtime", "deno")
     response["metadata"].setdefault(
         "runner_path",
-        get_settings().SANDBOX_WORKER_RUNNER_PATH
-        if response["metadata"].get("sandbox_runtime") == "deno_prewarmed_worker"
-        else get_settings().SANDBOX_RUNNER_PATH,
+        _runner_path_for_runtime(response["metadata"].get("sandbox_runtime")),
     )
     return response
+
+
+def _runner_path_for_runtime(sandbox_runtime: object) -> str:
+    """
+    根据沙箱运行时类型选择 runner 路径。
+
+    Args:
+        sandbox_runtime: worker 返回的运行时标识。
+
+    Returns:
+        对应 runner 脚本路径。
+    """
+    settings = get_settings()
+    if sandbox_runtime == "deno_pooled_worker":
+        return settings.SANDBOX_POOLED_WORKER_RUNNER_PATH
+    if sandbox_runtime == "deno_prewarmed_worker":
+        return settings.SANDBOX_WORKER_RUNNER_PATH
+    return settings.SANDBOX_RUNNER_PATH
 
 
 def _prepare_execution(
@@ -279,7 +296,28 @@ async def execute_python_in_sandbox(
         return early_response
 
     settings = get_settings()
-    if settings.SANDBOX_PREWARM_POOL_ENABLED:
+    if settings.SANDBOX_EXECUTION_MODE == "pooled_worker":
+        try:
+            payload = await get_pooled_sandbox_pool().execute(request_json, execution_timeout)
+            return _normalize_response(payload, started_at, limits)
+        except PooledSandboxAcquireTimeout:
+            logger.info("pooled sandbox worker unavailable; falling back to subprocess")
+        except asyncio.TimeoutError:
+            logger.warning("pooled sandbox worker timed out")
+            return _normalize_response(
+                {
+                    "success": False,
+                    "error": "Python sandbox execution timed out",
+                    "timed_out": True,
+                    "metadata": {"error_type": "timeout_error", "sandbox_runtime": "deno_pooled_worker"},
+                },
+                started_at,
+                limits,
+            )
+        except Exception as exc:
+            logger.warning("pooled sandbox worker failed; falling back to subprocess", extra={"error": str(exc)})
+
+    if settings.SANDBOX_EXECUTION_MODE == "one_shot_worker" and settings.SANDBOX_PREWARM_POOL_ENABLED:
         try:
             payload = await get_prewarmed_sandbox_pool().execute(request_json, execution_timeout)
             return _normalize_response(payload, started_at, limits)
