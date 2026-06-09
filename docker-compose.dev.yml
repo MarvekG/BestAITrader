@@ -146,6 +146,37 @@ services:
     networks:
       - best_ai_trader_network
 
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: best_ai_trader_web
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      WEB_CLOAKBROWSER_MAX_PAGES: 10
+      WEB_PATCHRIGHT_MAX_PAGES: 4
+      WEB_CAMOUFOX_MAX_PAGES: 2
+      WEB_RELOAD: "true"
+      WEB_RUNTIME_DIR: /runtime
+      CLOAKBROWSER_CACHE_DIR: /runtime/cloakbrowser/cache
+      PLAYWRIGHT_BROWSERS_PATH: /runtime/browsers/ms-playwright
+      XDG_CACHE_HOME: /runtime/cache
+    volumes:
+      - ./web:/app # FOR DEBUG
+      - web_runtime_data:/runtime
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://127.0.0.1:8010/health" ]
+      interval: 1m
+      start_interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 80s
+    ports:
+      - "8010:8010"
+    networks:
+      - best_ai_trader_network
+
   frontend:
     build:
       context: ./frontend
@@ -203,6 +234,7 @@ volumes:
   memo_pgvector17_data:
   memo_runtime_data:
   backend_runtime_data:
+  web_runtime_data:
 
 
 secrets:
