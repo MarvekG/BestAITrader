@@ -218,13 +218,6 @@ async def lifespan(app: Any):
     except Exception as e:
         logger.error(f"Failed to close Memory service HTTP client: {e}")
 
-    try:
-        from app.ai.agentic.tooling.browser_tool import close_browser_context
-        await close_browser_context(reason="backend_shutdown")
-        logger.info("CloakBrowser context closed")
-    except Exception as e:
-        logger.error(f"Failed to close CloakBrowser context: {e}")
-
 async def access_log_middleware(request, call_next):
     started_at = perf_counter()
     request_id = get_or_create_request_id(request.headers.get("x-request-id"))

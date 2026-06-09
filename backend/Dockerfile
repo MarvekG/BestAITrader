@@ -17,7 +17,7 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debia
     && apt-get install -y --no-install-recommends curl ca-certificates bzip2 unzip tzdata postgresql-client-17 \
     && pip install uv -i https://mirrors.aliyun.com/pypi/simple/ \
     && useradd -m trader \
-    && mkdir -p /home/trader/pyodide /app/runtime/logs /app/runtime/cloakbrowser/cache \
+    && mkdir -p /home/trader/pyodide /app/runtime/logs \
     && chown -R trader:trader /app /home/trader/pyodide \
     && rm -rf /var/lib/apt/lists/*
 
@@ -30,8 +30,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     uv pip install --system -i https://mirrors.aliyun.com/pypi/simple/ \
     -r requirements.txt \
     -r requirements-news-plugins.txt \
-    -r requirements-skills.txt && \
-    python -m playwright install-deps chromium
+    -r requirements-skills.txt
 
 # 切换到非 root 用户
 USER trader

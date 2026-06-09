@@ -1,3 +1,5 @@
+import os
+
 import pytest
 
 from app.ai.agentic.tooling import pdf_tool
@@ -6,39 +8,127 @@ from app.data.pdf_parser import PDFParserService
 
 
 @pytest.mark.asyncio
-async def test_download_pdf_with_cloakbrowser_rejects_pdf_viewer_html(monkeypatch):
+async def test_download_pdf_with_web_fetch_rejects_pdf_viewer_html(monkeypatch):
+    """PDF 下载工具拒绝 web 服务返回的 HTML 内容。"""
+    monkeypatch.setattr(pdf_tool.settings, "WEB_FETCH_TIMEOUT_SECONDS", 123.0)
+
     class FakeResponse:
         status = 200
-        url = "https://example.com/report.pdf"
-        headers = {"content-type": "application/pdf"}
+        status_code = 200
+        headers = {
+            "content-type": "application/pdf",
+            "x-final-url": "https://example.com/report.pdf",
+            "x-source-status": "200",
+        }
+        url = "http://web:8010/download"
 
-        async def body(self) -> bytes:
-            return b"<!doctype html><html></html>"
+        async def __aenter__(self):
+            return self
 
-    class FakeRequest:
-        async def get(self, url: str, timeout: int) -> FakeResponse:
-            assert url == "https://example.com/report.pdf"
-            assert timeout == 5000
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def raise_for_status(self) -> None:
+            """模拟响应状态检查。"""
+
+        async def aiter_bytes(self):
+            """模拟流式返回 HTML 内容。"""
+            yield b"<!doctype html><html></html>"
+
+    class FakeClient:
+        def __init__(self, base_url: str, timeout) -> None:
+            self.base_url = base_url
+            self.timeout = timeout
+            assert timeout.connect == 123.0
+            assert timeout.read == 123.0
+            assert timeout.write == 123.0
+            assert timeout.pool == 123.0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def stream(self, method: str, path: str, json: dict[str, object]) -> FakeResponse:
+            assert method == "POST"
+            assert path == "/download"
+            assert json == {"url": "https://example.com/report.pdf", "timeout": 5.0}
             return FakeResponse()
 
-    class FakeContext:
-        request = FakeRequest()
-
-    async def fake_get_browser_context() -> FakeContext:
-        return FakeContext()
-
-    monkeypatch.setattr(pdf_tool.browser_context, "get_browser_context", fake_get_browser_context)
+    monkeypatch.setattr(pdf_tool.httpx, "AsyncClient", FakeClient)
 
     with pytest.raises(RuntimeError, match="not a valid PDF"):
-        await pdf_tool._download_pdf_with_cloakbrowser("https://example.com/report.pdf", 5000)
+        await pdf_tool._download_pdf_with_web_fetch("https://example.com/report.pdf", 5.0)
+
+
+@pytest.mark.asyncio
+async def test_download_pdf_with_web_fetch_writes_stream_to_temp_file(monkeypatch):
+    """PDF 下载工具将响应流直接写入临时文件。"""
+    class FakeResponse:
+        status = 200
+        status_code = 200
+        headers = {
+            "content-type": "application/pdf",
+            "x-final-url": "https://example.com/report.pdf",
+            "x-source-status": "200",
+        }
+        url = "http://web:8010/download"
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def raise_for_status(self) -> None:
+            """模拟响应状态检查。"""
+
+        async def aiter_bytes(self):
+            """模拟被拆分的 PDF 响应流。"""
+            yield b"%P"
+            yield b"DF-1.7 fake"
+
+    class FakeClient:
+        def __init__(self, base_url: str, timeout) -> None:
+            self.base_url = base_url
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def stream(self, method: str, path: str, json: dict[str, object]) -> FakeResponse:
+            assert method == "POST"
+            assert path == "/download"
+            assert json == {"url": "https://example.com/report.pdf", "timeout": 7.5}
+            return FakeResponse()
+
+    monkeypatch.setattr(pdf_tool.httpx, "AsyncClient", FakeClient)
+
+    pdf_path, final_url, status, content_type = await pdf_tool._download_pdf_with_web_fetch(
+        "https://example.com/report.pdf",
+        7.5,
+    )
+    try:
+        assert final_url == "https://example.com/report.pdf"
+        assert status == 200
+        assert content_type == "application/pdf"
+        with open(pdf_path, "rb") as pdf_file:
+            assert pdf_file.read() == b"%PDF-1.7 fake"
+    finally:
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
 
 
 @pytest.mark.asyncio
 async def test_parse_pdf_to_markdown_tool_uses_word_pipeline(monkeypatch):
-    async def fake_download(url: str, timeout_ms: int):
+    async def fake_download(url: str, timeout: float):
         assert url == "https://example.com/report.pdf"
-        assert timeout_ms == 5000
-        return b"%PDF-1.7 fake", "https://example.com/final.pdf", 200, "application/pdf"
+        assert timeout == 5.0
+        return "/tmp/fake-report.pdf", "https://example.com/final.pdf", 200, "application/pdf"
 
     class FakePDFParserService:
         def parse_pdf_to_markdown(self, pdf_path: str, engine: str = "word") -> str:
@@ -49,14 +139,14 @@ async def test_parse_pdf_to_markdown_tool_uses_word_pipeline(monkeypatch):
         def clean_markdown_content(self, markdown: str) -> str:
             return markdown.strip()
 
-    monkeypatch.setattr(pdf_tool, "_download_pdf_with_cloakbrowser", fake_download)
+    monkeypatch.setattr(pdf_tool, "_download_pdf_with_web_fetch", fake_download)
     monkeypatch.setattr(pdf_tool, "PDFParserService", FakePDFParserService)
 
     result = await parse_pdf_to_markdown.ainvoke(
         {
             "url": "https://example.com/report.pdf",
             "engine": "word",
-            "timeout_ms": 5000,
+            "timeout": 5.0,
             "max_chars": 1200,
         }
     )
@@ -67,15 +157,15 @@ async def test_parse_pdf_to_markdown_tool_uses_word_pipeline(monkeypatch):
     assert result["markdown"].startswith("# Report")
     assert result["markdown_length"] > len(result["markdown"])
     assert result["truncated"] is True
-    assert result["content_source"] == "cloakbrowser_pdf_word_markdown"
+    assert result["content_source"] == "web_pdf_word_markdown"
 
 
 @pytest.mark.asyncio
 async def test_parse_pdf_to_markdown_default_limit_is_about_10000_tokens(monkeypatch):
-    async def fake_download(url: str, timeout_ms: int):
-        return b"%PDF-1.7 fake", url, 200, "application/pdf"
+    async def fake_download(url: str, timeout: float):
+        return "/tmp/fake-report.pdf", url, 200, "application/pdf"
 
-    monkeypatch.setattr(pdf_tool, "_download_pdf_with_cloakbrowser", fake_download)
+    monkeypatch.setattr(pdf_tool, "_download_pdf_with_web_fetch", fake_download)
     monkeypatch.setattr(
         pdf_tool,
         "_parse_pdf_file_to_clean_markdown",
@@ -91,22 +181,22 @@ async def test_parse_pdf_to_markdown_default_limit_is_about_10000_tokens(monkeyp
 
 @pytest.mark.asyncio
 async def test_parse_pdf_to_markdown_runs_parser_in_thread(monkeypatch):
-    async def fake_download(url: str, timeout_ms: int):
-        return b"%PDF-1.7 fake", url, 200, "application/pdf"
+    async def fake_download(url: str, timeout: float):
+        return "/tmp/fake-report.pdf", url, 200, "application/pdf"
 
     async def fake_to_thread(func, *args):
         assert func is pdf_tool._parse_pdf_file_to_clean_markdown
         assert args[1] == "word"
         return "# Threaded report\n\nRevenue and profit."
 
-    monkeypatch.setattr(pdf_tool, "_download_pdf_with_cloakbrowser", fake_download)
+    monkeypatch.setattr(pdf_tool, "_download_pdf_with_web_fetch", fake_download)
     monkeypatch.setattr(pdf_tool.asyncio, "to_thread", fake_to_thread)
 
     result = await parse_pdf_to_markdown.ainvoke(
         {
             "url": "https://example.com/report.pdf",
             "engine": "word",
-            "timeout_ms": 5000,
+            "timeout": 5.0,
             "max_chars": 5000,
         }
     )

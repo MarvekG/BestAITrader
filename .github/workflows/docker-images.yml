@@ -27,6 +27,9 @@ jobs:
           - component: frontend
             context: ./frontend
             dockerfile: ./frontend/Dockerfile
+          - component: web
+            context: ./web
+            dockerfile: ./web/Dockerfile
 
     steps:
       - name: Checkout

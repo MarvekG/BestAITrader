@@ -1,26 +1,32 @@
 from __future__ import annotations
 
-import asyncio
 from typing import Any, Dict, Literal
 from urllib.parse import urlparse, urlunparse
 
+import httpx
 from langchain.tools import tool
-from markdownify import markdownify as html_to_markdown
 
-from app.ai.agentic.tooling import browser_context
+from app.core.config import settings
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-DEFAULT_WAIT_UNTIL = "domcontentloaded"
-
 ContentFormat = Literal["html", "markdown"]
-
-_browser_context: Any | None = None
-_browser_context_lock = asyncio.Lock()
 
 
 def _normalize_browser_url(raw_url: str) -> str:
+    """
+    标准化网页浏览 URL。
+
+    Args:
+        raw_url: 用户输入的 URL。
+
+    Returns:
+        标准化后的 HTTP/HTTPS URL。
+
+    Raises:
+        ValueError: URL 为空、协议不支持或缺少主机名。
+    """
     stripped_url = raw_url.strip()
     if not stripped_url:
         raise ValueError("url is required")
@@ -37,67 +43,160 @@ def _normalize_browser_url(raw_url: str) -> str:
     return urlunparse((scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
 
 
-def _convert_html_to_markdown(html: str, title: str, source_url: str) -> str:
-    markdown_body = html_to_markdown(html, heading_style="ATX").strip()
-    heading = title.strip() or source_url
-    return f"# {heading}\n\nSource URL: {source_url}\n\n{markdown_body}".strip()
-
-
 def _normalize_content_selectors(content_selectors: list[str] | None) -> list[str]:
+    """
+    清理内容提取 selector 列表。
+
+    Args:
+        content_selectors: 原始 CSS selector 列表。
+
+    Returns:
+        去除空白后的 selector 列表。
+    """
     if not content_selectors:
         return []
     return [str(selector).strip() for selector in content_selectors if str(selector).strip()]
 
 
-async def _select_rendered_html(page: Any, content_selectors: list[str] | None) -> tuple[str, int | None]:
-    selectors = _normalize_content_selectors(content_selectors)
-    if not selectors:
-        html = await page.content()
-        return html, None
+def _build_web_fetch_payload(
+    normalized_url: str,
+    content_format: ContentFormat,
+    timeout_ms: int,
+    wait_after_ms: int,
+    content_selectors: list[str] | None,
+) -> dict[str, Any]:
+    """
+    构建发送给 web fetch 服务的请求体。
 
-    result = await page.evaluate(
-        """
-        (selectors) => {
-          const selected = [];
-          const seen = new Set();
-          for (const selector of selectors) {
-            for (const element of document.querySelectorAll(selector)) {
-              if (seen.has(element)) {
-                continue;
-              }
-              seen.add(element);
-              selected.push(element.outerHTML);
-            }
-          }
-          return {
-            html: selected.join("\\n"),
-            selected_element_count: selected.length,
-          };
+    Args:
+        normalized_url: 标准化后的目标 URL。
+        content_format: 返回内容格式。
+        timeout_ms: 页面导航超时时间。
+        wait_after_ms: 导航后的额外等待时间。
+        content_selectors: 可选 CSS selector 列表。
+
+    Returns:
+        web fetch 服务请求体。
+    """
+    return {
+        "url": normalized_url,
+        "return_type": content_format,
+        "selectors": _normalize_content_selectors(content_selectors),
+        "timeout_ms": timeout_ms,
+        "wait_after_ms": wait_after_ms,
+    }
+
+
+def _map_web_fetch_response(
+    payload: dict[str, Any],
+    normalized_url: str,
+    content_format: ContentFormat,
+    content_selectors: list[str] | None,
+) -> dict[str, Any]:
+    """
+    将 web fetch 响应映射为浏览工具原有返回结构。
+
+    Args:
+        payload: web fetch 服务响应体。
+        normalized_url: 标准化后的目标 URL。
+        content_format: 请求的内容格式。
+        content_selectors: 原始 selector 列表。
+
+    Returns:
+        与旧浏览工具兼容的结果字典。
+    """
+    base_result = {
+        "url": normalized_url,
+        "final_url": payload.get("final_url") or normalized_url,
+        "status": payload.get("status"),
+        "title": payload.get("title") or "",
+        "content_format": content_format,
+        "content_selectors": _normalize_content_selectors(content_selectors),
+        "selected_element_count": payload.get("selected_element_count"),
+    }
+
+    if not payload.get("success"):
+        return {
+            "url": normalized_url,
+            "error": str(payload.get("error") or "web fetch failed"),
+            "content_source": payload.get("content_source") or f"rendered_dom_{content_format}",
         }
-        """,
-        selectors,
-    )
+
+    content = str(payload.get("content") or "")
+    if content_format == "markdown":
+        return {
+            **base_result,
+            "markdown": content,
+            "markdown_length": int(payload.get("content_length") or len(content)),
+            "source_html_length": payload.get("source_html_length"),
+            "content_source": payload.get("content_source") or "rendered_dom_markdown",
+        }
+
+    return {
+        **base_result,
+        "html": content,
+        "html_length": int(payload.get("content_length") or len(content)),
+        "content_source": payload.get("content_source") or "rendered_dom_html",
+    }
+
+
+async def _fetch_web_page(payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    调用独立 web fetch 服务渲染网页。
+
+    Args:
+        payload: web fetch 服务请求体。
+
+    Returns:
+        web fetch 服务响应 JSON。
+
+    Raises:
+        httpx.HTTPError: 请求失败或服务返回非 2xx 响应。
+        ValueError: 响应体不是 JSON 对象。
+    """
+    base_url = settings.WEB_FETCH_BASE_URL.rstrip("/")
+    timeout = httpx.Timeout(settings.WEB_FETCH_TIMEOUT_SECONDS)
+    async with httpx.AsyncClient(base_url=base_url, timeout=timeout) as client:
+        response = await client.post("/fetch", json=payload)
+        response.raise_for_status()
+        result = response.json()
+
     if not isinstance(result, dict):
-        return "", 0
-    return str(result.get("html") or ""), int(result.get("selected_element_count") or 0)
+        raise ValueError(f"web fetch response must be an object, got {type(result).__name__}")
+    return result
 
 
-async def _get_browser_context() -> Any:
-    global _browser_context
+def _build_error_result(normalized_url: str, error: str, content_format: ContentFormat) -> dict[str, Any]:
+    """
+    构建网页抓取失败结果。
 
-    async with _browser_context_lock:
-        _browser_context = await browser_context.get_browser_context()
-        return _browser_context
+    Args:
+        normalized_url: 标准化后的目标 URL。
+        error: 错误描述。
+        content_format: 请求的内容格式。
+
+    Returns:
+        兼容浏览工具返回结构的失败结果。
+    """
+    return {
+        "url": normalized_url,
+        "error": error,
+        "content_source": f"rendered_dom_{content_format}",
+    }
 
 
-async def close_browser_context(reason: str = "browser_context_closed") -> None:
-    """关闭复用的 CloakBrowser context。"""
-    global _browser_context
+def _log_render_failure(normalized_url: str, exc: Exception) -> None:
+    """
+    记录 web fetch 调用失败日志。
 
-    async with _browser_context_lock:
-        _browser_context = None
-
-    await browser_context.close_browser_context(reason=reason)
+    Args:
+        normalized_url: 标准化后的目标 URL。
+        exc: 捕获到的异常。
+    """
+    logger.exception(
+        "render_web_page_html failed",
+        extra={"url": normalized_url, "error_type": type(exc).__name__},
+    )
 
 
 async def render_web_page_html(
@@ -108,7 +207,7 @@ async def render_web_page_html(
     content_selectors: list[str] | None = None,
 ) -> Dict[str, Any]:
     """
-    使用 CloakBrowser 渲染网页，并返回浏览器当前 DOM HTML 或 Markdown。
+    调用独立 web fetch 服务渲染网页，并返回浏览器当前 DOM HTML 或 Markdown。
 
     Args:
         url: 要浏览的网页 URL。
@@ -123,69 +222,21 @@ async def render_web_page_html(
     try:
         normalized_url = _normalize_browser_url(url)
     except ValueError as exc:
-        return {
-            "url": url,
-            "error": str(exc),
-            "content_source": "rendered_dom_html",
-        }
+        return _build_error_result(url, str(exc), content_format)
 
+    request_payload = _build_web_fetch_payload(
+        normalized_url=normalized_url,
+        content_format=content_format,
+        timeout_ms=timeout_ms,
+        wait_after_ms=wait_after_ms,
+        content_selectors=content_selectors,
+    )
     try:
-        await _get_browser_context()
-        async with browser_context.open_browser_page() as page:
-            response = await page.goto(normalized_url, wait_until=DEFAULT_WAIT_UNTIL, timeout=timeout_ms)
-            if wait_after_ms:
-                await page.wait_for_timeout(wait_after_ms)
-
-            title = await page.title()
-            html, selected_element_count = await _select_rendered_html(page, content_selectors)
-            html_length = len(html)
-            base_result = {
-                "url": normalized_url,
-                "final_url": page.url,
-                "status": response.status if response else None,
-                "title": title,
-                "content_format": content_format,
-                "content_selectors": _normalize_content_selectors(content_selectors),
-                "selected_element_count": selected_element_count,
-            }
-
-            if content_format == "markdown":
-                markdown = _convert_html_to_markdown(html, title, page.url)
-                return {
-                    **base_result,
-                    "markdown": markdown,
-                    "markdown_length": len(markdown),
-                    "source_html_length": html_length,
-                    "content_source": "rendered_dom_markdown",
-                }
-
-            return {
-                **base_result,
-                "html": html,
-                "html_length": html_length,
-                "content_source": "rendered_dom_html",
-            }
+        response_payload = await _fetch_web_page(request_payload)
+        return _map_web_fetch_response(response_payload, normalized_url, content_format, content_selectors)
     except Exception as exc:
-        closing_reason = browser_context.get_browser_closing_reason()
-        if closing_reason:
-            logger.info(
-                "render_web_page_html interrupted by browser context closing: url=%s reason=%s error=%s",
-                normalized_url,
-                closing_reason,
-                exc,
-            )
-            return {
-                "url": normalized_url,
-                "error": f"Browser context is closing: {closing_reason}",
-                "content_source": "rendered_dom_html",
-            }
-
-        logger.exception("render_web_page_html failed: url=%s error=%s", normalized_url, exc)
-        return {
-            "url": normalized_url,
-            "error": f"{type(exc).__name__}: {exc}",
-            "content_source": "rendered_dom_html",
-        }
+        _log_render_failure(normalized_url, exc)
+        return _build_error_result(normalized_url, f"{type(exc).__name__}: {exc}", content_format)
 
 
 @tool(parse_docstring=True)
@@ -197,13 +248,13 @@ async def browse_web_page_html(
     content_selectors: list[str] | None = None,
 ) -> Dict[str, Any]:
     """
-    使用 CloakBrowser 打开网页，执行页面 JavaScript，并返回渲染后的 HTML 或 Markdown。
+    调用 web fetch 服务打开网页，执行页面 JavaScript，并返回渲染后的 HTML 或 Markdown。
 
     Args:
         url: 要浏览的网页 URL；缺少协议时默认按 https:// 处理。
         content_format: 返回内容格式，默认html，可选markdown。html 返回浏览器当前 DOM HTML；markdown 将同一份渲染后 HTML 转成
             Markdown，并在 Markdown 开头写入 Source URL。
-        timeout_ms: page.goto 的导航超时时间，单位毫秒。
+        timeout_ms: web fetch 服务的导航超时时间，单位毫秒。
         wait_after_ms: 导航完成后额外等待前端 JS 渲染的时间，单位毫秒。
         content_selectors: 可选 CSS selector 列表；为空时返回完整页面，非空时只返回匹配区域。
 

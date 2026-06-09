@@ -1,0 +1,289 @@
+from fastapi.testclient import TestClient
+
+from app.engines.camoufox_engine import CamoufoxEngine
+from app.engines.cloakbrowser_engine import CloakBrowserEngine
+from app.engines.patchright_engine import PatchrightEngine
+from app.engines.base import DownloadedPdf, RenderedPage
+from app.main import app, engine_registry
+from app.schemas import EngineType
+from app.services.limiter import EngineLimiterTimeoutError
+
+
+class FakeEngine:
+    """测试用网页渲染引擎。"""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def render(
+        self,
+        url: str,
+        selectors: list[str],
+        timeout_ms: int,
+        wait_after_ms: int,
+    ) -> RenderedPage:
+        """
+        返回固定渲染结果并记录调用参数。
+
+        Args:
+            url: 已规范化 URL。
+            selectors: CSS selector 列表。
+            timeout_ms: 页面导航超时时间。
+            wait_after_ms: 导航后等待时间。
+
+        Returns:
+            固定渲染页面。
+        """
+        self.calls.append(
+            {
+                "url": url,
+                "selectors": selectors,
+                "timeout_ms": timeout_ms,
+                "wait_after_ms": wait_after_ms,
+            }
+        )
+        return RenderedPage(
+            final_url="https://example.com/final",
+            status=200,
+            title="Example",
+            html="<main><h1>Example</h1><p>正文</p><p>广告内容结束</p></main>",
+            selected_element_count=len(selectors) if selectors else None,
+        )
+
+    async def close(self) -> None:
+        """关闭测试引擎。"""
+
+
+class TimeoutEngine:
+    """测试用限流超时引擎。"""
+
+    async def render(
+        self,
+        url: str,
+        selectors: list[str],
+        timeout_ms: int,
+        wait_after_ms: int,
+    ) -> RenderedPage:
+        """
+        模拟等待引擎并发额度超时。
+
+        Args:
+            url: 已规范化 URL。
+            selectors: CSS selector 列表。
+            timeout_ms: 页面导航超时时间。
+            wait_after_ms: 导航后等待时间。
+
+        Returns:
+            不会返回。
+
+        Raises:
+            EngineLimiterTimeoutError: 始终抛出限流等待超时。
+        """
+        raise EngineLimiterTimeoutError("engine concurrency slot wait timed out after 1ms")
+
+    async def close(self) -> None:
+        """关闭测试引擎。"""
+
+
+class FakePdfEngine:
+    """测试用 PDF 下载引擎。"""
+
+    def __init__(self) -> None:
+        """初始化调用记录。"""
+        self.calls: list[dict[str, object]] = []
+
+    async def download_pdf(self, url: str, timeout: float) -> DownloadedPdf:
+        """
+        返回固定 PDF 内容并记录调用参数。
+
+        Args:
+            url: 已规范化 URL。
+            timeout: 下载超时时间，单位秒。
+
+        Returns:
+            固定 PDF 下载结果。
+        """
+        self.calls.append({"url": url, "timeout": timeout})
+        return DownloadedPdf(
+            final_url="https://example.com/final.pdf",
+            status=200,
+            content_type="application/pdf",
+            content=b"%PDF-1.7 fake",
+        )
+
+    async def close(self) -> None:
+        """关闭测试引擎。"""
+
+
+def test_fetch_returns_markdown_and_applies_clean_regex() -> None:
+    fake_engine = FakeEngine()
+    original_engine = engine_registry._engines[EngineType.CLOAKBROWSER]
+    engine_registry._engines[EngineType.CLOAKBROWSER] = fake_engine
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/fetch",
+                json={
+                    "url": "example.com/page",
+                    "selectors": [" main "],
+                    "markdown_clean_regexes": ["广告.*?结束"],
+                    "engine": "cloakbrowser",
+                    "return_type": "markdown",
+                    "timeout_ms": 10_000,
+                    "wait_after_ms": 0,
+                },
+            )
+    finally:
+        engine_registry._engines[EngineType.CLOAKBROWSER] = original_engine
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["success"] is True
+    assert payload["url"] == "https://example.com/page"
+    assert payload["final_url"] == "https://example.com/final"
+    assert payload["return_type"] == "markdown"
+    assert payload["selectors"] == ["main"]
+    assert "Source URL: https://example.com/final" in payload["content"]
+    assert "广告" not in payload["content"]
+    assert fake_engine.calls == [
+        {
+            "url": "https://example.com/page",
+            "selectors": ["main"],
+            "timeout_ms": 10_000,
+            "wait_after_ms": 0,
+        }
+    ]
+
+
+def test_fetch_returns_html() -> None:
+    fake_engine = FakeEngine()
+    original_engine = engine_registry._engines[EngineType.PATCHRIGHT]
+    engine_registry._engines[EngineType.PATCHRIGHT] = fake_engine
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/fetch",
+                json={
+                    "url": "https://example.com/page",
+                    "engine": "patchright",
+                    "return_type": "html",
+                    "wait_after_ms": 0,
+                },
+            )
+    finally:
+        engine_registry._engines[EngineType.PATCHRIGHT] = original_engine
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["success"] is True
+    assert payload["content_source"] == "rendered_dom_html"
+    assert payload["content"] == "<main><h1>Example</h1><p>正文</p><p>广告内容结束</p></main>"
+
+
+def test_fetch_returns_failure_when_limiter_times_out() -> None:
+    timeout_engine = TimeoutEngine()
+    original_engine = engine_registry._engines[EngineType.CAMOUFOX]
+    engine_registry._engines[EngineType.CAMOUFOX] = timeout_engine
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/fetch",
+                json={
+                    "url": "https://example.com/page",
+                    "engine": "camoufox",
+                    "return_type": "markdown",
+                    "wait_after_ms": 0,
+                },
+            )
+    finally:
+        engine_registry._engines[EngineType.CAMOUFOX] = original_engine
+
+    payload = response.json()
+    assert response.status_code == 200
+    assert payload["success"] is False
+    assert "EngineLimiterTimeoutError" in payload["error"]
+    assert "timed out" in payload["error"]
+
+
+def test_fetch_rejects_invalid_regex() -> None:
+    with TestClient(app) as client:
+        response = client.post(
+            "/fetch",
+            json={
+                "url": "https://example.com/page",
+                "return_type": "markdown",
+                "markdown_clean_regexes": ["["],
+            },
+        )
+
+    assert response.status_code == 400
+    assert "invalid markdown_clean_regexes" in response.json()["detail"]
+
+
+def test_fetch_rejects_unknown_engine() -> None:
+    with TestClient(app) as client:
+        response = client.post(
+            "/fetch",
+            json={
+                "url": "https://example.com/page",
+                "engine": "unknown",
+            },
+        )
+
+    assert response.status_code == 422
+
+
+def test_health_returns_ok() -> None:
+    with TestClient(app) as client:
+        response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+def test_download_returns_pdf_bytes() -> None:
+    fake_engine = FakePdfEngine()
+    original_engine = engine_registry._engines[EngineType.PATCHRIGHT]
+    engine_registry._engines[EngineType.PATCHRIGHT] = fake_engine
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/download",
+                json={"url": "example.com/report.pdf", "engine": "patchright", "timeout": 10.0},
+            )
+    finally:
+        engine_registry._engines[EngineType.PATCHRIGHT] = original_engine
+
+    assert response.status_code == 200
+    assert response.content == b"%PDF-1.7 fake"
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert response.headers["x-final-url"] == "https://example.com/final.pdf"
+    assert response.headers["x-source-status"] == "200"
+    assert fake_engine.calls == [{"url": "https://example.com/report.pdf", "timeout": 10.0}]
+
+
+def test_download_rejects_unknown_engine() -> None:
+    with TestClient(app) as client:
+        response = client.post("/download", json={"url": "https://example.com/report.pdf", "engine": "unknown"})
+
+    assert response.status_code == 422
+
+
+def test_download_rejects_invalid_url() -> None:
+    with TestClient(app) as client:
+        response = client.post("/download", json={"url": "file:///etc/passwd"})
+
+    assert response.status_code == 400
+    assert "only http and https URLs are supported" in response.json()["detail"]
+
+
+def test_engine_registry_uses_shared_limiter() -> None:
+    cloakbrowser_engine = engine_registry._engines[EngineType.CLOAKBROWSER]
+    patchright_engine = engine_registry._engines[EngineType.PATCHRIGHT]
+    camoufox_engine = engine_registry._engines[EngineType.CAMOUFOX]
+
+    assert isinstance(cloakbrowser_engine, CloakBrowserEngine)
+    assert isinstance(patchright_engine, PatchrightEngine)
+    assert isinstance(camoufox_engine, CamoufoxEngine)
+    assert cloakbrowser_engine._limiter is patchright_engine._limiter
+    assert patchright_engine._limiter is camoufox_engine._limiter
