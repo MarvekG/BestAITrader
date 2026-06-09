@@ -74,6 +74,7 @@ docker compose ps
 
 ```bash
 docker compose exec backend curl -f http://127.0.0.1:8000/health
+docker compose exec sandbox curl -f http://127.0.0.1:8030/health
 curl -f http://localhost
 curl -f http://localhost:4000/health/liveliness
 ```
@@ -82,6 +83,8 @@ curl -f http://localhost:4000/health/liveliness
 
 - 主系统：`http://localhost`
 - LiteLLM 管理系统：`http://localhost:4000/ui`
+
+`sandbox` 是独立 Python 沙箱服务，内置 Deno + Pyodide，用于后端 Agent 工具执行受限 Python 计算；生产 Compose 默认只在内部网络暴露，开发 Compose 额外映射 `8030:8030` 便于调试。
 
 修改配置后不要只用 `restart`，需要重建对应服务：
 

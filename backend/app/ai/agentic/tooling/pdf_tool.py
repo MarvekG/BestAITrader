@@ -20,9 +20,9 @@ PDFParseEngine = Literal["word", "pymupdf"]
 DEFAULT_MAX_MARKDOWN_CHARS = 40_000
 
 
-async def _download_pdf_with_web_fetch(url: str, timeout: float) -> tuple[str, str, int | None, str]:
+async def _download_pdf_with_webfetch(url: str, timeout: float) -> tuple[str, str, int | None, str]:
     """
-    通过 web fetch 服务下载 PDF 原始文件并写入临时文件。
+    通过 webfetch 服务下载 PDF 原始文件并写入临时文件。
 
     Args:
         url: 要下载的 PDF URL。
@@ -35,8 +35,8 @@ async def _download_pdf_with_web_fetch(url: str, timeout: float) -> tuple[str, s
         RuntimeError: 下载失败、内容为空或内容不是有效 PDF。
     """
     normalized_url = _normalize_browser_url(url)
-    base_url = settings.WEB_FETCH_BASE_URL.rstrip("/")
-    request_timeout = httpx.Timeout(settings.WEB_FETCH_TIMEOUT_SECONDS)
+    base_url = settings.WEBFETCH_BASE_URL.rstrip("/")
+    request_timeout = httpx.Timeout(settings.WEBFETCH_TIMEOUT_SECONDS)
     pdf_path = ""
     header_bytes = b""
     bytes_written = 0
@@ -94,12 +94,12 @@ async def parse_pdf_to_markdown(
     max_chars: int = DEFAULT_MAX_MARKDOWN_CHARS,
 ) -> Dict[str, Any]:
     """
-    调用 web fetch 服务下载 PDF，并将 PDF 解析为 Markdown。
+    调用 webfetch 服务下载 PDF，并将 PDF 解析为 Markdown。
 
     Args:
         url: 要下载和解析的 PDF URL；缺少协议时默认按 https:// 处理。
         engine: PDF 解析引擎。word 会先将 PDF 转为 Word，再转 Markdown；pymupdf 直接用 PyMuPDF 转 Markdown。
-        timeout: 传给 web fetch 服务的 PDF 下载超时时间，单位秒。
+        timeout: 传给 webfetch 服务的 PDF 下载超时时间，单位秒。
         max_chars: 返回 Markdown 的最大字符数。默认 40000 字符，按 1 token 约 4 字符估算约等于 10000 token。
 
     Returns:
@@ -107,7 +107,7 @@ async def parse_pdf_to_markdown(
     """
     pdf_path = ""
     try:
-        pdf_path, final_url, status, content_type = await _download_pdf_with_web_fetch(
+        pdf_path, final_url, status, content_type = await _download_pdf_with_webfetch(
             url=url,
             timeout=max(1.0, float(timeout or 60.0)),
         )

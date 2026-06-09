@@ -1,0 +1,35 @@
+# Python ignore
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+
+# Logs
+logs/
+*.log
+
+# Runtime data
+data/
+runtime/
+.codex/
+
+# Git
+.git/
+.gitignore
+
+# Environment
+.env
+
+# Tests and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Misc
+.idea/
+.vscode/
+*.swp
+*.bak

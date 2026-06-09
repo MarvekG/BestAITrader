@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 from typing import List
 
@@ -45,21 +44,11 @@ class Settings(BaseSettings):
     ENABLE_AUTO_TRADE: bool = True
     ASYNC_TASK_MAX_CONCURRENT: int = 8
     PY_SANDBOX_ENABLED: bool = True
-    PY_SANDBOX_DENO_EXECUTABLE: str = "deno"
-    PY_SANDBOX_RUNNER_PATH: str = str(PROJECT_ROOT / "app/ai/agentic/tooling/pyodide_runner.ts")
-    PY_SANDBOX_PYODIDE_ROOT: str = str(Path.home() / "pyodide")
+    PY_SANDBOX_BASE_URL: str = "http://sandbox:8030"
+    PY_SANDBOX_HTTP_TIMEOUT_SECONDS: float = 35.0
     PY_SANDBOX_TIMEOUT_SECONDS: int = 30
     PY_SANDBOX_STDOUT_MAX_BYTES: int = 32768
     PY_SANDBOX_STDERR_MAX_BYTES: int = 16384
-    PY_SANDBOX_MAX_CONCURRENT_EXECUTIONS: int = os.cpu_count() or 1
-    PY_SANDBOX_PREWARM_POOL_ENABLED: bool = True
-    PY_SANDBOX_PREWARM_ON_STARTUP: bool = True
-    PY_SANDBOX_PREWARM_POOL_SIZE: int = max(1, (os.cpu_count() or 1) // 2)
-    PY_SANDBOX_PREWARM_MIN_READY: int = max(1, max(1, (os.cpu_count() or 1) // 2) // 2)
-    PY_SANDBOX_PREWARM_MAX_STARTING: int = max(1, (os.cpu_count() or 1) // 2)
-    PY_SANDBOX_WORKER_ACQUIRE_TIMEOUT_SECONDS: int = 3
-    PY_SANDBOX_WORKER_STARTUP_TIMEOUT_SECONDS: int = 30
-    PY_SANDBOX_WORKER_RUNNER_PATH: str = str(PROJECT_ROOT / "app/ai/agentic/tooling/pyodide_one_shot_worker.ts")
     AGENTIC_DEPENDENCY_INSTALL_TIMEOUT_SECONDS: int = 600
     AGENTIC_DEPENDENCY_INSTALL_MAX_REQUIREMENTS: int = 50
     ENABLE_RUNTIME_EXTENSIONS: bool = True
@@ -111,9 +100,9 @@ class Settings(BaseSettings):
     MEMORY_SERVICE_BASE_URL: str = "http://memoflux:8020"
     MEMORY_SERVICE_TIMEOUT_SECONDS: float = 10.0
 
-    # Web Fetch Service Config
-    WEB_FETCH_BASE_URL: str = "http://web:8010"
-    WEB_FETCH_TIMEOUT_SECONDS: float = 180.0
+    # Webfetch Service Config
+    WEBFETCH_BASE_URL: str = "http://webfetch:8010"
+    WEBFETCH_TIMEOUT_SECONDS: float = 180.0
 
     # Experience Cleanup Config
     EXPERIENCE_CLEANUP_ENABLED: bool = True

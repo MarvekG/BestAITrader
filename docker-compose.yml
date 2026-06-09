@@ -123,6 +123,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      sandbox:
+        condition: service_healthy
     volumes:
     #   - ./backend:/app # FOR DEBUG
       - backend_runtime_data:/app/runtime
@@ -136,25 +138,52 @@ services:
     networks:
       - best_ai_trader_network
 
-  web:
-    image: ghcr.io/marvekg/bestaitrader-web:latest
-    container_name: best_ai_trader_web
+  sandbox:
+    image: ghcr.io/marvekg/bestaitrader-sandbox:latest
+    container_name: best_ai_trader_sandbox
     restart: unless-stopped
-    cpus: "6.0"
+    cpus: "4.0"
     mem_limit: 2g
     memswap_limit: 2g
     mem_swappiness: 0
     environment:
       TZ: Asia/Shanghai
-      WEB_MAX_PAGES: 4
-      WEB_ENGINE_ACQUIRE_TIMEOUT_MS: 30000
-      WEB_RELOAD: "false"
-      WEB_RUNTIME_DIR: /runtime
+      SANDBOX_RELOAD: "false"
+      SANDBOX_RUNTIME_DIR: /runtime
+      SANDBOX_MAX_CONCURRENT_EXECUTIONS: 2
+      SANDBOX_PREWARM_POOL_SIZE: 1
+      SANDBOX_PREWARM_MAX_STARTING: 1
+    volumes:
+      - sandbox_runtime_data:/runtime
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://127.0.0.1:8030/health" ]
+      interval: 1m
+      start_interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 80s
+    networks:
+      - best_ai_trader_network
+
+  webfetch:
+    image: ghcr.io/marvekg/bestaitrader-webfetch:latest
+    container_name: best_ai_trader_webfetch
+    restart: unless-stopped
+    cpus: "4.0"
+    mem_limit: 2g
+    memswap_limit: 2g
+    mem_swappiness: 0
+    environment:
+      TZ: Asia/Shanghai
+      WEBFETCH_MAX_PAGES: 4
+      WEBFETCH_ENGINE_ACQUIRE_TIMEOUT_MS: 30000
+      WEBFETCH_RELOAD: "false"
+      WEBFETCH_RUNTIME_DIR: /runtime
       CLOAKBROWSER_CACHE_DIR: /runtime/cloakbrowser/cache
       PLAYWRIGHT_BROWSERS_PATH: /runtime/browsers/ms-playwright
       XDG_CACHE_HOME: /runtime/cache
     volumes:
-      - web_runtime_data:/runtime
+      - webfetch_runtime_data:/runtime
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://127.0.0.1:8010/health" ]
       interval: 1m
@@ -220,7 +249,8 @@ volumes:
   memo_pgvector17_data:
   memo_runtime_data:
   backend_runtime_data:
-  web_runtime_data:
+  sandbox_runtime_data:
+  webfetch_runtime_data:
 
 
 secrets:
