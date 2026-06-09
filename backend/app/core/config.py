@@ -87,7 +87,6 @@ class Settings(BaseSettings):
                 "Use a unique value (recommend 12+ characters)."
             )
         return value
-    CLOAKBROWSER_MAX_PAGES: int = 10
     MARKET_WATCH_RECENT_DEBATE_LAUNCH_LOOKBACK_HOURS: int = 24
 
     # Core Indices Config
@@ -111,6 +110,10 @@ class Settings(BaseSettings):
     MEMORY_SERVICE_ENABLED: bool = True
     MEMORY_SERVICE_BASE_URL: str = "http://memoflux:8020"
     MEMORY_SERVICE_TIMEOUT_SECONDS: float = 10.0
+
+    # Web Fetch Service Config
+    WEB_FETCH_BASE_URL: str = "http://web:8010"
+    WEB_FETCH_TIMEOUT_SECONDS: float = 180.0
 
     # Experience Cleanup Config
     EXPERIENCE_CLEANUP_ENABLED: bool = True

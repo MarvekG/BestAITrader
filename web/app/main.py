@@ -3,16 +3,18 @@ from __future__ import annotations
 import logging
 import re
 from contextlib import asynccontextmanager
+from io import BytesIO
 from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.config import get_settings
-from app.engines.base import BrowserEngine
+from app.engines.base import BrowserEngine, PdfDownloadEngine
 from app.engines.camoufox_engine import CamoufoxEngine
 from app.engines.cloakbrowser_engine import CloakBrowserEngine
 from app.engines.patchright_engine import PatchrightEngine
-from app.schemas import EngineType, FetchRequest, FetchResponse, ReturnType
+from app.schemas import EngineType, FetchRequest, FetchResponse, PdfDownloadRequest, ReturnType
 from app.services.cleaner import clean_markdown, compile_markdown_patterns, normalize_fetch_url
 from app.services.limiter import EngineLimiter, EngineLimiterTimeoutError
 from app.services.renderer import convert_html_to_markdown
@@ -50,6 +52,21 @@ class EngineRegistry:
             渲染引擎实例。
         """
         return self._engines[engine_type]
+
+    def get_pdf_downloader(self, engine_type: EngineType) -> PdfDownloadEngine:
+        """
+        获取 PDF 下载引擎。
+
+        Args:
+            engine_type: 引擎类型。
+
+        Returns:
+            支持 request context 下载的引擎。
+        """
+        engine = self._engines[engine_type]
+        if not hasattr(engine, "download_pdf"):
+            raise RuntimeError(f"PDF download engine is not available: {engine_type.value}")
+        return engine
 
     async def close(self) -> None:
         """关闭所有渲染引擎资源。"""
@@ -191,4 +208,49 @@ async def fetch_page(request: FetchRequest) -> FetchResponse:
         content_length=html_length,
         source_html_length=html_length,
         content_source="rendered_dom_html",
+    )
+
+
+@app.post("/download")
+async def download_file(request: PdfDownloadRequest) -> StreamingResponse:
+    """
+    下载 PDF 并流式返回原始文件内容。
+
+    Args:
+        request: PDF 下载请求。
+
+    Returns:
+        原始 PDF 文件流。
+
+    Raises:
+        HTTPException: URL 非法或下载失败。
+    """
+    try:
+        normalized_url = normalize_fetch_url(request.url)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    settings = get_settings()
+    timeout = request.timeout if request.timeout is not None else settings.WEB_DEFAULT_DOWNLOAD_TIMEOUT_SECONDS
+
+    try:
+        downloaded = await engine_registry.get_pdf_downloader(request.engine).download_pdf(normalized_url, timeout)
+    except EngineLimiterTimeoutError as exc:
+        raise HTTPException(status_code=503, detail=f"{type(exc).__name__}: {exc}") from exc
+    except Exception as exc:
+        logger.exception(
+            "web pdf download failed",
+            extra={"url": normalized_url, "error_type": type(exc).__name__},
+        )
+        raise HTTPException(status_code=502, detail=f"{type(exc).__name__}: {exc}") from exc
+
+    content_type = downloaded.content_type if "pdf" in downloaded.content_type.lower() else "application/pdf"
+    return StreamingResponse(
+        BytesIO(downloaded.content),
+        media_type=content_type,
+        headers={
+            "Content-Length": str(len(downloaded.content)),
+            "X-Final-URL": downloaded.final_url,
+            "X-Source-Status": str(downloaded.status or ""),
+        },
     )

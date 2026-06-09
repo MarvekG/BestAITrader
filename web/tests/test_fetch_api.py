@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 from app.engines.camoufox_engine import CamoufoxEngine
 from app.engines.cloakbrowser_engine import CloakBrowserEngine
 from app.engines.patchright_engine import PatchrightEngine
-from app.engines.base import RenderedPage
+from app.engines.base import DownloadedPdf, RenderedPage
 from app.main import app, engine_registry
 from app.schemas import EngineType
 from app.services.limiter import EngineLimiterTimeoutError
@@ -80,6 +80,36 @@ class TimeoutEngine:
             EngineLimiterTimeoutError: 始终抛出限流等待超时。
         """
         raise EngineLimiterTimeoutError("engine concurrency slot wait timed out after 1ms")
+
+    async def close(self) -> None:
+        """关闭测试引擎。"""
+
+
+class FakePdfEngine:
+    """测试用 PDF 下载引擎。"""
+
+    def __init__(self) -> None:
+        """初始化调用记录。"""
+        self.calls: list[dict[str, object]] = []
+
+    async def download_pdf(self, url: str, timeout: float) -> DownloadedPdf:
+        """
+        返回固定 PDF 内容并记录调用参数。
+
+        Args:
+            url: 已规范化 URL。
+            timeout: 下载超时时间，单位秒。
+
+        Returns:
+            固定 PDF 下载结果。
+        """
+        self.calls.append({"url": url, "timeout": timeout})
+        return DownloadedPdf(
+            final_url="https://example.com/final.pdf",
+            status=200,
+            content_type="application/pdf",
+            content=b"%PDF-1.7 fake",
+        )
 
     async def close(self) -> None:
         """关闭测试引擎。"""
@@ -209,6 +239,42 @@ def test_health_returns_ok() -> None:
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_download_returns_pdf_bytes() -> None:
+    fake_engine = FakePdfEngine()
+    original_engine = engine_registry._engines[EngineType.PATCHRIGHT]
+    engine_registry._engines[EngineType.PATCHRIGHT] = fake_engine
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/download",
+                json={"url": "example.com/report.pdf", "engine": "patchright", "timeout": 10.0},
+            )
+    finally:
+        engine_registry._engines[EngineType.PATCHRIGHT] = original_engine
+
+    assert response.status_code == 200
+    assert response.content == b"%PDF-1.7 fake"
+    assert response.headers["content-type"].startswith("application/pdf")
+    assert response.headers["x-final-url"] == "https://example.com/final.pdf"
+    assert response.headers["x-source-status"] == "200"
+    assert fake_engine.calls == [{"url": "https://example.com/report.pdf", "timeout": 10.0}]
+
+
+def test_download_rejects_unknown_engine() -> None:
+    with TestClient(app) as client:
+        response = client.post("/download", json={"url": "https://example.com/report.pdf", "engine": "unknown"})
+
+    assert response.status_code == 422
+
+
+def test_download_rejects_invalid_url() -> None:
+    with TestClient(app) as client:
+        response = client.post("/download", json={"url": "file:///etc/passwd"})
+
+    assert response.status_code == 400
+    assert "only http and https URLs are supported" in response.json()["detail"]
 
 
 def test_engine_registry_uses_shared_limiter() -> None:

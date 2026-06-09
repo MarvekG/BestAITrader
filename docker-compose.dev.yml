@@ -123,9 +123,6 @@ services:
       - ./backend/.env
     environment:
       TZ: Asia/Shanghai
-      DATABASE_URL: postgresql://tradeuser:tradepassword@postgres:5432/trading
-      CLOAKBROWSER_CACHE_DIR: /app/runtime/cloakbrowser/cache
-      MEMORY_SERVICE_BASE_URL: http://memo:8020
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

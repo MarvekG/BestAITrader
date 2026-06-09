@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.engines.base import RenderedPage
+import logging
+
+from app.engines.base import DownloadedPdf, RenderedPage, timeout_seconds_to_ms, validate_pdf_download
 from app.services.limiter import EngineLimiter
 from app.services.renderer import (
     DEFAULT_LOCALE,
@@ -11,6 +13,8 @@ from app.services.renderer import (
     DEFAULT_WAIT_UNTIL,
     select_rendered_html,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class PatchrightEngine:
@@ -81,3 +85,57 @@ class PatchrightEngine:
 
     async def close(self) -> None:
         """关闭 Patchright 引擎资源。"""
+
+    async def download_pdf(self, url: str, timeout: float) -> DownloadedPdf:
+        """
+        使用 Patchright request context 下载 PDF。
+
+        Args:
+            url: 已规范化的 PDF URL。
+            timeout: 请求超时时间，单位秒。
+
+        Returns:
+            PDF 下载结果。
+
+        Raises:
+            RuntimeError: 下载失败、内容为空或内容不是有效 PDF。
+        """
+        try:
+            from patchright.async_api import async_playwright
+        except ImportError as exc:
+            raise RuntimeError("Patchright is not installed in the web container") from exc
+
+        async with self._limiter.acquire():
+            async with async_playwright() as playwright:
+                browser = await playwright.chromium.launch(headless=self._headless)
+                context: Any | None = None
+                try:
+                    context = await browser.new_context(
+                        viewport=DEFAULT_VIEWPORT,
+                        locale=DEFAULT_LOCALE,
+                        timezone_id=DEFAULT_TIMEZONE,
+                    )
+                    response = await context.request.get(url, timeout=timeout_seconds_to_ms(timeout))
+                    status = response.status
+                    final_url = response.url
+                    headers = response.headers or {}
+                    content_type = str(headers.get("content-type") or headers.get("Content-Type") or "")
+                    pdf_content = await response.body()
+                finally:
+                    if context is not None:
+                        await context.close()
+                    await browser.close()
+
+        validate_pdf_download(status, content_type, pdf_content)
+        if "pdf" not in content_type.lower():
+            logger.warning(
+                "downloaded content is not explicitly marked as PDF",
+                extra={"url": final_url, "content_type": content_type},
+            )
+
+        return DownloadedPdf(
+            final_url=final_url,
+            status=status,
+            content_type=content_type,
+            content=pdf_content,
+        )

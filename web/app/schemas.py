@@ -70,3 +70,13 @@ class FetchResponse(BaseModel):
     source_html_length: int | None = None
     content_source: str | None = None
     error: str | None = None
+
+
+class PdfDownloadRequest(BaseModel):
+    """PDF 下载请求体。"""
+
+    url: str = Field(min_length=1)
+    engine: EngineType = EngineType.CLOAKBROWSER
+    timeout: float | None = Field(default=None, ge=1.0, le=300.0)
+
+    model_config = ConfigDict(extra="forbid")

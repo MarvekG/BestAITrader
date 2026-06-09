@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
 
-from app.engines.base import RenderedPage
+from app.engines.base import DownloadedPdf, RenderedPage, timeout_seconds_to_ms, validate_pdf_download
 from app.services.limiter import EngineLimiter
 from app.services.renderer import (
     DEFAULT_LOCALE,
@@ -13,6 +14,8 @@ from app.services.renderer import (
     DEFAULT_WAIT_UNTIL,
     select_rendered_html,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class CloakBrowserEngine:
@@ -145,6 +148,45 @@ class CloakBrowserEngine:
                 html=html,
                 selected_element_count=selected_element_count,
             )
+
+    async def download_pdf(self, url: str, timeout: float) -> DownloadedPdf:
+        """
+        使用 CloakBrowser request context 下载 PDF。
+
+        Args:
+            url: 已规范化的 PDF URL。
+            timeout: 请求超时时间，单位秒。
+
+        Returns:
+            PDF 下载结果。
+
+        Raises:
+            RuntimeError: 下载失败、内容为空或内容不是有效 PDF。
+        """
+        async with self._limiter.acquire():
+            async with self._browser_context_lock:
+                context = await self._get_or_launch_browser_context_locked()
+            response = await context.request.get(url, timeout=timeout_seconds_to_ms(timeout))
+
+        status = response.status
+        final_url = response.url
+        headers = response.headers or {}
+        content_type = str(headers.get("content-type") or headers.get("Content-Type") or "")
+        pdf_content = await response.body()
+
+        validate_pdf_download(status, content_type, pdf_content)
+        if "pdf" not in content_type.lower():
+            logger.warning(
+                "downloaded content is not explicitly marked as PDF",
+                extra={"url": final_url, "content_type": content_type},
+            )
+
+        return DownloadedPdf(
+            final_url=final_url,
+            status=status,
+            content_type=content_type,
+            content=pdf_content,
+        )
 
     async def close(self, reason: str = "browser_context_closed") -> None:
         """

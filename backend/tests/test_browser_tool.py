@@ -1,45 +1,60 @@
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.ai.agentic.tooling import browser_context, browser_tool
-from app.ai.agentic.tooling.browser_tool import browse_web_page_html, close_browser_context, render_web_page_html
+from app.ai.agentic.tooling import browser_tool
+from app.ai.agentic.tooling.browser_tool import browse_web_page_html, render_web_page_html
 
 
-@pytest.fixture(autouse=True)
-def reset_browser_context_singleton():
-    browser_tool._browser_context = None
-    browser_context.set_cached_browser_context(None)
-    if hasattr(browser_context, "_active_pages"):
-        browser_context._active_pages.clear()
-    if hasattr(browser_context, "_browser_context_closing_reason"):
-        browser_context._browser_context_closing_reason = None
-    yield
-    browser_tool._browser_context = None
-    browser_context.set_cached_browser_context(None)
-    if hasattr(browser_context, "_active_pages"):
-        browser_context._active_pages.clear()
-    if hasattr(browser_context, "_browser_context_closing_reason"):
-        browser_context._browser_context_closing_reason = None
+def _web_fetch_response(
+    content: str,
+    return_type: str = "html",
+    content_source: str | None = None,
+    **overrides: object,
+) -> dict[str, object]:
+    """
+    构造测试用 web fetch 响应。
+
+    Args:
+        content: 返回内容。
+        return_type: 内容格式。
+        content_source: 可选内容来源。
+        **overrides: 覆盖字段。
+
+    Returns:
+        web fetch 响应字典。
+    """
+    payload: dict[str, object] = {
+        "success": True,
+        "url": "https://example.com",
+        "final_url": "https://example.com/final",
+        "status": 200,
+        "title": "Example",
+        "engine": "web",
+        "return_type": return_type,
+        "selectors": [],
+        "selected_element_count": None,
+        "content": content,
+        "content_length": len(content),
+        "source_html_length": len(content),
+        "content_source": content_source or f"rendered_dom_{return_type}",
+        "error": None,
+    }
+    payload.update(overrides)
+    return payload
 
 
 @pytest.mark.asyncio
-async def test_render_web_page_html_returns_rendered_dom_html():
-    fake_page = MagicMock()
-    fake_page.url = "https://example.com/final"
-    fake_page.goto = AsyncMock(return_value=SimpleNamespace(status=200))
-    fake_page.wait_for_timeout = AsyncMock()
-    fake_page.title = AsyncMock(return_value="Example")
-    fake_page.content = AsyncMock(return_value="<html><body>Example rendered page</body></html>")
-    fake_page.close = AsyncMock()
-    close_page = fake_page.close
+async def test_render_web_page_html_returns_rendered_dom_html() -> None:
+    """网页浏览工具将 web fetch HTML 响应映射为旧返回结构。"""
+    fetch_mock = AsyncMock(
+        return_value=_web_fetch_response(
+            "<html><body>Example rendered page</body></html>",
+            final_url="https://example.com/final",
+        )
+    )
 
-    fake_context = MagicMock()
-    fake_context.new_page = AsyncMock(return_value=fake_page)
-    fake_context.close = AsyncMock()
-
-    with patch("app.ai.agentic.tooling.browser_context.launch_context_async", AsyncMock(return_value=fake_context)):
+    with patch("app.ai.agentic.tooling.browser_tool._fetch_web_page", fetch_mock):
         result = await render_web_page_html(
             "example.com",
             wait_after_ms=0,
@@ -57,89 +72,80 @@ async def test_render_web_page_html_returns_rendered_dom_html():
         "content_selectors": [],
         "selected_element_count": None,
     }
-    close_page.assert_awaited_once()
-    fake_context.close.assert_not_awaited()
+    fetch_mock.assert_awaited_once_with(
+        {
+            "url": "https://example.com",
+            "return_type": "html",
+            "selectors": [],
+            "timeout_ms": 60_000,
+            "wait_after_ms": 0,
+        }
+    )
 
 
 @pytest.mark.asyncio
-async def test_render_web_page_html_normalizes_host_with_port():
-    fake_page = MagicMock()
-    fake_page.url = "https://example.com:443/path"
-    fake_page.goto = AsyncMock(return_value=SimpleNamespace(status=200))
-    fake_page.wait_for_timeout = AsyncMock()
-    fake_page.title = AsyncMock(return_value="Example")
-    fake_page.content = AsyncMock(return_value="<html></html>")
-    fake_page.close = AsyncMock()
+async def test_render_web_page_html_normalizes_host_with_port() -> None:
+    """网页浏览工具保留 URL 主机端口并传给 web fetch 服务。"""
+    fetch_mock = AsyncMock(
+        return_value=_web_fetch_response(
+            "<html></html>",
+            final_url="https://example.com:443/path",
+        )
+    )
 
-    fake_context = MagicMock()
-    fake_context.new_page = AsyncMock(return_value=fake_page)
-    fake_context.close = AsyncMock()
-
-    with patch("app.ai.agentic.tooling.browser_context.launch_context_async", AsyncMock(return_value=fake_context)):
+    with patch("app.ai.agentic.tooling.browser_tool._fetch_web_page", fetch_mock):
         result = await render_web_page_html("example.com:443/path", wait_after_ms=0)
 
     assert result["url"] == "https://example.com:443/path"
-    fake_page.goto.assert_awaited_once_with(
-        "https://example.com:443/path",
-        wait_until="domcontentloaded",
-        timeout=60_000,
-    )
+    fetch_mock.assert_awaited_once()
+    assert fetch_mock.await_args.args[0]["url"] == "https://example.com:443/path"
 
 
 @pytest.mark.asyncio
-async def test_render_web_page_html_allows_local_addresses_to_browser():
-    fake_page = MagicMock()
-    fake_page.url = "http://127.0.0.1:8000"
-    fake_page.goto = AsyncMock(return_value=SimpleNamespace(status=200))
-    fake_page.wait_for_timeout = AsyncMock()
-    fake_page.title = AsyncMock(return_value="Local")
-    fake_page.content = AsyncMock(return_value="<html></html>")
-    fake_page.close = AsyncMock()
+async def test_render_web_page_html_allows_local_addresses_to_web_fetch() -> None:
+    """网页浏览工具允许本地 HTTP 地址由 web fetch 服务访问。"""
+    fetch_mock = AsyncMock(
+        return_value=_web_fetch_response(
+            "<html></html>",
+            final_url="http://127.0.0.1:8000",
+        )
+    )
 
-    fake_context = MagicMock()
-    fake_context.new_page = AsyncMock(return_value=fake_page)
-    fake_context.close = AsyncMock()
-
-    with patch("app.ai.agentic.tooling.browser_context.launch_context_async", AsyncMock(return_value=fake_context)):
+    with patch("app.ai.agentic.tooling.browser_tool._fetch_web_page", fetch_mock):
         result = await render_web_page_html("http://127.0.0.1:8000", wait_after_ms=0)
 
     assert result["url"] == "http://127.0.0.1:8000"
-    fake_page.goto.assert_awaited_once_with(
-        "http://127.0.0.1:8000",
-        wait_until="domcontentloaded",
-        timeout=60_000,
-    )
+    assert fetch_mock.await_args.args[0]["url"] == "http://127.0.0.1:8000"
 
 
 @pytest.mark.asyncio
-async def test_render_web_page_html_rejects_non_http_url_scheme():
-    launch_context = AsyncMock()
+async def test_render_web_page_html_rejects_non_http_url_scheme() -> None:
+    """网页浏览工具在调用 web fetch 前拒绝非 HTTP 协议。"""
+    fetch_mock = AsyncMock()
 
-    with patch("app.ai.agentic.tooling.browser_context.launch_context_async", launch_context):
+    with patch("app.ai.agentic.tooling.browser_tool._fetch_web_page", fetch_mock):
         result = await render_web_page_html("file:///etc/passwd", wait_after_ms=0)
 
     assert result["url"] == "file:///etc/passwd"
     assert result["error"] == "only http and https URLs are supported"
-    launch_context.assert_not_called()
+    assert result["content_source"] == "rendered_dom_html"
+    fetch_mock.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_render_web_page_html_can_return_markdown_with_source_url():
-    fake_page = MagicMock()
-    fake_page.url = "https://example.com/final"
-    fake_page.goto = AsyncMock(return_value=SimpleNamespace(status=200))
-    fake_page.wait_for_timeout = AsyncMock()
-    fake_page.title = AsyncMock(return_value="Example Title")
-    fake_page.content = AsyncMock(
-        return_value="<html><body><h2>Section</h2><a href='https://example.com/a'>Link</a></body></html>"
+async def test_render_web_page_html_can_return_markdown_with_source_url() -> None:
+    """网页浏览工具将 web fetch Markdown 响应映射为 markdown 字段。"""
+    markdown = "# Example Title\n\nSource URL: https://example.com/final\n\n## Section\n\n[Link](https://example.com/a)"
+    fetch_mock = AsyncMock(
+        return_value=_web_fetch_response(
+            markdown,
+            return_type="markdown",
+            final_url="https://example.com/final",
+            source_html_length=82,
+        )
     )
-    fake_page.close = AsyncMock()
 
-    fake_context = MagicMock()
-    fake_context.new_page = AsyncMock(return_value=fake_page)
-    fake_context.close = AsyncMock()
-
-    with patch("app.ai.agentic.tooling.browser_context.launch_context_async", AsyncMock(return_value=fake_context)):
+    with patch("app.ai.agentic.tooling.browser_tool._fetch_web_page", fetch_mock):
         result = await render_web_page_html(
             "https://example.com",
             content_format="markdown",
@@ -155,26 +161,17 @@ async def test_render_web_page_html_can_return_markdown_with_source_url():
 
 
 @pytest.mark.asyncio
-async def test_render_web_page_html_can_select_multiple_content_regions_once():
-    fake_page = MagicMock()
-    fake_page.url = "https://example.com/final"
-    fake_page.goto = AsyncMock(return_value=SimpleNamespace(status=200))
-    fake_page.wait_for_timeout = AsyncMock()
-    fake_page.title = AsyncMock(return_value="Example Title")
-    fake_page.content = AsyncMock()
-    fake_page.evaluate = AsyncMock(
-        return_value={
-            "html": "<main><h2>Main</h2></main>\n<section><p>News</p></section>",
-            "selected_element_count": 2,
-        }
+async def test_render_web_page_html_can_select_multiple_content_regions_once() -> None:
+    """网页浏览工具将清理后的 selector 传给 web fetch 服务。"""
+    fetch_mock = AsyncMock(
+        return_value=_web_fetch_response(
+            "# Example Title\n\n## Main\n\nNews",
+            return_type="markdown",
+            selected_element_count=2,
+        )
     )
-    fake_page.close = AsyncMock()
 
-    fake_context = MagicMock()
-    fake_context.new_page = AsyncMock(return_value=fake_page)
-    fake_context.close = AsyncMock()
-
-    with patch("app.ai.agentic.tooling.browser_context.launch_context_async", AsyncMock(return_value=fake_context)):
+    with patch("app.ai.agentic.tooling.browser_tool._fetch_web_page", fetch_mock):
         result = await render_web_page_html(
             "https://example.com",
             content_format="markdown",
@@ -182,9 +179,7 @@ async def test_render_web_page_html_can_select_multiple_content_regions_once():
             content_selectors=[" main ", ".news"],
         )
 
-    fake_page.content.assert_not_called()
-    fake_page.evaluate.assert_awaited_once()
-    assert fake_page.evaluate.await_args.args[1] == ["main", ".news"]
+    assert fetch_mock.await_args.args[0]["selectors"] == ["main", ".news"]
     assert result["content_selectors"] == ["main", ".news"]
     assert result["selected_element_count"] == 2
     assert "## Main" in result["markdown"]
@@ -192,106 +187,51 @@ async def test_render_web_page_html_can_select_multiple_content_regions_once():
 
 
 @pytest.mark.asyncio
-async def test_render_web_page_html_reuses_browser_context():
-    first_page = MagicMock()
-    first_page.url = "https://example.com/one"
-    first_page.goto = AsyncMock(return_value=SimpleNamespace(status=200))
-    first_page.wait_for_timeout = AsyncMock()
-    first_page.title = AsyncMock(return_value="One")
-    first_page.content = AsyncMock(return_value="<html>one</html>")
-    first_page.close = AsyncMock()
-    close_first_page = first_page.close
+async def test_render_web_page_html_returns_web_fetch_error_without_logging_exception() -> None:
+    """web fetch 返回业务失败时直接映射错误，不记录异常日志。"""
+    fetch_mock = AsyncMock(
+        return_value={
+            "success": False,
+            "url": "https://example.com",
+            "engine": "web",
+            "return_type": "html",
+            "selectors": [],
+            "content_source": None,
+            "error": "engine unavailable",
+        }
+    )
 
-    second_page = MagicMock()
-    second_page.url = "https://example.com/two"
-    second_page.goto = AsyncMock(return_value=SimpleNamespace(status=200))
-    second_page.wait_for_timeout = AsyncMock()
-    second_page.title = AsyncMock(return_value="Two")
-    second_page.content = AsyncMock(return_value="<html>two</html>")
-    second_page.close = AsyncMock()
-    close_second_page = second_page.close
-
-    fake_context = MagicMock()
-    fake_context.new_page = AsyncMock(side_effect=[first_page, second_page])
-    fake_context.close = AsyncMock()
-    launch_context = AsyncMock(return_value=fake_context)
-
-    with patch("app.ai.agentic.tooling.browser_context.launch_context_async", launch_context):
-        first_result = await render_web_page_html("https://example.com/one", wait_after_ms=0)
-        second_result = await render_web_page_html("https://example.com/two", wait_after_ms=0)
-
-    assert first_result["title"] == "One"
-    assert second_result["title"] == "Two"
-    launch_context.assert_awaited_once()
-    assert fake_context.new_page.await_count == 2
-    close_first_page.assert_awaited_once()
-    close_second_page.assert_awaited_once()
-    fake_context.close.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_render_web_page_html_uses_shared_browser_context():
-    fake_page = MagicMock()
-    fake_page.url = "https://example.com"
-    fake_page.goto = AsyncMock(return_value=SimpleNamespace(status=200))
-    fake_page.wait_for_timeout = AsyncMock()
-    fake_page.title = AsyncMock(return_value="Shared")
-    fake_page.content = AsyncMock(return_value="<html>shared</html>")
-    fake_page.close = AsyncMock()
-
-    fake_context = MagicMock()
-    fake_context.new_page = AsyncMock(return_value=fake_page)
-    fake_context.close = AsyncMock()
-    browser_context.set_cached_browser_context(fake_context)
-
-    with patch("app.ai.agentic.tooling.browser_context.launch_context_async", AsyncMock()) as launch_context:
-        result = await render_web_page_html("https://example.com", wait_after_ms=0)
-
-    assert result["title"] == "Shared"
-    launch_context.assert_not_called()
-    assert browser_tool._browser_context is fake_context
-
-
-@pytest.mark.asyncio
-async def test_close_browser_context_closes_singleton_context():
-    fake_context = MagicMock()
-    fake_context.close = AsyncMock()
-    browser_context.set_cached_browser_context(fake_context)
-    browser_tool._browser_context = fake_context
-
-    await close_browser_context()
-
-    fake_context.close.assert_awaited_once()
-    assert browser_tool._browser_context is None
-    assert browser_context.get_cached_browser_context() is None
-
-
-@pytest.mark.asyncio
-async def test_render_web_page_html_logs_shutdown_page_close_without_error(monkeypatch):
-    fake_page = MagicMock()
-    fake_page.goto = AsyncMock(side_effect=RuntimeError("Page.goto: Target page has been closed"))
-    fake_page.close = AsyncMock()
-
-    fake_context = MagicMock()
-    fake_context.new_page = AsyncMock(return_value=fake_page)
-    fake_context.close = AsyncMock()
-    monkeypatch.setattr(browser_context, "get_browser_closing_reason", lambda: "backend_reload")
-
-    with patch("app.ai.agentic.tooling.browser_context.launch_context_async", AsyncMock(return_value=fake_context)), \
-         patch.object(browser_tool.logger, "info") as log_info, \
+    with patch("app.ai.agentic.tooling.browser_tool._fetch_web_page", fetch_mock), \
          patch.object(browser_tool.logger, "exception") as log_exception:
         result = await render_web_page_html("https://example.com", wait_after_ms=0)
 
     assert result == {
         "url": "https://example.com",
-        "error": "Browser context is closing: backend_reload",
+        "error": "engine unavailable",
         "content_source": "rendered_dom_html",
     }
-    log_info.assert_called_once()
     log_exception.assert_not_called()
 
 
-def test_browse_web_page_html_tool_metadata():
+@pytest.mark.asyncio
+async def test_render_web_page_html_returns_error_when_web_fetch_request_fails() -> None:
+    """web fetch HTTP 调用异常时返回兼容错误结构。"""
+    fetch_mock = AsyncMock(side_effect=RuntimeError("web unavailable"))
+
+    with patch("app.ai.agentic.tooling.browser_tool._fetch_web_page", fetch_mock), \
+         patch.object(browser_tool.logger, "exception") as log_exception:
+        result = await render_web_page_html("https://example.com", wait_after_ms=0)
+
+    assert result == {
+        "url": "https://example.com",
+        "error": "RuntimeError: web unavailable",
+        "content_source": "rendered_dom_html",
+    }
+    log_exception.assert_called_once()
+
+
+def test_browse_web_page_html_tool_metadata() -> None:
+    """LangChain 工具元数据保留原有参数。"""
     assert browse_web_page_html.name == "browse_web_page_html"
     assert "url" in browse_web_page_html.args
     assert "content_format" in browse_web_page_html.args
@@ -301,7 +241,8 @@ def test_browse_web_page_html_tool_metadata():
 
 
 @pytest.mark.asyncio
-async def test_browse_web_page_html_tool_ainvoke():
+async def test_browse_web_page_html_tool_ainvoke() -> None:
+    """LangChain 工具调用仍委托 render_web_page_html。"""
     render_mock = AsyncMock(return_value={"status": 200, "html": "<html></html>"})
 
     with patch("app.ai.agentic.tooling.browser_tool.render_web_page_html", render_mock):

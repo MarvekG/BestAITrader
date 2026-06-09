@@ -1,5 +1,6 @@
 apscheduler>=3.11.2
 fastapi>=0.128.0
+httpx>=0.28.1
 numpy>=2.4.1
 argon2-cffi
 openai>=2.15.0
@@ -21,6 +22,5 @@ ta>=0.11.0
 langchain
 langgraph>=0.2.60
 langchain-openai
-cloakbrowser[geoip]>=0.3.28
 markdownify>=0.13.1
 concurrent-log-handler>=0.9.29

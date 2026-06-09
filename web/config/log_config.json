@@ -1,0 +1,77 @@
+{
+    "version": 1,
+    "disable_existing_loggers": false,
+    "formatters": {
+        "json": {
+            "()": "app.core.logger.JsonFormatter",
+            "datefmt": "%Y-%m-%d %H:%M:%S"
+        },
+        "standard": {
+            "format": "[%(asctime)s %(process)d %(filename)s:%(lineno)d %(funcName)s %(levelname)s] - %(message)s",
+            "datefmt": "%Y-%m-%d %H:%M:%S"
+        },
+        "default": {
+            "()": "uvicorn.logging.DefaultFormatter",
+            "fmt": "[%(levelprefix)s] %(message)s",
+            "use_colors": null
+        },
+        "access": {
+            "()": "uvicorn.logging.AccessFormatter",
+            "fmt": "[%(levelprefix)s %(client_addr)s] - \"%(request_line)s\" %(status_code)s"
+        }
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "standard",
+            "stream": "ext://sys.stdout"
+        },
+        "web_file": {
+            "class": "logging.handlers.RotatingFileHandler",
+            "formatter": "standard",
+            "filename": "/runtime/logs/web.log",
+            "maxBytes": 10485760,
+            "backupCount": 5,
+            "encoding": "utf-8",
+            "delay": false
+        }
+    },
+    "loggers": {
+        "uvicorn": {
+            "level": "INFO",
+            "handlers": [
+                "console",
+                "web_file"
+            ],
+            "propagate": false
+        },
+        "uvicorn.error": {
+            "level": "INFO",
+            "handlers": [
+                "console",
+                "web_file"
+            ],
+            "propagate": false
+        },
+        "uvicorn.access": {
+            "level": "WARNING",
+            "handlers": [],
+            "propagate": false
+        },
+        "web_fetch": {
+            "level": "INFO",
+            "handlers": [
+                "console",
+                "web_file"
+            ],
+            "propagate": false
+        },
+        "root": {
+            "level": "INFO",
+            "handlers": [
+                "console",
+                "web_file"
+            ]
+        }
+    }
+}

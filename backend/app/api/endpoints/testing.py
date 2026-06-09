@@ -457,7 +457,7 @@ async def test_pdf_tool(
         result = await tools.parse_pdf_to_markdown.ainvoke({
             "url": pdf_url,
             "engine": "word",
-            "timeout_ms": 120_000,
+            "timeout": 120.0,
             "max_chars": 40_000,
         })
         elapsed = int((time.time() - start_time) * 1000)
