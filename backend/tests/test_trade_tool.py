@@ -9,7 +9,66 @@ from uuid import uuid4
 # Set up path to import from backend
 sys.path.append(os.path.join(os.getcwd(), "backend"))
 
-from app.ai.agentic.tools import execute_trading_order
+from app.ai.agentic.tools import execute_trading_order, get_pm_order_type_guidance
+
+
+def test_portfolio_manager_agent_exposes_order_type_guidance_tool():
+    from app.ai.llm_engine.agents.governance import PortfolioManagerAgent
+
+    agent = PortfolioManagerAgent(state={"session_id": str(uuid4())})
+    tool_names = {tool.name for tool in agent.tools}
+
+    assert "get_pm_order_type_guidance" in tool_names
+    assert "execute_trading_order" in tool_names
+
+
+@pytest.mark.asyncio
+async def test_get_pm_order_type_guidance_returns_market_during_trading_time(monkeypatch):
+    monkeypatch.setattr("app.data.market_utils.is_trading_time", lambda: True)
+    monkeypatch.setattr(
+        "app.data.storage.data_storage_service.get_stock_realtime_market",
+        lambda _stock_code: {"latest_price": 10.25, "update_time": "2026-06-09 10:00:00"},
+    )
+
+    result = await get_pm_order_type_guidance.ainvoke({"stock_code": "600519.SH"})
+
+    assert result["success"] is True
+    assert result["is_trading_time"] is True
+    assert result["market_order_allowed"] is True
+    assert result["recommended_order_type"] == "market"
+    assert result["latest_price"] == 10.25
+    assert result["limit_price"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_pm_order_type_guidance_returns_limit_outside_trading_time(monkeypatch):
+    monkeypatch.setattr("app.data.market_utils.is_trading_time", lambda: False)
+    monkeypatch.setattr(
+        "app.data.storage.data_storage_service.get_stock_realtime_market",
+        lambda _stock_code: {"latest_price": Decimal("10.25"), "update_time": "2026-06-08 15:00:00"},
+    )
+
+    result = await get_pm_order_type_guidance.ainvoke({"stock_code": "600519.SH"})
+
+    assert result["success"] is True
+    assert result["is_trading_time"] is False
+    assert result["market_order_allowed"] is False
+    assert result["recommended_order_type"] == "limit"
+    assert result["latest_price"] == 10.25
+    assert result["limit_price"] == 10.25
+
+
+@pytest.mark.asyncio
+async def test_get_pm_order_type_guidance_requires_latest_price_outside_trading_time(monkeypatch):
+    monkeypatch.setattr("app.data.market_utils.is_trading_time", lambda: False)
+    monkeypatch.setattr("app.data.storage.data_storage_service.get_stock_realtime_market", lambda _stock_code: None)
+
+    result = await get_pm_order_type_guidance.ainvoke({"stock_code": "600519.SH"})
+
+    assert result["success"] is False
+    assert result["recommended_order_type"] == "limit"
+    assert result["limit_price"] is None
+    assert result["reason"] == "latest_price_unavailable"
 
 @pytest.mark.asyncio
 async def test_execute_trading_order_buy_logic():
