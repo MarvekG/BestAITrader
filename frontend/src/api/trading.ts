@@ -53,7 +53,7 @@ export const tradingApi = {
     },
 
     cancelOrder: async (orderId: string) => {
-        return apiClient.post<{ success: boolean; message?: string }>(`/trading/orders/${orderId}/cancel`);
+        return apiClient.post<{ success: boolean; message?: string; released_cash?: number }>(`/trading/orders/${orderId}/cancel`);
     },
 
     getMyOrders: async (skip: number = 0, limit: number = 100) => {

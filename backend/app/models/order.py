@@ -21,7 +21,7 @@ class Order(Base):
     shares = Column(BigInteger)
 
     status = Column(
-        Enum("pending", "partial", "filled", "cancelled", "rejected", name="order_status"),
+        Enum("pending", "filled", "cancelled", "rejected", name="order_status"),
         default="pending"
     )
     filled_shares = Column(BigInteger, default=0)

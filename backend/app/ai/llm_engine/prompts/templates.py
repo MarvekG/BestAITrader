@@ -1126,6 +1126,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 - `policy_report`: 政策分析师的直接报告。
 - `previous_pm_decision`: 上一轮投资经理对同一股票的最近一次决策摘要（若存在）。
 - `same_stock_history`: 同一用户同一股票的压缩交易历史，包含最近订单、成交、已实现盈亏和历史 PM 决策摘要（若存在）。
+- `pending_orders`: 当前账户全部待成交挂单，包含可直接传给交易工具的 `order_id`。
 - `vertical_views`: 各垂直分析师完整观点汇总。
 - `strategic_debate`: 多空与后续轮次辩论结果。
 - `fact_arbitration_report`: 事实仲裁 Markdown 摘要，包含已裁决事实、未解决事实和 PM 必须关注事项。
@@ -1207,6 +1208,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 - 若 `previous_pm_decision.execution_summary` 存在，你必须先判断上一轮是否有订单、是否有成交、成交均价、实际成交数量、最近订单/成交时间，以及上一轮 `take_profit` 与 `holding_horizon_days` 是否仍适用。
 - 若风险专家给出“硬阻断”或“强警告”级别建议，而你没有完全采纳，必须说明覆盖理由、替代风控、触发器和覆盖该风险对置信度的影响。
 - 若目标股票是组合大仓位、第一大持仓或本轮争议明显，必须至少比较“维持当前仓位”“降仓”“等待确认但设置触发器”三类方案，并说明最终方案为什么优于其他方案。
+- 若 `pending_orders` 存在且与本轮计划冲突，你必须先调用交易工具撤销旧挂单，再提交新的挂单或说明继续保留的原因；撤单时传入对应 `order_id`。
 - 不得把 `has_orders=false` 或 `has_trades=false` 的上一轮误认为已经建仓；若上一轮有决策但未成交，本轮必须说明是继续执行原计划、调整计划、还是放弃计划。
 - 当前 `decision`、`target_position`、`take_profit`、`holding_horizon_days` 和 `execution_details` 必须解释相对上一轮执行结果是延续、修正还是反转，而不是只复述上一轮结论。
 - 上一轮决策只能作为对比线索，不能替代本轮事实核验。
@@ -1981,6 +1983,7 @@ inside `report_markdown`:
 - `previous_pm_decision`: Latest prior PM decision summary for the same stock, if available.
 - `same_stock_history`: Compressed same-user same-stock trading history, including recent orders, fills, realized PnL,
   and historical PM decision summaries, if available.
+- `pending_orders`: Current account pending orders, including `order_id` values that can be passed directly to the trading tool.
 - `vertical_views`: Full set of vertical analyst views.
 - `strategic_debate`: Bull/Bear and later-round debate outputs.
 - `fact_arbitration_report`: Markdown fact-arbitration summary, including resolved facts, unresolved facts, and items PM must pay attention to.
@@ -2017,6 +2020,7 @@ inside `report_markdown`:
 - If `previous_pm_decision.execution_summary` exists, first determine whether the previous round had orders, whether it had fills, average fill price, filled quantity, latest order/trade time, and whether the previous `take_profit` and `holding_horizon_days` still apply.
 - If the Risk Analyst gives a hard-block or strong-warning recommendation and you do not fully adopt it, explain the override rationale, replacement controls, triggers, and how overriding that risk affects confidence.
 - If the target stock is a large portfolio position, the top holding, or highly disputed in this round, compare at least three sizing options: maintain current position, reduce position, and wait for confirmation with explicit triggers. Explain why the final option is superior.
+- If `pending_orders` exist and conflict with this round's plan, you must cancel the stale pending order via the trading tool before placing a new one, or explain why it remains valid. Pass the corresponding `order_id` for cancellation.
 - Do not treat a previous round with `has_orders=false` or `has_trades=false` as an established position. If the previous round had a decision but no fill, state whether this round continues, adjusts, or abandons the prior plan.
 - Current `decision`, `target_position`, `take_profit`, `holding_horizon_days`, and `execution_details` must explain whether they continue, revise, or reverse the previous execution outcome, rather than merely restating the previous conclusion.
 - A previous decision is only a comparison anchor and must not replace current evidence verification.

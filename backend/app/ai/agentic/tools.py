@@ -1,5 +1,6 @@
 import json
 from typing import List, Dict, Any, Optional
+from decimal import Decimal
 from langchain.tools import tool
 from app.ai.agentic.tooling.browser_tool import browse_web_page_html
 from app.ai.agentic.tooling.news_tool import search_news
@@ -36,9 +37,16 @@ def _format_trade_execution_result(payload: Dict[str, Any]) -> Dict[str, Any]:
         包含执行状态、展示消息、机器可读原因和详情的工具返回值。
     """
     if payload.get("success") is True:
+        order = payload.get("order")
+        status = payload.get("status") or getattr(order, "status", None)
+        execution_status = "executed"
+        if status == "pending":
+            execution_status = "pending"
+        elif status == "cancelled":
+            execution_status = "cancelled"
         return {
             "success": True,
-            "execution_status": "executed",
+            "execution_status": execution_status,
             "message": payload.get("message", "Trade executed successfully."),
             "reason": None,
             "details": make_json_serializable(payload),
@@ -96,7 +104,7 @@ def _evaluate_pm_trade_gate(
         action: PM 调用工具时传入的动作。
         target_position: PM 设定的目标仓位比例。
         current_position: 当前目标股票仓位比例。
-        price: 当前可用交易价格。
+        price: 本次交易的价格基准。
         stop_loss: PM 设定的止损价。
         take_profit: PM 设定的止盈价；缺失时不做止盈门禁。
         current_total_shares: 当前总持仓数量。
@@ -149,14 +157,14 @@ def _evaluate_pm_trade_gate(
     if act == "buy" and stop_loss >= price:
         return _build_trade_gate_rejection(
             "invalid_buy_stop_loss",
-            "Trade gate rejected the buy: stop_loss must be below the current price.",
+            "Trade gate rejected the buy: stop_loss must be below the order price.",
             details,
         )
 
     if act == "buy" and take_profit is not None and take_profit <= price:
         return _build_trade_gate_rejection(
             "invalid_buy_take_profit",
-            "Trade gate rejected the buy: take_profit must be above the current price.",
+            "Trade gate rejected the buy: take_profit must be above the order price.",
             details,
         )
 
@@ -284,16 +292,84 @@ SUPPORTED_STOCK_QUERY_TYPES = sorted(STOCK_QUERY_HANDLERS.keys())
 
 
 def make_json_serializable(obj: Any) -> Any:
-    """递归将对象转换为 JSON 可序列化的格式 (Recursively convert to JSON serializable)"""
+    """
+    递归将对象转换为 JSON 可序列化的格式。
+
+    Args:
+        obj: 任意待序列化对象。
+
+    Returns:
+        JSON 兼容的数据结构。
+    """
     if isinstance(obj, (datetime, date)):
         return obj.isoformat()
     if isinstance(obj, uuid.UUID):
         return str(obj)
+    if isinstance(obj, Decimal):
+        return float(obj)
     if isinstance(obj, list):
         return [make_json_serializable(item) for item in obj]
     if isinstance(obj, dict):
         return {k: make_json_serializable(v) for k, v in obj.items()}
+    if hasattr(obj, "__dict__"):
+        return {
+            key: make_json_serializable(value)
+            for key, value in obj.__dict__.items()
+            if not key.startswith("_")
+        }
     return obj
+
+
+def _compact_order_id(order_id: Any) -> str:
+    """
+    生成便于比较的紧凑订单 ID。
+
+    Args:
+        order_id: 订单 UUID 或字符串。
+
+    Returns:
+        去除短横线后的订单 ID。
+    """
+    return str(order_id).replace("-", "")
+
+
+def _resolve_order_by_llm_id(db: Any, order_model: Any, account_id: Any, raw_order_id: str) -> Any:
+    """
+    按订单 ID 解析当前账户待撤订单。
+
+    Args:
+        db: 数据库会话。
+        order_model: 订单模型类。
+        account_id: 当前账户 ID。
+        raw_order_id: LLM 传入的订单 ID。
+
+    Returns:
+        匹配到的订单模型；未匹配或存在多个候选时返回 None。
+    """
+    from uuid import UUID
+
+    cleaned_order_id = str(raw_order_id or "").strip()
+    try:
+        order_uuid = UUID(cleaned_order_id)
+    except Exception:
+        compact_order_id = cleaned_order_id.replace("-", "").lower()
+        if not compact_order_id:
+            return None
+        candidates = db.query(order_model).filter(
+            order_model.account_id == account_id,
+            order_model.status == "pending",
+        ).all()
+        matches = [
+            order
+            for order in candidates
+            if _compact_order_id(order.order_id).lower().startswith(compact_order_id)
+        ]
+        return matches[0] if len(matches) == 1 else None
+
+    return db.query(order_model).filter(
+        order_model.order_id == order_uuid,
+        order_model.account_id == account_id,
+    ).first()
 
 
 @tool
@@ -921,12 +997,16 @@ async def query_and_calculate(
 
 
 async def execute_trading_order(
-    stock_code: str,
-    action: str,
-    target_position: float,
-    session_id: str,
-    stop_loss: float,
-    take_profit: float,
+    stock_code: str = "",
+    action: str = "buy",
+    target_position: float = 0.0,
+    session_id: str = "",
+    stop_loss: float = 0.0,
+    take_profit: float = 0.0,
+    operation: str = "place",
+    order_type: str = "market",
+    limit_price: Optional[float] = None,
+    order_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     执行股票交易下单工具 (Execute stock trading order).
@@ -943,6 +1023,10 @@ async def execute_trading_order(
     - session_id: 当前会话 ID (必须从 Context 中准确获取)，用于关联账户和持久化。
     - stop_loss: 止损价，必填。成交后会直接写入持仓 `purchase_details.stop_loss`。
     - take_profit: PM 本轮止盈价或目标价，必填。买入时必须高于当前价。
+    - operation: `place` 下单或 `cancel` 撤单，默认 `place`。
+    - order_type: `market` 或 `limit`，默认 `market`。
+    - limit_price: 限价挂单委托价，`order_type=limit` 时必填。
+    - order_id: 撤单目标订单 ID，`operation=cancel` 时必填。
 
     注意:
     1. 自动执行 A 股交易规则：买入必须是 100 的整数倍；卖出减仓时尽量取 100 倍数。
@@ -956,6 +1040,7 @@ async def execute_trading_order(
     from app.models.session import Session as DbSession
     from app.models.user import User
     from app.models.position import Position
+    from app.models.order import Order
     from app.core.database import SessionLocal
     from app.models.data_storage import StockRealtimeMarket
     from sqlalchemy import desc
@@ -964,11 +1049,29 @@ async def execute_trading_order(
     if not config.settings.ENABLE_AUTO_TRADE:
         return _format_trade_execution_result({"error": "Auto-trade is disabled in system settings."})
 
-    if stop_loss <= 0:
-        return _format_trade_execution_result({"error": f"Invalid stop_loss: {stop_loss}. stop_loss must be greater than 0."})
+    normalized_operation = str(operation or "place").lower()
+    normalized_order_type = str(order_type or "market").lower()
+    if normalized_operation not in {"place", "cancel"}:
+        return _format_trade_execution_result({"error": f"Invalid operation: {operation}", "reason": "invalid_operation"})
 
-    if take_profit <= 0:
-        return _format_trade_execution_result({"error": f"Invalid take_profit: {take_profit}. take_profit must be greater than 0."})
+    if normalized_order_type not in {"market", "limit"}:
+        return _format_trade_execution_result({"error": f"Invalid order_type: {order_type}", "reason": "invalid_order_type"})
+
+    if normalized_operation == "place":
+        if stop_loss <= 0:
+            return _format_trade_execution_result({"error": f"Invalid stop_loss: {stop_loss}. stop_loss must be greater than 0."})
+
+        if take_profit <= 0:
+            return _format_trade_execution_result({"error": f"Invalid take_profit: {take_profit}. take_profit must be greater than 0."})
+
+        if normalized_order_type == "limit" and (limit_price is None or limit_price <= 0):
+            return _format_trade_execution_result({
+                "error": "limit_price must be greater than 0 for limit orders.",
+                "reason": "invalid_limit_price",
+            })
+
+    if normalized_operation == "cancel" and not order_id:
+        return _format_trade_execution_result({"error": "order_id is required for cancel operation", "reason": "missing_order_id"})
 
     session_uuid = None
     try:
@@ -989,6 +1092,17 @@ async def execute_trading_order(
                 return _format_trade_execution_result({"error": "Associated User or Account not found."})
             
             account = user.account
+
+            if normalized_operation == "cancel":
+                order = _resolve_order_by_llm_id(db, Order, account.account_id, str(order_id))
+                if not order:
+                    return _format_trade_execution_result({
+                        "error": f"Order {order_id} not found or ambiguous.",
+                        "reason": "order_not_found_or_ambiguous",
+                    })
+                cancel_result = await trading_service.cancel_order(db, order)
+                return _format_trade_execution_result(cancel_result)
+
             total_assets = float(account.total_assets or 0)
             
             # 2. 获取最新价格
@@ -1012,8 +1126,10 @@ async def execute_trading_order(
             if price <= 0:
                 return _format_trade_execution_result({"error": f"Could not determine a valid price for {stock_code}. Trade aborted."})
 
+            order_price = float(limit_price) if normalized_order_type == "limit" else price
+
             # 3. 计算目标总股数
-            target_total_shares = (total_assets * target_position) / price
+            target_total_shares = (total_assets * target_position) / order_price
             
             # 4. 获取当前持仓
             pos = db.query(Position).filter(
@@ -1033,7 +1149,7 @@ async def execute_trading_order(
                 action=action,
                 target_position=target_position,
                 current_position=current_position,
-                price=price,
+                price=order_price,
                 stop_loss=stop_loss,
                 take_profit=take_profit,
                 current_total_shares=current_total_shares,
@@ -1073,7 +1189,7 @@ async def execute_trading_order(
                         "details": {
                             "action": act,
                             "stock_code": stock_code,
-                            "price": price,
+                            "price": order_price,
                             "target_position": target_position,
                             "stop_loss": stop_loss,
                             "current_total_shares": current_total_shares,
@@ -1107,8 +1223,8 @@ async def execute_trading_order(
                 stock_code=stock_code,
                 action=act,
                 shares=suggested_shares,
-                price=price,
-                order_type="market",
+                price=order_price,
+                order_type=normalized_order_type,
                 stop_loss=stop_loss,
             )
             

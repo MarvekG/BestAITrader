@@ -120,6 +120,22 @@ async def place_order(
                 "order": order_payload
             }
 
+        if order_result.get("status") == "pending":
+            pending_order = order_result["order"]
+            return {
+                "success": True,
+                "message": order_result.get("message", "Order accepted"),
+                "order": {
+                    **order_payload,
+                    "id": str(pending_order.order_id),
+                    "status": pending_order.status,
+                    "filled_shares": pending_order.filled_shares,
+                    "reserved_cash": order_result.get("reserved_cash", 0.0),
+                },
+                "risk_control": order_result.get("risk_control"),
+                "trade_record": None,
+            }
+
         # 返回前端期望的格式 (Maintain backward compatibility for return schema)
         trade_data = order_result["trade_result"]["trade_record"]
 
@@ -168,21 +184,9 @@ async def cancel_order(
     """Cancel order"""
     try:
         order_record = get_owned_order(db, order_id, current_user)
-        if order_record.status == "pending":
-            order_record.status = "cancelled"
-            db.commit()
-            db.refresh(order_record)
-            result = {
-                "success": True,
-                "message": "Order cancelled successfully",
-                "order": order_record,
-            }
-        else:
-            result = {
-                "success": False,
-                "message": f"Order cannot be cancelled, current status: {order_record.status}",
-                "order": order_record,
-            }
+        from app.trading.service import trading_service
+
+        result = await trading_service.cancel_order(db, order_record)
 
         # Push order status change
         if result["success"]:
@@ -207,7 +211,8 @@ async def cancel_order(
             "success": result["success"],
             "message": result["message"],
             "order_id": str(order_id),
-            "status": result["order"].status
+            "status": result["order"].status,
+            "released_cash": result.get("released_cash", 0.0),
         }
     except HTTPException:
         raise
@@ -326,6 +331,13 @@ async def update_order(
                 "success": False,
                 "message": f"Order status is {order.status}, cannot update",
                 "order_id": str(order_id)
+            }
+
+        if order.order_type == "limit":
+            return {
+                "success": False,
+                "message": "Pending limit order update is not supported; cancel and place a new order",
+                "order_id": str(order_id),
             }
 
         # Update order
