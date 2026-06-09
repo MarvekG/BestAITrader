@@ -7,7 +7,8 @@
             "datefmt": "%Y-%m-%d %H:%M:%S"
         },
         "standard": {
-            "format": "[%(asctime)s %(process)d %(filename)s:%(lineno)d %(funcName)s %(levelname)s] - %(message)s",
+            "()": "app.core.logger.ContextFormatter",
+            "format": "[%(asctime)s %(process)d %(filename)s:%(lineno)d %(funcName)s %(levelname)s] - %(message)s%(context)s",
             "datefmt": "%Y-%m-%d %H:%M:%S"
         },
         "default": {
@@ -54,11 +55,22 @@
             "propagate": false
         },
         "uvicorn.access": {
-            "level": "WARNING",
-            "handlers": [],
+            "level": "INFO",
+            "handlers": [
+                "console",
+                "web_file"
+            ],
             "propagate": false
         },
         "web_fetch": {
+            "level": "INFO",
+            "handlers": [
+                "console",
+                "web_file"
+            ],
+            "propagate": false
+        },
+        "app": {
             "level": "INFO",
             "handlers": [
                 "console",
