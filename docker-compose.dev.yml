@@ -123,7 +123,6 @@ services:
       - ./backend/.env
     environment:
       TZ: Asia/Shanghai
-      MEMORY_SERVICE_BASE_URL: http://memo:8020
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
