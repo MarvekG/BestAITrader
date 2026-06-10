@@ -44,7 +44,7 @@
 - 批量删除选中的 external 插件。
 - 删除单个插件。
 
-内置插件不能在界面删除。只有位于 `news_plugins/external/` 的插件会标记为可删除。
+内置插件不能在界面删除。只有位于 `/runtime/news_plugins/external/` 的插件会标记为可删除。
 
 ### 2.2 后端接口
 
@@ -75,7 +75,7 @@
 
 ```text
 backend/app/ai/agentic/tooling/news_plugins/*.py
-backend/app/ai/agentic/tooling/news_plugins/external/*.py
+/runtime/news_plugins/external/*.py
 ```
 
 跳过：
@@ -88,10 +88,10 @@ backend/app/ai/agentic/tooling/news_plugins/external/*.py
 推荐把业务插件放在：
 
 ```text
-backend/app/ai/agentic/tooling/news_plugins/external/
+/runtime/news_plugins/external/
 ```
 
-`external/` 是运行环境中的插件目录，已被 `news_plugins/.gitignore` 忽略，不作为仓库内容提交。生产环境需要自行持久化或挂载该目录，否则容器重建后上传的插件会丢失。
+`/runtime/news_plugins/external/` 是运行环境中的插件目录，不作为仓库内容提交。生产环境需要持久化或挂载 `/runtime`，否则容器重建后上传的插件会丢失。
 
 ### 2.4 导入前探针
 

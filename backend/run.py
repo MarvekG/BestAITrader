@@ -1,13 +1,6 @@
 import uvicorn
 from app.core.config import settings
 
-RELOAD_EXCLUDES = [
-    "external/*/*.py",
-    "external/*/*/*.py",
-    "skills/*/*.json",
-    "skills/*/scripts/*.py",
-    "skills/*/scripts/*/*.py",
-]
 
 if __name__ == "__main__":
     uvicorn.run(
@@ -20,5 +13,4 @@ if __name__ == "__main__":
         timeout_graceful_shutdown=0,
         reload_dirs=["app", "config"],
         reload_includes=["*.json"],
-        reload_excludes=RELOAD_EXCLUDES,
     )

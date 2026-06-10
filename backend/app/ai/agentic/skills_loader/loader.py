@@ -9,7 +9,9 @@ from app.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-SKILLS_ROOT = Path(__file__).resolve().parent / "skills"
+DEFAULT_SKILLS_ROOT = Path("/runtime/skills")
+BUILTIN_SKILLS_ROOT = Path(__file__).resolve().parent / "skills"
+SKILLS_ROOT = DEFAULT_SKILLS_ROOT
 SKILL_FILE_NAME = "SKILL.md"
 SKILL_MANIFEST_FILE_NAME = "skill.json"
 REQUIRED_MANIFEST_FIELDS = ("name", "description")
@@ -110,25 +112,39 @@ def _load_skill_from_path(root_path: Path) -> Optional[LoadedSkill]:
     )
 
 
-def discover_skills() -> List[LoadedSkill]:
+def _skill_discovery_roots() -> List[Path]:
     """
-    Discover locally installed external skills.
+    获取需要扫描的 Skill 根目录。
 
     Returns:
-        List of skills that have a readable SKILL.md.
+        Skill 根目录列表；默认同时包含源码内置目录和运行时目录。
     """
-    if not SKILLS_ROOT.is_dir():
-        return []
+    roots: List[Path] = []
+    if SKILLS_ROOT == DEFAULT_SKILLS_ROOT:
+        roots.append(BUILTIN_SKILLS_ROOT)
+    roots.append(SKILLS_ROOT)
+    return roots
 
-    skills: List[LoadedSkill] = []
-    for root_path in sorted(SKILLS_ROOT.iterdir()):
-        if not root_path.is_dir():
+
+def discover_skills() -> List[LoadedSkill]:
+    """
+    发现本地可用 Skills，包括源码内置 Skill 和运行时上传 Skill。
+
+    Returns:
+        具有可读 `SKILL.md` 的 Skill 列表；同名运行时 Skill 会覆盖内置 Skill。
+    """
+    skills_by_id: Dict[str, LoadedSkill] = {}
+    for skills_root in _skill_discovery_roots():
+        if not skills_root.is_dir():
             continue
-        skill = _load_skill_from_path(root_path)
-        if skill is None:
-            continue
-        skills.append(skill)
-    return skills
+        for root_path in sorted(skills_root.iterdir()):
+            if not root_path.is_dir():
+                continue
+            skill = _load_skill_from_path(root_path)
+            if skill is None:
+                continue
+            skills_by_id[skill.skill_id] = skill
+    return sorted(skills_by_id.values(), key=lambda skill: skill.skill_id)
 
 
 def get_skill(skill_id: str) -> Optional[LoadedSkill]:

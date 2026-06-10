@@ -127,7 +127,7 @@ services:
         condition: service_healthy
     volumes:
     #   - ./backend:/app # FOR DEBUG
-      - backend_runtime_data:/app/runtime
+      - backend_runtime_data:/runtime
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://127.0.0.1:8000/health" ]
       interval: 1m

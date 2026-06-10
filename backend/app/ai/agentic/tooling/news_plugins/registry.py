@@ -1,4 +1,6 @@
 import importlib
+import importlib.util
+import sys
 from dataclasses import dataclass
 from functools import lru_cache
 from inspect import isawaitable
@@ -8,6 +10,7 @@ from typing import Any, Callable, Dict, List
 from app.core.logger import get_logger
 
 from .base import ensure_source, format_error
+from .paths import NEWS_PLUGIN_DIR, NEWS_PLUGIN_EXTERNAL_DIR
 
 logger = get_logger(__name__)
 
@@ -21,6 +24,8 @@ class NewsPlugin:
     keyword_examples: tuple[str, ...]
     search: Callable[..., Any]
     module_name: str
+    source_type: str
+    file_path: Path | None = None
 
 
 def _validate_list(value: Any) -> tuple[str, ...]:
@@ -32,34 +37,59 @@ def _validate_list(value: Any) -> tuple[str, ...]:
     return tuple(cleaned)
 
 
-def _iter_plugin_modules(plugin_dir: Path, package_name: str) -> list[tuple[Path, str]]:
-    reserved_modules = {"base", "manager", "registry"}
-    module_specs: list[tuple[Path, str]] = []
+def _iter_plugin_modules(plugin_dir: Path, package_name: str) -> list[tuple[Path, str, str, str]]:
+    reserved_modules = {"base", "manager", "paths", "registry"}
+    module_specs: list[tuple[Path, str, str, str]] = []
 
     for path in sorted(plugin_dir.glob("*.py")):
         if path.name == "__init__.py" or path.stem in reserved_modules:
             continue
-        module_specs.append((path, f"{package_name}.{path.stem}"))
+        module_specs.append((path, path.stem, "builtin", f"{package_name}.{path.stem}"))
 
-    external_dir = plugin_dir / "external"
-    if external_dir.is_dir():
-        for path in sorted(external_dir.glob("*.py")):
+    if NEWS_PLUGIN_EXTERNAL_DIR.is_dir():
+        for path in sorted(NEWS_PLUGIN_EXTERNAL_DIR.glob("*.py")):
             if path.name == "__init__.py" or path.stem in reserved_modules:
                 continue
-            module_specs.append((path, f"{package_name}.external.{path.stem}"))
+            module_specs.append((path, path.stem, "external", f"runtime_news_plugin_{path.stem}"))
 
     return module_specs
 
 
+def _load_plugin_module(path: Path, import_name: str, source_type: str) -> Any:
+    """
+    加载新闻插件模块。
+
+    Args:
+        path: 插件源文件路径。
+        import_name: Python 导入或文件加载使用的模块名。
+        source_type: 插件来源，`builtin` 或 `external`。
+
+    Returns:
+        已导入的 Python 模块。
+
+    Raises:
+        ImportError: 外部插件无法按文件路径加载时抛出。
+    """
+    if source_type == "builtin":
+        return importlib.import_module(import_name)
+
+    spec = importlib.util.spec_from_file_location(import_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load news plugin from {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[import_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 @lru_cache(maxsize=1)
 def get_news_plugins() -> Dict[str, NewsPlugin]:
-    plugin_dir = Path(__file__).resolve().parent
-    package_name = __package__
     plugins: Dict[str, NewsPlugin] = {}
+    package_name = __package__ or "app.ai.agentic.tooling.news_plugins"
 
-    for path, module_name in _iter_plugin_modules(plugin_dir, package_name):
+    for path, module_name, source_type, import_name in _iter_plugin_modules(NEWS_PLUGIN_DIR, package_name):
         try:
-            module = importlib.import_module(module_name)
+            module = _load_plugin_module(path, import_name, source_type)
             name = str(getattr(module, "NAME")).strip()
             plugin_id = str(getattr(module, "PLUGIN_ID")).strip()
             tool_name = str(getattr(module, "TOOL_NAME")).strip()
@@ -90,6 +120,8 @@ def get_news_plugins() -> Dict[str, NewsPlugin]:
             keyword_examples=keyword_examples,
             search=search,
             module_name=module_name,
+            source_type=source_type,
+            file_path=path if source_type == "external" else None,
         )
 
     return plugins

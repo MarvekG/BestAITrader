@@ -35,7 +35,7 @@ Agent 的正确使用链路是：
 所有本地 Skills 放在：
 
 ```text
-backend/app/ai/agentic/skills_loader/skills/
+/runtime/skills/
 ```
 
 每个 skill 是一个独立目录：
@@ -63,7 +63,7 @@ skills/
 | `references/` | 接口文档、字段说明、业务规则、样例、决策口径等静态资料 |
 | `scripts/` | 可执行脚本或二进制入口，供 `run_skill_script` 调用 |
 
-当前仓库内置示例：
+当前仓库内置示例仍保留在源码目录，Loader 会直接扫描，不复制到 `/runtime`：
 
 ```text
 backend/app/ai/agentic/skills_loader/skills/tushare-data/
@@ -96,21 +96,21 @@ backend/app/ai/agentic/skills_loader/skills/tushare-data/
 上传成功后，后端会写入：
 
 ```text
-backend/app/ai/agentic/skills_loader/skills/<skill_id>/
+/runtime/skills/<skill_id>/
 ```
 
 上传同名 `skill_id` 时会替换原目录。删除时会删除对应的 `<skill_id>/` 目录。
 
 LLM 是否能选到上传后的 Skill：
 
-- 能。`discover_skills()` 每次运行时扫描 `skills/` 目录，不依赖服务重启。
+- 能。`discover_skills()` 每次运行时扫描内置 Skill 目录和 `/runtime/skills/`，不依赖服务重启。
 - Debate、AI 智能选股、经验复盘等已接入 Skills Loader 的链路，会在下一次任务启动时看到新的 catalog 摘要。
 - Agent 只会先看到 `skill_id`、`name`、`description`、references 和 scripts 清单；真正使用前仍应调用 `load_skill` 读取完整 `SKILL.md`。
 - 如果当前问题和 Skill 描述不相关，LLM 可能不会主动选择该 Skill。这是预期行为。
 
-上传目录属于运行时资产。`skills/.gitignore` 默认忽略运行时上传的 Skill，避免把私有资料、脚本和临时测试目录提交进仓库。当前仓库只显式保留内置 `tushare-data`。
+上传目录属于运行时资产，固定写入 `/runtime/skills/`。当前仓库只显式保留内置 `tushare-data`，内置 Skill 从源码目录直接发现，不复制到运行时目录。
 
-开发环境启用 uvicorn reload 时，`backend/run.py` 已排除 `app/ai/agentic/skills_loader/skills/*`，上传或删除 Skill 不会触发后端自动重载。
+开发环境启用 uvicorn reload 时，`backend/run.py` 只监听 `app/` 和 `config/`；上传或删除运行时 Skill 不会触发后端自动重载。
 
 ## 4. 推荐补齐什么
 
@@ -420,7 +420,7 @@ references/
 目录：
 
 ```text
-backend/app/ai/agentic/skills_loader/skills/my-skill/
+/runtime/skills/my-skill/
   skill.json
   SKILL.md
   references/interfaces.md
@@ -523,18 +523,18 @@ if __name__ == "__main__":
 
 ## 12. Git 规则
 
-默认 `skills/` 目录忽略外部安装的 Skill。当前仓库显式允许 `tushare-data` 入库。
+默认 `/runtime/skills/` 目录不属于仓库内容。当前仓库显式保留 `tushare-data` 作为内置 Skill，并在容器启动时初始化到运行时目录。
 
-新增需要入库的 Skill 时，需要同步调整：
+新增需要入库的内置 Skill 时，需要放在源码内置目录：
 
 ```text
-backend/app/ai/agentic/skills_loader/skills/.gitignore
+backend/app/ai/agentic/skills_loader/skills/<skill_id>/
 ```
 
 如果 Skill 绑定团队私有资料，不建议直接提交到公开仓库。可以使用私有子模块、私有包或部署时挂载目录，但需要保证运行路径仍然是：
 
 ```text
-backend/app/ai/agentic/skills_loader/skills/<skill_id>/
+/runtime/skills/<skill_id>/
 ```
 
 ## 13. Python 依赖管理

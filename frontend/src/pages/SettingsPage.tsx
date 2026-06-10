@@ -2461,7 +2461,7 @@ export const SettingsPage: React.FC = () => {
           <Button>{t('settings.select_news_plugin_file')}</Button>
         </Upload>
         <a
-          href="https://github.com/MarvekW/BestAITrader/blob/main/backend/app/ai/agentic/tooling/news_plugins/README.md"
+          href="https://github.com/MarvekG/BestAITrader/blob/main/backend/app/ai/agentic/tooling/news_plugins/README.md"
           target="_blank"
           rel="noopener noreferrer"
           style={{ display: 'inline-block', marginTop: 12 }}
