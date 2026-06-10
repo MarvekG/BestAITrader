@@ -14,7 +14,7 @@ from app.ai.llm_engine.orchestrator import (
     _get_pending_orders_for_pm, _build_pm_review_focus, _build_portfolio_field_descriptions
 )
 from app.ai.llm_engine.models import PMDecision
-from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER, AGENT_ROLE_PORTFOLIO_MANAGER
+from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER, AGENT_ROLE_PORTFOLIO_MANAGER, AGENT_ROLE_RISK
 from app.models.account import Account
 from app.models.data_storage import KlineData, StockBasic, StockRealtimeMarket
 from app.models.debate_message import DebateMessage
@@ -195,7 +195,7 @@ async def test_fetch_context_node_keeps_portfolio_risk_control_in_build_context(
 
 
 @pytest.mark.asyncio
-async def test_fetch_context_revalues_position_with_latest_realtime_price(initial_state, db_session):
+async def test_fetch_context_uses_portfolio_overview_position_as_pm_valuation_source(initial_state, db_session):
     user = User(
         username="pm_revalue_user",
         email="pm_revalue_user@example.com",
@@ -246,11 +246,32 @@ async def test_fetch_context_revalues_position_with_latest_realtime_price(initia
     )
     db_session.commit()
     initial_state["session_id"] = session.session_id
+    context_with_portfolio = {
+        **MOCK_CONTEXT,
+        "portfolio": {
+            "overview": {
+                "summary": {
+                    "total_assets": 58500.0,
+                    "available_cash": 50000.0,
+                    "market_value": 8500.0,
+                },
+                "positions": [
+                    {
+                        "stock_code": "000001.SZ",
+                        "current_price": 8.5,
+                        "weight": 8500 / 58500,
+                        "unrealized_pnl": -1500.0,
+                        "unrealized_pnl_pct": -0.15,
+                    }
+                ],
+            }
+        },
+    }
 
     with patch("app.ai.llm_engine.orchestrator.AIContextService") as MockService, \
          patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
         mock_service = MockService.return_value
-        mock_service.build = AsyncMock(return_value=MOCK_CONTEXT)
+        mock_service.build = AsyncMock(return_value=context_with_portfolio)
 
         result = await fetch_context(initial_state)
 
@@ -259,13 +280,18 @@ async def test_fetch_context_revalues_position_with_latest_realtime_price(initia
     assert position["available_shares"] == "900股"
     assert position["avg_cost"] == "10元"
     assert position["current_price"] == "8.5元"
-    assert position["current_position"] == "8.5%"
-    assert position["profit_loss"] == "-1500元"
-    assert position["profit_loss_pct"] == "-15%"
+    assert position["weight"] == 8500 / 58500
+    assert position["unrealized_pnl"] == -1500.0
+    assert position["unrealized_pnl_pct"] == -0.15
+    assert result["static_context"]["portfolio_info"]["account"] == {
+        "total_assets": "58500元",
+        "available_cash": "50000元",
+        "market_value": "8500元",
+    }
 
 
 @pytest.mark.asyncio
-async def test_fetch_context_ignores_stale_realtime_price_when_daily_close_is_newer(initial_state, db_session):
+async def test_fetch_context_keeps_portfolio_info_consistent_with_overview(initial_state, db_session):
     user = User(
         username="pm_revalue_stale_realtime_user",
         email="pm_revalue_stale_realtime_user@example.com",
@@ -322,19 +348,40 @@ async def test_fetch_context_ignores_stale_realtime_price_when_daily_close_is_ne
     )
     db_session.commit()
     initial_state["session_id"] = session.session_id
+    context_with_portfolio = {
+        **MOCK_CONTEXT,
+        "portfolio": {
+            "overview": {
+                "summary": {
+                    "total_assets": 59200.0,
+                    "available_cash": 50000.0,
+                    "market_value": 9200.0,
+                },
+                "positions": [
+                    {
+                        "stock_code": "000001.SZ",
+                        "current_price": 9.2,
+                        "weight": 9200 / 59200,
+                        "unrealized_pnl": -800.0,
+                        "unrealized_pnl_pct": -0.08,
+                    }
+                ],
+            }
+        },
+    }
 
     with patch("app.ai.llm_engine.orchestrator.AIContextService") as MockService, \
          patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
         mock_service = MockService.return_value
-        mock_service.build = AsyncMock(return_value=MOCK_CONTEXT)
+        mock_service.build = AsyncMock(return_value=context_with_portfolio)
 
         result = await fetch_context(initial_state)
 
     position = result["static_context"]["portfolio_info"]["position"]
     assert position["current_price"] == "9.2元"
-    assert position["current_position"] == "9.2%"
-    assert position["profit_loss"] == "-800元"
-    assert position["profit_loss_pct"] == "-8%"
+    assert position["weight"] == 9200 / 59200
+    assert position["unrealized_pnl"] == -800.0
+    assert position["unrealized_pnl_pct"] == -0.08
 
 @pytest.mark.asyncio
 async def test_sentiment_analysis_node(initial_state):
@@ -644,7 +691,7 @@ async def test_persist_agent_report_saves_pm_report():
 
 @pytest.mark.asyncio
 async def test_portfolio_management_passes_expected_top_level_keys(initial_state):
-    initial_state["vertical_reports"] = {"fundamental": "F"}
+    initial_state["vertical_reports"] = {"fundamental": "F", AGENT_ROLE_RISK: "Risk report"}
     initial_state["strategic_reports"] = {"bull": "B"}
     initial_state["fact_arbitration_report"] = "Fact arbitration"
     portfolio_info = {"account": {"total_assets": 1000000}, "position": {}}
@@ -677,6 +724,7 @@ async def test_portfolio_management_passes_expected_top_level_keys(initial_state
             "sentiment_report",
             "news_report",
             "policy_report",
+            "risk_report",
             "previous_pm_decision",
             "same_stock_history",
             "pending_orders",
@@ -685,6 +733,7 @@ async def test_portfolio_management_passes_expected_top_level_keys(initial_state
             "fact_arbitration_report",
         }
         assert pm_runtime_context["previous_pm_decision"]["decision"] == "buy"
+        assert pm_runtime_context["risk_report"] == "Risk report"
         assert pm_runtime_context["same_stock_history"]["recent_execution_summary"]["recent_realized_pnl"] == -100.0
         assert pm_runtime_context["pending_orders"] == []
         assert pm_runtime_context["fact_arbitration_report"] == "Fact arbitration"
