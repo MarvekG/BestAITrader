@@ -14,7 +14,7 @@ from app.ai.llm_engine.orchestrator import (
     _get_pending_orders_for_pm, _build_pm_review_focus, _build_portfolio_field_descriptions
 )
 from app.ai.llm_engine.models import PMDecision
-from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER, AGENT_ROLE_PORTFOLIO_MANAGER
+from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER, AGENT_ROLE_PORTFOLIO_MANAGER, AGENT_ROLE_RISK
 from app.models.account import Account
 from app.models.data_storage import KlineData, StockBasic, StockRealtimeMarket
 from app.models.debate_message import DebateMessage
@@ -691,7 +691,7 @@ async def test_persist_agent_report_saves_pm_report():
 
 @pytest.mark.asyncio
 async def test_portfolio_management_passes_expected_top_level_keys(initial_state):
-    initial_state["vertical_reports"] = {"fundamental": "F"}
+    initial_state["vertical_reports"] = {"fundamental": "F", AGENT_ROLE_RISK: "Risk report"}
     initial_state["strategic_reports"] = {"bull": "B"}
     initial_state["fact_arbitration_report"] = "Fact arbitration"
     portfolio_info = {"account": {"total_assets": 1000000}, "position": {}}
@@ -724,6 +724,7 @@ async def test_portfolio_management_passes_expected_top_level_keys(initial_state
             "sentiment_report",
             "news_report",
             "policy_report",
+            "risk_report",
             "previous_pm_decision",
             "same_stock_history",
             "pending_orders",
@@ -732,6 +733,7 @@ async def test_portfolio_management_passes_expected_top_level_keys(initial_state
             "fact_arbitration_report",
         }
         assert pm_runtime_context["previous_pm_decision"]["decision"] == "buy"
+        assert pm_runtime_context["risk_report"] == "Risk report"
         assert pm_runtime_context["same_stock_history"]["recent_execution_summary"]["recent_realized_pnl"] == -100.0
         assert pm_runtime_context["pending_orders"] == []
         assert pm_runtime_context["fact_arbitration_report"] == "Fact arbitration"

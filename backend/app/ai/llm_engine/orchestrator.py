@@ -1275,21 +1275,31 @@ async def fact_arbitration(state: AnalystState) -> Dict[str, Any]:
 
 
 async def portfolio_management(state: AnalystState) -> Dict[str, Any]:
+    """执行 PM 最终裁决并持久化结果。
+
+    Args:
+        state: 当前 Debate 工作流状态，包含静态上下文、各 Agent 报告和会话信息。
+
+    Returns:
+        包含 `pm_decision` 的更新字典；若执行失败则包含 `errors`。
+    """
     static_context = state.get("static_context", {})
     session_id = state.get("session_id")
     previous_pm_decision = _get_previous_pm_decision(session_id, state["stock_code"])
     same_stock_history = _get_same_stock_history(session_id, state["stock_code"])
     pending_orders = _get_pending_orders_for_pm(session_id)
+    vertical_reports = state.get("vertical_reports", {})
     runtime_context = _build_runtime_context(
         state,
         {
             "sentiment_report": state.get("sentiment_report", ""),
             "news_report": state.get("news_report", ""),
             "policy_report": state.get("policy_report", ""),
+            "risk_report": vertical_reports.get(AGENT_ROLE_RISK, ""),
             "previous_pm_decision": previous_pm_decision,
             "same_stock_history": same_stock_history,
             "pending_orders": pending_orders,
-            "vertical_views": state.get("vertical_reports", {}),
+            "vertical_views": vertical_reports,
             "strategic_debate": state.get("strategic_reports", {}),
             "fact_arbitration_report": state.get("fact_arbitration_report", ""),
         },
