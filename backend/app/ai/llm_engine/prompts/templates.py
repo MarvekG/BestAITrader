@@ -1102,6 +1102,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 - `take_profit` 是 PM 本轮明确设定的止盈价或目标价，必须为大于 0 的数值。若 `decision="buy"`，或 `decision="hold"` 且 `target_position > 0`，`take_profit` 必须高于当前可用价格或你明确采用的评估价；否则说明没有正向目标收益，不应给出买入或继续持有的结构化计划。若 `decision="sell"` 或 `target_position = 0`，`take_profit` 仍必须填写，用于记录原目标价或已放弃的目标价，不作为卖出执行条件。
 - 若 `decision="buy"`，或 `decision="hold"` 且 `target_position > 0`，`take_profit` 必须与目标价分析形成闭环：写清采用的估值方法、核心假设、对应目标价、相对当前价的上行空间和失效条件。若无法形成正向收益闭环，应降低仓位、改为 `hold` 或给出更保守目标价。
 - `holding_horizon_days` 是 PM 本轮明确设定的预期持有天数，必须为大于 0 的整数，用于记录 PM 原始持有预期，供后验解释和下一次 Debate 参考。
+- `holding_horizon_days` 必须与当前交易频率/交易策略形成闭环，说明为什么该持有天数匹配当前策略，并与止损距离、止盈目标、数据时效和触发器保持一致。若持有周期突破频率或策略，必须说明原因、额外风险和退出条件；若无法一致，应降低仓位、等待确认或调整持有周期。
 - `report_markdown` 必须给出综合评分/投资评级，并解释评分由基本面质量、资金链、估值、技术位置、资金流、风险和账户约束共同决定。
 - `report_markdown` 必须显式给出交易风格适配研判：说明当前交易是风格内交易还是风格外机会捕捉，并解释是否适配当前交易频率和交易策略。
 - `report_markdown` 的置信度依据必须包含数据时效检查，覆盖实时价/盘中快照、财报或关键经营数据、新闻/公告、资金流/技术指标、上一轮 PM 决策。若关键证据偏旧或时间戳不明，不得作为强买/强卖依据，应降低置信度、降低仓位或等待确认。
@@ -1259,7 +1260,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 *   **上一轮执行摘要读取**: [has_orders / has_trades / avg_fill_price / total_quantity / latest_order_time / latest_trade_time；说明未成交时不得视为已建仓]
 *   **当前挂单复核**: [逐笔说明 pending_orders 的保留 / 撤销 / 替换判断，依据方向、价格、目标仓位、止损/止盈、有效期和证据变化]
 *   **同股历史交易复盘**: [最近实际买卖 / 最近已实现盈亏 / 上一轮止损或清仓参考 / 本轮是否具备新增可验证优势]
-*   **交易风格适配研判**: [当前交易频率 / 当前交易策略 / 风格内交易或风格外机会捕捉 / 适配或突破理由 / 额外风险和执行纪律]
+*   **交易风格适配研判**: [当前交易频率 / 当前交易策略 / holding_horizon_days 是否匹配 / 风格内交易或风格外机会捕捉 / 适配或突破理由 / 额外风险和执行纪律]
 *   **组合经理裁决 / 组合约束检查**: [组合状态、当前仓位、目标仓位、单股/行业/现金限制、可卖数量和止损要求如何影响最终裁决]
 *   **风控覆盖说明**: [如覆盖风险专家硬阻断或强警告，说明覆盖理由、替代风控、触发器和置信度影响]
 *   **仓位方案比较**: [比较维持当前仓位 / 降仓释放现金 / 等待确认但设置触发器；若继续持有正仓位，说明机会成本和最终方案为什么更优]
@@ -1274,7 +1275,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 *   **价格区间**: [ ¥[价格] - ¥[价格] ]
 *   **止损纪律**: [明确价格；若止损距离很近，写清预警位、复核条件、是否提前减仓、盘中触发 vs 收盘确认、分步卖出或清仓]
 *   **止盈/目标价**: [明确价格，必须与结构化字段 `take_profit` 一致；买入或继续持仓时必须说明估值来源和上行空间]
-*   **预期持有周期**: [N 天，必须与结构化字段 `holding_horizon_days` 一致]
+*   **预期持有周期**: [N 天，必须与结构化字段 `holding_horizon_days` 一致；说明与交易频率、止损距离、止盈目标、数据时效和触发器是否匹配]
 *   **买入反证 / 卖出反证**: [按当前交易风格说明失败路径、最早证伪信号、是否存在更好等待条件；卖出时说明风格内失效还是正常波动，以及卖错可能错过什么]
 *   **风险评估**: [0.0 - 1.0] ([主要风险源描述])
 
@@ -1972,6 +1973,7 @@ inside `report_markdown`:
 - `take_profit` is the PM's explicit take-profit or target price for this round and must be a number greater than 0. If `decision="buy"`, or `decision="hold"` with `target_position > 0`, `take_profit` must be above the currently available price or the evaluation price you explicitly use; otherwise the plan has no positive target return and should not be a buy or continued-hold plan. If `decision="sell"` or `target_position = 0`, `take_profit` is still required to record the original or abandoned target price, but it is not a sell execution condition.
 - If `decision="buy"`, or `decision="hold"` with `target_position > 0`, `take_profit` must close the loop with target-price analysis: state the valuation method, core assumptions, resulting target price, upside versus current price, and invalidation conditions. If a positive-return loop cannot be formed, reduce sizing, switch to `hold`, or use a more conservative target price.
 - `holding_horizon_days` is the PM's explicit expected holding period in days and must be a positive integer. It records the PM's original holding expectation for later explanation and the next Debate.
+- `holding_horizon_days` must close the loop with the current trading frequency/strategy: explain why this holding period fits the strategy and remains consistent with stop-loss distance, take-profit target, data freshness, and executable triggers. If the holding period breaks the frequency or strategy, state the reason, extra risk, and exit conditions; if consistency cannot be achieved, reduce sizing, wait for confirmation, or adjust the holding period.
 - `report_markdown` must provide a Comprehensive Score / Investment Rating and explain how the score reflects fundamental quality, funding chain, valuation, technical position, capital flow, risk, and account constraints.
 - `report_markdown` must explicitly provide a trading-style fit assessment: state whether this is an in-style trade or an out-of-style opportunity capture, and explain whether it fits the current trading frequency and strategy.
 - The confidence basis inside `report_markdown` must include a data-freshness check covering latest price / intraday snapshot, financial or key operating data, news/filings, capital-flow/technical indicators, and the previous PM decision. If key evidence is stale or has unclear timestamps, do not use it as a strong buy/sell basis; lower confidence, reduce sizing, or wait for confirmation.
@@ -2087,7 +2089,7 @@ As PM and Debate Host, I have evaluated both sides.
 *   **Previous Execution Summary Readout**: [has_orders / has_trades / avg_fill_price / total_quantity / latest_order_time / latest_trade_time; state that no-fill must not be treated as an established position]
 *   **Current Pending Order Review**: [For each pending_order, state keep / cancel / replace judgment based on direction, price, target position, stop loss / take profit, age/expiry, and evidence change]
 *   **Same-Stock Trading History Review**: [recent actual buys/sells / recent realized PnL / latest stop-loss or liquidation reference / whether this round has new verifiable edge]
-*   **Trading-Style Fit Assessment**: [Current trading frequency / current trading strategy / in-style trade or out-of-style opportunity capture / fit or breakout reason / extra risk and execution discipline]
+*   **Trading-Style Fit Assessment**: [Current trading frequency / current trading strategy / whether holding_horizon_days fits / in-style trade or out-of-style opportunity capture / fit or breakout reason / extra risk and execution discipline]
 *   **Portfolio Manager Verdict / Portfolio Constraint Check**: [How portfolio regime, current position, target position, single-stock/industry/cash limits, sellable shares, and stop-loss requirements affect the final verdict]
 *   **Risk Override Explanation**: [If overriding a Risk Analyst hard-block or strong-warning recommendation, state override rationale, replacement controls, triggers, and confidence impact]
 *   **Sizing Option Comparison**: [Compare maintain current position / reduce position to release cash / wait for confirmation with triggers; if continuing to hold a positive position, state opportunity cost and why the final option is superior]
@@ -2102,7 +2104,7 @@ As PM and Debate Host, I have evaluated both sides.
 *   **Price Range**: [ ¥[Price] - ¥[Price] ]
 *   **Stop Loss Discipline**: [Clear price; if stop-loss distance is tight, state warning level, review conditions, early-trim allowance, intraday trigger vs close confirmation, and staged selling or liquidation]
 *   **Take Profit / Target Price**: [Clear price, must match structured field `take_profit`; for buying or continued holding, explain valuation source and upside]
-*   **Expected Holding Horizon**: [N days, must match structured field `holding_horizon_days`]
+*   **Expected Holding Horizon**: [N days, must match structured field `holding_horizon_days`; explain fit with trading frequency, stop-loss distance, take-profit target, data freshness, and triggers]
 *   **Buy Counter-Evidence / Sell Counter-Evidence**: [Using the current trading style, state the failure path, earliest disconfirming signal, and whether a better wait condition exists; for sells, state whether this is style-relevant invalidation or normal volatility, and what may be missed if the sell is wrong]
 *   **Risk Assessment**: [0.0 - 1.0] ([Description of main risk sources])
 
