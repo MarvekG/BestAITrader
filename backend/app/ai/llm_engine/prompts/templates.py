@@ -1204,6 +1204,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 - 若引用大宗交易，折价接盘不得直接解释为二级市场主动买入；必须结合折溢价率、买方类型、成交金额、卖方性质和之后的二级市场价格行为交叉验证。
 - 你在“辩论总结与判决”前，必须先综合审阅 `sentiment_report`、`news_report`、`policy_report`、`strategic_debate` 与 `previous_pm_decision`。
 - 若 `same_stock_history` 存在，你必须先回答四个问题：历史上实际买卖了什么、这些交易实际赚亏多少、上一轮止损或清仓参考在哪里、本轮相对亏损交易是否有新增可验证优势。
+- 若最近多轮同股 PM 决策连续 `HOLD` 且当前持仓浮亏，必须回答反锚定复盘问题：不看持仓成本，当前是否仍值得维持同等仓位；继续持有是否只是成本锚定或回本心态；相比首次 `HOLD`，本轮新增了哪些可验证优势或风险缓释。
 - 若 `previous_pm_decision` 存在，你必须显式判断本轮决策与上一轮决策是“延续、减弱、增强、还是反转”，并说明原因。若出现反转，必须指出触发反转的核心变量。
 - 若 `fact_arbitration_report` 存在，你必须优先阅读并在 `report_markdown` 中说明关键采用口径、未解决事实和这些事项如何影响最终判断。若你不同意仲裁摘要，必须说明原因和证据。
 - 若 `previous_pm_decision.execution_summary` 存在，你必须先判断上一轮是否有订单、是否有成交、成交均价、实际成交数量、最近订单/成交时间，以及上一轮 `take_profit` 与 `holding_horizon_days` 是否仍适用。
@@ -2017,6 +2018,10 @@ inside `report_markdown`:
 - If `same_stock_history` exists, first answer four questions: what was actually bought or sold historically, how much
   those trades actually made or lost, where the latest stop-loss or liquidation reference was, and whether this round has
   new verifiable edge versus the losing trade.
+- If recent same-stock PM decisions have been consecutive `HOLD` while the current position is in unrealized loss, answer
+  the anti-anchoring review questions: ignoring holding cost, is the same position size still justified now; is continuing
+  to hold merely cost anchoring or break-even thinking; compared with the first `HOLD`, what new verifiable edge or risk
+  mitigation exists in this round.
 - If `previous_pm_decision` exists, you must explicitly judge whether the current decision is a continuation, weakening, strengthening, or reversal of the previous PM decision, and explain why. If it is a reversal, you must identify the core trigger.
 - If `fact_arbitration_report` exists, read it first and explain in `report_markdown` which fact versions you adopt, which facts remain unresolved, and how those items affect the final judgment. If you disagree with the arbitration summary, explain why and cite evidence.
 - If `previous_pm_decision.execution_summary` exists, first determine whether the previous round had orders, whether it had fills, average fill price, filled quantity, latest order/trade time, and whether the previous `take_profit` and `holding_horizon_days` still apply.
