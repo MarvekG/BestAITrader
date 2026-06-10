@@ -1097,6 +1097,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 - 若决定买入，必须说明买入后如何验证逻辑继续成立。
 - 若决定卖出，必须说明是基本面破坏、估值过高、趋势失效、风险暴露，还是组合风控要求。
 - 若决定持有，必须说明继续持有的条件、触发减仓的信号和是否需要调整止损。
+- 若 `decision="hold"` 且 `target_position > 0`，必须做机会成本复核：比较继续持有、降低仓位释放现金、等待确认后再行动，说明继续占用仓位为何优于其他方案，以及条件不满足时如何调整。
 - 目标价必须说明估值方法，例如远期 PE、PB、股息率、情景概率或资产价值法；同时列出核心假设、上行/下行空间和失效条件。
 - `take_profit` 是 PM 本轮明确设定的止盈价或目标价，必须为大于 0 的数值。若 `decision="buy"`，或 `decision="hold"` 且 `target_position > 0`，`take_profit` 必须高于当前可用价格或你明确采用的评估价；否则说明没有正向目标收益，不应给出买入或继续持有的结构化计划。若 `decision="sell"` 或 `target_position = 0`，`take_profit` 仍必须填写，用于记录原目标价或已放弃的目标价，不作为卖出执行条件。
 - 若 `decision="buy"`，或 `decision="hold"` 且 `target_position > 0`，`take_profit` 必须与目标价分析形成闭环：写清采用的估值方法、核心假设、对应目标价、相对当前价的上行空间和失效条件。若无法形成正向收益闭环，应降低仓位、改为 `hold` 或给出更保守目标价。
@@ -1256,7 +1257,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 *   **交易风格适配研判**: [当前交易频率 / 当前交易策略 / 风格内交易或风格外机会捕捉 / 适配或突破理由 / 额外风险和执行纪律]
 *   **组合经理裁决 / 组合约束检查**: [组合状态、当前仓位、目标仓位、单股/行业/现金限制、可卖数量和止损要求如何影响最终裁决]
 *   **风控覆盖说明**: [如覆盖风险专家硬阻断或强警告，说明覆盖理由、替代风控、触发器和置信度影响]
-*   **仓位方案比较**: [比较维持当前仓位 / 降仓 / 等待确认但设置触发器，并说明最终方案为什么更优]
+*   **仓位方案比较**: [比较维持当前仓位 / 降仓释放现金 / 等待确认但设置触发器；若继续持有正仓位，说明机会成本和最终方案为什么更优]
 *   **置信度依据**: [PM 自主说明事实冲突、数据时效、风险覆盖、Memory 规则影响和触发器可执行性如何影响 confidence_score；不要机械套用硬编码扣分]
 *   **核心理由 (Rationale)**:
     1.  [价格 vs 价值]: ...
@@ -1959,6 +1960,9 @@ inside `report_markdown`:
 - If selling, explain whether the trigger is fundamental breakage, overvaluation, trend invalidation, risk exposure,
   or portfolio risk control.
 - If holding, explain the conditions for continued holding, reduction triggers, and whether stop loss needs adjustment.
+- If `decision="hold"` with `target_position > 0`, run an opportunity-cost review: compare continuing to hold,
+  reducing position to release cash, and waiting for confirmation before acting. Explain why keeping capital in this
+  position is superior and how to adjust if the conditions fail.
 - The target price must state the valuation method, such as Forward PE, PB, dividend yield, scenario probability, or asset-value approach. Also list core assumptions, upside/downside room, and invalidation conditions.
 - `take_profit` is the PM's explicit take-profit or target price for this round and must be a number greater than 0. If `decision="buy"`, or `decision="hold"` with `target_position > 0`, `take_profit` must be above the currently available price or the evaluation price you explicitly use; otherwise the plan has no positive target return and should not be a buy or continued-hold plan. If `decision="sell"` or `target_position = 0`, `take_profit` is still required to record the original or abandoned target price, but it is not a sell execution condition.
 - If `decision="buy"`, or `decision="hold"` with `target_position > 0`, `take_profit` must close the loop with target-price analysis: state the valuation method, core assumptions, resulting target price, upside versus current price, and invalidation conditions. If a positive-return loop cannot be formed, reduce sizing, switch to `hold`, or use a more conservative target price.
@@ -2076,7 +2080,7 @@ As PM and Debate Host, I have evaluated both sides.
 *   **Trading-Style Fit Assessment**: [Current trading frequency / current trading strategy / in-style trade or out-of-style opportunity capture / fit or breakout reason / extra risk and execution discipline]
 *   **Portfolio Manager Verdict / Portfolio Constraint Check**: [How portfolio regime, current position, target position, single-stock/industry/cash limits, sellable shares, and stop-loss requirements affect the final verdict]
 *   **Risk Override Explanation**: [If overriding a Risk Analyst hard-block or strong-warning recommendation, state override rationale, replacement controls, triggers, and confidence impact]
-*   **Sizing Option Comparison**: [Compare maintain current position / reduce position / wait for confirmation with triggers, and explain why the final option is superior]
+*   **Sizing Option Comparison**: [Compare maintain current position / reduce position to release cash / wait for confirmation with triggers; if continuing to hold a positive position, state opportunity cost and why the final option is superior]
 *   **Confidence Basis**: [PM independently explains how fact conflicts, data freshness, risk override, Memory-rule impact, and executable triggers affect confidence_score; do not mechanically apply hard-coded deductions]
 *   **Rationale**:
     1.  [Price vs Value]: ...
