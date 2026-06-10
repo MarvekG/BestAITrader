@@ -125,6 +125,70 @@ def _get_latest_position_price(db: Any, stock_code: str, fallback_price: float) 
 
     return fallback_price, "position_snapshot", None
 
+
+def _find_portfolio_overview_position(static_context: Dict[str, Any], stock_code: str) -> Dict[str, Any]:
+    """从组合概览中读取目标股票的动态估值持仓。
+
+    Args:
+        static_context: AIContextService 构建的静态上下文。
+        stock_code: 标准股票代码。
+
+    Returns:
+        组合概览中的目标股票持仓；不存在时返回空字典。
+    """
+    portfolio = static_context.get("portfolio") if isinstance(static_context, dict) else {}
+    overview = portfolio.get("overview") if isinstance(portfolio, dict) else {}
+    positions = overview.get("positions") if isinstance(overview, dict) else []
+    if not isinstance(positions, list):
+        return {}
+    for item in positions:
+        if isinstance(item, dict) and item.get("stock_code") == stock_code:
+            return dict(item)
+    return {}
+
+
+def _build_portfolio_info_position(
+    *,
+    overview_position: Dict[str, Any],
+    stock_code: str,
+    total_shares: int,
+    available_shares: int,
+    avg_cost: float,
+    fallback_price: float,
+) -> Dict[str, Any]:
+    """构建 PM 目标股票持仓输入，优先复用组合概览动态估值口径。
+
+    Args:
+        overview_position: `portfolio.overview.positions` 中的目标股票行。
+        stock_code: 标准股票代码。
+        total_shares: 当前持仓数量。
+        available_shares: 当前可卖数量。
+        avg_cost: 持仓均价。
+        fallback_price: 组合概览缺失时使用的兜底价格。
+
+    Returns:
+        给 PM 使用的目标股票持仓字段；仓位、价格和盈亏优先来自组合概览。
+    """
+    position_payload = dict(overview_position) if overview_position else {}
+    position_payload.update(
+        {
+            "stock_code": stock_code,
+            "total_shares": total_shares,
+            "available_shares": available_shares,
+            "avg_cost": avg_cost,
+        }
+    )
+    if not overview_position:
+        position_payload.update(
+            {
+                "current_price": fallback_price,
+                "current_position": 0,
+                "profit_loss": 0,
+                "profit_loss_pct": 0,
+            }
+        )
+    return position_payload
+
 # Define State
 
 
@@ -318,10 +382,12 @@ async def fetch_context(state: AnalystState) -> Dict[str, Any]:
                     # 获取账户信息
                     account = db.query(Account).filter(Account.user_id == session_obj.user_id).first()
                     if account:
+                        portfolio_overview = ai_context_snapshot.get("portfolio", {}).get("overview", {})
+                        portfolio_summary = portfolio_overview.get("summary", {}) if isinstance(portfolio_overview, dict) else {}
                         portfolio_info["account"] = {
-                            "total_assets": account.total_assets,
-                            "available_cash": account.available_cash,
-                            "market_value": account.market_value,
+                            "total_assets": portfolio_summary.get("total_assets", account.total_assets),
+                            "available_cash": portfolio_summary.get("available_cash", account.available_cash),
+                            "market_value": portfolio_summary.get("market_value", account.market_value),
                         }
                         portfolio_info["account"] = format_payload_values(
                             "portfolio.account",
@@ -334,45 +400,24 @@ async def fetch_context(state: AnalystState) -> Dict[str, Any]:
                             Position.stock_code == stock_code
                         ).first()
                         if position:
-                            # PM 决策必须使用最新可用行情重估持仓，不能依赖可能滞后的 positions 快照价。
+                            # PM 的价格、仓位和盈亏主口径来自 portfolio.overview，避免与组合快照不一致。
+                            overview_position = _find_portfolio_overview_position(ai_context_snapshot, stock_code)
                             snapshot_price = safe_float(position.current_price) or 0
-                            curr_price, price_source, price_reference_time = _get_latest_position_price(
-                                db,
-                                stock_code,
-                                snapshot_price,
-                            )
-                            if price_source != "position_snapshot":
-                                logger.info(
-                                    "Revalued position using latest market price",
-                                    extra={
-                                        "stock_code": stock_code,
-                                        "current_price": curr_price,
-                                        "price_source": price_source,
-                                        "price_reference_time": price_reference_time,
-                                    },
-                                )
-
-                            # 计算当前该股仓位比例 (current_position = 市值 / 总资产)
-                            total_assets = float(account.total_assets or 0)
                             total_shares = int(position.total_shares or 0)
                             avg_cost = safe_float(position.avg_cost) or 0
-                            market_value = total_shares * curr_price
-                            profit_loss = (curr_price - avg_cost) * total_shares
-                            profit_loss_pct = (curr_price - avg_cost) / avg_cost if avg_cost > 0 else 0
-                            current_pos_ratio = (
-                                market_value / total_assets if total_assets > 0 else 0
+                            if not overview_position:
+                                logger.info(
+                                    "Target position missing from portfolio overview; using execution-only fallback",
+                                    extra={"stock_code": stock_code},
+                                )
+                            portfolio_info["position"] = _build_portfolio_info_position(
+                                overview_position=overview_position,
+                                stock_code=position.stock_code,
+                                total_shares=total_shares,
+                                available_shares=int(position.available_shares or 0),
+                                avg_cost=avg_cost,
+                                fallback_price=snapshot_price,
                             )
-
-                            portfolio_info["position"] = {
-                                "stock_code": position.stock_code,
-                                "total_shares": total_shares,
-                                "available_shares": position.available_shares,
-                                "avg_cost": avg_cost,
-                                "current_price": curr_price,
-                                "current_position": current_pos_ratio,
-                                "profit_loss": profit_loss,
-                                "profit_loss_pct": profit_loss_pct,
-                            }
                             portfolio_info["position"] = format_payload_values(
                                 "portfolio.position",
                                 portfolio_info["position"],

@@ -195,7 +195,7 @@ async def test_fetch_context_node_keeps_portfolio_risk_control_in_build_context(
 
 
 @pytest.mark.asyncio
-async def test_fetch_context_revalues_position_with_latest_realtime_price(initial_state, db_session):
+async def test_fetch_context_uses_portfolio_overview_position_as_pm_valuation_source(initial_state, db_session):
     user = User(
         username="pm_revalue_user",
         email="pm_revalue_user@example.com",
@@ -246,11 +246,32 @@ async def test_fetch_context_revalues_position_with_latest_realtime_price(initia
     )
     db_session.commit()
     initial_state["session_id"] = session.session_id
+    context_with_portfolio = {
+        **MOCK_CONTEXT,
+        "portfolio": {
+            "overview": {
+                "summary": {
+                    "total_assets": 58500.0,
+                    "available_cash": 50000.0,
+                    "market_value": 8500.0,
+                },
+                "positions": [
+                    {
+                        "stock_code": "000001.SZ",
+                        "current_price": 8.5,
+                        "weight": 8500 / 58500,
+                        "unrealized_pnl": -1500.0,
+                        "unrealized_pnl_pct": -0.15,
+                    }
+                ],
+            }
+        },
+    }
 
     with patch("app.ai.llm_engine.orchestrator.AIContextService") as MockService, \
          patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
         mock_service = MockService.return_value
-        mock_service.build = AsyncMock(return_value=MOCK_CONTEXT)
+        mock_service.build = AsyncMock(return_value=context_with_portfolio)
 
         result = await fetch_context(initial_state)
 
@@ -259,13 +280,18 @@ async def test_fetch_context_revalues_position_with_latest_realtime_price(initia
     assert position["available_shares"] == "900股"
     assert position["avg_cost"] == "10元"
     assert position["current_price"] == "8.5元"
-    assert position["current_position"] == "8.5%"
-    assert position["profit_loss"] == "-1500元"
-    assert position["profit_loss_pct"] == "-15%"
+    assert position["weight"] == 8500 / 58500
+    assert position["unrealized_pnl"] == -1500.0
+    assert position["unrealized_pnl_pct"] == -0.15
+    assert result["static_context"]["portfolio_info"]["account"] == {
+        "total_assets": "58500元",
+        "available_cash": "50000元",
+        "market_value": "8500元",
+    }
 
 
 @pytest.mark.asyncio
-async def test_fetch_context_ignores_stale_realtime_price_when_daily_close_is_newer(initial_state, db_session):
+async def test_fetch_context_keeps_portfolio_info_consistent_with_overview(initial_state, db_session):
     user = User(
         username="pm_revalue_stale_realtime_user",
         email="pm_revalue_stale_realtime_user@example.com",
@@ -322,19 +348,40 @@ async def test_fetch_context_ignores_stale_realtime_price_when_daily_close_is_ne
     )
     db_session.commit()
     initial_state["session_id"] = session.session_id
+    context_with_portfolio = {
+        **MOCK_CONTEXT,
+        "portfolio": {
+            "overview": {
+                "summary": {
+                    "total_assets": 59200.0,
+                    "available_cash": 50000.0,
+                    "market_value": 9200.0,
+                },
+                "positions": [
+                    {
+                        "stock_code": "000001.SZ",
+                        "current_price": 9.2,
+                        "weight": 9200 / 59200,
+                        "unrealized_pnl": -800.0,
+                        "unrealized_pnl_pct": -0.08,
+                    }
+                ],
+            }
+        },
+    }
 
     with patch("app.ai.llm_engine.orchestrator.AIContextService") as MockService, \
          patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
         mock_service = MockService.return_value
-        mock_service.build = AsyncMock(return_value=MOCK_CONTEXT)
+        mock_service.build = AsyncMock(return_value=context_with_portfolio)
 
         result = await fetch_context(initial_state)
 
     position = result["static_context"]["portfolio_info"]["position"]
     assert position["current_price"] == "9.2元"
-    assert position["current_position"] == "9.2%"
-    assert position["profit_loss"] == "-800元"
-    assert position["profit_loss_pct"] == "-8%"
+    assert position["weight"] == 9200 / 59200
+    assert position["unrealized_pnl"] == -800.0
+    assert position["unrealized_pnl_pct"] == -0.08
 
 @pytest.mark.asyncio
 async def test_sentiment_analysis_node(initial_state):
