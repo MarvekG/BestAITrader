@@ -736,7 +736,7 @@ async def test_memory_client_records_last_error_for_failed_requests():
 
     memory_client.clear_last_error("recall")
     with patch("app.ai.memory_client.settings.MEMORY_SERVICE_ENABLED", True), \
-         patch("app.ai.memory_client.settings.MEMORY_SERVICE_BASE_URL", "http://memoflux"), \
+         patch("app.ai.memory_client.settings.MEMORY_SERVICE_BASE_URL", "http://memo"), \
          patch("app.ai.memory_client.httpx.AsyncClient", _FailingAsyncClient):
         result = await memory_client.recall(
             user_id=1,
@@ -876,7 +876,7 @@ async def test_recall_memory_tool_returns_memoflux_data_shape():
     recall_tool = next(tool for tool in tools if tool.name == "recall_memory")
 
     with patch("app.ai.memory_client.settings.MEMORY_SERVICE_ENABLED", True), \
-         patch("app.ai.memory_client.settings.MEMORY_SERVICE_BASE_URL", "http://memoflux"), \
+         patch("app.ai.memory_client.settings.MEMORY_SERVICE_BASE_URL", "http://memo"), \
          patch.object(memory_client, "_post", new=AsyncMock(return_value={
              "success": True,
              "data": {
@@ -918,7 +918,7 @@ async def test_write_memory_tool_uses_memory_client_request_adapter():
     write_tool = next(tool for tool in tools if tool.name == "write_memory")
 
     with patch("app.ai.memory_client.settings.MEMORY_SERVICE_ENABLED", True), \
-         patch("app.ai.memory_client.settings.MEMORY_SERVICE_BASE_URL", "http://memoflux"), \
+         patch("app.ai.memory_client.settings.MEMORY_SERVICE_BASE_URL", "http://memo"), \
          patch.object(
              memory_client,
              "_post",

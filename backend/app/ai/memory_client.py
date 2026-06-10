@@ -116,18 +116,35 @@ class MemoryServiceClient:
         }
 
     async def get_usage_stats(self, *, hours: int | None = None) -> dict[str, Any]:
+        """获取 MemoFlux 用量统计数据。
+
+        Args:
+            hours: 预留的统计窗口参数，当前 MemoFlux 仅返回全量聚合统计。
+
+        Returns:
+            MemoFlux 标准响应 data 内的统计对象；未启用或请求失败时返回空对象。
+        """
+
         if not self.enabled:
             self.clear_last_error("usage_stats")
             logger.info("Memory usage stats skipped: enabled=%s", self.enabled)
             return {}
-        return await self._get("/v1/usage/stats", operation="usage_stats")
+        response = await self._get("/v1/usage/stats", operation="usage_stats")
+        return self._response_data(response)
 
     async def clear_usage_stats(self) -> dict[str, Any]:
+        """清空 MemoFlux 用量统计数据。
+
+        Returns:
+            MemoFlux 标准响应 data 内的清理结果；未启用或请求失败时返回空对象。
+        """
+
         if not self.enabled:
             self.clear_last_error("clear_usage_stats")
             logger.info("Memory usage clear skipped: enabled=%s", self.enabled)
             return {}
-        return await self._delete("/v1/usage/stats", operation="clear_usage_stats")
+        response = await self._delete("/v1/usage/stats", operation="clear_usage_stats")
+        return self._response_data(response)
 
     async def _ingest_scope(
         self,

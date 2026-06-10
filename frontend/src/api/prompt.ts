@@ -1,5 +1,20 @@
 import { apiClient } from './client';
 
+interface ApiEnvelope<T> {
+  data?: T;
+  error?: unknown;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
+
+const unwrapApiData = <T>(payload: T | ApiEnvelope<T>): T => {
+  if (isRecord(payload) && 'data' in payload && isRecord(payload.data)) {
+    return payload.data as T;
+  }
+  return payload as T;
+};
+
 export interface PromptTemplate {
   role: string;
   content: string;
@@ -131,13 +146,15 @@ export const promptApi = {
    * Get prompt usage statistics
    */
   getUsageStats: async (): Promise<PromptStats> => {
-    return apiClient.get('/llm/usage-stats');
+    const response = await apiClient.get<PromptStats | ApiEnvelope<PromptStats>>('/llm/usage-stats');
+    return unwrapApiData(response);
   },
 
   /**
    * Clear prompt usage statistics
    */
   clearUsageStats: async (): Promise<ClearUsageStatsResult> => {
-    return apiClient.delete('/llm/usage-stats');
+    const response = await apiClient.delete<ClearUsageStatsResult | ApiEnvelope<ClearUsageStatsResult>>('/llm/usage-stats');
+    return unwrapApiData(response);
   }
 };

@@ -98,7 +98,7 @@ class Settings(BaseSettings):
 
     # Memory Service Config
     MEMORY_SERVICE_ENABLED: bool = True
-    MEMORY_SERVICE_BASE_URL: str = "http://memoflux:8020"
+    MEMORY_SERVICE_BASE_URL: str = "http://memo:8020"
     MEMORY_SERVICE_TIMEOUT_SECONDS: float = 10.0
 
     # Webfetch Service Config
