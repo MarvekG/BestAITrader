@@ -15,6 +15,7 @@ class ExecuteRequest(BaseModel):
 
     code: str = Field(default="", max_length=500_000)
     limits: SandboxLimits = Field(default_factory=SandboxLimits)
+    execution_mode: str = Field(pattern="^(pooled_worker|one_shot_worker)$")
     timeout_seconds: int | None = Field(default=None, ge=1)
 
 

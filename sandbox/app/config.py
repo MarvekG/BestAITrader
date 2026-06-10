@@ -27,8 +27,9 @@ class Settings(BaseSettings):
     SANDBOX_WORKER_POOL_MAX_STARTING: int = Field(default=2, ge=1)
     SANDBOX_PREWARM_POOL_ENABLED: bool = True
     SANDBOX_PREWARM_ON_STARTUP: bool = True
-    SANDBOX_PREWARM_POOL_SIZE: int = Field(default=1, ge=1)
-    SANDBOX_PREWARM_MAX_STARTING: int = Field(default=1, ge=1)
+    SANDBOX_STARTUP_PREWARM_WORKERS: int = Field(default=1, ge=1)
+    SANDBOX_PREWARM_POOL_SIZE: int = Field(default=4, ge=1)
+    SANDBOX_PREWARM_MAX_STARTING: int = Field(default=2, ge=1)
     SANDBOX_WORKER_ACQUIRE_TIMEOUT_SECONDS: int = Field(default=3, ge=1)
     SANDBOX_WORKER_STARTUP_TIMEOUT_SECONDS: int = Field(default=30, ge=1)
 

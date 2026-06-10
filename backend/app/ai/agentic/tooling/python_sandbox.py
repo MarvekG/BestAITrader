@@ -241,18 +241,20 @@ def _normalize_response(payload: Dict[str, Any], started_at: float) -> Dict[str,
     return response
 
 
-def _build_service_payload(code: str) -> Dict[str, Any]:
+def _build_service_payload(code: str, execution_mode: str | None = None) -> Dict[str, Any]:
     """
     构建发往独立 Python 沙箱服务的请求体。
 
     Args:
         code: 待执行 Python 代码。
+        execution_mode: 本次请求的执行模式。
 
     Returns:
         HTTP JSON 请求体。
     """
     return {
         "code": code,
+        "execution_mode": execution_mode or settings.PY_SANDBOX_EXECUTION_MODE,
         "timeout_seconds": settings.PY_SANDBOX_TIMEOUT_SECONDS,
         "limits": {
             "stdout_max_bytes": settings.PY_SANDBOX_STDOUT_MAX_BYTES,
@@ -283,12 +285,13 @@ def _build_error_response(started_at: float, error: str, error_type: str) -> Dic
     )
 
 
-async def execute_python_in_sandbox(code: str) -> Dict[str, Any]:
+async def execute_python_in_sandbox(code: str, execution_mode: str | None = None) -> Dict[str, Any]:
     """
     通过独立沙箱服务执行受限 Python 计算代码。
 
     Args:
         code: 待执行 Python 代码。
+        execution_mode: 本次请求的执行模式。
 
     Returns:
         标准沙箱执行响应。
@@ -307,7 +310,7 @@ async def execute_python_in_sandbox(code: str) -> Dict[str, Any]:
     timeout = httpx.Timeout(settings.PY_SANDBOX_HTTP_TIMEOUT_SECONDS)
     try:
         async with httpx.AsyncClient(base_url=base_url, timeout=timeout) as client:
-            response = await client.post("/execute", json=_build_service_payload(code))
+            response = await client.post("/execute", json=_build_service_payload(code, execution_mode))
             response.raise_for_status()
             payload = response.json()
     except httpx.HTTPError as exc:

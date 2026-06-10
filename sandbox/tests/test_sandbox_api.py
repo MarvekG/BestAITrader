@@ -36,6 +36,7 @@ def test_execute_delegates_to_sandbox_runner() -> None:
             "/execute",
             json={
                 "code": "print(2 + 2)",
+                "execution_mode": "pooled_worker",
                 "timeout_seconds": 30,
                 "limits": {"stdout_max_bytes": 1000, "stderr_max_bytes": 500},
             },
@@ -50,4 +51,21 @@ def test_execute_delegates_to_sandbox_runner() -> None:
     assert kwargs["code"] == "print(2 + 2)"
     assert kwargs["limits"].stdout_max_bytes == 1000
     assert kwargs["limits"].stderr_max_bytes == 500
+    assert kwargs["execution_mode"] == "pooled_worker"
     assert kwargs["timeout_seconds"] == 30
+
+
+def test_execute_requires_execution_mode() -> None:
+    """验证 HTTP 执行接口要求调用方显式传入执行模式。"""
+    client = TestClient(app)
+
+    response = client.post(
+        "/execute",
+        json={
+            "code": "print(2 + 2)",
+            "timeout_seconds": 30,
+            "limits": {"stdout_max_bytes": 1000, "stderr_max_bytes": 500},
+        },
+    )
+
+    assert response.status_code == 422

@@ -47,13 +47,12 @@ class FakePool:
 
 
 @pytest.mark.asyncio
-async def test_execute_python_uses_pooled_worker_mode_by_default() -> None:
-    """验证默认执行模式为持久 worker 池。"""
+async def test_execute_python_uses_pooled_worker_mode_when_requested() -> None:
+    """验证请求 pooled_worker 时使用持久 worker 池。"""
     settings = get_settings()
     fake_pool = FakePool("deno_pooled_worker")
 
-    with patch.object(settings, "SANDBOX_EXECUTION_MODE", "pooled_worker"), \
-         patch.object(settings, "SANDBOX_TIMEOUT_SECONDS", 5), \
+    with patch.object(settings, "SANDBOX_TIMEOUT_SECONDS", 5), \
          patch("app.services.python_sandbox._resolve_executable", return_value="/usr/bin/deno"), \
          patch("app.services.python_sandbox.get_pooled_sandbox_pool", return_value=fake_pool), \
          patch("app.services.python_sandbox.get_prewarmed_sandbox_pool") as one_shot_mock, \
@@ -61,6 +60,7 @@ async def test_execute_python_uses_pooled_worker_mode_by_default() -> None:
         response = await execute_python_in_sandbox(
             "print(2 + 2)",
             SandboxLimits(stdout_max_bytes=1000, stderr_max_bytes=1000),
+            execution_mode="pooled_worker",
             timeout_seconds=None,
         )
 
@@ -72,13 +72,12 @@ async def test_execute_python_uses_pooled_worker_mode_by_default() -> None:
 
 
 @pytest.mark.asyncio
-async def test_execute_python_uses_one_shot_worker_mode_when_configured() -> None:
-    """验证配置为 one_shot_worker 时保留原 one-shot 预热池路径。"""
+async def test_execute_python_uses_one_shot_worker_mode_when_requested() -> None:
+    """验证请求 one_shot_worker 时使用 one-shot 预热池路径。"""
     settings = get_settings()
     fake_pool = FakePool("deno_prewarmed_worker")
 
-    with patch.object(settings, "SANDBOX_EXECUTION_MODE", "one_shot_worker"), \
-         patch.object(settings, "SANDBOX_TIMEOUT_SECONDS", 5), \
+    with patch.object(settings, "SANDBOX_TIMEOUT_SECONDS", 5), \
          patch.object(settings, "SANDBOX_PREWARM_POOL_ENABLED", True), \
          patch("app.services.python_sandbox._resolve_executable", return_value="/usr/bin/deno"), \
          patch("app.services.python_sandbox.get_pooled_sandbox_pool") as pooled_mock, \
@@ -87,6 +86,7 @@ async def test_execute_python_uses_one_shot_worker_mode_when_configured() -> Non
         response = await execute_python_in_sandbox(
             "print(2 + 2)",
             SandboxLimits(stdout_max_bytes=1000, stderr_max_bytes=1000),
+            execution_mode="one_shot_worker",
             timeout_seconds=None,
         )
 

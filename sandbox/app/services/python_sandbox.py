@@ -277,6 +277,7 @@ async def execute_python_in_sandbox(
     code: str,
     limits: SandboxLimits,
     timeout_seconds: int | None,
+    execution_mode: str,
 ) -> Dict[str, Any]:
     """
     在独立 Deno/Pyodide 沙箱服务内执行 Python 代码。
@@ -285,6 +286,7 @@ async def execute_python_in_sandbox(
         code: 待执行 Python 代码。
         limits: stdout/stderr 输出字节限制。
         timeout_seconds: 调用方请求的执行超时时间。
+        execution_mode: 本次请求的执行模式。
 
     Returns:
         标准沙箱执行响应。
@@ -296,7 +298,7 @@ async def execute_python_in_sandbox(
         return early_response
 
     settings = get_settings()
-    if settings.SANDBOX_EXECUTION_MODE == "pooled_worker":
+    if execution_mode == "pooled_worker":
         try:
             payload = await get_pooled_sandbox_pool().execute(request_json, execution_timeout)
             return _normalize_response(payload, started_at, limits)
@@ -317,7 +319,7 @@ async def execute_python_in_sandbox(
         except Exception as exc:
             logger.warning("pooled sandbox worker failed; falling back to subprocess", extra={"error": str(exc)})
 
-    if settings.SANDBOX_EXECUTION_MODE == "one_shot_worker" and settings.SANDBOX_PREWARM_POOL_ENABLED:
+    if execution_mode == "one_shot_worker" and settings.SANDBOX_PREWARM_POOL_ENABLED:
         try:
             payload = await get_prewarmed_sandbox_pool().execute(request_json, execution_timeout)
             return _normalize_response(payload, started_at, limits)
@@ -337,6 +339,18 @@ async def execute_python_in_sandbox(
             )
         except Exception as exc:
             logger.warning("prewarmed sandbox worker failed; falling back to subprocess", extra={"error": str(exc)})
+
+    if execution_mode not in {"pooled_worker", "one_shot_worker"}:
+        logger.warning("unsupported python sandbox execution mode", extra={"execution_mode": execution_mode})
+        return _normalize_response(
+            {
+                "success": False,
+                "error": f"Unsupported execution mode: {execution_mode}",
+                "metadata": {"error_type": "validation_error"},
+            },
+            started_at,
+            limits,
+        )
 
     return await _execute_python_subprocess_once(request_json, command, started_at, limits, execution_timeout)
 
