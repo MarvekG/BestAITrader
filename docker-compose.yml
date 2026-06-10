@@ -85,9 +85,9 @@ services:
     networks:
       - best_ai_trader_network
 
-  memoflux:
+  memo:
     image: ghcr.io/marvekg/memoflux:latest
-    container_name: best_ai_trader_memoflux
+    container_name: best_ai_trader_memo
     restart: unless-stopped
     env_file:
       - ./memo/.env

@@ -6,12 +6,12 @@ import pytest
 from app.ai.memory_client import MemoryServiceClient
 
 
-def test_memory_service_defaults_to_memoflux_base_url():
+def test_memory_service_defaults_to_memo_base_url():
     from app.core.config import Settings
 
     fresh_settings = Settings()
 
-    assert fresh_settings.MEMORY_SERVICE_BASE_URL == "http://memoflux:8020"
+    assert fresh_settings.MEMORY_SERVICE_BASE_URL == "http://memo:8020"
 
 
 @pytest.mark.asyncio
@@ -328,19 +328,23 @@ async def test_preview_recall_audits_omits_session_when_user_is_missing(monkeypa
 @pytest.mark.asyncio
 async def test_memory_observability_uses_memoflux_endpoints(monkeypatch):
     client = MemoryServiceClient()
-    mock_get = AsyncMock(return_value={"data": {}, "error": None})
-    mock_delete = AsyncMock(return_value={"data": {"status": "ok", "deleted": 1}, "error": None})
+    usage_stats = {"status": "ok", "total_calls": 2, "input_tokens": 30}
+    clear_result = {"status": "ok", "deleted": 1}
+    mock_get = AsyncMock(return_value={"data": usage_stats, "error": None})
+    mock_delete = AsyncMock(return_value={"data": clear_result, "error": None})
     monkeypatch.setattr(client, "_get", mock_get)
     monkeypatch.setattr(client, "_delete", mock_delete)
 
     await client.check_embedding_health()
-    await client.get_usage_stats(hours=24)
-    await client.clear_usage_stats()
+    stats_result = await client.get_usage_stats(hours=24)
+    clear_result_response = await client.clear_usage_stats()
 
     assert mock_get.await_args_list[0].args[0] == "/v1/health"
     assert mock_get.await_args_list[1].args[0] == "/v1/usage/stats"
     assert "params" not in mock_get.await_args_list[1].kwargs
     assert mock_delete.await_args.args[0] == "/v1/usage/stats"
+    assert stats_result == usage_stats
+    assert clear_result_response == clear_result
 
 
 @pytest.mark.asyncio
@@ -362,7 +366,7 @@ async def test_memory_client_reuses_async_client_between_requests(monkeypatch):
 
     monkeypatch.setattr("app.ai.memory_client.httpx.AsyncClient", _ReusableAsyncClient)
     with patch("app.ai.memory_client.settings.MEMORY_SERVICE_ENABLED", True), \
-         patch("app.ai.memory_client.settings.MEMORY_SERVICE_BASE_URL", "http://memoflux"):
+         patch("app.ai.memory_client.settings.MEMORY_SERVICE_BASE_URL", "http://memo"):
         await client.recall(user_id=7, stock_code="000001.SZ", query="first query")
         await client.recall(user_id=7, stock_code="000001.SZ", query="second query")
 
@@ -389,7 +393,7 @@ async def test_memory_client_passes_per_request_timeout_to_reused_client(monkeyp
 
     monkeypatch.setattr("app.ai.memory_client.httpx.AsyncClient", _TimeoutRecordingAsyncClient)
     with patch("app.ai.memory_client.settings.MEMORY_SERVICE_ENABLED", True), \
-         patch("app.ai.memory_client.settings.MEMORY_SERVICE_BASE_URL", "http://memoflux"), \
+         patch("app.ai.memory_client.settings.MEMORY_SERVICE_BASE_URL", "http://memo"), \
          patch("app.ai.memory_client.settings.MEMORY_SERVICE_TIMEOUT_SECONDS", 5.0):
         await client.write_memory(user_id=7, stock_code="000001.SZ", content="risk lesson")
         await client.recall(user_id=7, stock_code="000001.SZ", query="risk lesson")
