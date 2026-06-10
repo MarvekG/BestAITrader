@@ -12,6 +12,8 @@ import {
   Table,
   Tag,
   Typography,
+  Checkbox,
+  Select,
 } from 'antd';
 import {
   BarChartOutlined,
@@ -37,6 +39,8 @@ const STOCK_ANALYSIS_TASK_TYPE = 'stock_analysis';
 const FINISHED_TASK_STATUS = new Set(['completed', 'failed', 'cancelled']);
 const STOCK_ANALYSIS_HISTORY_PAGE_SIZE = 10;
 const DEBATE_SESSIONS_REFRESH_EVENT = 'debate-sessions-refresh';
+const DEBATE_SESSION_AUTO_REFRESH_INTERVAL_OPTIONS = [10, 30, 60, 300] as const;
+const DEFAULT_DEBATE_SESSION_AUTO_REFRESH_SECONDS = 30;
 
 interface StockOption {
   value: string;
@@ -112,6 +116,10 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [reportSessionId, setReportSessionId] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
+  const [autoRefreshIntervalSeconds, setAutoRefreshIntervalSeconds] = useState(
+    DEFAULT_DEBATE_SESSION_AUTO_REFRESH_SECONDS,
+  );
   const { setActiveSession } = useSessionStore();
   const navigate = useNavigate();
   const { message } = AntdApp.useApp();
@@ -133,6 +141,16 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
     if (!isActive) return;
     void fetchSessions();
   }, [fetchSessions, isActive]);
+
+  useEffect(() => {
+    if (!isActive || !autoRefreshEnabled) return undefined;
+
+    const timer = window.setInterval(() => {
+      void fetchSessions();
+    }, autoRefreshIntervalSeconds * 1000);
+
+    return () => window.clearInterval(timer);
+  }, [autoRefreshEnabled, autoRefreshIntervalSeconds, fetchSessions, isActive]);
 
   useEffect(() => {
     const handleDebateSessionsRefresh = () => {
@@ -314,7 +332,7 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
   return (
     <div>
       <div className="flex justify-between items-center mb-6">
-        <Space>
+        <Space wrap>
           <Button icon={<InboxOutlined />} onClick={handleBatchArchive} disabled={selectedRowKeys.length === 0}>
             {t('session.batch_archive')}
           </Button>
@@ -322,6 +340,25 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
             {t('session.batch_delete')}
           </Button>
           <Button icon={<FolderOpenOutlined />} onClick={fetchSessions}>{t('session.refresh')}</Button>
+          <Checkbox
+            checked={autoRefreshEnabled}
+            onChange={(event) => setAutoRefreshEnabled(event.target.checked)}
+          >
+            {t('session.auto_refresh')}
+          </Checkbox>
+          <Select<number>
+            size="small"
+            value={autoRefreshIntervalSeconds}
+            disabled={!autoRefreshEnabled}
+            onChange={setAutoRefreshIntervalSeconds}
+            style={{ width: 120 }}
+            options={DEBATE_SESSION_AUTO_REFRESH_INTERVAL_OPTIONS.map((seconds) => ({
+              value: seconds,
+              label: seconds < 60
+                ? t('session.auto_refresh_interval_seconds', { seconds })
+                : t('session.auto_refresh_interval_minutes', { minutes: seconds / 60 }),
+            }))}
+          />
           <Input
             placeholder={t('common.input_stock_placeholder')}
             allowClear
