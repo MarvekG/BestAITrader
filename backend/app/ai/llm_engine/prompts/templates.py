@@ -1104,6 +1104,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 - `holding_horizon_days` 是 PM 本轮明确设定的预期持有天数，必须为大于 0 的整数，用于记录 PM 原始持有预期，供后验解释和下一次 Debate 参考。
 - `report_markdown` 必须给出综合评分/投资评级，并解释评分由基本面质量、资金链、估值、技术位置、资金流、风险和账户约束共同决定。
 - `report_markdown` 必须显式给出交易风格适配研判：说明当前交易是风格内交易还是风格外机会捕捉，并解释是否适配当前交易频率和交易策略。
+- `report_markdown` 的置信度依据必须包含数据时效检查，覆盖实时价/盘中快照、财报或关键经营数据、新闻/公告、资金流/技术指标、上一轮 PM 决策。若关键证据偏旧或时间戳不明，不得作为强买/强卖依据，应降低置信度、降低仓位或等待确认。
 - 若本轮突破用户交易频率或交易策略，`report_markdown` 必须说明突破原因、机会质量、额外风险、风险收益比、止损、止盈、仓位上限和最早失效信号。
 - 买入前必须给出按当前交易风格定义的失败路径、最早证伪信号和更好等待条件；卖出前必须区分风格内失效和正常波动，并说明如果卖错最可能错过什么。
 
@@ -1258,7 +1259,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 *   **组合经理裁决 / 组合约束检查**: [组合状态、当前仓位、目标仓位、单股/行业/现金限制、可卖数量和止损要求如何影响最终裁决]
 *   **风控覆盖说明**: [如覆盖风险专家硬阻断或强警告，说明覆盖理由、替代风控、触发器和置信度影响]
 *   **仓位方案比较**: [比较维持当前仓位 / 降仓释放现金 / 等待确认但设置触发器；若继续持有正仓位，说明机会成本和最终方案为什么更优]
-*   **置信度依据**: [PM 自主说明事实冲突、数据时效、风险覆盖、Memory 规则影响和触发器可执行性如何影响 confidence_score；不要机械套用硬编码扣分]
+*   **置信度依据**: [PM 自主说明事实冲突、数据时效检查、风险覆盖、Memory 规则影响和触发器可执行性如何影响 confidence_score；数据时效需覆盖实时价/盘中快照、财报或经营数据、新闻/公告、资金流/技术指标、上一轮 PM 决策；不要机械套用硬编码扣分]
 *   **核心理由 (Rationale)**:
     1.  [价格 vs 价值]: ...
     2.  [技术面与基本面分歧]: ...
@@ -1969,6 +1970,7 @@ inside `report_markdown`:
 - `holding_horizon_days` is the PM's explicit expected holding period in days and must be a positive integer. It records the PM's original holding expectation for later explanation and the next Debate.
 - `report_markdown` must provide a Comprehensive Score / Investment Rating and explain how the score reflects fundamental quality, funding chain, valuation, technical position, capital flow, risk, and account constraints.
 - `report_markdown` must explicitly provide a trading-style fit assessment: state whether this is an in-style trade or an out-of-style opportunity capture, and explain whether it fits the current trading frequency and strategy.
+- The confidence basis inside `report_markdown` must include a data-freshness check covering latest price / intraday snapshot, financial or key operating data, news/filings, capital-flow/technical indicators, and the previous PM decision. If key evidence is stale or has unclear timestamps, do not use it as a strong buy/sell basis; lower confidence, reduce sizing, or wait for confirmation.
 - If this round breaks the user's trading frequency or strategy, `report_markdown` must state the breakout reason, opportunity quality, extra risk, risk/reward, stop loss, take profit, position cap, and earliest invalidation signal.
 - Before buying, provide the style-specific failure path, earliest disconfirming signal, and better wait condition. Before selling, distinguish style-relevant invalidation from normal volatility, and explain what could be missed if the sell is wrong.
 
@@ -2081,7 +2083,7 @@ As PM and Debate Host, I have evaluated both sides.
 *   **Portfolio Manager Verdict / Portfolio Constraint Check**: [How portfolio regime, current position, target position, single-stock/industry/cash limits, sellable shares, and stop-loss requirements affect the final verdict]
 *   **Risk Override Explanation**: [If overriding a Risk Analyst hard-block or strong-warning recommendation, state override rationale, replacement controls, triggers, and confidence impact]
 *   **Sizing Option Comparison**: [Compare maintain current position / reduce position to release cash / wait for confirmation with triggers; if continuing to hold a positive position, state opportunity cost and why the final option is superior]
-*   **Confidence Basis**: [PM independently explains how fact conflicts, data freshness, risk override, Memory-rule impact, and executable triggers affect confidence_score; do not mechanically apply hard-coded deductions]
+*   **Confidence Basis**: [PM independently explains how fact conflicts, data-freshness check, risk override, Memory-rule impact, and executable triggers affect confidence_score; data freshness must cover latest price / intraday snapshot, financial or operating data, news/filings, capital-flow/technical indicators, and previous PM decision; do not mechanically apply hard-coded deductions]
 *   **Rationale**:
     1.  [Price vs Value]: ...
     2.  [Technical vs Fundamental Divergence]: ...
