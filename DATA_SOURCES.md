@@ -23,7 +23,7 @@
 | NewsAPI | 通过用户提供的必填 API Key 进行新闻搜索。 | `backend/app/ai/agentic/tooling/news_plugins/newsapi.py` | 当前计划限制、生产使用、署名、存储和文章内容处理要求。 |
 | Tavily | 通过用户提供的 API Key 进行可选网页/新闻搜索。 | `backend/app/ai/agentic/tooling/news_plugins/tavily.py` | API 条款、可接受使用限制、高风险金融约束和输出处理要求。 |
 | LLM 服务商 | 使用用户提供的 Key 生成聊天、记忆和分析结果。 | LiteLLM Proxy via `litellm/config.yaml`, `backend/app/ai/llm_providers/`, `memo/memoflux/llm.py` | 是否可以向服务商发送 prompt、输出、个人数据、账户数据和金融分析内容。 |
-| 外部插件和 Skills | 用户安装的数据源插件和脚本。 | `backend/app/ai/agentic/tooling/news_plugins/external/`, `backend/app/ai/agentic/skills_loader/skills/` | 安装前审查代码、依赖、数据权利、网络目标和许可证兼容性。 |
+| 外部插件和 Skills | 用户安装的数据源插件和脚本。 | `/runtime/news_plugins/external/`, `/runtime/skills/` | 安装前审查代码、依赖、数据权利、网络目标和许可证兼容性。 |
 
 ## 原始数据处理
 
@@ -92,7 +92,7 @@ rules, caching rules, redistribution limits, and noncommercial-use restrictions.
 | NewsAPI | News search provider through a required user-provided API key. | `backend/app/ai/agentic/tooling/news_plugins/newsapi.py` | Confirm current plan limits, production use, attribution, storage, and article-content handling. |
 | Tavily | Optional web/news search provider through a user-provided API key. | `backend/app/ai/agentic/tooling/news_plugins/tavily.py` | Confirm API terms, acceptable-use limits, high-risk finance constraints, and output handling. |
 | LLM providers | Chat/completion, memory, and analysis generation through user-provided keys. | LiteLLM Proxy via `litellm/config.yaml`, `backend/app/ai/llm_providers/`, `memo/memoflux/llm.py` | Confirm whether prompts, outputs, personal data, account data, and financial analysis may be sent to the provider. |
-| External plugins and skills | User-installed source plugins and scripts. | `backend/app/ai/agentic/tooling/news_plugins/external/`, `backend/app/ai/agentic/skills_loader/skills/` | Review code, dependencies, source rights, network targets, and license compatibility before installing. |
+| External plugins and skills | User-installed source plugins and scripts. | `/runtime/news_plugins/external/`, `/runtime/skills/` | Review code, dependencies, source rights, network targets, and license compatibility before installing. |
 
 ## Handling Raw Data
 

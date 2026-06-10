@@ -1,7 +1,6 @@
 import ast
 import importlib
 import re
-import sys
 from datetime import date, timedelta
 from inspect import isawaitable
 from pathlib import Path
@@ -15,15 +14,15 @@ from app.ai.agentic.dependency_installer import (
     install_python_requirements,
 )
 from app.ai.agentic.tooling.news_plugins import get_news_plugins
+from app.ai.agentic.tooling.news_plugins.paths import (
+    NEWS_PLUGIN_EXTERNAL_DIR,
+)
 from app.ai.agentic.tooling.news_plugins.registry import NewsPlugin
 from app.core.i18n import i18n_service
 from app.core.logger import get_logger
 
-NEWS_PLUGIN_DIR = Path(__file__).resolve().parent
-NEWS_PLUGIN_EXTERNAL_DIR = NEWS_PLUGIN_DIR / "external"
-NEWS_PLUGIN_PACKAGE = "app.ai.agentic.tooling.news_plugins"
 NEWS_PLUGIN_MODULE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
-RESERVED_NEWS_PLUGIN_MODULE_NAMES = {"__init__", "base", "registry", "manager"}
+RESERVED_NEWS_PLUGIN_MODULE_NAMES = {"__init__", "base", "manager", "paths", "registry"}
 logger = get_logger(__name__)
 
 
@@ -73,33 +72,20 @@ def get_external_news_plugin_path(module_name: str) -> Path:
     return NEWS_PLUGIN_EXTERNAL_DIR / f"{normalized_module_name}.py"
 
 
-def is_external_news_plugin(module_name: str) -> bool:
+def _display_external_news_plugin_path(plugin_path: Path) -> str:
     """
-    Return whether a registered module points to a writable external plugin file.
+    生成外部新闻插件路径的响应展示值。
 
     Args:
-        module_name: Fully qualified registered module name.
+        plugin_path: 外部新闻插件文件路径。
 
     Returns:
-        True when the module belongs to `news_plugins.external` and its file exists.
+        可读的路径字符串；位于运行时插件目录下时优先返回相对路径。
     """
-    path = get_external_news_plugin_path_from_module(module_name)
-    return bool(path and path.exists())
-
-
-def get_external_news_plugin_path_from_module(module_name: str) -> Path | None:
-    """
-    Resolve a registered module name to an external plugin file path.
-
-    Args:
-        module_name: Fully qualified registered module name.
-
-    Returns:
-        The external plugin path, or None for built-in plugins.
-    """
-    if not module_name.startswith(f"{NEWS_PLUGIN_PACKAGE}.external."):
-        return None
-    return get_external_news_plugin_path(module_name.rsplit(".", 1)[-1])
+    try:
+        return str(plugin_path.relative_to(NEWS_PLUGIN_EXTERNAL_DIR.parent))
+    except ValueError:
+        return str(plugin_path)
 
 
 def serialize_news_plugin(plugin: NewsPlugin) -> Dict[str, Any]:
@@ -112,16 +98,16 @@ def serialize_news_plugin(plugin: NewsPlugin) -> Dict[str, Any]:
     Returns:
         JSON-serializable plugin metadata.
     """
-    module_name = plugin.module_name.rsplit(".", 1)[-1]
     return {
         "name": plugin.name,
         "plugin_id": plugin.plugin_id,
         "tool_name": plugin.tool_name,
         "news_types": list(plugin.news_types),
         "keyword_examples": list(plugin.keyword_examples),
-        "module_name": module_name,
+        "module_name": plugin.module_name,
         "qualified_module_name": plugin.module_name,
-        "can_delete": is_external_news_plugin(plugin.module_name),
+        "source_type": plugin.source_type,
+        "can_delete": plugin.source_type == "external" and bool(plugin.file_path and plugin.file_path.exists()),
     }
 
 
@@ -162,35 +148,35 @@ async def create_news_plugin(request: NewsPluginCreateRequest) -> Dict[str, Any]
             "status": "error",
             "message": dependency_result["message"],
             "module_name": module_name,
-            "path": str(plugin_path.relative_to(NEWS_PLUGIN_DIR)),
+            "path": _display_external_news_plugin_path(plugin_path),
             "dependencies": dependency_result,
         }
     previous_content = plugin_path.read_text(encoding="utf-8") if plugin_path.exists() else None
 
     NEWS_PLUGIN_EXTERNAL_DIR.mkdir(parents=True, exist_ok=True)
     plugin_path.write_text(content, encoding="utf-8")
-    refresh_news_plugin_registry(f"{NEWS_PLUGIN_PACKAGE}.external.{module_name}")
+    refresh_news_plugin_registry()
 
     matched_plugin = find_registered_plugin_by_module_name(module_name)
     if matched_plugin is None:
         _restore_news_plugin_file(plugin_path, previous_content)
-        refresh_news_plugin_registry(f"{NEWS_PLUGIN_PACKAGE}.external.{module_name}")
+        refresh_news_plugin_registry()
         return {
             "status": "error",
             "message": _t("not_registered", module_name=module_name),
             "module_name": module_name,
-            "path": str(plugin_path.relative_to(NEWS_PLUGIN_DIR)),
+            "path": _display_external_news_plugin_path(plugin_path),
         }
 
     probe_result = await probe_news_plugin_search(matched_plugin)
     if probe_result["status"] != "success":
         _restore_news_plugin_file(plugin_path, previous_content)
-        refresh_news_plugin_registry(f"{NEWS_PLUGIN_PACKAGE}.external.{module_name}")
+        refresh_news_plugin_registry()
         return {
             "status": "error",
             "message": probe_result["message"],
             "module_name": module_name,
-            "path": str(plugin_path.relative_to(NEWS_PLUGIN_DIR)),
+            "path": _display_external_news_plugin_path(plugin_path),
             "probe": probe_result,
         }
 
@@ -199,7 +185,7 @@ async def create_news_plugin(request: NewsPluginCreateRequest) -> Dict[str, Any]
         "message": _t("saved", plugin_id=matched_plugin.plugin_id),
         "module_name": module_name,
         "source": matched_plugin.plugin_id,
-        "path": str(plugin_path.relative_to(NEWS_PLUGIN_DIR)),
+        "path": _display_external_news_plugin_path(plugin_path),
         "plugin": serialize_news_plugin(matched_plugin),
         "probe": probe_result,
         "dependencies": dependency_result,
@@ -218,8 +204,8 @@ def delete_news_plugin(plugin_key: str) -> Dict[str, Any]:
     """
     plugin = get_news_plugins().get(plugin_key)
     if plugin is not None:
-        module_name = plugin.module_name.rsplit(".", 1)[-1]
-        plugin_path = get_external_news_plugin_path_from_module(plugin.module_name)
+        module_name = plugin.module_name
+        plugin_path = plugin.file_path if plugin.source_type == "external" else None
     else:
         module_name = normalize_news_plugin_module_name(plugin_key)
         plugin_path = get_external_news_plugin_path(module_name)
@@ -231,7 +217,7 @@ def delete_news_plugin(plugin_key: str) -> Dict[str, Any]:
         }
 
     plugin_path.unlink()
-    refresh_news_plugin_registry(f"{NEWS_PLUGIN_PACKAGE}.external.{module_name}")
+    refresh_news_plugin_registry()
     return {
         "status": "success",
         "message": _t("deleted", module_name=module_name),
@@ -349,15 +335,10 @@ def _get_python_requirements_value_node(node: ast.stmt) -> ast.expr | None:
     return None
 
 
-def refresh_news_plugin_registry(module_name: str | None = None) -> None:
+def refresh_news_plugin_registry() -> None:
     """
-    Clear imported plugin modules and cached registry state.
-
-    Args:
-        module_name: Optional fully qualified module name to evict from `sys.modules`.
+    Clear importlib caches and cached registry state.
     """
-    if module_name:
-        sys.modules.pop(module_name, None)
     importlib.invalidate_caches()
     get_news_plugins.cache_clear()
 
@@ -373,7 +354,7 @@ def find_registered_plugin_by_module_name(module_name: str) -> NewsPlugin | None
         The registered plugin, or None when the file did not register.
     """
     return next(
-        (plugin for plugin in get_news_plugins().values() if plugin.module_name.endswith(f".{module_name}")),
+        (plugin for plugin in get_news_plugins().values() if plugin.module_name == module_name),
         None,
     )
 

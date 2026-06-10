@@ -16,8 +16,8 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debia
     && apt-get install -y --no-install-recommends curl ca-certificates tzdata postgresql-client-17 \
     && pip install uv -i https://mirrors.aliyun.com/pypi/simple/ \
     && useradd -m trader \
-    && mkdir -p /app/runtime/logs \
-    && chown -R trader:trader /app \
+    && mkdir -p /runtime/logs /runtime/skills /runtime/news_plugins/external \
+    && chown -R trader:trader /app /runtime \
     && rm -rf /var/lib/apt/lists/*
 
 # 使用 uv 进行项目依赖安装，并挂载 pip 缓存

@@ -5,6 +5,7 @@ import pytest
 
 from app.ai.agentic.dependency_installer import DependencyInstallError, DependencyInstallResult
 from app.ai.agentic.tooling.news_plugins import manager
+from app.ai.agentic.tooling.news_plugins import registry as news_plugin_registry
 from app.ai.agentic.tooling.news_plugins.manager import NewsPluginCreateRequest
 from app.ai.agentic.tooling.news_plugins.registry import NewsPlugin
 from app.ai.agentic.tooling.news_tool import _compact_news_result, _search_news_impl
@@ -33,7 +34,9 @@ class _FakePluginRegistry:
                 news_types=("market",),
                 keyword_examples=("AI",),
                 search=search,
-                module_name="app.ai.agentic.tooling.news_plugins.external.custom_news",
+                module_name="custom_news",
+                source_type="external",
+                file_path=plugin_path,
             )
         }
 
@@ -47,7 +50,6 @@ def isolated_news_plugin_manager(tmp_path, monkeypatch):
     external_dir = plugin_dir / "external"
     registry = _FakePluginRegistry(external_dir)
 
-    monkeypatch.setattr(manager, "NEWS_PLUGIN_DIR", plugin_dir)
     monkeypatch.setattr(manager, "NEWS_PLUGIN_EXTERNAL_DIR", external_dir)
     monkeypatch.setattr(manager, "get_news_plugins", registry)
     yield external_dir, registry
@@ -132,6 +134,32 @@ def test_list_news_plugins_marks_external_plugins_deletable(isolated_news_plugin
     assert result["count"] == 1
     assert result["items"][0]["plugin_id"] == "custom_source"
     assert result["items"][0]["can_delete"] is True
+
+
+def test_registry_loads_external_plugins_from_runtime_dir(tmp_path, monkeypatch):
+    external_dir = tmp_path / "runtime" / "news_plugins" / "external"
+    external_dir.mkdir(parents=True)
+    (external_dir / "custom_news.py").write_text(
+        'NAME = "Custom News"\n'
+        'PLUGIN_ID = "custom_source"\n'
+        'TOOL_NAME = "Custom News Tool"\n'
+        'NEWS_TYPES = ["market"]\n'
+        'KEYWORD_EXAMPLES = ["AI"]\n'
+        'def search(**kwargs):\n'
+        '    return []\n',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(news_plugin_registry, "NEWS_PLUGIN_EXTERNAL_DIR", external_dir)
+    news_plugin_registry.get_news_plugins.cache_clear()
+    try:
+        plugins = news_plugin_registry.get_news_plugins()
+    finally:
+        news_plugin_registry.get_news_plugins.cache_clear()
+
+    assert plugins["custom_source"].module_name == "custom_news"
+    assert plugins["custom_source"].source_type == "external"
+    assert plugins["custom_source"].file_path == external_dir / "custom_news.py"
 
 
 def test_validate_news_plugin_content_rejects_invalid_python():
