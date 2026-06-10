@@ -197,17 +197,30 @@ class PooledSandboxPool:
         request_payload = json.loads(request_json)
         worker.process.stdin.write((request_json + "\n").encode("utf-8"))
         await worker.process.stdin.drain()
-        try:
-            result_line = await asyncio.wait_for(worker.process.stdout.readline(), timeout=timeout_seconds + 1)
-        except asyncio.TimeoutError:
-            _kill_worker(worker.process)
-            raise
-
-        try:
-            payload = json.loads(result_line.decode("utf-8"))
-        except json.JSONDecodeError as exc:
-            _kill_worker(worker.process)
-            raise PrewarmedSandboxPoolError("Invalid worker result JSON") from exc
+        deadline = time.monotonic() + timeout_seconds + 1
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                _kill_worker(worker.process)
+                raise asyncio.TimeoutError
+            try:
+                result_line = await asyncio.wait_for(worker.process.stdout.readline(), timeout=remaining)
+            except asyncio.TimeoutError:
+                _kill_worker(worker.process)
+                raise
+            if not result_line:
+                _kill_worker(worker.process)
+                raise PrewarmedSandboxPoolError("Worker exited before result")
+            result_text = result_line.decode("utf-8", errors="replace").strip()
+            try:
+                payload = json.loads(result_text)
+                break
+            except json.JSONDecodeError as exc:
+                if not result_text or _is_ignorable_pyodide_startup_output(result_text):
+                    logger.debug("ignored Pyodide package result output", extra={"worker_output": result_text})
+                    continue
+                _kill_worker(worker.process)
+                raise PrewarmedSandboxPoolError("Invalid worker result JSON") from exc
 
         if payload.get("type") != "result":
             _kill_worker(worker.process)

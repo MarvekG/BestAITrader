@@ -4,7 +4,7 @@ from unittest.mock import patch
 import pytest
 
 from app.services.pooled_sandbox_pool import PooledSandboxPool, PooledSandboxWorker
-from app.services.python_sandbox_pool import PrewarmedSandboxPool
+from app.services.python_sandbox_pool import PrewarmedSandboxPool, PrewarmedSandboxWorker
 from app.config import get_settings
 
 
@@ -64,6 +64,9 @@ class FakeStdin:
     async def drain(self) -> None:
         """模拟异步写缓冲刷新。"""
 
+    def close(self) -> None:
+        """模拟关闭 stdin。"""
+
 
 class FakePooledProcess:
     """测试用持久 worker 进程。"""
@@ -90,7 +93,9 @@ def test_sandbox_pool_defaults_limit_startup_prewarm_to_one_worker() -> None:
     """验证启动阶段默认只预热 1 个 worker，避免占用过多内存。"""
     settings = get_settings()
 
+    assert settings.SANDBOX_MAX_CONCURRENT_EXECUTIONS == 4
     assert settings.SANDBOX_STARTUP_PREWARM_WORKERS == 1
+    assert settings.SANDBOX_WORKER_ACQUIRE_TIMEOUT_SECONDS == 30
     assert settings.SANDBOX_WORKER_POOL_MAX_STARTING == 2
     assert settings.SANDBOX_WORKER_POOL_SIZE == 4
     assert settings.SANDBOX_PREWARM_MAX_STARTING == 2
@@ -197,3 +202,34 @@ async def test_pooled_pool_reuses_worker_after_success() -> None:
         (json.dumps(second_request) + "\n").encode("utf-8"),
     ]
     assert await pool._ready.get() is worker
+
+
+@pytest.mark.asyncio
+async def test_prewarmed_pool_execute_skips_pyodide_noise_before_result() -> None:
+    """验证执行阶段会跳过延迟出现的 Pyodide 包加载噪声。"""
+    request = {
+        "type": "execute",
+        "id": "req-1",
+        "code": "print(1)",
+        "limits": {"stdout_max_bytes": 1000, "stderr_max_bytes": 1000},
+    }
+    result = {
+        "type": "result",
+        "id": "req-1",
+        "success": True,
+        "stdout": "1\n",
+        "stderr": "",
+        "error": None,
+        "metadata": {"sandbox_runtime": "deno_prewarmed_worker"},
+    }
+    process = FakePooledProcess([
+        "Loading numpy, pandas, python-dateutil, pytz, six\n",
+        json.dumps(result) + "\n",
+    ])
+    worker = PrewarmedSandboxWorker(process=process, worker_id="worker-1", startup_ms=1)
+    pool = PrewarmedSandboxPool()
+
+    payload = await pool._execute_worker(worker, json.dumps(request), timeout_seconds=1)
+
+    assert payload["stdout"] == "1\n"
+    assert process.killed is False

@@ -273,6 +273,40 @@ def _bound_timeout_seconds(timeout_seconds: int | None) -> int:
     return max(1, min(requested_timeout, settings.SANDBOX_MAX_TIMEOUT_SECONDS))
 
 
+def _build_execution_error(
+    error: str,
+    error_type: str,
+    sandbox_runtime: str,
+    started_at: float,
+    limits: SandboxLimits,
+    timed_out: bool = False,
+) -> Dict[str, Any]:
+    """
+    构建指定执行模式失败时的稳定错误响应。
+
+    Args:
+        error: 面向调用方的错误描述。
+        error_type: 机器可读错误类型。
+        sandbox_runtime: 失败执行模式对应的运行时标识。
+        started_at: 外层请求开始时间。
+        limits: stdout/stderr 输出字节限制。
+        timed_out: 是否为执行超时。
+
+    Returns:
+        标准沙箱执行响应。
+    """
+    return _normalize_response(
+        {
+            "success": False,
+            "error": error,
+            "timed_out": timed_out,
+            "metadata": {"error_type": error_type, "sandbox_runtime": sandbox_runtime},
+        },
+        started_at,
+        limits,
+    )
+
+
 async def execute_python_in_sandbox(
     code: str,
     limits: SandboxLimits,
@@ -303,56 +337,89 @@ async def execute_python_in_sandbox(
             payload = await get_pooled_sandbox_pool().execute(request_json, execution_timeout)
             return _normalize_response(payload, started_at, limits)
         except PooledSandboxAcquireTimeout:
-            logger.info("pooled sandbox worker unavailable; falling back to subprocess")
-        except asyncio.TimeoutError:
-            logger.warning("pooled sandbox worker timed out")
-            return _normalize_response(
-                {
-                    "success": False,
-                    "error": "Python sandbox execution timed out",
-                    "timed_out": True,
-                    "metadata": {"error_type": "timeout_error", "sandbox_runtime": "deno_pooled_worker"},
-                },
+            logger.info("pooled sandbox worker unavailable")
+            return _build_execution_error(
+                "Pooled sandbox worker unavailable",
+                "worker_unavailable",
+                "deno_pooled_worker",
                 started_at,
                 limits,
             )
+        except asyncio.TimeoutError:
+            logger.warning("pooled sandbox worker timed out")
+            return _build_execution_error(
+                "Python sandbox execution timed out",
+                "timeout_error",
+                "deno_pooled_worker",
+                started_at,
+                limits,
+                timed_out=True,
+            )
         except Exception as exc:
-            logger.warning("pooled sandbox worker failed; falling back to subprocess", extra={"error": str(exc)})
+            logger.warning("pooled sandbox worker failed", extra={"error": str(exc)})
+            return _build_execution_error(
+                f"Pooled sandbox worker failed: {type(exc).__name__}: {exc}",
+                "worker_error",
+                "deno_pooled_worker",
+                started_at,
+                limits,
+            )
 
     if execution_mode == "one_shot_worker" and settings.SANDBOX_PREWARM_POOL_ENABLED:
         try:
             payload = await get_prewarmed_sandbox_pool().execute(request_json, execution_timeout)
             return _normalize_response(payload, started_at, limits)
         except PrewarmedSandboxAcquireTimeout:
-            logger.info("prewarmed sandbox pool unavailable; falling back to subprocess")
-        except asyncio.TimeoutError:
-            logger.warning("prewarmed sandbox worker timed out")
-            return _normalize_response(
-                {
-                    "success": False,
-                    "error": "Python sandbox execution timed out",
-                    "timed_out": True,
-                    "metadata": {"error_type": "timeout_error", "sandbox_runtime": "deno_prewarmed_worker"},
-                },
+            logger.info("prewarmed sandbox pool unavailable")
+            return _build_execution_error(
+                "Prewarmed sandbox worker unavailable",
+                "worker_unavailable",
+                "deno_prewarmed_worker",
                 started_at,
                 limits,
             )
+        except asyncio.TimeoutError:
+            logger.warning("prewarmed sandbox worker timed out")
+            return _build_execution_error(
+                "Python sandbox execution timed out",
+                "timeout_error",
+                "deno_prewarmed_worker",
+                started_at,
+                limits,
+                timed_out=True,
+            )
         except Exception as exc:
-            logger.warning("prewarmed sandbox worker failed; falling back to subprocess", extra={"error": str(exc)})
+            logger.warning("prewarmed sandbox worker failed", extra={"error": str(exc)})
+            return _build_execution_error(
+                f"Prewarmed sandbox worker failed: {type(exc).__name__}: {exc}",
+                "worker_error",
+                "deno_prewarmed_worker",
+                started_at,
+                limits,
+            )
 
-    if execution_mode not in {"pooled_worker", "one_shot_worker"}:
-        logger.warning("unsupported python sandbox execution mode", extra={"execution_mode": execution_mode})
-        return _normalize_response(
-            {
-                "success": False,
-                "error": f"Unsupported execution mode: {execution_mode}",
-                "metadata": {"error_type": "validation_error"},
-            },
+    if execution_mode == "one_shot_worker":
+        return _build_execution_error(
+            "Prewarmed sandbox pool is disabled",
+            "worker_unavailable",
+            "deno_prewarmed_worker",
             started_at,
             limits,
         )
 
-    return await _execute_python_subprocess_once(request_json, command, started_at, limits, execution_timeout)
+    if execution_mode == "subprocess":
+        return await _execute_python_subprocess_once(request_json, command, started_at, limits, execution_timeout)
+
+    logger.warning("unsupported python sandbox execution mode", extra={"execution_mode": execution_mode})
+    return _normalize_response(
+        {
+            "success": False,
+            "error": f"Unsupported execution mode: {execution_mode}",
+            "metadata": {"error_type": "validation_error"},
+        },
+        started_at,
+        limits,
+    )
 
 
 async def _execute_python_subprocess_once(
@@ -363,7 +430,7 @@ async def _execute_python_subprocess_once(
     timeout_seconds: int,
 ) -> Dict[str, Any]:
     """
-    使用一次性 Deno 子进程执行沙箱请求，作为预热池 fallback。
+    使用一次性 Deno 子进程执行沙箱请求。
 
     Args:
         request_json: 已序列化的沙箱请求。

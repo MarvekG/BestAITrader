@@ -198,10 +198,10 @@ async def test_execute_python_in_sandbox_forwards_execution_mode() -> None:
     with patch("app.ai.agentic.tooling.python_sandbox.httpx.AsyncClient", FakeAsyncClient), \
          patch.object(settings, "PY_SANDBOX_BASE_URL", "http://sandbox:8030"), \
          patch.object(settings, "PY_SANDBOX_TIMEOUT_SECONDS", 30):
-        await execute_python_in_sandbox("print(2 + 2)", execution_mode="one_shot_worker")
+        await execute_python_in_sandbox("print(2 + 2)", execution_mode="subprocess")
 
     client = FakeAsyncClient.instances[0]
-    assert client.requests[0][1]["execution_mode"] == "one_shot_worker"
+    assert client.requests[0][1]["execution_mode"] == "subprocess"
 
 
 @pytest.mark.asyncio
