@@ -1217,7 +1217,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 - 若 `previous_pm_decision.execution_summary` 存在，你必须先判断上一轮是否有订单、是否有成交、成交均价、实际成交数量、最近订单/成交时间，以及上一轮 `take_profit` 与 `holding_horizon_days` 是否仍适用。
 - 若风险专家给出“硬阻断”或“强警告”级别建议，而你没有完全采纳，必须说明覆盖理由、替代风控、触发器和覆盖该风险对置信度的影响。
 - 若目标股票是组合大仓位、第一大持仓或本轮争议明显，必须至少比较“维持当前仓位”“降仓”“等待确认但设置触发器”三类方案，并说明最终方案为什么优于其他方案。
-- 若 `pending_orders` 存在且与本轮计划冲突，你必须先调用交易工具撤销旧挂单，再提交新的挂单或说明继续保留的原因；撤单时传入对应 `order_id`。
+- 若 `pending_orders` 存在，你必须逐笔判断保留、撤销或替换。判断依据包括方向是否一致、价格是否仍合理、目标仓位是否匹配、止损/止盈是否匹配、是否超过有效期或证据已变化。若保留旧挂单，必须说明它仍符合本轮裁决；若撤销或替换，必须先调用交易工具撤销旧挂单并说明原因，撤单时传入对应 `order_id`。
 - 不得把 `has_orders=false` 或 `has_trades=false` 的上一轮误认为已经建仓；若上一轮有决策但未成交，本轮必须说明是继续执行原计划、调整计划、还是放弃计划。
 - 当前 `decision`、`target_position`、`take_profit`、`holding_horizon_days` 和 `execution_details` 必须解释相对上一轮执行结果是延续、修正还是反转，而不是只复述上一轮结论。
 - 上一轮决策只能作为对比线索，不能替代本轮事实核验。
@@ -1257,6 +1257,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 *   **与上一轮 PM 决策的关系**: [延续 / 减弱 / 增强 / 反转] (原因: ...)
 *   **事实仲裁摘要读取**: [采用哪些关键事实 / 哪些事实仍未解决 / 每项未解决事实如何处理：降权、补证、触发器或影响仓位/置信度]
 *   **上一轮执行摘要读取**: [has_orders / has_trades / avg_fill_price / total_quantity / latest_order_time / latest_trade_time；说明未成交时不得视为已建仓]
+*   **当前挂单复核**: [逐笔说明 pending_orders 的保留 / 撤销 / 替换判断，依据方向、价格、目标仓位、止损/止盈、有效期和证据变化]
 *   **同股历史交易复盘**: [最近实际买卖 / 最近已实现盈亏 / 上一轮止损或清仓参考 / 本轮是否具备新增可验证优势]
 *   **交易风格适配研判**: [当前交易频率 / 当前交易策略 / 风格内交易或风格外机会捕捉 / 适配或突破理由 / 额外风险和执行纪律]
 *   **组合经理裁决 / 组合约束检查**: [组合状态、当前仓位、目标仓位、单股/行业/现金限制、可卖数量和止损要求如何影响最终裁决]
@@ -2044,7 +2045,7 @@ inside `report_markdown`:
 - If `previous_pm_decision.execution_summary` exists, first determine whether the previous round had orders, whether it had fills, average fill price, filled quantity, latest order/trade time, and whether the previous `take_profit` and `holding_horizon_days` still apply.
 - If the Risk Analyst gives a hard-block or strong-warning recommendation and you do not fully adopt it, explain the override rationale, replacement controls, triggers, and how overriding that risk affects confidence.
 - If the target stock is a large portfolio position, the top holding, or highly disputed in this round, compare at least three sizing options: maintain current position, reduce position, and wait for confirmation with explicit triggers. Explain why the final option is superior.
-- If `pending_orders` exist and conflict with this round's plan, you must cancel the stale pending order via the trading tool before placing a new one, or explain why it remains valid. Pass the corresponding `order_id` for cancellation.
+- If `pending_orders` exist, review each one and decide whether to keep, cancel, or replace it. Judge by direction consistency, price validity, target-position fit, stop-loss/take-profit fit, age/expiry, and whether evidence has changed. If keeping an old pending order, explain why it still matches this round's verdict; if canceling or replacing, cancel the old order via the trading tool first and explain why. Pass the corresponding `order_id` for cancellation.
 - Do not treat a previous round with `has_orders=false` or `has_trades=false` as an established position. If the previous round had a decision but no fill, state whether this round continues, adjusts, or abandons the prior plan.
 - Current `decision`, `target_position`, `take_profit`, `holding_horizon_days`, and `execution_details` must explain whether they continue, revise, or reverse the previous execution outcome, rather than merely restating the previous conclusion.
 - A previous decision is only a comparison anchor and must not replace current evidence verification.
@@ -2084,6 +2085,7 @@ As PM and Debate Host, I have evaluated both sides.
 *   **Relation To Previous PM Decision**: [Continuation / Weakening / Strengthening / Reversal] (Reason: ...)
 *   **Fact Arbitration Readout**: [Which key facts are adopted / which facts remain unresolved / how each unresolved fact is handled: down-weight, supplement evidence, trigger, or sizing/confidence impact]
 *   **Previous Execution Summary Readout**: [has_orders / has_trades / avg_fill_price / total_quantity / latest_order_time / latest_trade_time; state that no-fill must not be treated as an established position]
+*   **Current Pending Order Review**: [For each pending_order, state keep / cancel / replace judgment based on direction, price, target position, stop loss / take profit, age/expiry, and evidence change]
 *   **Same-Stock Trading History Review**: [recent actual buys/sells / recent realized PnL / latest stop-loss or liquidation reference / whether this round has new verifiable edge]
 *   **Trading-Style Fit Assessment**: [Current trading frequency / current trading strategy / in-style trade or out-of-style opportunity capture / fit or breakout reason / extra risk and execution discipline]
 *   **Portfolio Manager Verdict / Portfolio Constraint Check**: [How portfolio regime, current position, target position, single-stock/industry/cash limits, sellable shares, and stop-loss requirements affect the final verdict]
