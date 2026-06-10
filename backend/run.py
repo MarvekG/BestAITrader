@@ -1,15 +1,12 @@
-from pathlib import Path
-
 import uvicorn
 from app.core.config import settings
 
-BACKEND_ROOT = Path(__file__).resolve().parent
-
 RELOAD_EXCLUDES = [
-    str(BACKEND_ROOT / "app/ai/agentic/tooling/news_plugins/external"),
-    str(BACKEND_ROOT / "app/ai/agentic/skills_loader/skills"),
-    "app/ai/agentic/tooling/news_plugins/external",
-    "app/ai/agentic/skills_loader/skills",
+    "external/*/*.py",
+    "external/*/*/*.py",
+    "skills/*/*.json",
+    "skills/*/scripts/*.py",
+    "skills/*/scripts/*/*.py",
 ]
 
 if __name__ == "__main__":

@@ -1,14 +1,20 @@
+from pathlib import Path
+
 from uvicorn.config import Config
 from uvicorn.supervisors.watchfilesreload import FileFilter
 
-from run import BACKEND_ROOT, RELOAD_EXCLUDES
+from run import RELOAD_EXCLUDES
+
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_reload_excludes_runtime_skill_files():
+def test_reload_excludes_runtime_skill_files(monkeypatch):
+    monkeypatch.chdir(BACKEND_ROOT)
+
     config = Config(
         "app.main:app",
         reload=True,
-        reload_dirs=[str(BACKEND_ROOT / "app"), str(BACKEND_ROOT / "config")],
+        reload_dirs=["app", "config"],
         reload_includes=["*.json"],
         reload_excludes=RELOAD_EXCLUDES,
     )
