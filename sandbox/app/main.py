@@ -32,27 +32,28 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         "python sandbox service started",
         extra={
             "prewarm_enabled": settings.SANDBOX_PREWARM_POOL_ENABLED,
+            "startup_prewarm_workers": settings.SANDBOX_STARTUP_PREWARM_WORKERS,
             "prewarm_pool_size": settings.SANDBOX_PREWARM_POOL_SIZE,
             "worker_pool_size": settings.SANDBOX_WORKER_POOL_SIZE,
-            "execution_mode": settings.SANDBOX_EXECUTION_MODE,
+            "default_execution_mode": settings.SANDBOX_EXECUTION_MODE,
             "max_concurrent_executions": settings.SANDBOX_MAX_CONCURRENT_EXECUTIONS,
             "timeout_seconds": settings.SANDBOX_TIMEOUT_SECONDS,
         },
     )
     try:
-        if settings.SANDBOX_EXECUTION_MODE == "pooled_worker" and settings.SANDBOX_PREWARM_ON_STARTUP:
-            await get_pooled_sandbox_pool().prewarm()
-            logger.info("python sandbox pooled worker pool started")
-        elif settings.SANDBOX_PREWARM_POOL_ENABLED and settings.SANDBOX_PREWARM_ON_STARTUP:
-            await get_prewarmed_sandbox_pool().prewarm()
-            logger.info("python sandbox prewarmed worker pool started")
+        if settings.SANDBOX_PREWARM_ON_STARTUP:
+            if settings.SANDBOX_EXECUTION_MODE == "pooled_worker":
+                await get_pooled_sandbox_pool().prewarm(settings.SANDBOX_STARTUP_PREWARM_WORKERS)
+                logger.info("python sandbox pooled worker pool started")
+            elif settings.SANDBOX_PREWARM_POOL_ENABLED:
+                await get_prewarmed_sandbox_pool().prewarm(settings.SANDBOX_STARTUP_PREWARM_WORKERS)
+                logger.info("python sandbox prewarmed worker pool started")
         yield
     finally:
         logger.info("python sandbox service stopping")
-        if settings.SANDBOX_EXECUTION_MODE == "pooled_worker":
-            await get_pooled_sandbox_pool().shutdown()
-            logger.info("python sandbox pooled worker pool stopped")
-        elif settings.SANDBOX_PREWARM_POOL_ENABLED:
+        await get_pooled_sandbox_pool().shutdown()
+        logger.info("python sandbox pooled worker pool stopped")
+        if settings.SANDBOX_PREWARM_POOL_ENABLED:
             await get_prewarmed_sandbox_pool().shutdown()
             logger.info("python sandbox prewarmed worker pool stopped")
         logger.info("python sandbox service stopped")
@@ -86,6 +87,7 @@ async def execute_python(request: ExecuteRequest) -> ExecuteResponse:
     result = await execute_python_in_sandbox(
         code=request.code,
         limits=request.limits,
+        execution_mode=request.execution_mode,
         timeout_seconds=request.timeout_seconds,
     )
     return ExecuteResponse.model_validate(result)

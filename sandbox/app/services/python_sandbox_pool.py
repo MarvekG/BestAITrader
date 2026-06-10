@@ -40,8 +40,13 @@ class PrewarmedSandboxPool:
         self._starting = 0
         self._lock = asyncio.Lock()
 
-    async def prewarm(self) -> None:
-        """启动后台 worker 补池任务。"""
+    async def prewarm(self, target_size: int | None = None) -> None:
+        """
+        启动后台 one-shot worker 补池任务。
+
+        Args:
+            target_size: 本次预热希望维持的 ready worker 数量；未传入时使用池默认容量。
+        """
         settings = get_settings()
         if _resolve_executable(settings.SANDBOX_DENO_EXECUTABLE) is None:
             logger.warning(
@@ -49,7 +54,7 @@ class PrewarmedSandboxPool:
                 extra={"deno_executable": settings.SANDBOX_DENO_EXECUTABLE},
             )
             return
-        await self._replenish()
+        await self._replenish(target_size)
 
     async def shutdown(self) -> None:
         """关闭 ready 队列中的预热 worker。"""
@@ -102,11 +107,16 @@ class PrewarmedSandboxPool:
         except asyncio.TimeoutError as exc:
             raise PrewarmedSandboxAcquireTimeout("Prewarmed sandbox worker unavailable") from exc
 
-    async def _replenish(self) -> None:
-        """按配置异步补充预热 worker。"""
+    async def _replenish(self, target_size: int | None = None) -> None:
+        """
+        按配置异步补充预热 worker。
+
+        Args:
+            target_size: 本次补池目标数量；未传入时使用池默认容量。
+        """
         settings = get_settings()
         async with self._lock:
-            target = max(1, int(settings.SANDBOX_PREWARM_POOL_SIZE or 1))
+            target = max(1, int(target_size or settings.SANDBOX_PREWARM_POOL_SIZE or 1))
             max_starting = max(1, int(settings.SANDBOX_PREWARM_MAX_STARTING or 1))
             deficit = target - self._ready.qsize() - self._starting
             starts = min(deficit, max_starting - self._starting)

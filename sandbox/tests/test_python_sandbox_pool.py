@@ -86,6 +86,17 @@ class FakePooledProcess:
         self.returncode = -9
 
 
+def test_sandbox_pool_defaults_limit_startup_prewarm_to_one_worker() -> None:
+    """验证启动阶段默认只预热 1 个 worker，避免占用过多内存。"""
+    settings = get_settings()
+
+    assert settings.SANDBOX_STARTUP_PREWARM_WORKERS == 1
+    assert settings.SANDBOX_WORKER_POOL_MAX_STARTING == 2
+    assert settings.SANDBOX_WORKER_POOL_SIZE == 4
+    assert settings.SANDBOX_PREWARM_MAX_STARTING == 2
+    assert settings.SANDBOX_PREWARM_POOL_SIZE == 4
+
+
 @pytest.mark.asyncio
 async def test_prewarmed_pool_ready_reader_allows_only_pyodide_package_noise() -> None:
     """验证 ready 读取器会跳过 Pyodide 包加载噪声。"""

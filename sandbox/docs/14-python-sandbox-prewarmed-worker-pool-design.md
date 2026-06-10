@@ -233,14 +233,15 @@ executing -> killed
 ```python
 SANDBOX_PREWARM_POOL_ENABLED: bool = True
 SANDBOX_PREWARM_ON_STARTUP: bool = True
-SANDBOX_PREWARM_POOL_SIZE: int = 1
-SANDBOX_PREWARM_MAX_STARTING: int = 1
+SANDBOX_STARTUP_PREWARM_WORKERS: int = 1
+SANDBOX_PREWARM_POOL_SIZE: int = 4
+SANDBOX_PREWARM_MAX_STARTING: int = 2
 SANDBOX_WORKER_ACQUIRE_TIMEOUT_SECONDS: int = 3
 SANDBOX_WORKER_STARTUP_TIMEOUT_SECONDS: int = 30
 SANDBOX_WORKER_RUNNER_PATH: str = "/app/app/workers/pyodide_one_shot_worker.ts"
 ```
 
-预热池默认开启并在 `sandbox` 服务启动时预热，优先降低首轮 Agent 沙箱调用延迟。`SANDBOX_PREWARM_POOL_SIZE` 默认维持 1 个预热 Deno worker；内存充足且沙箱调用密集时，可以通过环境变量继续调高；内存紧张或只做轻量开发调试时，可以关闭 `SANDBOX_PREWARM_ON_STARTUP` 或降低池大小。
+预热池默认开启并在 `sandbox` 服务启动时只预热默认执行模式的 1 个 worker，避免同时拉起两类 worker 占用过多内存。普通 one-shot 预热池和持久 pooled worker 池运行时默认都最多并发启动 2 个 worker，并维持 4 个 ready worker 上限；内存紧张或只做轻量开发调试时，可以关闭 `SANDBOX_PREWARM_ON_STARTUP` 或降低池大小。
 
 ## 池耗尽策略
 

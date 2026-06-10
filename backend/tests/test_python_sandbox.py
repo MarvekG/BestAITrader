@@ -165,6 +165,7 @@ async def test_execute_python_in_sandbox_calls_sandbox_service() -> None:
     FakeAsyncClient.instances.clear()
     with patch("app.ai.agentic.tooling.python_sandbox.httpx.AsyncClient", FakeAsyncClient), \
          patch.object(settings, "PY_SANDBOX_BASE_URL", "http://sandbox:8030"), \
+         patch.object(settings, "PY_SANDBOX_EXECUTION_MODE", "pooled_worker"), \
          patch.object(settings, "PY_SANDBOX_TIMEOUT_SECONDS", 30):
         response = await execute_python_in_sandbox("print(2 + 2)")
 
@@ -179,6 +180,7 @@ async def test_execute_python_in_sandbox_calls_sandbox_service() -> None:
             "/execute",
             {
                 "code": "print(2 + 2)",
+                "execution_mode": "pooled_worker",
                 "timeout_seconds": 30,
                 "limits": {
                     "stdout_max_bytes": settings.PY_SANDBOX_STDOUT_MAX_BYTES,
@@ -187,6 +189,33 @@ async def test_execute_python_in_sandbox_calls_sandbox_service() -> None:
             },
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_execute_python_in_sandbox_forwards_execution_mode() -> None:
+    """验证后端沙箱入口会透传请求级执行模式。"""
+    FakeAsyncClient.instances.clear()
+    with patch("app.ai.agentic.tooling.python_sandbox.httpx.AsyncClient", FakeAsyncClient), \
+         patch.object(settings, "PY_SANDBOX_BASE_URL", "http://sandbox:8030"), \
+         patch.object(settings, "PY_SANDBOX_TIMEOUT_SECONDS", 30):
+        await execute_python_in_sandbox("print(2 + 2)", execution_mode="one_shot_worker")
+
+    client = FakeAsyncClient.instances[0]
+    assert client.requests[0][1]["execution_mode"] == "one_shot_worker"
+
+
+@pytest.mark.asyncio
+async def test_execute_python_in_sandbox_uses_configured_execution_mode() -> None:
+    """验证后端沙箱入口默认使用配置中的执行模式。"""
+    FakeAsyncClient.instances.clear()
+    with patch("app.ai.agentic.tooling.python_sandbox.httpx.AsyncClient", FakeAsyncClient), \
+         patch.object(settings, "PY_SANDBOX_BASE_URL", "http://sandbox:8030"), \
+         patch.object(settings, "PY_SANDBOX_EXECUTION_MODE", "one_shot_worker"), \
+         patch.object(settings, "PY_SANDBOX_TIMEOUT_SECONDS", 30):
+        await execute_python_in_sandbox("print(2 + 2)")
+
+    client = FakeAsyncClient.instances[0]
+    assert client.requests[0][1]["execution_mode"] == "one_shot_worker"
 
 
 @pytest.mark.asyncio
