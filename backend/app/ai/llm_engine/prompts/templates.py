@@ -1235,6 +1235,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 如果你仅建议“观望/持有” (`hold`)，则禁止调用 `execute_trading_order`。
 最终 JSON 的 `execution_details` 和 `report_markdown` 必须如实写入 `execute_trading_order` 返回的成交结果或失败原因。
 若执行失败，你必须先阅读失败原因，再判断是否需要调整执行方案；若无法合理修复，则停止继续执行，并在最终报告中明确写出未成交原因与后续计划。严禁忽略失败结果后直接假装已成交。
+若 `execute_trading_order` 失败、跳过或未成交，必须在 `execution_details` 和 `report_markdown` 写出失败后计划：失败原因分类、是否保留或撤销挂单、下一触发价格或时间、是否需要重新评估，以及何时放弃原计划。`hold` 未调用交易工具时不适用。
 
 **【最终结构化输出格式】**:
 - 最终输出必须是一个合法 JSON 对象，不能输出任何 JSON 之外的文字、Markdown、代码围栏或解释。
@@ -1295,7 +1296,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 *   **当前事实优先说明**: [若 Memory 与当前事实冲突，说明采用当前事实、降权 Memory 的原因]
 
 ## 5. 最终可执行指令
-> 自即日起，在 [价格] 价位，启动 [动作]，目标仓位 [比例]。止损设置在 [价格]，止盈/目标价为 [价格]，预期持有 [N] 天。
+> 自即日起，在 [价格] 价位，启动 [动作]，目标仓位 [比例]。止损设置在 [价格]，止盈/目标价为 [价格]，预期持有 [N] 天。若本次执行失败、跳过或未成交，后续计划为 [保留/撤销挂单、下一触发价格或时间、是否重评、放弃条件]。
 """
 
 
@@ -2061,6 +2062,7 @@ Before calling `execute_trading_order`, you MUST call `get_pm_order_type_guidanc
 If you suggest `hold`, you MUST NOT call `execute_trading_order`.
 The final JSON `execution_details` and `report_markdown` MUST truthfully include the execution result or failure reason returned by `execute_trading_order`.
 If execution fails, you must inspect the failure reason before deciding the next step. If the failure is not reasonably fixable, or retrying is not meaningful, you must stop further execution and clearly explain the failed trade reason and next plan in the final report. Never act as if the trade succeeded when execution actually failed.
+If `execute_trading_order` fails, is skipped, or remains unfilled, `execution_details` and `report_markdown` must state the post-failure plan: failure category, whether to keep or cancel the pending order, next trigger price or time, whether reassessment is required, and when to abandon the original plan. This does not apply when `hold` correctly avoids calling the trading tool.
 
 **[FINAL STRUCTURED OUTPUT FORMAT]**:
 - The final output must be one valid JSON object, with no text, Markdown, code fence, or explanation outside JSON.
@@ -2121,7 +2123,7 @@ As PM and Debate Host, I have evaluated both sides.
 *   **Current-Fact Priority**: [If Memory conflicts with current facts, explain why current facts are adopted and the Memory is down-weighted]
 
 ## 5. Final Executable Instruction
-> Effective immediately, at [Price], initiate [Action], target position [Ratio]. Stop loss set at [Price].
+> Effective immediately, at [Price], initiate [Action], target position [Ratio]. Stop loss set at [Price], take profit / target price at [Price], expected holding horizon [N] days. If this execution fails, is skipped, or remains unfilled, the follow-up plan is [keep/cancel pending order, next trigger price or time, reassessment requirement, abandonment condition].
 """
 
 
