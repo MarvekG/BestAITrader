@@ -73,9 +73,6 @@ export interface PromptStats {
     by_api_key_alias?: UsageBreakdown;
   } | null;
   memory?: {
-    entities?: number;
-    memories?: number;
-    observations?: number;
     llm_runs?: number;
     total_calls?: number;
     input_tokens?: number;

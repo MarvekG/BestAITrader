@@ -1410,27 +1410,6 @@ export const SettingsPage: React.FC = () => {
         <Row gutter={[12, 12]}>
           <Col xs={12} md={6}>
             <Statistic
-              title={t('settings.memory_entities')}
-              value={memoryStats?.entities || 0}
-              valueStyle={{ fontSize: 16 }}
-            />
-          </Col>
-          <Col xs={12} md={6}>
-            <Statistic
-              title={t('settings.memory_memories')}
-              value={memoryStats?.memories || 0}
-              valueStyle={{ fontSize: 16 }}
-            />
-          </Col>
-          <Col xs={12} md={6}>
-            <Statistic
-              title={t('settings.memory_observations')}
-              value={memoryStats?.observations || 0}
-              valueStyle={{ fontSize: 16 }}
-            />
-          </Col>
-          <Col xs={12} md={6}>
-            <Statistic
               title={t('settings.memory_llm_runs')}
               value={memoryStats?.llm_runs || 0}
               valueStyle={{ fontSize: 16 }}
