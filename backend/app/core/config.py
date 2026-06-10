@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     PY_SANDBOX_ENABLED: bool = True
     PY_SANDBOX_BASE_URL: str = "http://sandbox:8030"
     PY_SANDBOX_HTTP_TIMEOUT_SECONDS: float = 35.0
-    PY_SANDBOX_EXECUTION_MODE: Literal["pooled_worker", "one_shot_worker"] = "pooled_worker"
+    PY_SANDBOX_EXECUTION_MODE: Literal["pooled_worker", "one_shot_worker", "subprocess"] = "pooled_worker"
     PY_SANDBOX_TIMEOUT_SECONDS: int = 30
     PY_SANDBOX_STDOUT_MAX_BYTES: int = 32768
     PY_SANDBOX_STDERR_MAX_BYTES: int = 16384

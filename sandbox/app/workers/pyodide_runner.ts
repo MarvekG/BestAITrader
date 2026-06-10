@@ -59,7 +59,13 @@ try {
   const pyodide = await loadPyodide({
     indexURL: `${pyodideRoot}/`,
   });
-  await pyodide.loadPackage(["numpy", "pandas"]);
+  const originalConsoleLog = console.log;
+  try {
+    console.log = () => undefined;
+    await pyodide.loadPackage(["numpy", "pandas"]);
+  } finally {
+    console.log = originalConsoleLog;
+  }
   pyodide.globals.set("request_json", JSON.stringify(request));
 
   const wrapper = `

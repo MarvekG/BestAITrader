@@ -45,7 +45,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             if settings.SANDBOX_EXECUTION_MODE == "pooled_worker":
                 await get_pooled_sandbox_pool().prewarm(settings.SANDBOX_STARTUP_PREWARM_WORKERS)
                 logger.info("python sandbox pooled worker pool started")
-            elif settings.SANDBOX_PREWARM_POOL_ENABLED:
+            if settings.SANDBOX_PREWARM_POOL_ENABLED:
                 await get_prewarmed_sandbox_pool().prewarm(settings.SANDBOX_STARTUP_PREWARM_WORKERS)
                 logger.info("python sandbox prewarmed worker pool started")
         yield
