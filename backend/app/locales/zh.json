@@ -1611,7 +1611,7 @@
       "invoke_tool": "模拟调用",
       "invoke_title": "模拟调用 {{name}}",
       "invoke_arguments": "JSON 参数",
-      "invoke_arguments_invalid": "请输入 JSON 对象参数",
+      "invoke_arguments_invalid": "请输入合法 JSON 对象参数，例如 {\"query\": \"你好\"}。常见错误：使用中文冒号/逗号/引号、使用单引号、末尾多余逗号，或填写了数组/字符串而不是对象。",
       "invoke_result": "调用结果",
       "invoke_success": "MCP 工具调用成功",
       "invoke_failed": "MCP 工具调用失败",
