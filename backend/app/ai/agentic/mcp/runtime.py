@@ -201,14 +201,31 @@ def tool_to_item(name: str, tool: Any) -> Dict[str, Any]:
     """
     raw_name = str(getattr(tool, "name", "") or "")
     args_schema = getattr(tool, "args_schema", None)
-    input_schema = args_schema.model_json_schema() if args_schema is not None else {}
     return {
         "server": name,
         "name": normalize_tool_name(name, raw_name),
         "langchain_name": raw_name,
         "description": str(getattr(tool, "description", "") or ""),
-        "input_schema": input_schema,
+        "input_schema": tool_input_schema_to_json(args_schema),
     }
+
+
+def tool_input_schema_to_json(args_schema: Any) -> Dict[str, Any]:
+    """将 LangChain 工具入参 schema 转换为 JSON schema。
+
+    Args:
+        args_schema: LangChain 工具的 args_schema，可能是 Pydantic 模型、dict 或空值。
+
+    Returns:
+        JSON schema 字典。
+    """
+    if args_schema is None:
+        return {}
+    if isinstance(args_schema, dict):
+        return args_schema
+    if hasattr(args_schema, "model_json_schema"):
+        return args_schema.model_json_schema()
+    return {}
 
 
 def normalize_tool_name(name: str, tool_name: str) -> str:

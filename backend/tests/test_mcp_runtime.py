@@ -122,3 +122,15 @@ def test_mcp_adapter_config_includes_token_and_filters_allowed_tools():
 
     assert adapter_config["headers"] == {"Authorization": "Bearer secret-token"}
     assert [tool.name for tool in filtered_tools] == ["网页抓取__echo"]
+
+
+def test_tool_to_item_accepts_dict_args_schema():
+    class FakeTool:
+        name = "server__search"
+        description = "Search tool"
+        args_schema = {"type": "object", "properties": {"query": {"type": "string"}}}
+
+    item = mcp_runtime.tool_to_item("server", FakeTool())
+
+    assert item["name"] == "search"
+    assert item["input_schema"] == {"type": "object", "properties": {"query": {"type": "string"}}}
