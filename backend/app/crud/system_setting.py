@@ -1,5 +1,7 @@
 from typing import Optional, Any, Dict
 from sqlalchemy.orm import Session
+
+from app.core import database as database_module
 from app.crud.base import CRUDBase
 from app.models.system_setting import SystemSetting
 
@@ -50,3 +52,39 @@ class CRUDSystemSetting(CRUDBase[SystemSetting, Dict[str, Any], Dict[str, Any]])
 
 
 system_setting = CRUDSystemSetting(SystemSetting)
+
+
+def read_system_setting(key: str, default: Any = None, user_id: Optional[int] = None) -> Any:
+    """读取系统设置值。
+
+    Args:
+        key: 系统设置 key。
+        default: 未找到设置时返回的默认值。
+        user_id: 可选用户归属；为空时读取全局设置。
+
+    Returns:
+        系统设置值或默认值。
+    """
+    with database_module.SessionLocal() as db:
+        return system_setting.get_value(db, key, default=default, user_id=user_id)
+
+
+def save_system_setting(
+    key: str,
+    value: Any,
+    description: Optional[str] = None,
+    user_id: Optional[int] = None,
+) -> SystemSetting:
+    """保存系统设置值。
+
+    Args:
+        key: 系统设置 key。
+        value: 需要保存的 JSON 兼容值。
+        description: 可选设置说明。
+        user_id: 可选用户归属；为空时保存为全局设置。
+
+    Returns:
+        已保存的系统设置记录。
+    """
+    with database_module.SessionLocal() as db:
+        return system_setting.set_value(db, key, value, description=description, user_id=user_id)
