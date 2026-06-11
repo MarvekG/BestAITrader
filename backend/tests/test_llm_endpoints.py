@@ -84,6 +84,13 @@ class _FakePythonTool:
         return {"success": True, "result": args.get("code", "")}
 
 
+class _FailingTool:
+    name = "failing_tool"
+
+    async def ainvoke(self, args):
+        raise RuntimeError("tool exploded")
+
+
 @pytest.mark.asyncio
 async def test_llm_probe_runs_all_probe_steps():
     build_calls = []
@@ -139,6 +146,20 @@ async def test_ai_function_test_tools_include_enabled_mcp_tools(monkeypatch):
 
     assert "tavily_search" in tool_names
     assert "list_skills" in tool_names
+
+
+@pytest.mark.asyncio
+async def test_ai_function_tool_call_failure_is_returned_as_tool_result():
+    tool_results, executed_names = await llm_endpoint._execute_ai_function_tool_calls(
+        [{"name": "failing_tool", "args": {}, "id": "tool-1"}],
+        {"failing_tool": _FailingTool()},
+        [],
+    )
+
+    assert executed_names == []
+    assert tool_results[0]["result"]["success"] is False
+    assert tool_results[0]["result"]["tool"] == "failing_tool"
+    assert "tool exploded" in tool_results[0]["result"]["error"]
 
 
 @pytest.mark.asyncio

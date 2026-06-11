@@ -229,8 +229,11 @@ async def _execute_ai_function_tool_calls(
         if not tool_func:
             result_payload: Any = {"error": f"unsupported tool: {tool_name}"}
         else:
-            result_payload = await tool_func.ainvoke(tool_args)
-            executed_names.append(tool_name)
+            try:
+                result_payload = await tool_func.ainvoke(tool_args)
+                executed_names.append(tool_name)
+            except Exception as exc:
+                result_payload = {"success": False, "error": str(exc), "tool": tool_name}
         result_payload = _json_safe(result_payload)
         result_content = json.dumps(result_payload, ensure_ascii=False)
         messages.append(ToolMessage(tool_call_id=tool_call_id, content=result_content))
