@@ -10,15 +10,8 @@ from app.crud.system_setting import read_system_setting, save_system_setting
 MCP_SETTINGS_KEY = "mcp.servers"
 MCP_SETTINGS_DESCRIPTION = "Global MCP server runtime configuration"
 DEFAULT_SCRAPLING_ALLOWED_TOOLS = [
-    "bulk_fetch",
-    "bulk_get",
-    "bulk_stealthy_fetch",
-    "close_session",
     "fetch",
     "get",
-    "list_sessions",
-    "open_session",
-    "screenshot",
     "stealthy_fetch",
 ]
 DEFAULT_MCP_SERVERS = [

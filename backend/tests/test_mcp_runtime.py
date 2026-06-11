@@ -7,15 +7,8 @@ from app.ai.agentic.mcp.runtime import build_mcp_catalog_prompt
 
 
 SCRAPLING_ALLOWED_TOOLS = [
-    "bulk_fetch",
-    "bulk_get",
-    "bulk_stealthy_fetch",
-    "close_session",
     "fetch",
     "get",
-    "list_sessions",
-    "open_session",
-    "screenshot",
     "stealthy_fetch",
 ]
 
@@ -85,7 +78,8 @@ def test_build_mcp_catalog_prompt_lists_enabled_server_tools(db_session):
     prompt = build_mcp_catalog_prompt()
 
     assert "网页抓取" in prompt
-    assert "bulk_fetch" in prompt
+    assert "stealthy_fetch" in prompt
+    assert "bulk_fetch" not in prompt
     assert "external evidence" not in prompt
 
 

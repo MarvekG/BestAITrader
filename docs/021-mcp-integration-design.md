@@ -56,7 +56,7 @@ Frontend Settings
 
 MCP Server 配置存储在系统配置表 `system_settings`，使用全局 key `mcp.servers`，不再写运行时 JSON 文件。
 
-当系统配置不存在时，系统预置一个默认禁用的 HTTP MCP Server：`name=网页抓取`、`url=http://scrapling.mcp:8765/mcp`。默认允许 Scrapling 的 10 个内置工具：`bulk_fetch`、`bulk_get`、`bulk_stealthy_fetch`、`close_session`、`fetch`、`get`、`list_sessions`、`open_session`、`screenshot`、`stealthy_fetch`。用户删除或保存配置后，以系统配置为准，不在每次启动时反复重建默认项。
+当系统配置不存在时，系统预置一个默认禁用的 HTTP MCP Server：`name=网页抓取`、`url=http://scrapling.mcp:8765/mcp`。默认只允许 Scrapling 的 3 个基础网页抓取工具：`fetch`、`get`、`stealthy_fetch`。用户删除或保存配置后，以系统配置为准，不在每次启动时反复重建默认项。
 
 配置字段：
 
