@@ -1599,7 +1599,7 @@
       "refresh_tools": "Refresh Tools",
       "refresh_prompt": "Refresh Prompt",
       "empty": "No MCP servers",
-      "prompt_title": "MCP Prompt Injected into the LLM",
+      "prompt_title": "MCP Tool Instructions Injected into AI",
       "prompt_empty": "No MCP prompt is currently available",
       "tools_title": "MCP Tools for {{name}}",
       "tools_empty": "No MCP tools",

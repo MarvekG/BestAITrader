@@ -199,6 +199,11 @@ export const SettingsPage: React.FC = () => {
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-all',
   };
+  const mcpToolInstructionBlockStyle: React.CSSProperties = {
+    ...promptTextBlockStyle,
+    maxHeight: 360,
+    overflowY: 'auto',
+  };
   const activeSettingsTab = SETTINGS_TAB_KEYS.has(settingsSearchParams.get('tab') || '')
     ? settingsSearchParams.get('tab') || 'datasources'
     : 'datasources';
@@ -2198,8 +2203,8 @@ export const SettingsPage: React.FC = () => {
               </Card>
               <Card title={t('settings.mcp.prompt_title')}>
                 <pre
-                  className="bg-gray-800 p-3 rounded text-sm text-gray-300 max-h-60"
-                  style={promptTextBlockStyle}
+                  className="bg-gray-800 p-3 rounded text-sm text-gray-300"
+                  style={mcpToolInstructionBlockStyle}
                 >
                   {mcpPromptLoading ? t('common.loading_stats') : (mcpPrompt || t('settings.mcp.prompt_empty'))}
                 </pre>

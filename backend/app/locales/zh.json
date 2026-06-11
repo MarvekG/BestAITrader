@@ -1599,7 +1599,7 @@
       "refresh_tools": "刷新工具",
       "refresh_prompt": "刷新 Prompt",
       "empty": "暂无 MCP Server",
-      "prompt_title": "注入给 LLM 的 MCP Prompt",
+      "prompt_title": "注入给 AI 的 MCP 工具说明",
       "prompt_empty": "当前没有可注入的 MCP Prompt",
       "tools_title": "{{name}} 的 MCP 工具",
       "tools_empty": "暂无 MCP 工具",
