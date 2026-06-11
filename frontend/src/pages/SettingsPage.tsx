@@ -1001,17 +1001,17 @@ export const SettingsPage: React.FC = () => {
         name: values.name.trim(),
         enabled: Boolean(values.enabled),
         url: values.url.trim(),
-        token: values.token?.trim() || '',
+        token: values.token?.trim(),
         allowed_tools: values.allowed_tools || [],
       };
       const res = editingMcpServer
         ? await mcpApi.update(editingMcpServer.name, {
           enabled: payload.enabled,
           url: payload.url,
-          token: payload.token,
           allowed_tools: payload.allowed_tools,
+          ...(payload.token ? { token: payload.token } : {}),
         })
-        : await mcpApi.create(payload);
+        : await mcpApi.create({ ...payload, token: payload.token || '' });
       if (res.status === 'success') {
         message.success(t('settings.mcp.saved'));
         setMcpModalOpen(false);
@@ -2832,7 +2832,7 @@ export const SettingsPage: React.FC = () => {
             <Input />
           </Form.Item>
           <Form.Item label={t('settings.mcp.token')} name="token">
-            <Input.Password autoComplete="off" />
+            <Input.Password autoComplete="off" placeholder={editingMcpServer ? t('settings.mcp.token_keep_placeholder') : ''} />
           </Form.Item>
           <Form.Item>
             <Button onClick={() => void handlePreviewMcpTools()} loading={mcpPreviewLoading}>

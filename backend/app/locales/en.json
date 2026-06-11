@@ -1592,6 +1592,7 @@
       "enabled": "Enabled",
       "url": "HTTP URL",
       "token": "Token (optional)",
+      "token_keep_placeholder": "Leave blank to keep the saved token",
       "actions": "Actions",
       "test": "Test Connection",
       "view_tools": "View Tools",

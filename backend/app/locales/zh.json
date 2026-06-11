@@ -1592,6 +1592,7 @@
       "enabled": "启用",
       "url": "HTTP URL",
       "token": "Token（可选）",
+      "token_keep_placeholder": "留空则保留已保存 Token",
       "actions": "操作",
       "test": "测试连接",
       "view_tools": "查看工具",
