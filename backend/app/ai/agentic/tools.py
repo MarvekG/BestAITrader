@@ -446,6 +446,10 @@ async def execute_python_sandboxed(code: str) -> Dict[str, Any]:
     """
     在受限沙箱中执行 Python 计算代码 (Execute Python code in a compute-only sandbox).
     适合一次性数值计算、日期处理、JSON 解析、列表/字典处理、numpy/pandas 分析。
+    使用纪律:
+    - 可以充分利用 Python 做计算、数据处理、JSON/文本解析、聚合、校验和逻辑判断。
+    - 代码和 stdout 不允许包含叙事性 print、Markdown、emoji、核验过程长文或报告式结论文字。
+    - 不允许把已知结论硬编码成多行说明。
     允许:
     - 默认允许大多数纯计算、纯数据处理 Python 代码；除明确列出的禁止项外，不要把本说明理解成白名单
     - 大多数不触达宿主环境的标准库和数据分析模块都可以尝试，例如 json、datetime、math、
