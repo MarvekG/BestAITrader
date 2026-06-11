@@ -353,17 +353,19 @@ class PortfolioRiskControlService:
 
     def _get_latest_price(self, db: Session, stock_code: str) -> Decimal:
         """
-        获取股票最新行情价格。
+        获取股票最近有效行情价格。
 
         Args:
             db: 数据库会话。
             stock_code: 股票代码。
 
         Returns:
-            最新价格；缺失时返回 0。
+            最近有效价格；缺失时返回 0。
         """
         price = db.query(StockRealtimeMarket.current_price).filter(
             StockRealtimeMarket.stock_code == stock_code,
+            StockRealtimeMarket.current_price.isnot(None),
+            StockRealtimeMarket.current_price > 0,
         ).order_by(StockRealtimeMarket.timestamp.desc()).scalar()
         return _to_decimal(price or 0)
 

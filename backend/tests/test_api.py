@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, patch
 
 from app.crud.user import create_user
 from app.models.async_task import AsyncTask
-from app.models.data_storage import FinancialIndicator, StockBasic
+from app.models.account import Account
+from app.models.data_storage import FinancialIndicator, StockBasic, StockRealtimeMarket
+from app.models.position import Position
+from app.models.user import User
 from app.schemas.user import UserCreate
 
 
@@ -566,13 +569,6 @@ class TestAccountAPI:
         assert float(put_response.json()["total_funds"]) == 200000.0
 
     def test_my_total_funds_uses_dynamic_portfolio_valuation(self, client, auth_headers, db_session):
-        from datetime import datetime
-
-        from app.models.account import Account
-        from app.models.data_storage import StockRealtimeMarket
-        from app.models.position import Position
-        from app.models.user import User
-
         user = db_session.query(User).filter(User.username.like("test_%")).first()
         account = Account(
             user_id=user.id,
@@ -614,6 +610,62 @@ class TestAccountAPI:
         payload = response.json()
         assert float(payload["market_value"]) == 120000.0
         assert float(payload["total_funds"]) == 430000.0
+
+    def test_my_positions_ignore_latest_zero_realtime_price(self, client, auth_headers, db_session):
+        """
+        账户持仓应忽略时间更新但价格无效的实时行情。
+
+        Args:
+            client: 测试 HTTP 客户端。
+            auth_headers: 已登录用户的鉴权请求头。
+            db_session: 测试数据库会话。
+        """
+        user = db_session.query(User).filter(User.username.like("test_%")).first()
+        account = Account(
+            user_id=user.id,
+            total_assets=Decimal("1000000.0000"),
+            available_cash=Decimal("900000.0000"),
+            frozen_cash=Decimal("0.0000"),
+            market_value=Decimal("100000.0000"),
+            initial_capital=Decimal("1000000.0000"),
+            total_profit_loss=Decimal("0.0000"),
+        )
+        db_session.add(account)
+        db_session.flush()
+        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+        db_session.add_all([
+            StockRealtimeMarket(
+                stock_code="000001.SZ",
+                current_price=12.0,
+                timestamp=datetime(2026, 6, 10, 15, 0, 0),
+            ),
+            StockRealtimeMarket(
+                stock_code="000001.SZ",
+                current_price=0.0,
+                timestamp=datetime(2026, 6, 11, 9, 20, 0),
+            ),
+            Position(
+                account_id=account.account_id,
+                stock_code="000001.SZ",
+                total_shares=100,
+                available_shares=100,
+                frozen_shares=0,
+                avg_cost=Decimal("10.0000"),
+                current_price=Decimal("10.0000"),
+                market_value=Decimal("1000.0000"),
+                profit_loss=Decimal("0.0000"),
+                profit_loss_pct=Decimal("0.0000"),
+                purchase_details={"ledger": []},
+            ),
+        ])
+        db_session.commit()
+
+        response = client.get("/api/v1/accounts/my-positions", headers=auth_headers)
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload[0]["current_price"] == 12.0
+        assert payload[0]["market_value"] == 1200.0
 
 
 class TestTaskAPI:

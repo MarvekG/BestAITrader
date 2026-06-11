@@ -1304,17 +1304,21 @@ async def get_realtime_market(
     order: str = "desc",
     db: Session = Depends(get_db)
 ):
-    """Get real-time market data from database
+    """从数据库分页读取有效实时行情数据。
 
     Args:
-        skip: Pagination offset
-        limit: Number of records to return
-        stock_code: Filter by stock code (optional)
-        sort_by: Sort field (e.g., 'change_percent', 'turnover', 'latest_price')
-        order: Sort order ('asc' or 'desc')
+        skip: 分页偏移量。
+        limit: 返回记录数。
+        stock_code: 可选股票代码过滤条件。
+        sort_by: 排序字段，例如 change_percent、turnover、current_price。
+        order: 排序方向，支持 asc 或 desc。
+        db: 数据库会话。
 
     Returns:
-        Paginated real-time market data
+        包含总数和行情记录的分页结果。
+
+    Raises:
+        HTTPException: 查询实时行情失败。
     """
     from app.models.data_storage import StockRealtimeMarket
     import math
@@ -1326,6 +1330,11 @@ async def get_realtime_market(
         if stock_code:
             formatted_code = StockCodeStandardizer.standardize(stock_code)
             query = query.filter(StockRealtimeMarket.stock_code == formatted_code)
+
+        query = query.filter(
+            StockRealtimeMarket.current_price.isnot(None),
+            StockRealtimeMarket.current_price > 0,
+        )
 
         # Apply sorting
         if sort_by:

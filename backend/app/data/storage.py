@@ -499,11 +499,20 @@ class DataStorageService:
             return None
 
     def get_stock_realtime_market(self, stock_code: str) -> Optional[Dict[str, Any]]:
-        """从 stock_realtime_market 表获取详细行情数据"""
+        """
+        从实时行情表获取最近一条有效股票行情。
+
+        Args:
+            stock_code: 标准化股票代码。
+
+        Returns:
+            行情字段字典；没有有效行情或查询失败时返回 None。
+        """
         try:
             with SessionLocal() as db:
                 d = db.query(StockRealtimeMarket)\
                       .filter(StockRealtimeMarket.stock_code == stock_code)\
+                      .filter(StockRealtimeMarket.current_price.isnot(None), StockRealtimeMarket.current_price > 0)\
                       .order_by(StockRealtimeMarket.timestamp.desc())\
                       .first()
                 if d:
