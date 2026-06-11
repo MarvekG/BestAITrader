@@ -933,7 +933,6 @@ def _get_previous_pm_decision(
             ).order_by(
                 DebateMessage.created_at.desc()
             ).first()
-
             if not previous_msg:
                 return {}
 
@@ -1329,6 +1328,19 @@ async def portfolio_management(state: AnalystState) -> Dict[str, Any]:
         )
 
         decision_data = decision.model_dump() if hasattr(decision, "model_dump") else decision
+
+        # 把 PM 止损/止盈/持有期同步到持仓，供 market_watch 盘中扫描判定触发
+        try:
+            from app.trading.pm_rules import sync_pm_discipline_to_position
+
+            sync_pm_discipline_to_position(
+                session_id=session_id,
+                user_id=state.get("user_id"),
+                stock_code=state["stock_code"],
+                decision=decision_data if isinstance(decision_data, dict) else {},
+            )
+        except Exception:
+            logger.exception("Failed to sync PM discipline to position")
 
         return {"pm_decision": decision_data}
     except Exception as e:

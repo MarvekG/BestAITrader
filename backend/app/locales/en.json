@@ -786,6 +786,26 @@
         "stop_loss_warning_pct": "{{stock_code}} stop-loss drawdown {{current}} exceeds warning threshold {{limit}}."
       }
     },
+    "discipline": {
+      "button": "Stop/Take Settings",
+      "title": "Stop-Loss / Take-Profit Scan Settings",
+      "enabled": "Enable Auto Scan",
+      "scan_interval_seconds": "Scan Interval (seconds)",
+      "scan_non_trading_days": "Scan on Non-trading Days",
+      "scan_start_time": "Scan Start Time",
+      "scan_end_time": "Scan End Time",
+      "auto_launch_debate": "Auto-launch Review Debate After Trigger",
+      "cooldown_minutes": "Same-stock Trigger Cooldown (minutes)",
+      "run_now": "Scan Now",
+      "cancel": "Cancel",
+      "save": "Save",
+      "load_failed": "Failed to load stop/take settings",
+      "save_success": "Stop/take settings saved",
+      "save_failed": "Failed to save stop/take settings: {{error}}",
+      "scan_success": "Stop/take scan completed, {{count}} trigger(s)",
+      "scan_failed": "Stop/take scan failed: {{error}}",
+      "unknown_error": "Unknown error"
+    },
     "account_info": {
       "title": "Account Info",
       "starting_capital": "Starting Capital",

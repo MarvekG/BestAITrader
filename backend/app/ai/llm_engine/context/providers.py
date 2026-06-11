@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from app.ai.llm_engine.context.canonical_metrics import CanonicalMetricsProvider
 from app.ai.llm_engine.context.portfolio import build_portfolio_risk_control_context
 from app.ai.llm_engine.context.runtime import merge_status
 from app.ai.llm_engine.context.types import AIContextLayer, AIContextPayload
@@ -374,4 +375,5 @@ DEFAULT_CONTEXT_PROVIDERS = (
     HistoryProvider(),
     SignalsProvider(),
     EventsProvider(),
+    CanonicalMetricsProvider(),
 )

@@ -1,6 +1,13 @@
 import { apiClient } from './client';
 
-export type MarketWatchEventType = 'scan' | 'ai_decision' | 'debate_launched' | 'debate_skipped' | 'error';
+export type MarketWatchEventType =
+  | 'scan'
+  | 'ai_decision'
+  | 'debate_launched'
+  | 'debate_skipped'
+  | 'error'
+  | 'pm_discipline_trigger'
+  | 'pm_discipline_error';
 export type MarketWatchEventStatus = 'success' | 'skipped' | 'failed';
 export type WatchAiDecisionAction = 'ignore' | 'monitor' | 'start_debate';
 export type WatchAiDecisionUrgency = 'low' | 'medium' | 'high';

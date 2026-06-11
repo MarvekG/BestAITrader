@@ -19,11 +19,16 @@ import {
     Tooltip,
     theme,
     Tabs,
+    TimePicker,
+    Row,
+    Col,
 } from 'antd';
 import { SyncOutlined, PlusOutlined, DeleteOutlined, InfoCircleOutlined, HistoryOutlined, QuestionCircleOutlined } from '@ant-design/icons';
+import dayjs from 'dayjs';
+import type { Dayjs } from 'dayjs';
 import { useTranslation } from 'react-i18next';
 import { accountsApi, AccountAssets, Position } from '../api/accounts';
-import { tradingApi, OrderHistory, OrderRequest } from '../api/trading';
+import { tradingApi, OrderHistory, OrderRequest, PositionDisciplineSettingsUpdate } from '../api/trading';
 import { riskControlApi, RiskControlConfigUpdate, RiskControlHit, RiskControlPolicy } from '../api/riskControl';
 import { marketApi } from '../api/market';
 import { WebSocketMessage } from '../services/websocket';
@@ -40,6 +45,21 @@ interface OrderFormValues {
     shares: number;
     stop_loss_pct?: number;
 }
+
+interface DisciplineSettingsFormValues extends Omit<PositionDisciplineSettingsUpdate, 'scan_start_time' | 'scan_end_time'> {
+    scan_start_time?: Dayjs | string | null;
+    scan_end_time?: Dayjs | string | null;
+}
+
+const parseScanTime = (value?: string | null) => {
+    if (!value) return null;
+    return dayjs(`2000-01-01T${value}:00`);
+};
+
+const formatScanTime = (value?: Dayjs | string | null) => {
+    if (!value) return undefined;
+    return dayjs.isDayjs(value) ? value.format('HH:mm') : value;
+};
 
 export const SimulatedTradingPage: React.FC = () => {
     const { t } = useTranslation();
@@ -65,10 +85,14 @@ export const SimulatedTradingPage: React.FC = () => {
     // Modals
     const [isOrderModalVisible, setIsOrderModalVisible] = useState(false);
     const [isRiskControlModalVisible, setIsRiskControlModalVisible] = useState(false);
+    const [isDisciplineSettingsVisible, setIsDisciplineSettingsVisible] = useState(false);
     const [orderForm] = Form.useForm();
     const [riskControlForm] = Form.useForm();
+    const [disciplineSettingsForm] = Form.useForm<DisciplineSettingsFormValues>();
     const [submittingOrder, setSubmittingOrder] = useState(false);
     const [savingRiskControl, setSavingRiskControl] = useState(false);
+    const [savingDisciplineSettings, setSavingDisciplineSettings] = useState(false);
+    const [scanningDisciplines, setScanningDisciplines] = useState(false);
     const orderAction = Form.useWatch('action', orderForm);
     const orderType = Form.useWatch('order_type', orderForm);
     const riskPolicyOptions = [
@@ -312,6 +336,64 @@ export const SimulatedTradingPage: React.FC = () => {
             message.error(t('trading_center.risk_control.save_failed'));
         } finally {
             setSavingRiskControl(false);
+        }
+    };
+
+    const loadDisciplineSettings = async () => {
+        try {
+            const settings = await tradingApi.getDisciplineSettings();
+            disciplineSettingsForm.setFieldsValue({
+                enabled: settings.enabled,
+                scan_interval_seconds: settings.scan_interval_seconds,
+                scan_non_trading_days: settings.scan_non_trading_days,
+                scan_start_time: parseScanTime(settings.scan_start_time),
+                scan_end_time: parseScanTime(settings.scan_end_time),
+                auto_launch_debate: settings.auto_launch_debate,
+                cooldown_minutes: settings.cooldown_minutes,
+            });
+        } catch (error) {
+            console.error('Failed to load discipline settings:', error);
+            message.error(t('trading_center.discipline.load_failed'));
+        }
+    };
+
+    const handleOpenDisciplineSettings = async () => {
+        setIsDisciplineSettingsVisible(true);
+        await loadDisciplineSettings();
+    };
+
+    const handleSaveDisciplineSettings = async (values: DisciplineSettingsFormValues) => {
+        setSavingDisciplineSettings(true);
+        try {
+            await tradingApi.updateDisciplineSettings({
+                ...values,
+                scan_start_time: formatScanTime(values.scan_start_time),
+                scan_end_time: formatScanTime(values.scan_end_time),
+            });
+            message.success(t('trading_center.discipline.save_success'));
+            setIsDisciplineSettingsVisible(false);
+        } catch (error) {
+            console.error('Failed to save discipline settings:', error);
+            message.error(t('trading_center.discipline.save_failed', {
+                error: getApiErrorMessage(error, t('trading_center.discipline.unknown_error')),
+            }));
+        } finally {
+            setSavingDisciplineSettings(false);
+        }
+    };
+
+    const handleRunDisciplineScan = async () => {
+        setScanningDisciplines(true);
+        try {
+            const result = await tradingApi.scanDisciplines();
+            const triggered = Array.isArray(result.triggered) ? result.triggered.length : 0;
+            message.success(t('trading_center.discipline.scan_success', { count: triggered }));
+        } catch (error) {
+            message.error(t('trading_center.discipline.scan_failed', {
+                error: getApiErrorMessage(error, t('trading_center.discipline.unknown_error')),
+            }));
+        } finally {
+            setScanningDisciplines(false);
         }
     };
 
@@ -579,6 +661,9 @@ export const SimulatedTradingPage: React.FC = () => {
                 <Space>
                     <Button onClick={handleOpenRiskControl}>
                         {t('trading_center.risk_control.settings')}
+                    </Button>
+                    <Button onClick={handleOpenDisciplineSettings}>
+                        {t('trading_center.discipline.button')}
                     </Button>
                     <Button type="primary" icon={<PlusOutlined />} onClick={() => {
                         orderForm.resetFields();
@@ -927,6 +1012,62 @@ export const SimulatedTradingPage: React.FC = () => {
                     </div>
                 </Form>
             </Modal >
+
+            <Modal
+                title={t('trading_center.discipline.title')}
+                open={isDisciplineSettingsVisible}
+                onCancel={() => setIsDisciplineSettingsVisible(false)}
+                footer={null}
+                width={560}
+            >
+                <Form
+                    form={disciplineSettingsForm}
+                    layout="vertical"
+                    onFinish={handleSaveDisciplineSettings}
+                    initialValues={{
+                        enabled: true,
+                        scan_interval_seconds: 300,
+                        scan_non_trading_days: false,
+                        scan_start_time: parseScanTime('09:30'),
+                        scan_end_time: parseScanTime('15:00'),
+                        auto_launch_debate: true,
+                        cooldown_minutes: 60,
+                    }}
+                >
+                    <Form.Item label={t('trading_center.discipline.enabled')} name="enabled" valuePropName="checked">
+                        <Switch />
+                    </Form.Item>
+                    <Form.Item label={t('trading_center.discipline.scan_interval_seconds')} name="scan_interval_seconds" rules={[{ required: true }]}>
+                        <InputNumber min={60} max={3600} step={60} style={{ width: '100%' }} />
+                    </Form.Item>
+                    <Form.Item label={t('trading_center.discipline.scan_non_trading_days')} name="scan_non_trading_days" valuePropName="checked">
+                        <Switch />
+                    </Form.Item>
+                    <Row gutter={12}>
+                        <Col span={12}>
+                            <Form.Item label={t('trading_center.discipline.scan_start_time')} name="scan_start_time" rules={[{ required: true }]}>
+                                <TimePicker format="HH:mm" minuteStep={5} style={{ width: '100%' }} />
+                            </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                            <Form.Item label={t('trading_center.discipline.scan_end_time')} name="scan_end_time" rules={[{ required: true }]}>
+                                <TimePicker format="HH:mm" minuteStep={5} style={{ width: '100%' }} />
+                            </Form.Item>
+                        </Col>
+                    </Row>
+                    <Form.Item label={t('trading_center.discipline.auto_launch_debate')} name="auto_launch_debate" valuePropName="checked">
+                        <Switch />
+                    </Form.Item>
+                    <Form.Item label={t('trading_center.discipline.cooldown_minutes')} name="cooldown_minutes" rules={[{ required: true }]}>
+                        <InputNumber min={0} max={1440} style={{ width: '100%' }} />
+                    </Form.Item>
+                    <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <Button onClick={handleRunDisciplineScan} loading={scanningDisciplines}>{t('trading_center.discipline.run_now')}</Button>
+                        <Button onClick={() => setIsDisciplineSettingsVisible(false)}>{t('trading_center.discipline.cancel')}</Button>
+                        <Button type="primary" htmlType="submit" loading={savingDisciplineSettings}>{t('trading_center.discipline.save')}</Button>
+                    </Space>
+                </Form>
+            </Modal>
 
             <Modal
                 title={t('trading_center.risk_control.settings')}

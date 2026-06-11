@@ -47,6 +47,23 @@ export interface OrderHistory {
     updated_at: string;
 }
 
+export interface PositionDisciplineSettings {
+    user_id: number;
+    enabled: boolean;
+    scan_interval_seconds: number;
+    scan_non_trading_days: boolean;
+    scan_start_time: string;
+    scan_end_time: string;
+    auto_launch_debate: boolean;
+    cooldown_minutes: number;
+    created_at?: string | null;
+    updated_at?: string | null;
+}
+
+export type PositionDisciplineSettingsUpdate = Partial<
+    Omit<PositionDisciplineSettings, 'user_id' | 'created_at' | 'updated_at'>
+>;
+
 export const tradingApi = {
     placeOrder: async (data: OrderRequest) => {
         return apiClient.post<{ success: boolean; message?: string }>('/trading/orders', data);
@@ -58,5 +75,17 @@ export const tradingApi = {
 
     getMyOrders: async (skip: number = 0, limit: number = 100) => {
         return apiClient.get<OrderHistory[]>('/trading/my-orders', { params: { skip, limit } });
-    }
+    },
+
+    getDisciplineSettings: async () => {
+        return apiClient.get<PositionDisciplineSettings>('/trading/discipline-settings');
+    },
+
+    updateDisciplineSettings: async (data: PositionDisciplineSettingsUpdate) => {
+        return apiClient.put<PositionDisciplineSettings>('/trading/discipline-settings', data);
+    },
+
+    scanDisciplines: async () => {
+        return apiClient.post<Record<string, unknown>>('/trading/discipline-scan');
+    },
 };

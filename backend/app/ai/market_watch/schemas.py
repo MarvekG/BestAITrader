@@ -429,7 +429,15 @@ class MarketWatchEventSchema(BaseModel):
 
     event_id: str | None = None
     user_id: int
-    event_type: Literal["scan", "ai_decision", "debate_launched", "debate_skipped", "error"]
+    event_type: Literal[
+        "scan",
+        "ai_decision",
+        "debate_launched",
+        "debate_skipped",
+        "error",
+        "pm_discipline_trigger",
+        "pm_discipline_error",
+    ]
     status: Literal["success", "skipped", "failed"]
     watch_ai_decision: dict[str, Any] | list[dict[str, Any]] | None = None
     debate_parameters: dict | None = None

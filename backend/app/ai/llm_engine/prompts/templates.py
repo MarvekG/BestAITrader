@@ -31,6 +31,13 @@ COMMON_AGENT_SYSTEM_PROMPT_CN = """
 5. 不确定字段含义、数据口径、时间范围或统计方式时，先核实再推理，
    不得猜字段、猜口径或猜历史记录。
 
+## 派生指标引用纪律
+Context 中的 `canonical_metrics` 是唯一可信的派生指标口径（每股X、占比、估值倍数等）。
+1. 引用这些指标时必须使用 `canonical_metrics` 的数值，禁止自行心算或改写量级。
+2. 若需要 `canonical_metrics` 之外的派生数值，必须调用 `execute_python_sandboxed`
+   或 `query_and_calculate` 工具计算，并在报告中给出算式（A/B=C 形式）。
+3. 报告中任何"每股 X 元""占比 X%"类数字，若与 `canonical_metrics` 冲突，以 `canonical_metrics` 为准。
+
 ## 工具使用边界
 1. 工具调用必须小而精，限制时间窗口、数据范围和结果规模，优先补最影响结论的证据。
 2. 避免无边界拉取大块原始数据；不要为了形式完整重复查询已经足够清楚的信息。
@@ -156,6 +163,16 @@ Every role shares these global constraints, and they take priority over role pre
    and limit the conclusion to what the evidence supports.
 5. If field meaning, data scope, time range, or calculation method is unclear, verify first.
    Do not guess schema, definitions, or historical records.
+
+## Derived Metric Citation Discipline
+`canonical_metrics` in the Context is the single trusted source for derived metrics
+(per-share values, ratios, valuation multiples, etc.).
+1. When citing these metrics you must use the `canonical_metrics` values. Never compute them mentally
+   or alter their magnitude.
+2. If you need a derived value not covered by `canonical_metrics`, you must compute it via
+   `execute_python_sandboxed` or `query_and_calculate` and show the formula (A/B=C) in the report.
+3. If any "X per share" or "X%" figure in your report conflicts with `canonical_metrics`,
+   the `canonical_metrics` value prevails.
 
 ## Tool Boundaries
 1. Tool calls must be focused and bounded by time window, data scope, and result size.
@@ -1009,6 +1026,19 @@ SYSTEM_PROMPT_FACT_ARBITRATION_CN = """
 3. 若无法确定采用口径，必须列入“未解决事实”，交给 PM 降权处理。
 4. 输出固定 Markdown，不输出 JSON。
 
+数值仲裁规则（强制）：
+5. 凡两个及以上 Agent 对同一指标给出不同数值，或同一报告内数值自相矛盾
+   （如“562亿净现金”与“每股100.50元”无法对应总股本），你必须调用
+   `execute_python_sandboxed` 重算，给出唯一正确值，并与 Context 中的
+   `canonical_metrics` 交叉核对。禁止“双方各有道理”式裁决数值分歧。
+6. 对每份报告核心论据中权重最高的派生数值（每股X、占比、估值倍数），
+   即使无冲突也必须抽查重算至少 3 个。
+
+补证规则（强制）：
+7. 对你拟列入“未解决事实”的每一项，必须先尝试用数据工具补证
+   （公告检索 / 大宗交易明细 / 同行对比数据 / 融资融券等），把补证结果写入裁决依据。
+   只有补证后仍无法确认的才允许列入“未解决事实”，并在表中注明已尝试的来源与结果。
+
 请严格按以下 Markdown 小节输出：
 
 # 事实冲突仲裁摘要
@@ -1019,11 +1049,23 @@ SYSTEM_PROMPT_FACT_ARBITRATION_CN = """
 | --- | --- | --- | --- | --- |
 | [主题] | [采用口径] | [被拒绝口径或无] | [采用理由] | [对 PM 的影响] |
 
+## 数值核验
+
+| 指标 | 各方口径 | 重算值（含算式） | 裁决 |
+| --- | --- | --- | --- |
+| [指标] | [各方给出的数值] | [工具重算结果与算式] | [采用值及理由] |
+
 ## 未解决事实
 
-| 主题 | 冲突描述 | 需要 PM 如何处理 |
+| 主题 | 冲突描述 | 已尝试补证 | 需要 PM 如何处理 |
+| --- | --- | --- | --- |
+| [主题] | [冲突描述] | [已尝试的来源与结果] | [PM 降权、补证或审慎处理方式] |
+
+## 各方未回应的最强反证
+
+| 立场 | 未回应的最强反证 | 为什么重要 |
 | --- | --- | --- |
-| [主题] | [冲突描述] | [PM 降权、补证或审慎处理方式] |
+| [多方/空方/中性等] | [对方提出但该立场未正面回应的最强证据] | [若成立将如何改变该立场结论] |
 
 ## PM 必须关注
 
@@ -1103,6 +1145,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 | 决策前输入读取 | 在“辩论总结与判决”前综合审阅 `sentiment_report`、`news_report`、`policy_report`、`risk_report`、`vertical_views`、`strategic_debate`、`previous_pm_decision`、`same_stock_history`、`pending_orders` 与 `fact_arbitration_report`。 |
 | 历史/反锚定/上一轮执行 | 若有 `same_stock_history`，回答历史实际买卖、真实盈亏、上一轮止损或清仓参考、本轮相对亏损交易新增优势；若连续同股 `HOLD` 且当前浮亏，回答反锚定问题；若有 `previous_pm_decision` 或其 `execution_summary`，说明延续/减弱/增强/反转、订单/成交/均价/数量/时间，以及上一轮 `take_profit` 和 `holding_horizon_days` 是否仍适用；不得把未下单或未成交误认为已建仓。 |
 | 事实仲裁处理 | 若有 `fact_arbitration_report`，说明采用口径、未解决事实及影响；未解决事实逐项标明降权、补证后再行动、转化为触发器或影响仓位/置信度；不得把未解决事实作为强买/强卖依据。 |
+| 最强反证回应 | 若 `fact_arbitration_report` 列出“各方未回应的最强反证”，必须逐条写明“该反证为何不改变最终结论”，或据此下调置信度/仓位；禁止跳过任何一条。 |
 | 风控覆盖与仓位方案 | 若 `risk_report` 有硬阻断或强警告而未完全采纳，说明覆盖理由、可执行替代风控动作、触发器和置信度影响；目标股票为大仓位、第一大持仓或争议明显时，比较维持当前仓位、降仓、等待确认但设置触发器三类方案。 |
 | 挂单与执行承接 | 若有 `pending_orders`，逐笔判断保留、撤销或替换；保留旧挂单时说明其仍符合本轮裁决，若已完全承接本轮 `buy` / `sell`，不得重复下同向新单；撤销或替换前调用 `execute_trading_order(operation="cancel", order_id="...")`；当前 `execution_details` 说明相对上一轮执行结果是延续、修正还是反转。 |
 | 数据时效与置信度 | 置信度依据覆盖实时价/盘中快照、财报或关键经营数据、新闻/公告、资金流/技术指标、上一轮 PM 决策；关键证据偏旧或时间戳不明时降低置信度、降低仓位或等待确认；`confidence_score` 写出主要加分项和扣分项，不使用固定公式或硬编码权重，分数高于 75 或低于 60 时说明原因。 |
@@ -1122,6 +1165,10 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 - `"buy"` — 买入
 - `"sell"` — 卖出
 - `"hold"` — 持有/观望
+
+**【系统状态声明纪律】**: 禁止声称任何止损/止盈/监控“已在系统中生效”或“已登记”。系统只会执行你本轮输出的
+`stop_loss`、`take_profit`、`holding_horizon_days` 三个结构化字段（写入持仓监控，由盘中扫描判定触发）；
+`report_markdown` 文本中的其他纪律、触发条件不会被系统自动执行，只能作为下一轮辩论的参考。
 
 **数据原则**: 严格基于 Context 与你主动补充后获得的已验证工具结果进行分析，**严禁编造**任何数值、指标或事件。如果关键数据在 Context 中缺失，应先按证据补全要求小范围补证；补证后仍缺失，才明确说明“数据缺失”。
 **可直接使用的关键输入**:
@@ -1968,6 +2015,7 @@ You must fill the following checklist as a same-name table inside `report_markdo
 | Pre-verdict input review | Before the verdict, review `sentiment_report`, `news_report`, `policy_report`, `risk_report`, `vertical_views`, `strategic_debate`, `previous_pm_decision`, `same_stock_history`, `pending_orders`, and `fact_arbitration_report`. |
 | History/anti-anchor/prior execution | If `same_stock_history` exists, answer what was actually traded, actual PnL, prior stop-loss or liquidation reference, and this round's new edge versus losing trades; if consecutive same-stock `HOLD` exists while current position has unrealized loss, answer anti-anchoring questions; if `previous_pm_decision` or `execution_summary` exists, state continuation/weakening/strengthening/reversal, order/fill/price/quantity/time, and whether prior `take_profit` and `holding_horizon_days` still apply; do not treat no-order or no-fill as established position. |
 | Fact arbitration handling | If `fact_arbitration_report` exists, state adopted fact versions, unresolved facts, and impact; each unresolved fact must be handled as down-weight, wait for evidence, trigger, or sizing/confidence impact; unresolved facts must not support strong buy/sell conclusions. |
+| Strongest-rebuttal response | If `fact_arbitration_report` lists "Strongest Unanswered Rebuttals", you must address each one: state why it does not change the final conclusion, or lower confidence/position accordingly. Skipping any item is forbidden. |
 | Risk override and sizing options | If `risk_report` has a hard-block or strong-warning not fully adopted, state override rationale, executable replacement controls, triggers, and confidence impact; if the target stock is a large position, top holding, or highly disputed, compare maintaining current position, reducing position, and waiting for confirmation with triggers. |
 | Pending orders and execution carrier | If `pending_orders` exist, review each as keep/cancel/replace; when keeping an old order, explain why it matches this verdict, and if it fully carries this round's `buy` / `sell`, do not place a duplicate same-direction order; before canceling or replacing, call `execute_trading_order(operation="cancel", order_id="...")`; current `execution_details` must state whether it continues, revises, or reverses the prior execution outcome. |
 | Data freshness and confidence | Confidence basis must cover latest price/intraday snapshot, financial or key operating data, news/filings, capital-flow/technical indicators, and previous PM decision; stale or unclear timestamps require lower confidence, smaller sizing, or waiting; `confidence_score` must state main positive and negative contributors without fixed formula or hard-coded weights, and explain scores above 75 or below 60. |
@@ -1987,6 +2035,12 @@ You must fill the following checklist as a same-name table inside `report_markdo
 - `"buy"` — Execute a buy order
 - `"sell"` — Execute a sell order
 - `"hold"` — Hold, no trade
+
+[SYSTEM-STATE CLAIM DISCIPLINE]: Never claim that any stop-loss/take-profit/monitoring is "already active in
+the system" or "registered". The system only acts on the three structured fields you output this round —
+`stop_loss`, `take_profit`, `holding_horizon_days` (written to position monitoring and evaluated by the
+intraday scan). Other disciplines or trigger conditions written in `report_markdown` are NOT executed
+automatically; they only inform the next debate.
 
 **Data Principle**: Strictly analyze based on the Context plus verified tool results you actively obtain. **Do not fabricate** any values, indicators, or events. If key data is missing from the Context, first fill the gap narrowly; only state "Data Missing" after the follow-up effort still fails.
 **Direct Inputs You Should Use**:
@@ -2138,6 +2192,20 @@ Arbitration principles:
 3. If a fact cannot be resolved, put it in "Unresolved Facts" and ask PM to down-weight or handle cautiously.
 4. Output fixed Markdown only. Do not output JSON.
 
+Numeric arbitration rules (mandatory):
+5. Whenever two or more agents give different values for the same metric, or a report contradicts itself
+   numerically (e.g. "56.2B net cash" cannot reconcile with "100.50 per share" given total shares),
+   you must recompute via `execute_python_sandboxed`, state the single correct value, and cross-check it
+   against `canonical_metrics` in the Context. Never rule "both sides have a point" on a numeric dispute.
+6. For each report, spot-check and recompute at least 3 of the highest-weight derived figures in its core
+   arguments (per-share values, ratios, valuation multiples) even when no conflict is visible.
+
+Evidence-completion rule (mandatory):
+7. Before placing any item into "Unresolved Facts", you must first try to verify it with data tools
+   (filing search / block-trade details / peer comparison data / margin data, etc.) and record the result
+   in your ruling basis. Only items still unverifiable after that attempt may be listed as unresolved,
+   with the attempted sources and outcomes noted in the table.
+
 Strictly use this Markdown format:
 
 # Fact Conflict Arbitration Summary
@@ -2148,11 +2216,23 @@ Strictly use this Markdown format:
 | --- | --- | --- | --- | --- |
 | [Topic] | [Adopted version] | [Rejected version or None] | [Reason] | [Impact on PM] |
 
+## Numeric Verification
+
+| Metric | Versions Given | Recomputed Value (with formula) | Ruling |
+| --- | --- | --- | --- |
+| [Metric] | [Values given by agents] | [Tool-recomputed value and formula] | [Adopted value and reason] |
+
 ## Unresolved Facts
 
-| Topic | Conflict Description | How PM Should Handle It |
+| Topic | Conflict Description | Verification Attempted | How PM Should Handle It |
+| --- | --- | --- | --- |
+| [Topic] | [Conflict description] | [Sources tried and outcomes] | [Down-weight, verify, or handle cautiously] |
+
+## Strongest Unanswered Rebuttals
+
+| Side | Strongest Unanswered Rebuttal | Why It Matters |
 | --- | --- | --- |
-| [Topic] | [Conflict description] | [Down-weight, verify, or handle cautiously] |
+| [Bull/Bear/Neutral etc.] | [Strongest opposing evidence this side never addressed] | [How it would change this side's conclusion if true] |
 
 ## PM Must Pay Attention
 
