@@ -31,7 +31,7 @@
 - 配置变更后重建容器：`docker compose up -d --force-recreate <service>`，不要只用 `restart`。
 
 ## 修改前先读
-- 部署/环境：`docs/01-deployment.md`，Windows WSL2 读 `docs/04-windows-wsl-docker-engine-deployment.md`。
+- 部署/环境：`docs/001-deployment.md`，Windows WSL2 读 `docs/004-windows-wsl-docker-engine-deployment.md`。
 - 后端能力地图：`backend/app/README.md`。
 - 交易链路：`backend/app/trading/README.md`。
 - Debate 工作流：`backend/app/ai/llm_engine/README.md`。
