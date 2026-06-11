@@ -255,7 +255,20 @@ async def get_positions(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Get position list"""
+    """
+    获取指定会话下的有效持仓列表，并使用最近有效行情价动态估值。
+
+    Args:
+        session_id: 交易会话 ID。
+        current_user: 当前登录用户。
+        db: 数据库会话。
+
+    Returns:
+        持仓列表，每条包含股份数量、可用股份、最新价、市值和浮动盈亏。
+
+    Raises:
+        HTTPException: 会话不属于当前用户，或读取持仓失败。
+    """
     try:
         get_owned_session(db, session_id, current_user)
         account = ensure_user_account(db, current_user)
@@ -268,6 +281,9 @@ async def get_positions(
                 partition_by=StockRealtimeMarket.stock_code,
                 order_by=StockRealtimeMarket.timestamp.desc()
             ).label("rn")
+        ).filter(
+            StockRealtimeMarket.current_price.isnot(None),
+            StockRealtimeMarket.current_price > 0,
         ).subquery()
 
         positions = db.query(Position, StockBasic.name, latest_market_subquery.c.current_price).outerjoin(

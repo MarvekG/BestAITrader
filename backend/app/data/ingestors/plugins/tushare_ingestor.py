@@ -688,7 +688,7 @@ class TushareIngestor(BaseIngestor):
 
     async def fetch_and_ingest_realtime_market(self, stock_code: str) -> bool:
         """
-        采集单只股票实时行情并写入实时行情表。
+        采集单只股票有效实时行情并写入实时行情表。
 
         官方文档:
             - get_realtime_quotes: https://tushare.org/trading.html
@@ -697,7 +697,7 @@ class TushareIngestor(BaseIngestor):
             stock_code: 股票代码。
 
         Returns:
-            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
+            采集并写入有效价格行情成功返回 True；无数据、价格无效、配置缺失或异常返回 False。
         """
         try:
             # 1. 准备查询代码 (get_realtime_quotes 接收 6 位数字代码或列表)
@@ -739,6 +739,12 @@ class TushareIngestor(BaseIngestor):
             # 4. 标准化代码与增加元数据
             if 'stock_code' in df.columns:
                 df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
+
+            if 'current_price' in df.columns:
+                df['current_price'] = pd.to_numeric(df['current_price'], errors='coerce')
+                df = df[df['current_price'] > 0].copy()
+                if df.empty:
+                    return False
 
             df['data_source'] = self.source
             df['timestamp'] = pd.Timestamp.now()

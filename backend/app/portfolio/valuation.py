@@ -115,14 +115,14 @@ def _get_position_rows(
     db: Session,
     account_id: object,
 ) -> list[tuple[Position, str | None, str | None, object]]:
-    """读取当前账户有效持仓及其最新行情和基础信息。
+    """读取当前账户有效持仓及其最近有效行情和基础信息。
 
     Args:
         db: 数据库会话。
         account_id: 账户 ID。
 
     Returns:
-        持仓、股票名称、行业和最新价格的元组列表。
+        持仓、股票名称、行业和最近有效价格的元组列表。
     """
     latest_market = (
         db.query(
@@ -133,6 +133,7 @@ def _get_position_rows(
                 order_by=StockRealtimeMarket.timestamp.desc(),
             ).label("rn"),
         )
+        .filter(StockRealtimeMarket.current_price.isnot(None), StockRealtimeMarket.current_price > 0)
         .subquery()
     )
 
