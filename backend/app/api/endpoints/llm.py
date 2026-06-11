@@ -11,6 +11,7 @@ from openai import AsyncOpenAI
 from sqlalchemy.orm import Session
 
 from app.ai.agentic.tools import get_all_tools
+from app.ai.agentic.mcp.runtime import get_mcp_tools
 from app.ai.agentic.skills_loader.runtime import build_skills_catalog_prompt, get_skills_loader_tools
 from app.ai.llm_routing import API_KEY_ALIAS_SHARED, CACHE_LANE_SHARED
 from app.ai.llm_providers.factory import build_chat_completion_kwargs, build_chat_model
@@ -183,6 +184,24 @@ def _get_ai_function_test_tools(scenario: str) -> list[Any]:
         test_tools.extend(_get_real_ai_tools())
     if _scenario_requires_skills(scenario):
         test_tools.extend(get_skills_loader_tools())
+    return test_tools
+
+
+async def _get_ai_function_test_tools_async(scenario: str) -> list[Any]:
+    """返回 AI 功能测试可绑定工具，包含启用的 MCP 工具。
+
+    Args:
+        scenario: 测试场景名称。
+
+    Returns:
+        当前场景应绑定的工具列表。
+    """
+    test_tools = _get_ai_function_test_tools(scenario)
+    if _scenario_requires_ai_tools(scenario):
+        try:
+            test_tools.extend(await get_mcp_tools())
+        except Exception as exc:
+            logger.warning("MCP tools unavailable for AI function test", extra={"scenario": scenario, "error": str(exc)})
     return test_tools
 
 
@@ -706,9 +725,10 @@ async def execute_ai_function_test(*, scenario: str, user_input: str) -> Dict[st
         _message_record("system", system_prompt),
         _message_record("user", user_input),
     ]
-    test_tools = _get_ai_function_test_tools(scenario)
+    test_tools = await _get_ai_function_test_tools_async(scenario)
     expected_requirements = _expected_ai_function_test_requirements(scenario)
-    ai_tool_names = {tool_obj.name for tool_obj in _get_real_ai_tools()}
+    skill_tool_names = {tool_obj.name for tool_obj in get_skills_loader_tools()}
+    ai_tool_names = {tool_obj.name for tool_obj in test_tools if tool_obj.name not in skill_tool_names}
     model = settings.LLM_THINKING_MODEL if _is_ai_function_thinking_scenario(scenario) else settings.LLM_MODEL
     llm = _build_llm_probe_model(model, max_tokens=1024)
     runnable = llm.bind_tools(test_tools) if test_tools else llm

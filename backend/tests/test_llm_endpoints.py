@@ -1,12 +1,12 @@
 from importlib import reload
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage
 
 from app.api.endpoints import llm as llm_endpoint
-from app.api.endpoints.llm import _get_ai_function_test_tools, run_llm_probe
+from app.api.endpoints.llm import _get_ai_function_test_tools, _get_ai_function_test_tools_async, run_llm_probe
 
 
 class _FakeOpenAIMessage:
@@ -77,6 +77,13 @@ class _FakeTestingLLM:
         return AIMessage(content=f"{self.model} ok", additional_kwargs=additional_kwargs)
 
 
+class _FakePythonTool:
+    name = "execute_python_sandboxed"
+
+    async def ainvoke(self, args):
+        return {"success": True, "result": args.get("code", "")}
+
+
 @pytest.mark.asyncio
 async def test_llm_probe_runs_all_probe_steps():
     build_calls = []
@@ -87,6 +94,8 @@ async def test_llm_probe_runs_all_probe_steps():
 
     with (
         patch("app.api.endpoints.llm.build_chat_model", side_effect=_fake_build_chat_model),
+        patch("app.api.endpoints.llm._get_real_ai_tools", return_value=[_FakePythonTool()]),
+        patch("app.api.endpoints.llm.get_mcp_tools", new=AsyncMock(return_value=[])),
         patch("app.api.endpoints.llm.settings.LLM_MODEL", "backend"),
         patch("app.api.endpoints.llm.settings.LLM_THINKING_MODEL", "backend-thinking"),
     ):
@@ -114,6 +123,22 @@ def test_ai_function_test_tools_are_real_tools_and_skills():
     assert "browse_web_page_html" in tool_names
     assert "list_skills" in tool_names
     assert "llm_probe_echo" not in tool_names
+
+
+@pytest.mark.asyncio
+async def test_ai_function_test_tools_include_enabled_mcp_tools(monkeypatch):
+    class FakeMcpTool:
+        name = "tavily_search"
+
+    async def fake_get_mcp_tools():
+        return [FakeMcpTool()]
+
+    monkeypatch.setattr(llm_endpoint, "get_mcp_tools", fake_get_mcp_tools)
+
+    tool_names = {tool_obj.name for tool_obj in await _get_ai_function_test_tools_async("tools_and_skills")}
+
+    assert "tavily_search" in tool_names
+    assert "list_skills" in tool_names
 
 
 @pytest.mark.asyncio
@@ -168,7 +193,10 @@ async def test_ai_function_test_executes_real_tool_and_skills_loader():
     def _fake_build_chat_model(**kwargs):
         return _FakeTestingLLM(kwargs.get("model"))
 
-    with patch("app.api.endpoints.llm.build_chat_model", side_effect=_fake_build_chat_model):
+    with (
+        patch("app.api.endpoints.llm.build_chat_model", side_effect=_fake_build_chat_model),
+        patch("app.api.endpoints.llm.get_mcp_tools", new=AsyncMock(return_value=[])),
+    ):
         result = await llm_endpoint.execute_ai_function_test(
             scenario="tools_and_skills",
             user_input="先列出 skills，再用真实 AI 工具计算 17 * 23。",
