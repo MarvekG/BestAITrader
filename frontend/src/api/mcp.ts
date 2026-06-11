@@ -49,6 +49,14 @@ export interface MCPPromptResult {
   message?: string;
 }
 
+export interface MCPToolInvokeResult {
+  status: 'success' | 'error';
+  name?: string;
+  tool_name?: string;
+  result?: unknown;
+  message?: string;
+}
+
 export const mcpApi = {
   list: async (): Promise<MCPServerListResult> => {
     return apiClient.get('/mcp/servers');
@@ -73,5 +81,10 @@ export const mcpApi = {
   },
   getPrompt: async (): Promise<MCPPromptResult> => {
     return apiClient.get('/mcp/prompt');
+  },
+  invokeTool: async (name: string, toolName: string, argumentsPayload: Record<string, unknown>): Promise<MCPToolInvokeResult> => {
+    return apiClient.post(`/mcp/servers/${encodeURIComponent(name)}/tools/${encodeURIComponent(toolName)}/invoke`, {
+      arguments: argumentsPayload,
+    });
   },
 };

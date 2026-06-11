@@ -43,7 +43,7 @@ import type { NewsPluginBatchUploadResult, NewsPluginItem, NewsPluginMutationRes
 import { skillsApi } from '../api/skills';
 import type { SkillItem } from '../api/skills';
 import { mcpApi } from '../api/mcp';
-import type { MCPServerItem, MCPToolItem } from '../api/mcp';
+import type { MCPServerItem, MCPToolInvokeResult, MCPToolItem } from '../api/mcp';
 import { useTranslation } from 'react-i18next';
 import { getApiErrorMessage, getApiErrorResponseData } from '../utils/errorUtils';
 import { useSearchParams } from 'react-router-dom';
@@ -294,6 +294,10 @@ export const SettingsPage: React.FC = () => {
   const [mcpToolsLoading, setMcpToolsLoading] = useState(false);
   const [mcpToolsServerName, setMcpToolsServerName] = useState('');
   const [mcpTools, setMcpTools] = useState<MCPToolItem[]>([]);
+  const [mcpInvokeTool, setMcpInvokeTool] = useState<MCPToolItem | null>(null);
+  const [mcpInvokeArguments, setMcpInvokeArguments] = useState('{}');
+  const [mcpInvokeResult, setMcpInvokeResult] = useState<MCPToolInvokeResult | null>(null);
+  const [mcpInvokeLoading, setMcpInvokeLoading] = useState(false);
   const [mcpPreviewTools, setMcpPreviewTools] = useState<MCPToolItem[]>([]);
   const [mcpPreviewLoading, setMcpPreviewLoading] = useState(false);
   const [mcpPrompt, setMcpPrompt] = useState('');
@@ -1097,6 +1101,46 @@ export const SettingsPage: React.FC = () => {
       message.error(getApiErrorMessage(error, t('settings.test_failed')));
     } finally {
       setMcpToolsLoading(false);
+    }
+  };
+
+  const openMcpInvokeModal = (tool: MCPToolItem) => {
+    setMcpInvokeTool(tool);
+    setMcpInvokeArguments('{}');
+    setMcpInvokeResult(null);
+  };
+
+  const handleInvokeMcpTool = async () => {
+    if (!mcpInvokeTool) {
+      return;
+    }
+    let parsedArguments: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(mcpInvokeArguments || '{}') as unknown;
+      if (!isRecord(parsed)) {
+        message.error(t('settings.mcp.invoke_arguments_invalid'));
+        return;
+      }
+      parsedArguments = parsed;
+    } catch {
+      message.error(t('settings.mcp.invoke_arguments_invalid'));
+      return;
+    }
+
+    setMcpInvokeLoading(true);
+    setMcpInvokeResult(null);
+    try {
+      const res = await mcpApi.invokeTool(mcpInvokeTool.server, mcpInvokeTool.name, parsedArguments);
+      setMcpInvokeResult(res);
+      if (res.status === 'success') {
+        message.success(t('settings.mcp.invoke_success'));
+      } else {
+        message.error(res.message || t('settings.mcp.invoke_failed'));
+      }
+    } catch (error) {
+      message.error(getApiErrorMessage(error, t('settings.mcp.invoke_failed')));
+    } finally {
+      setMcpInvokeLoading(false);
     }
   };
 
@@ -1982,6 +2026,16 @@ export const SettingsPage: React.FC = () => {
       key: 'description',
       ellipsis: true,
       render: (value: string) => value || '-',
+    },
+    {
+      title: t('settings.mcp.actions'),
+      key: 'actions',
+      width: 120,
+      render: (_, record) => (
+        <Button size="small" onClick={() => openMcpInvokeModal(record)}>
+          {t('settings.mcp.invoke_tool')}
+        </Button>
+      ),
     },
   ];
 
@@ -2874,6 +2928,47 @@ export const SettingsPage: React.FC = () => {
           scroll={{ x: 760 }}
           size="small"
         />
+      </Modal>
+
+      <Modal
+        open={!!mcpInvokeTool}
+        title={mcpInvokeTool ? t('settings.mcp.invoke_title', { name: mcpInvokeTool.name }) : ''}
+        onCancel={() => setMcpInvokeTool(null)}
+        onOk={() => void handleInvokeMcpTool()}
+        okText={t('settings.mcp.invoke_tool')}
+        cancelText={t('common.cancel')}
+        confirmLoading={mcpInvokeLoading}
+        width={900}
+      >
+        {mcpInvokeTool && (
+          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <div>
+              <div className="text-white font-medium">{t('settings.mcp.tool_description')}</div>
+              <div style={diagnosticPanelStyle}>{mcpInvokeTool.description || '-'}</div>
+            </div>
+            <div>
+              <div className="text-white font-medium">{t('settings.mcp.input_schema')}</div>
+              <pre style={diagnosticPanelStyle}>{JSON.stringify(mcpInvokeTool.input_schema || {}, null, 2)}</pre>
+            </div>
+            <div>
+              <div className="text-white font-medium">{t('settings.mcp.invoke_arguments')}</div>
+              <Input.TextArea
+                value={mcpInvokeArguments}
+                onChange={(event) => setMcpInvokeArguments(event.target.value)}
+                autoSize={{ minRows: 6, maxRows: 14 }}
+                placeholder={'{"query":"AI news"}'}
+              />
+            </div>
+            {mcpInvokeResult && (
+              <div>
+                <div className="text-white font-medium">{t('settings.mcp.invoke_result')}</div>
+                <pre style={{ ...diagnosticPanelStyle, maxHeight: 360 }}>
+                  {JSON.stringify(mcpInvokeResult, null, 2)}
+                </pre>
+              </div>
+            )}
+          </Space>
+        )}
       </Modal>
 
       <Modal
