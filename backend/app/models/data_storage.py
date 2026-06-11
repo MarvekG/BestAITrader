@@ -346,6 +346,9 @@ class  StockValuationHistory(Base):
   change_percent  =  Column(Float)  #  当日涨跌幅  (%)
   total_market_value  =  Column(BigInteger)  #  总市值  (元)
   circulating_market_value  =  Column(BigInteger)  #  流通市值  (元)
+  total_share  =  Column(Float)  #  总股本  (股)
+  float_share  =  Column(Float)  #  流通股本  (股)
+  free_share  =  Column(Float)  #  自由流通股本  (股)
   pe_ttm  =  Column(Float)  #  市盈率  (TTM)
   pe_static  =  Column(Float)  #  市盈率  (静)
   pb  =  Column(Float)  #  市净率

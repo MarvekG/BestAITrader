@@ -248,6 +248,9 @@ class FundamentalSource:
             "dividend_yield": val.dividend_yield,
             "total_mv": val.total_market_value,
             "float_mv": val.circulating_market_value,
+            "total_share": val.total_share,
+            "float_share": val.float_share,
+            "free_share": val.free_share,
         }
         return format_payload_values("fundamental.valuation", payload)
 

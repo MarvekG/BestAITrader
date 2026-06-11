@@ -54,16 +54,33 @@ class StockTools:
 
     @staticmethod
     def get_stock_basic_info(stock_code: str) -> Dict[str, Any]:
-        """获取股票基础信息 (Get basic stock info)"""
+        """获取股票基础信息。
+
+        Args:
+            stock_code: 标准股票代码。
+
+        Returns:
+            股票基础信息；股本字段来自最新估值表记录，使用“股”口径。
+        """
         with SessionLocal() as db:
             stock = db.query(StockBasic).filter(StockBasic.stock_code == stock_code).first()
             if stock:
+                latest_valuation = db.query(StockValuationHistory)\
+                    .filter(StockValuationHistory.stock_code == stock_code)\
+                    .order_by(desc(StockValuationHistory.data_date))\
+                    .first()
+                total_share = latest_valuation.total_share if latest_valuation else None
+                float_share = latest_valuation.float_share if latest_valuation else None
                 return {
                     "stock_code": stock.stock_code,
                     "stock_name": stock.name,
                     "industry": stock.industry,
                     "market": stock.market,
-                    "list_date": stock.list_date
+                    "list_date": stock.list_date,
+                    "total_share": total_share,
+                    "float_share": float_share,
+                    "share_unit": "shares" if total_share or float_share else None,
+                    "share_source": "stock_valuation_history" if total_share or float_share else None,
                 }
         return {}
 

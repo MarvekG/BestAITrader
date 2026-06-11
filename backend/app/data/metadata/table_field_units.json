@@ -1166,6 +1166,15 @@
         "scale": 1e-9
       },
       "precision": 2
+    },
+    "total_share": {
+      "$ref": "shares"
+    },
+    "float_share": {
+      "$ref": "shares"
+    },
+    "free_share": {
+      "$ref": "shares"
     }
   },
   "fundamental.northbound_flow": {
@@ -2211,7 +2220,7 @@
       "_unused_update_flag"
     ],
     "total_share": {
-      "$ref": "shares"
+      "$ref": "cny_to_hundred_million"
     }
   },
   "data.stock_cashflow_statement": {

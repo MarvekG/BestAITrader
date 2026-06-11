@@ -142,7 +142,7 @@ def test_format_payload_values_uses_default_ref_for_financial_statements(monkeyp
     assert income["basic_eps"] == "1.2346元"
     assert income["report_date"] == "2025-12-31"
     assert balance["total_assets"] == "678.9亿元"
-    assert balance["total_share"] == "100000000股"
+    assert balance["total_share"] == "1亿元"
     assert cashflow["n_cashflow_act"] == "32.1亿元"
 
 
@@ -1420,7 +1420,7 @@ def test_financial_context_includes_localized_balance_sheet_data(monkeypatch):
     assert income_history[0]["data"]["营业总收入"] == "100亿元"
     assert latest_balance["data"]["货币资金"] == "123.45亿元"
     assert latest_balance["data"]["资产总计"] == "678.9亿元"
-    assert latest_balance["data"]["实收资本(或股本)"] == "100000000股"
+    assert latest_balance["data"]["实收资本(或股本金额)"] == "1亿元"
     assert latest_balance["meta"]["报告期"] == "2025-12-31"
     assert balance_history[0]["data"]["货币资金"] == "123.45亿元"
     assert latest_cashflow["data"]["经营活动产生的现金流量净额"] == "321亿元"
