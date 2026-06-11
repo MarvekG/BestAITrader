@@ -2,14 +2,25 @@ from typing import Any, Dict
 
 from fastapi import APIRouter
 
-from app.ai.agentic.mcp.models import MCPServerCreateRequest, MCPServerUpdateRequest, MCPToolInvokeRequest
+from app.ai.agentic.mcp.models import (
+    MCPServerCreateRequest,
+    MCPServerUpdateRequest,
+    MCPToolInvokeRequest,
+    MCPToolPreviewRequest,
+)
 from app.ai.agentic.mcp.registry import (
     create_mcp_server,
     delete_mcp_server,
     list_mcp_servers,
     update_mcp_server,
 )
-from app.ai.agentic.mcp.runtime import MCPRuntimeError, build_mcp_catalog_prompt, invoke_mcp_tool, list_mcp_tools
+from app.ai.agentic.mcp.runtime import (
+    MCPRuntimeError,
+    build_mcp_catalog_prompt,
+    invoke_mcp_tool,
+    list_mcp_tools,
+    preview_mcp_tools,
+)
 from app.core.logger import get_logger
 
 
@@ -43,7 +54,9 @@ async def list_registered_mcp_servers() -> Dict[str, Any]:
 
 
 @router.post("/servers", response_model=Dict[str, Any])
-async def create_registered_mcp_server(request: MCPServerCreateRequest) -> Dict[str, Any]:
+async def create_registered_mcp_server(
+    request: MCPServerCreateRequest,
+) -> Dict[str, Any]:
     """创建 MCP Server 配置。
 
     Args:
@@ -61,8 +74,27 @@ async def create_registered_mcp_server(request: MCPServerCreateRequest) -> Dict[
         return _error_response(str(exc))
 
 
+@router.post("/tools/preview", response_model=Dict[str, Any])
+async def preview_registered_mcp_server_tools(request: MCPToolPreviewRequest) -> Dict[str, Any]:
+    """用未保存配置预览 MCP Server 工具。
+
+    Args:
+        request: MCP 工具预览请求。
+
+    Returns:
+        MCP 工具列表。
+    """
+    try:
+        return await preview_mcp_tools(request)
+    except (ValueError, MCPRuntimeError) as exc:
+        return _error_response(str(exc))
+
+
 @router.put("/servers/{name}", response_model=Dict[str, Any])
-async def update_registered_mcp_server(name: str, request: MCPServerUpdateRequest) -> Dict[str, Any]:
+async def update_registered_mcp_server(
+    name: str,
+    request: MCPServerUpdateRequest,
+) -> Dict[str, Any]:
     """更新 MCP Server 配置。
 
     Args:

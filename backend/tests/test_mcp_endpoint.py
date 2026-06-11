@@ -1,11 +1,7 @@
-from app.ai.agentic.mcp import registry as mcp_registry
+from app.models.system_setting import SystemSetting
 
 
-def test_mcp_server_crud_api(client, auth_headers, tmp_path, monkeypatch):
-    root = tmp_path / "runtimes" / "mcp"
-    monkeypatch.setattr(mcp_registry, "MCP_RUNTIME_ROOT", root)
-    monkeypatch.setattr(mcp_registry, "MCP_SERVERS_FILE", root / "servers.json")
-
+def test_mcp_server_crud_api(client, auth_headers, db_session):
     create_response = client.post(
         "/api/v1/mcp/servers",
         headers=auth_headers,
@@ -13,12 +9,18 @@ def test_mcp_server_crud_api(client, auth_headers, tmp_path, monkeypatch):
             "name": "公告检索",
             "enabled": True,
             "url": "http://127.0.0.1:8000/mcp",
+            "token": "secret-token",
+            "allowed_tools": ["search"],
         },
     )
 
     assert create_response.status_code == 200
     assert create_response.json()["status"] == "success"
-    assert set(create_response.json()["server"]) == {"name", "enabled", "url"}
+    assert set(create_response.json()["server"]) == {"name", "enabled", "url", "allowed_tools"}
+    assert "token" not in create_response.json()["server"]
+    setting = db_session.query(SystemSetting).filter(SystemSetting.key == "mcp.servers").one()
+    assert setting.user_id is None
+    assert any(item["name"] == "公告检索" and item["token"] == "secret-token" for item in setting.value["servers"])
 
     list_response = client.get("/api/v1/mcp/servers", headers=auth_headers)
     assert list_response.status_code == 200

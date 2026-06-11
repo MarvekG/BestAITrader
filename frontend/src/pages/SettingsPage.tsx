@@ -103,6 +103,8 @@ type MCPServerFormValues = {
   name: string;
   enabled?: boolean;
   url: string;
+  token?: string;
+  allowed_tools?: string[];
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -287,6 +289,8 @@ export const SettingsPage: React.FC = () => {
   const [mcpToolsLoading, setMcpToolsLoading] = useState(false);
   const [mcpToolsServerName, setMcpToolsServerName] = useState('');
   const [mcpTools, setMcpTools] = useState<MCPToolItem[]>([]);
+  const [mcpPreviewTools, setMcpPreviewTools] = useState<MCPToolItem[]>([]);
+  const [mcpPreviewLoading, setMcpPreviewLoading] = useState(false);
   const [mcpPrompt, setMcpPrompt] = useState('');
   const [mcpPromptLoading, setMcpPromptLoading] = useState(false);
   const [mcpForm] = Form.useForm<MCPServerFormValues>();
@@ -937,14 +941,51 @@ export const SettingsPage: React.FC = () => {
 
   const openMcpCreateModal = () => {
     setEditingMcpServer(null);
-    mcpForm.setFieldsValue({ name: '', enabled: false, url: '' });
+    setMcpPreviewTools([]);
+    mcpForm.setFieldsValue({ name: '', enabled: false, url: '', token: '', allowed_tools: [] });
     setMcpModalOpen(true);
   };
 
   const openMcpEditModal = (server: MCPServerItem) => {
     setEditingMcpServer(server);
-    mcpForm.setFieldsValue(server);
+    setMcpPreviewTools((server.allowed_tools || []).map((tool) => ({
+      server: server.name,
+      name: tool,
+      langchain_name: tool,
+      description: '',
+      input_schema: {},
+    })));
+    mcpForm.setFieldsValue({ ...server, token: '', allowed_tools: server.allowed_tools || [] });
     setMcpModalOpen(true);
+  };
+
+  const handlePreviewMcpTools = async () => {
+    const values = await mcpForm.validateFields(['name', 'url', 'token']);
+    setMcpPreviewLoading(true);
+    try {
+      const res = await mcpApi.previewTools({
+        name: values.name.trim() || 'preview',
+        url: values.url.trim(),
+        token: values.token?.trim() || '',
+      });
+      if (res.status === 'success') {
+        const items = res.items || [];
+        setMcpPreviewTools(items);
+        mcpForm.setFieldValue(
+          'allowed_tools',
+          (mcpForm.getFieldValue('allowed_tools') || []).filter((tool: string) =>
+            items.some((item) => item.name === tool),
+          ),
+        );
+        message.success(t('settings.mcp.test_success', { count: items.length }));
+      } else {
+        message.error(res.message || t('settings.mcp.tools_load_failed'));
+      }
+    } catch (error) {
+      message.error(getApiErrorMessage(error, t('settings.test_failed')));
+    } finally {
+      setMcpPreviewLoading(false);
+    }
   };
 
   const handleSaveMcpServer = async () => {
@@ -955,9 +996,16 @@ export const SettingsPage: React.FC = () => {
         name: values.name.trim(),
         enabled: Boolean(values.enabled),
         url: values.url.trim(),
+        token: values.token?.trim() || '',
+        allowed_tools: values.allowed_tools || [],
       };
       const res = editingMcpServer
-        ? await mcpApi.update(editingMcpServer.name, { enabled: payload.enabled, url: payload.url })
+        ? await mcpApi.update(editingMcpServer.name, {
+          enabled: payload.enabled,
+          url: payload.url,
+          token: payload.token,
+          allowed_tools: payload.allowed_tools,
+        })
         : await mcpApi.create(payload);
       if (res.status === 'success') {
         message.success(t('settings.mcp.saved'));
@@ -1868,6 +1916,17 @@ export const SettingsPage: React.FC = () => {
       render: (value: string) => <Tooltip title={value}>{value}</Tooltip>,
     },
     {
+      title: t('settings.mcp.allowed_tools'),
+      dataIndex: 'allowed_tools',
+      key: 'allowed_tools',
+      width: 220,
+      render: (value?: string[]) => (
+        <Space wrap size={[4, 4]}>
+          {(value || []).map((tool) => <Tag key={tool}>{tool}</Tag>)}
+        </Space>
+      ),
+    },
+    {
       title: t('settings.mcp.actions'),
       key: 'actions',
       width: 340,
@@ -2766,6 +2825,26 @@ export const SettingsPage: React.FC = () => {
             ]}
           >
             <Input />
+          </Form.Item>
+          <Form.Item label={t('settings.mcp.token')} name="token">
+            <Input.Password autoComplete="off" />
+          </Form.Item>
+          <Form.Item>
+            <Button onClick={() => void handlePreviewMcpTools()} loading={mcpPreviewLoading}>
+              {t('settings.mcp.refresh_tools')}
+            </Button>
+          </Form.Item>
+          <Form.Item
+            label={t('settings.mcp.allowed_tools')}
+            name="allowed_tools"
+            rules={[{ required: true, message: t('settings.mcp.allowed_tools_required') }]}
+          >
+            <Select
+              mode="multiple"
+              options={mcpPreviewTools.map((tool) => ({ value: tool.name, label: tool.name }))}
+              placeholder={t('settings.mcp.allowed_tools_placeholder')}
+              disabled={mcpPreviewTools.length === 0}
+            />
           </Form.Item>
           <Form.Item label={t('settings.mcp.enabled')} name="enabled" valuePropName="checked">
             <Switch />

@@ -4,6 +4,11 @@ export interface MCPServerItem {
   name: string;
   enabled: boolean;
   url: string;
+  allowed_tools: string[];
+}
+
+export interface MCPServerSavePayload extends MCPServerItem {
+  token?: string;
 }
 
 export interface MCPServerListResult {
@@ -48,11 +53,14 @@ export const mcpApi = {
   list: async (): Promise<MCPServerListResult> => {
     return apiClient.get('/mcp/servers');
   },
-  create: async (payload: MCPServerItem): Promise<MCPServerMutationResult> => {
+  create: async (payload: MCPServerSavePayload): Promise<MCPServerMutationResult> => {
     return apiClient.post('/mcp/servers', payload);
   },
-  update: async (name: string, payload: Partial<Pick<MCPServerItem, 'enabled' | 'url'>>): Promise<MCPServerMutationResult> => {
+  update: async (name: string, payload: Partial<Pick<MCPServerSavePayload, 'enabled' | 'url' | 'token' | 'allowed_tools'>>): Promise<MCPServerMutationResult> => {
     return apiClient.put(`/mcp/servers/${encodeURIComponent(name)}`, payload);
+  },
+  previewTools: async (payload: Pick<MCPServerSavePayload, 'name' | 'url' | 'token'>): Promise<MCPToolsResult> => {
+    return apiClient.post('/mcp/tools/preview', payload);
   },
   delete: async (name: string): Promise<MCPServerMutationResult> => {
     return apiClient.delete(`/mcp/servers/${encodeURIComponent(name)}`);

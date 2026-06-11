@@ -54,22 +54,25 @@ Frontend Settings
 
 ## 4. 配置模型
 
-MCP Server 配置存储在运行时目录，例如 `runtimes/mcp/servers.json`。该目录用于本地运行态文件，不作为源码配置提交。
+MCP Server 配置存储在系统配置表 `system_settings`，使用全局 key `mcp.servers`，不再写运行时 JSON 文件。
 
-当配置文件不存在时，系统预置一个默认禁用的 HTTP MCP Server：`name=网页抓取`、`url=http://scrapling-mcp:8765/mcp`。用户删除或保存配置后，以运行时配置文件为准，不在每次启动时反复重建默认项。
+当系统配置不存在时，系统预置一个默认禁用的 HTTP MCP Server：`name=网页抓取`、`url=http://scrapling-mcp:8765/mcp`。用户删除或保存配置后，以系统配置为准，不在每次启动时反复重建默认项。
 
 配置字段：
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `name` | string | 唯一名称，正则 `^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$` |
+| `name` | string | 唯一名称，非空且最长 64 字符，允许中文 |
 | `enabled` | bool | 是否进入 Agent 工具池 |
 | `url` | string | MCP HTTP Server 绝对 URL，只接受 `http://` 或 `https://` |
+| `token` | string | 可选鉴权 token，只写入配置文件，不在管理 API 列表中回显 |
+| `allowed_tools` | list[string] | 提交前通过工具预览获得并选择的工具名；只有选中的工具会暴露给 Agent |
 
 配置安全策略：
 
-- MCP 配置文件位于 `runtimes/mcp/servers.json`，由运行环境负责保护，不做字段级脱敏。
+- MCP 配置存储在 `system_settings`，管理 API 不回显 `token`。
 - v1 只支持 HTTP MCP Server，不支持本地 stdio 命令。
+- 前端新增/编辑必须先用 `url` 和可选 `token` 刷新可用工具，并选择至少一个工具后才能保存。
 
 ## 5. 工具命名与 Schema 映射
 
@@ -121,6 +124,7 @@ API 草案：
 | --- | --- | --- |
 | `GET` | `/api/v1/mcp/servers` | 列出 MCP Server 完整配置 |
 | `POST` | `/api/v1/mcp/servers` | 新增 Server 配置 |
+| `POST` | `/api/v1/mcp/tools/preview` | 用未保存的 url/token 预览可用 MCP tools |
 | `PUT` | `/api/v1/mcp/servers/{name}` | 更新 Server 配置 |
 | `DELETE` | `/api/v1/mcp/servers/{name}` | 删除 Server 配置 |
 | `POST` | `/api/v1/mcp/servers/{name}/test` | 测试连接并返回 server info |
@@ -138,8 +142,8 @@ API 草案：
 
 页面能力：
 
-- Server 列表：name、enabled、url、工具数量、最近连接状态。
-- 新增/编辑抽屉：填写 name、enabled、url。
+- Server 列表：name、enabled、url、已选择工具、最近连接状态。
+- 新增/编辑抽屉：填写 name、enabled、url、可选 token；刷新工具后选择允许暴露的工具。
 - 连接测试：调用 `/test`，展示 server info、耗时、错误堆栈摘要。
 - 工具试调用：根据 JSON schema 提供 JSON 参数编辑器，显示结构化结果。
 - Prompt 预览：复用 Skills prompt 预览模式，展示注入 Agent 的 MCP catalog。
@@ -164,7 +168,7 @@ v1 推荐文件存储，理由是当前 runtime extensions 已以文件系统管
 
 运行时状态：
 
-- Server 配置：持久化到 `runtimes/mcp/servers.json`。
+- Server 配置：持久化到 `system_settings` 全局 key `mcp.servers`。
 - 调用审计：先写结构化日志；如需要前端历史，再新增 DB 表，不在 v1 强行落表。
 
 ## 11. 实施步骤

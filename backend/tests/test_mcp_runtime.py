@@ -2,19 +2,11 @@ import pytest
 
 from app.ai.agentic.mcp import registry as mcp_registry
 from app.ai.agentic.mcp import runtime as mcp_runtime
-from app.ai.agentic.mcp.models import MCPServerCreateRequest, MCPServerUpdateRequest
+from app.ai.agentic.mcp.models import MCPServerConfig, MCPServerCreateRequest, MCPServerUpdateRequest
 from app.ai.agentic.mcp.runtime import build_mcp_catalog_prompt
 
 
-@pytest.fixture
-def mcp_runtime_root(tmp_path, monkeypatch):
-    root = tmp_path / "runtimes" / "mcp"
-    monkeypatch.setattr(mcp_registry, "MCP_RUNTIME_ROOT", root)
-    monkeypatch.setattr(mcp_registry, "MCP_SERVERS_FILE", root / "servers.json")
-    return root
-
-
-def test_default_mcp_server_is_available_when_config_file_missing(mcp_runtime_root):
+def test_default_mcp_server_is_available_when_system_config_missing(db_session):
     list_result = mcp_registry.list_mcp_servers()
 
     assert list_result["count"] == 1
@@ -22,21 +14,26 @@ def test_default_mcp_server_is_available_when_config_file_missing(mcp_runtime_ro
         "name": "网页抓取",
         "enabled": False,
         "url": "http://scrapling-mcp:8765/mcp",
+        "allowed_tools": [],
     }
-    assert not (mcp_runtime_root / "servers.json").exists()
 
 
-def test_create_update_delete_mcp_server_config(mcp_runtime_root):
+def test_create_update_delete_mcp_server_config(db_session):
     create_result = mcp_registry.create_mcp_server(
         MCPServerCreateRequest(
             name="公告检索",
             url="http://127.0.0.1:8000/mcp",
+            token="secret-token",
+            allowed_tools=["search"],
         )
     )
 
     assert create_result["status"] == "success"
-    assert set(create_result["server"]) == {"name", "enabled", "url"}
-    assert (mcp_runtime_root / "servers.json").exists()
+    assert set(create_result["server"]) == {"name", "enabled", "url", "allowed_tools"}
+    assert "token" not in create_result["server"]
+
+    stored_config = mcp_registry.get_mcp_server_config("公告检索")
+    assert stored_config.token == "secret-token"
 
     list_result = mcp_registry.list_mcp_servers()
     assert list_result["count"] == 2
@@ -59,7 +56,7 @@ def test_mcp_url_rejects_unsafe_values(url):
         mcp_registry.validate_mcp_url(url)
 
 
-def test_build_mcp_catalog_prompt_lists_enabled_servers(mcp_runtime_root):
+def test_build_mcp_catalog_prompt_lists_enabled_servers(db_session):
     mcp_registry.update_mcp_server(
         "网页抓取",
         MCPServerUpdateRequest(enabled=True),
@@ -71,7 +68,7 @@ def test_build_mcp_catalog_prompt_lists_enabled_servers(mcp_runtime_root):
 
 
 @pytest.mark.asyncio
-async def test_mcp_runtime_lists_invokes_and_filters_adapter_tools(monkeypatch, mcp_runtime_root):
+async def test_mcp_runtime_lists_invokes_and_filters_adapter_tools(monkeypatch, db_session):
     class FakeArgsSchema:
         @classmethod
         def model_json_schema(cls):
@@ -93,6 +90,7 @@ async def test_mcp_runtime_lists_invokes_and_filters_adapter_tools(monkeypatch, 
             name="fake",
             enabled=True,
             url="http://127.0.0.1:8000/mcp",
+            allowed_tools=["echo"],
         )
     )
     monkeypatch.setattr(mcp_runtime, "list_mcp_langchain_tools", fake_get_tools)
@@ -105,3 +103,22 @@ async def test_mcp_runtime_lists_invokes_and_filters_adapter_tools(monkeypatch, 
     assert tools["items"][0]["name"] == "echo"
     assert tools["items"][0]["langchain_name"] == "fake__echo"
     assert result["result"] == {"content": "hello"}
+
+
+def test_mcp_adapter_config_includes_token_and_filters_allowed_tools():
+    class FakeTool:
+        def __init__(self, name):
+            self.name = name
+
+    config = MCPServerConfig(
+        name="网页抓取",
+        url="http://127.0.0.1:8000/mcp",
+        token="secret-token",
+        allowed_tools=["echo"],
+    )
+
+    adapter_config = mcp_runtime.build_adapter_config(config)
+    filtered_tools = mcp_runtime.filter_allowed_tools(config, [FakeTool("网页抓取__echo"), FakeTool("网页抓取__other")])
+
+    assert adapter_config["headers"] == {"Authorization": "Bearer secret-token"}
+    assert [tool.name for tool in filtered_tools] == ["网页抓取__echo"]

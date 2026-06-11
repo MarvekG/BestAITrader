@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -13,6 +13,8 @@ class MCPServerConfig(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
     enabled: bool = False
     url: str = Field(..., min_length=1)
+    token: str = ""
+    allowed_tools: List[str] = Field(default_factory=list)
 
 
 class MCPServerCreateRequest(BaseModel):
@@ -23,6 +25,8 @@ class MCPServerCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=64)
     enabled: bool = False
     url: str = Field(..., min_length=1)
+    token: str = ""
+    allowed_tools: List[str] = Field(..., min_length=1)
 
 
 class MCPServerUpdateRequest(BaseModel):
@@ -32,6 +36,18 @@ class MCPServerUpdateRequest(BaseModel):
 
     enabled: Optional[bool] = None
     url: Optional[str] = Field(default=None, min_length=1)
+    token: Optional[str] = None
+    allowed_tools: Optional[List[str]] = Field(default=None, min_length=1)
+
+
+class MCPToolPreviewRequest(BaseModel):
+    """提交前预览 MCP Server 工具的请求体。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field("preview", min_length=1, max_length=64)
+    url: str = Field(..., min_length=1)
+    token: str = ""
 
 
 class MCPToolInvokeRequest(BaseModel):

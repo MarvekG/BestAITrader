@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from app.ai.agentic.mcp.registry import get_enabled_mcp_server_configs, get_mcp_server_config
+from app.ai.agentic.mcp.models import MCPServerConfig, MCPToolPreviewRequest
+from app.ai.agentic.mcp.registry import get_enabled_mcp_server_configs, get_mcp_server_config, validate_mcp_url
 from app.core.logger import get_logger
 
 
@@ -29,7 +30,7 @@ async def get_mcp_tools() -> List[Any]:
                 extra={"name": config.name, "error": str(exc)},
             )
             continue
-        tools.extend(server_tools)
+        tools.extend(filter_allowed_tools(config, server_tools))
     return tools
 
 
@@ -66,7 +67,10 @@ async def list_mcp_langchain_tools(name: str) -> List[Any]:
         client = MultiServerMCPClient({config.name: build_adapter_config(config)})
         return await client.get_tools()
     except ImportError as exc:
-        raise MCPRuntimeError("Python package `langchain-mcp-adapters` is required to use MCP tools") from exc
+        raise MCPRuntimeError(
+            "Python package `langchain-mcp-adapters` is required to use MCP tools. "
+            "Install backend requirements or rebuild the backend container."
+        ) from exc
     except Exception as exc:
         raise MCPRuntimeError(str(exc)) from exc
 
@@ -83,7 +87,42 @@ def build_adapter_config(config: Any) -> Dict[str, Any]:
     return {
         "transport": "streamable_http",
         "url": config.url,
+        **({"headers": {"Authorization": f"Bearer {config.token}"}} if getattr(config, "token", "") else {}),
     }
+
+
+async def preview_mcp_tools(request: MCPToolPreviewRequest) -> Dict[str, Any]:
+    """使用未保存的 MCP 配置预览可用工具。
+
+    Args:
+        request: 预览请求。
+
+    Returns:
+        工具列表响应。
+
+    Raises:
+        MCPRuntimeError: 依赖缺失或工具获取失败时抛出。
+    """
+    config = MCPServerConfig(
+        name=request.name.strip() or "preview",
+        enabled=False,
+        url=validate_mcp_url(request.url),
+        token=str(request.token or "").strip(),
+    )
+    try:
+        from langchain_mcp_adapters.client import MultiServerMCPClient
+
+        client = MultiServerMCPClient({config.name: build_adapter_config(config)})
+        tools = await client.get_tools()
+    except ImportError as exc:
+        raise MCPRuntimeError(
+            "Python package `langchain-mcp-adapters` is required to use MCP tools. "
+            "Install backend requirements or rebuild the backend container."
+        ) from exc
+    except Exception as exc:
+        raise MCPRuntimeError(str(exc)) from exc
+    items = [tool_to_item(config.name, tool) for tool in tools]
+    return {"status": "success", "name": config.name, "count": len(items), "items": items}
 
 
 async def list_mcp_tools(name: str) -> Dict[str, Any]:
@@ -96,7 +135,10 @@ async def list_mcp_tools(name: str) -> Dict[str, Any]:
         工具列表响应。
     """
     tools = await list_mcp_langchain_tools(name)
-    items = [tool_to_item(name, tool) for tool in tools]
+    config = get_mcp_server_config(name)
+    if config is None:
+        raise MCPRuntimeError(f"MCP server not found: {name}")
+    items = [tool_to_item(name, tool) for tool in filter_allowed_tools(config, tools)]
     return {"status": "success", "name": name, "count": len(items), "items": items}
 
 
@@ -114,7 +156,10 @@ async def invoke_mcp_tool(name: str, tool_name: str, arguments: Dict[str, Any]) 
     Raises:
         MCPRuntimeError: 工具不存在或调用失败时抛出。
     """
-    for tool in await list_mcp_langchain_tools(name):
+    config = get_mcp_server_config(name)
+    if config is None:
+        raise MCPRuntimeError(f"MCP server not found: {name}")
+    for tool in filter_allowed_tools(config, await list_mcp_langchain_tools(name)):
         if normalize_tool_name(name, str(getattr(tool, "name", "") or "")) == tool_name:
             try:
                 result = await tool.ainvoke(arguments or {})
@@ -122,6 +167,26 @@ async def invoke_mcp_tool(name: str, tool_name: str, arguments: Dict[str, Any]) 
                 raise MCPRuntimeError(str(exc)) from exc
             return {"status": "success", "name": name, "tool_name": tool_name, "result": json_safe(result)}
     raise MCPRuntimeError(f"MCP tool not found: {tool_name}")
+
+
+def filter_allowed_tools(config: MCPServerConfig, tools: List[Any]) -> List[Any]:
+    """按配置筛选允许暴露的 MCP 工具。
+
+    Args:
+        config: MCP Server 配置。
+        tools: 官方 adapter 返回的工具列表。
+
+    Returns:
+        允许暴露的工具列表。
+    """
+    allowed_tools = set(config.allowed_tools)
+    if not allowed_tools:
+        return []
+    return [
+        tool
+        for tool in tools
+        if normalize_tool_name(config.name, str(getattr(tool, "name", "") or "")) in allowed_tools
+    ]
 
 
 def tool_to_item(name: str, tool: Any) -> Dict[str, Any]:

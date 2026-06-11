@@ -1,66 +1,66 @@
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from urllib.parse import urlparse
 from typing import Any, Dict, List
+from urllib.parse import urlparse
 
 from app.ai.agentic.mcp.models import MCPServerConfig, MCPServerCreateRequest, MCPServerUpdateRequest
-from app.core.config import PROJECT_ROOT
+from app.crud.system_setting import read_system_setting, save_system_setting
 
 
-MCP_RUNTIME_ROOT = PROJECT_ROOT.parent / "runtimes" / "mcp"
-MCP_SERVERS_FILE = MCP_RUNTIME_ROOT / "servers.json"
+MCP_SETTINGS_KEY = "mcp.servers"
+MCP_SETTINGS_DESCRIPTION = "Global MCP server runtime configuration"
 DEFAULT_MCP_SERVERS = [
     {
         "name": "网页抓取",
         "enabled": False,
         "url": "http://scrapling-mcp:8765/mcp",
+        "token": "",
+        "allowed_tools": [],
     }
 ]
 
+SENSITIVE_CONFIG_FIELDS = {"token"}
 
-def _ensure_runtime_dir() -> None:
-    """确保 MCP 运行时目录存在。"""
-    MCP_RUNTIME_ROOT.mkdir(parents=True, exist_ok=True)
+
+def _default_payload() -> Dict[str, Any]:
+    """返回默认 MCP 系统配置。
+
+    Returns:
+        默认系统配置字典。
+    """
+    return {"servers": DEFAULT_MCP_SERVERS}
 
 
 def _read_raw_payload() -> Dict[str, Any]:
-    """读取 MCP 配置文件原始 JSON。
+    """读取 MCP 系统配置。
 
     Returns:
-        配置文件中的原始字典，文件不存在时返回空 server 列表。
+        系统配置中的原始字典，配置不存在时返回默认 server 列表。
 
     Raises:
-        ValueError: 配置文件不是合法 JSON 对象时抛出。
+        ValueError: 配置不是合法 JSON 对象时抛出。
     """
-    if not MCP_SERVERS_FILE.exists():
-        return {"servers": DEFAULT_MCP_SERVERS}
-    try:
-        payload = json.loads(MCP_SERVERS_FILE.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"MCP server config is not valid JSON: {exc}") from exc
+    payload = read_system_setting(MCP_SETTINGS_KEY, default=_default_payload(), user_id=None)
     if not isinstance(payload, dict):
-        raise ValueError("MCP server config must be a JSON object")
+        raise ValueError("MCP server system config must be a JSON object")
     servers = payload.get("servers")
     if servers is None:
         payload["servers"] = []
     elif not isinstance(servers, list):
-        raise ValueError("MCP server config field `servers` must be a list")
+        raise ValueError("MCP server system config field `servers` must be a list")
     return payload
 
 
 def _write_configs(configs: List[MCPServerConfig]) -> None:
-    """将 MCP Server 配置写入运行时文件。
+    """将 MCP Server 配置写入系统配置。
 
     Args:
         configs: MCP Server 配置列表。
     """
-    _ensure_runtime_dir()
     payload = {
         "servers": [config.model_dump(mode="json") for config in sorted(configs, key=lambda item: item.name)],
     }
-    MCP_SERVERS_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    save_system_setting(MCP_SETTINGS_KEY, payload, description=MCP_SETTINGS_DESCRIPTION, user_id=None)
 
 
 def _validate_server_name(name: str) -> str:
@@ -113,7 +113,24 @@ def _validate_config(config: MCPServerConfig) -> MCPServerConfig:
         ValueError: 配置不满足安全约束时抛出。
     """
     config.url = validate_mcp_url(config.url)
+    config.token = str(config.token or "").strip()
+    config.allowed_tools = sorted({str(tool).strip() for tool in config.allowed_tools if str(tool).strip()})
     return config
+
+
+def _public_config(config: MCPServerConfig) -> Dict[str, Any]:
+    """转换为管理 API 可返回的 MCP Server 配置。
+
+    Args:
+        config: MCP Server 配置。
+
+    Returns:
+        移除敏感字段后的配置字典。
+    """
+    payload = config.model_dump(mode="json")
+    for field in SENSITIVE_CONFIG_FIELDS:
+        payload.pop(field, None)
+    return payload
 
 
 def list_mcp_servers() -> Dict[str, Any]:
@@ -122,7 +139,7 @@ def list_mcp_servers() -> Dict[str, Any]:
     Returns:
         管理 API 使用的配置列表响应。
     """
-    items = [config.model_dump(mode="json") for config in load_mcp_server_configs()]
+    items = [_public_config(config) for config in load_mcp_server_configs()]
     return {"status": "success", "count": len(items), "items": items}
 
 
@@ -146,7 +163,6 @@ def get_mcp_server_config(name: str) -> MCPServerConfig | None:
 
     Args:
         name: MCP Server 名称。
-
     Returns:
         找到时返回配置对象，否则返回 None。
     """
@@ -168,7 +184,6 @@ def create_mcp_server(request: MCPServerCreateRequest) -> Dict[str, Any]:
 
     Args:
         request: 创建请求。
-
     Returns:
         创建结果和配置内容。
 
@@ -183,7 +198,7 @@ def create_mcp_server(request: MCPServerCreateRequest) -> Dict[str, Any]:
     )
     configs.append(config)
     _write_configs(configs)
-    return {"status": "success", "server": config.model_dump(mode="json")}
+    return {"status": "success", "server": _public_config(config)}
 
 
 def update_mcp_server(name: str, request: MCPServerUpdateRequest) -> Dict[str, Any]:
@@ -192,7 +207,6 @@ def update_mcp_server(name: str, request: MCPServerUpdateRequest) -> Dict[str, A
     Args:
         name: MCP Server 名称。
         request: 更新请求。
-
     Returns:
         更新后的配置响应。
 
@@ -218,7 +232,7 @@ def update_mcp_server(name: str, request: MCPServerUpdateRequest) -> Dict[str, A
     )
     configs[target_index] = next_config
     _write_configs(configs)
-    return {"status": "success", "server": next_config.model_dump(mode="json")}
+    return {"status": "success", "server": _public_config(next_config)}
 
 
 def delete_mcp_server(name: str) -> Dict[str, Any]:
@@ -226,7 +240,6 @@ def delete_mcp_server(name: str) -> Dict[str, Any]:
 
     Args:
         name: MCP Server 名称。
-
     Returns:
         删除结果。
 
