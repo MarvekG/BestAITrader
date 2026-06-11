@@ -117,6 +117,32 @@ class BaseAgent(ABC):
         """Returns the Pydantic model for the expected output."""
         pass
 
+    def _extract_json_from_content(self, text: str) -> str:
+        """从 markdown 代码围栏或混合文本中提取纯 JSON。
+
+        Args:
+            text: 可能包含 markdown 格式的文本
+
+        Returns:
+            提取的 JSON 字符串
+        """
+        # 尝试提取 ```json ... ```
+        json_block = re.search(r'```json\s*\n(.*?)\n```', text, re.DOTALL)
+        if json_block:
+            return json_block.group(1).strip()
+
+        # 尝试提取 ``` ... ```
+        code_block = re.search(r'```\s*\n(.*?)\n```', text, re.DOTALL)
+        if code_block:
+            return code_block.group(1).strip()
+
+        # 尝试提取第一个完整的 { ... } 对象
+        json_match = re.search(r'\{.*\}', text, re.DOTALL)
+        if json_match:
+            return json_match.group(0)
+
+        return text
+
     def _get_encoding(self):
         try:
             return tiktoken.encoding_for_model(self.model_name)
@@ -466,7 +492,9 @@ class BaseAgent(ABC):
         else:
             parser = PydanticOutputParser(pydantic_object=output_model)
             try:
-                return parser.parse(final_content)
+                # 尝试提取纯 JSON（去除 markdown 代码围栏）
+                cleaned = self._extract_json_from_content(final_content)
+                return parser.parse(cleaned)
             except Exception as e:
                 last_error = e
                 for retry_index in range(STRUCTURED_OUTPUT_RETRY_LIMIT):
@@ -492,7 +520,9 @@ class BaseAgent(ABC):
                     messages.append(retry_response)
                     retry_content = (retry_response.content or "").strip()
                     try:
-                        return parser.parse(retry_content)
+                        # 同样尝试提取纯 JSON
+                        cleaned_retry = self._extract_json_from_content(retry_content)
+                        return parser.parse(cleaned_retry)
                     except Exception as retry_error:
                         last_error = retry_error
 
