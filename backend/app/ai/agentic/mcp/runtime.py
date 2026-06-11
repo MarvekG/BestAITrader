@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 from app.ai.agentic.mcp.models import MCPServerConfig, MCPToolPreviewRequest
-from app.ai.agentic.mcp.registry import get_enabled_mcp_server_configs, get_mcp_server_config, validate_mcp_url
+from app.ai.agentic.mcp.registry import get_enabled_mcp_server_configs, get_mcp_server_config, load_mcp_server_configs, validate_mcp_url
 from app.core.logger import get_logger
 
 
@@ -40,10 +40,21 @@ def build_mcp_catalog_prompt() -> str:
     Returns:
         可注入系统提示词的 MCP catalog 文本。
     """
-    lines = ["# Available MCP Tools", ""]
-    for config in get_enabled_mcp_server_configs():
-        lines.append(f"- {config.name}")
-    return "\n".join(lines).strip() if len(lines) > 2 else ""
+    configs = load_mcp_server_configs()
+    enabled_configs = [config for config in configs if config.enabled and config.allowed_tools]
+    if not enabled_configs:
+        configured_configs = [config for config in configs if config.allowed_tools]
+        if not configured_configs:
+            return ""
+        lines = ["# Available MCP Tools", "", "No MCP server is enabled for LLM tool use.", ""]
+        for config in configured_configs:
+            lines.append(f"- {config.name}: configured but disabled; allowed tools: {', '.join(config.allowed_tools)}")
+        return "\n".join(lines).strip()
+
+    lines = ["# Available MCP Tools", "", "Use MCP tools only when they are relevant to the user request."]
+    for config in enabled_configs:
+        lines.append(f"- {config.name}: {', '.join(config.allowed_tools)}")
+    return "\n".join(lines).strip()
 
 
 async def list_mcp_langchain_tools(name: str) -> List[Any]:

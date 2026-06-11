@@ -6,6 +6,20 @@ from app.ai.agentic.mcp.models import MCPServerConfig, MCPServerCreateRequest, M
 from app.ai.agentic.mcp.runtime import build_mcp_catalog_prompt
 
 
+SCRAPLING_ALLOWED_TOOLS = [
+    "bulk_fetch",
+    "bulk_get",
+    "bulk_stealthy_fetch",
+    "close_session",
+    "fetch",
+    "get",
+    "list_sessions",
+    "open_session",
+    "screenshot",
+    "stealthy_fetch",
+]
+
+
 def test_default_mcp_server_is_available_when_system_config_missing(db_session):
     list_result = mcp_registry.list_mcp_servers()
 
@@ -13,8 +27,8 @@ def test_default_mcp_server_is_available_when_system_config_missing(db_session):
     assert list_result["items"][0] == {
         "name": "网页抓取",
         "enabled": False,
-        "url": "http://scrapling-mcp:8765/mcp",
-        "allowed_tools": [],
+        "url": "http://scrapling.mcp:8765/mcp",
+        "allowed_tools": SCRAPLING_ALLOWED_TOOLS,
     }
 
 
@@ -56,7 +70,15 @@ def test_mcp_url_rejects_unsafe_values(url):
         mcp_registry.validate_mcp_url(url)
 
 
-def test_build_mcp_catalog_prompt_lists_enabled_servers(db_session):
+def test_build_mcp_catalog_prompt_shows_configured_disabled_servers(db_session):
+    prompt = build_mcp_catalog_prompt()
+
+    assert "No MCP server is enabled" in prompt
+    assert "网页抓取" in prompt
+    assert "stealthy_fetch" in prompt
+
+
+def test_build_mcp_catalog_prompt_lists_enabled_server_tools(db_session):
     mcp_registry.update_mcp_server(
         "网页抓取",
         MCPServerUpdateRequest(enabled=True),
@@ -65,6 +87,7 @@ def test_build_mcp_catalog_prompt_lists_enabled_servers(db_session):
     prompt = build_mcp_catalog_prompt()
 
     assert "网页抓取" in prompt
+    assert "bulk_fetch" in prompt
 
 
 @pytest.mark.asyncio

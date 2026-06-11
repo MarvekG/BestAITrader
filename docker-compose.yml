@@ -198,9 +198,9 @@ services:
     networks:
       - best_ai_trader_network
 
-  scrapling-mcp:
+  scrapling.mcp:
     image: ghcr.io/d4vinci/scrapling:latest
-    container_name: best_ai_trader_scrapling_mcp
+    container_name: scrapling.mcp
     restart: unless-stopped
     command: ["mcp", "--http", "--host", "0.0.0.0", "--port", "8765"]
     cpus: "4.0"
