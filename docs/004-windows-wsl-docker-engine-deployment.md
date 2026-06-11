@@ -448,7 +448,7 @@ ls -la backend/.env.example memo/.env.example docker-compose.yml nginx.conf
 到这里，Windows WSL2、Docker Engine、Docker Compose Plugin 和项目代码已经准备完成。应用配置、LiteLLM 配置、启动服务、停止服务和修改配置后的重建命令统一维护在：
 
 ```text
-docs/01-deployment.md
+docs/001-deployment.md
 ```
 
 继续执行部署时，在 WSL Ubuntu 中保持当前项目目录：
