@@ -43,13 +43,7 @@ def build_mcp_catalog_prompt() -> str:
     configs = load_mcp_server_configs()
     enabled_configs = [config for config in configs if config.enabled and config.allowed_tools]
     if not enabled_configs:
-        configured_configs = [config for config in configs if config.allowed_tools]
-        if not configured_configs:
-            return ""
-        lines = ["# Available MCP Tools", "", "No MCP server is enabled for LLM tool use.", ""]
-        for config in configured_configs:
-            lines.append(f"- {config.name}: configured but disabled; allowed tools: {', '.join(config.allowed_tools)}")
-        return "\n".join(lines).strip()
+        return "No MCP tools are enabled for LLM use."
 
     lines = ["# Available MCP Tools", "", "Use MCP tools only when they are relevant to the user request."]
     for config in enabled_configs:

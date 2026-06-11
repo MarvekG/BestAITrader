@@ -73,9 +73,7 @@ def test_mcp_url_rejects_unsafe_values(url):
 def test_build_mcp_catalog_prompt_shows_configured_disabled_servers(db_session):
     prompt = build_mcp_catalog_prompt()
 
-    assert "No MCP server is enabled" in prompt
-    assert "网页抓取" in prompt
-    assert "stealthy_fetch" in prompt
+    assert prompt == "No MCP tools are enabled for LLM use."
 
 
 def test_build_mcp_catalog_prompt_lists_enabled_server_tools(db_session):
