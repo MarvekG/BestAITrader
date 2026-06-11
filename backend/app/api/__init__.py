@@ -20,6 +20,7 @@ def register_api_routes(app: FastAPI) -> None:
         general,
         llm,
         market_watch,
+        mcp,
         news_plugins,
         performance,
         portfolio,
@@ -84,6 +85,7 @@ def register_api_routes(app: FastAPI) -> None:
             dependencies=authenticated,
         )
         app.include_router(skills.router, prefix=f"{prefix}/skills", tags=["skills"], dependencies=authenticated)
+        app.include_router(mcp.router, prefix=f"{prefix}/mcp", tags=["mcp"], dependencies=authenticated)
     app.include_router(
         stock_picker_router,
         prefix=f"{prefix}/ai-stock-picker",

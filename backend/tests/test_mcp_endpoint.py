@@ -1,0 +1,41 @@
+from app.ai.agentic.mcp import registry as mcp_registry
+
+
+def test_mcp_server_crud_api(client, auth_headers, tmp_path, monkeypatch):
+    root = tmp_path / "runtimes" / "mcp"
+    monkeypatch.setattr(mcp_registry, "MCP_RUNTIME_ROOT", root)
+    monkeypatch.setattr(mcp_registry, "MCP_SERVERS_FILE", root / "servers.json")
+
+    create_response = client.post(
+        "/api/v1/mcp/servers",
+        headers=auth_headers,
+        json={
+            "name": "fake_docs",
+            "enabled": True,
+            "url": "http://127.0.0.1:8000/mcp",
+        },
+    )
+
+    assert create_response.status_code == 200
+    assert create_response.json()["status"] == "success"
+    assert set(create_response.json()["server"]) == {"name", "enabled", "url"}
+
+    list_response = client.get("/api/v1/mcp/servers", headers=auth_headers)
+    assert list_response.status_code == 200
+    assert list_response.json()["count"] == 1
+
+    prompt_response = client.get("/api/v1/mcp/prompt", headers=auth_headers)
+    assert prompt_response.status_code == 200
+    assert "fake_docs" in prompt_response.json()["prompt"]
+
+    update_response = client.put(
+        "/api/v1/mcp/servers/fake_docs",
+        headers=auth_headers,
+        json={"enabled": False},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["server"]["enabled"] is False
+
+    delete_response = client.delete("/api/v1/mcp/servers/fake_docs", headers=auth_headers)
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"status": "success", "name": "fake_docs"}
