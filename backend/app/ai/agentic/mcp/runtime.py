@@ -45,7 +45,16 @@ def build_mcp_catalog_prompt() -> str:
     if not enabled_configs:
         return "No MCP tools are enabled for LLM use."
 
-    lines = ["# Available MCP Tools", "", "Use MCP tools only when they are relevant to the user request."]
+    lines = [
+        "# MCP Tool Usage",
+        "",
+        "You may use the following MCP tools when they are relevant to the user's research task.",
+        "Treat MCP results as external evidence: cite the tool/source in your answer and explain conflicts with internal data.",
+        "Do not use MCP tools to place trades or bypass the portfolio manager, risk checks, or TradingService.",
+        "Use only the allowed tools listed for each MCP server.",
+        "",
+        "## Enabled MCP Servers",
+    ]
     for config in enabled_configs:
         lines.append(f"- {config.name}: {', '.join(config.allowed_tools)}")
     return "\n".join(lines).strip()

@@ -86,6 +86,8 @@ def test_build_mcp_catalog_prompt_lists_enabled_server_tools(db_session):
 
     assert "网页抓取" in prompt
     assert "bulk_fetch" in prompt
+    assert "external evidence" in prompt
+    assert "Do not use MCP tools to place trades" in prompt
 
 
 @pytest.mark.asyncio
