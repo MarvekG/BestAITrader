@@ -208,14 +208,23 @@ class BaseAgent(ABC):
         static_context: Dict[str, Any],
         context: Dict[str, Any],
     ) -> list[HumanMessage]:
+        """构建传给 Agent 的紧凑上下文消息。
+
+        Args:
+            static_context: 工作流固定上下文。
+            context: 当前运行时上下文。
+
+        Returns:
+            包含静态上下文和运行时上下文的消息列表。
+        """
         return [
             HumanMessage(content=(
                 "STATIC_CONTEXT:\n"
-                f"{stable_json_dumps(static_context, indent=2)}"
+                f"{stable_json_dumps(static_context)}"
             )),
             HumanMessage(content=(
                 "RUNTIME_CONTEXT:\n"
-                f"{stable_json_dumps(context, indent=2)}"
+                f"{stable_json_dumps(context)}"
             )),
         ]
 

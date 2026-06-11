@@ -1,4 +1,5 @@
 from typing import Dict, Any, List
+from datetime import datetime, timedelta
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
@@ -165,10 +166,16 @@ class CapitalFlowSource:
         return format_payload_values("capital_flow.margin", payload)
 
     def _get_block_trade(self, db: Session, stock_code: str) -> Dict[str, Any]:
-        """获取大宗交易数据"""
+        """获取大宗交易数据（近 30 个自然日全量窗口 + 买方结构聚合）"""
+        window_start = datetime.now().date() - timedelta(days=30)
         trades = db.query(StockBlockTrade).filter(
-            StockBlockTrade.stock_code == stock_code
-        ).order_by(desc(StockBlockTrade.trade_date)).limit(10).all()
+            StockBlockTrade.stock_code == stock_code,
+            StockBlockTrade.trade_date >= window_start,
+        ).order_by(desc(StockBlockTrade.trade_date)).all()
+        if not trades:
+            trades = db.query(StockBlockTrade).filter(
+                StockBlockTrade.stock_code == stock_code
+            ).order_by(desc(StockBlockTrade.trade_date)).limit(10).all()
 
         if not trades:
             return self.status_payload(
@@ -190,10 +197,28 @@ class CapitalFlowSource:
                 buyers[t.buyer] = buyers.get(t.buyer, 0) + (t.amount or 0)
             if t.seller:
                 sellers[t.seller] = sellers.get(t.seller, 0) + (t.amount or 0)
-        
+
+        # 买方类型结构：机构专用 / 营业部 / 其他（基于窗口内全量成交额，避免抽样口径冲突）
+        buyer_type_amounts = {"institution": 0.0, "branch": 0.0, "other": 0.0}
+        for name, amt in buyers.items():
+            if "机构专用" in name:
+                buyer_type_amounts["institution"] += amt
+            elif "营业部" in name or "证券" in name:
+                buyer_type_amounts["branch"] += amt
+            else:
+                buyer_type_amounts["other"] += amt
+        known_buyer_amount = sum(buyer_type_amounts.values())
+        buyer_type_breakdown = {
+            key: {
+                "amount": amt,
+                "ratio_pct": round(amt / known_buyer_amount * 100, 2) if known_buyer_amount else None,
+            }
+            for key, amt in buyer_type_amounts.items()
+        }
+
         # 识别主要买方机构
         top_buyers = sorted(buyers.items(), key=lambda x: x[1], reverse=True)[:3]
-        
+
         # 评估大宗交易意图 (基于平均折溢价率)
         if avg_premium < -5:
             trade_intent = i18n_service.get(ctx_const.BLOCK_TRADE_INTENT_HIGH_DISCOUNT)
@@ -215,26 +240,28 @@ class CapitalFlowSource:
             activity_level = i18n_service.get(ctx_const.BLOCK_TRADE_ACTIVITY_LOW)
 
         trade_list = []
-        for t in trades[:5]:  # 最近5笔大宗交易
+        for t in trades[:10]:  # 最近10笔大宗交易明细
             trade_list.append({
                 "date": str(t.trade_date),
                 "price": t.price,
                 "volume": t.volume,
                 "amount": t.amount,
                 "premium_rate": t.premium_rate,
-                "buyer": t.buyer[:30] if t.buyer else "",
-                "seller": t.seller[:30] if t.seller else ""
+                "buyer": t.buyer if t.buyer else "",
+                "seller": t.seller if t.seller else ""
             })
 
         payload = {
             "data_status": "available",
+            "window_days": 30,
             "count": len(trades),
             "total_amount": total_amount,
             "avg_premium": avg_premium,
             "trade_intent": trade_intent,
             "activity_level": activity_level,
+            "buyer_type_breakdown": buyer_type_breakdown,
             "top_buyers": [
-                {"name": name[:30], "amount": amt}
+                {"name": name, "amount": amt}
                 for name, amt in top_buyers
             ],
             "recent_trades": trade_list

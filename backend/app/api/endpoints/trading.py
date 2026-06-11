@@ -15,7 +15,7 @@ from app.schemas.order import OrderUpdate, PlaceOrderRequest
 from app.core.security import get_current_user
 from app.models.user import User
 from app.models.trade_record import TradeRecord
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 from uuid import UUID
@@ -25,6 +25,14 @@ from datetime import datetime
 from app.core.database import get_db
 from app.core.logger import get_logger
 from app.crud.account import ensure_user_account
+from app.tasks.async_scheduler import async_task_scheduler
+from app.trading.discipline_service import scan_position_disciplines
+from app.trading.discipline_settings import (
+    PositionDisciplineSettingsResponse,
+    PositionDisciplineSettingsUpdate,
+    get_position_discipline_settings,
+    upsert_position_discipline_settings,
+)
 
 # Get logger
 logger = get_logger(__name__)
@@ -33,6 +41,37 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 trading_engine = TradingEngine()
+
+
+@router.get("/discipline-settings", response_model=PositionDisciplineSettingsResponse)
+def read_position_discipline_settings(
+    current_user: User = Depends(get_current_user),
+) -> PositionDisciplineSettingsResponse:
+    """读取当前用户止损止盈扫描设置。"""
+    return get_position_discipline_settings(current_user.id)
+
+
+@router.put("/discipline-settings", response_model=PositionDisciplineSettingsResponse)
+def update_position_discipline_settings(
+    payload: PositionDisciplineSettingsUpdate,
+    current_user: User = Depends(get_current_user),
+) -> PositionDisciplineSettingsResponse:
+    """更新当前用户止损止盈扫描设置。"""
+    try:
+        updated = upsert_position_discipline_settings(current_user.id, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    async_task_scheduler.refresh_schedule()
+    return updated
+
+
+@router.post("/discipline-scan")
+async def scan_position_disciplines_once(
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+) -> dict[str, Any]:
+    """立即执行一次当前用户止损止盈扫描。"""
+    return await scan_position_disciplines(current_user.id, background_tasks=background_tasks)
 
 
 @router.post("/orders", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)

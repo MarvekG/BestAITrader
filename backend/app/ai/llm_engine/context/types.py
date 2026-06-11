@@ -12,6 +12,7 @@ AI_CONTEXT_SECTION_ORDER = (
     "history",
     "signals",
     "events",
+    "canonical_metrics",
 )
 
 if TYPE_CHECKING:

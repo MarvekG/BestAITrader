@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from app.ai.llm_engine.context.canonical_metrics import CanonicalMetricsProvider
 from app.ai.llm_engine.context.portfolio import build_portfolio_risk_control_context
 from app.ai.llm_engine.context.runtime import merge_status
 from app.ai.llm_engine.context.types import AIContextLayer, AIContextPayload
@@ -12,6 +13,57 @@ from app.models.data_storage import StockValuationHistory
 from app.performance.service import get_latest_performance_summary
 from app.portfolio.service import get_portfolio_overview
 from sqlalchemy import desc
+
+
+def _csv_value(value: Any) -> str:
+    """转换 CSV 单元格值，避免时间序列上下文重复键名。
+
+    Args:
+        value: 待写入 CSV 单元格的原始值。
+
+    Returns:
+        可安全放入紧凑 CSV 行的字符串。
+    """
+    if value is None:
+        return ""
+    text = str(value)
+    if any(char in text for char in [",", "\n", '"']):
+        return '"' + text.replace('"', '""') + '"'
+    return text
+
+
+def _compact_series_payload(
+    items: Any,
+    *,
+    columns: list[str],
+    empty_status: str = "missing",
+    **extra: Any,
+) -> AIContextPayload:
+    """将对象数组压缩为 columns + CSV rows 结构。
+
+    Args:
+        items: 字典列表形式的时间序列数据。
+        columns: 保留并输出的字段顺序。
+        empty_status: 空数据时返回的状态。
+        **extra: 需要附加到上下文 payload 的元数据。
+
+    Returns:
+        面向 LLM 的紧凑时间序列 payload。
+    """
+    rows = [
+        ",".join(_csv_value(item.get(column)) for column in columns)
+        for item in (items or [])
+        if isinstance(item, dict)
+    ]
+    payload: AIContextPayload = {
+        "status": "available" if rows else empty_status,
+        "format": "csv_rows",
+        "columns": columns,
+        "rows": rows,
+        "record_count": len(rows),
+    }
+    payload.update(extra)
+    return payload
 
 
 def _wrap_dict(reader: Any, raw: Any) -> Any:
@@ -241,7 +293,19 @@ class SnapshotProvider:
 class HistoryProvider:
     name = "history"
 
+    KLINE_COLUMNS = ["date", "open", "high", "low", "close", "volume", "pct_chg"]
+    MONEY_FLOW_TREND_COLUMNS = ["date", "net_inflow_main", "net_inflow_ratio_main", "pct_chg"]
+
     async def build(self, runtime: Any, sections: Mapping[str, AIContextPayload]) -> AIContextLayer:
+        """构建历史行情、资金流和公司事件上下文。
+
+        Args:
+            runtime: 当前 AI 上下文构建运行时。
+            sections: 已构建的上下文分层。
+
+        Returns:
+            包含紧凑时间序列和历史摘要的上下文分层。
+        """
         technical = runtime.readers.technical
         capital_flow = runtime.readers.capital_flow
         fundamental = runtime.readers.fundamental
@@ -254,18 +318,26 @@ class HistoryProvider:
             insider_activity = fundamental.insider_activity(db, runtime.stock_code)
             interactive_qa_items = sentiment.recent_interactive_qa(db, runtime.stock_code)
             seo_history = fundamental.seo_history(db, runtime.stock_code)
-            kline = _items_payload(kline_items, window_days=30)
+            kline = _compact_series_payload(
+                kline_items,
+                columns=self.KLINE_COLUMNS,
+                window_days=30,
+            )
+            money_flow_trend = _compact_series_payload(
+                money_flow_trend_items,
+                columns=self.MONEY_FLOW_TREND_COLUMNS,
+            )
             payload = {
                 "status": merge_status(
                     kline,
-                    money_flow_trend_items,
+                    money_flow_trend,
                     northbound_trend,
                     financial_trend,
                     interactive_qa_items,
                     seo_history,
                 ),
                 "kline": kline,
-                "money_flow_trend": _items_payload(money_flow_trend_items),
+                "money_flow_trend": money_flow_trend,
                 "northbound_trend": northbound_trend,
                 "financial_trend": _wrap_dict(fundamental, financial_trend),
                 "insider_activity": _wrap_dict(fundamental, insider_activity),
@@ -374,4 +446,5 @@ DEFAULT_CONTEXT_PROVIDERS = (
     HistoryProvider(),
     SignalsProvider(),
     EventsProvider(),
+    CanonicalMetricsProvider(),
 )

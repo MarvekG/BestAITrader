@@ -786,6 +786,26 @@
         "stop_loss_warning_pct": "{{stock_code}} 止损跌幅 {{current}} 超过提醒阈值 {{limit}}。"
       }
     },
+    "discipline": {
+      "button": "止损止盈设置",
+      "title": "止损止盈扫描设置",
+      "enabled": "启用自动扫描",
+      "scan_interval_seconds": "扫描间隔（秒）",
+      "scan_non_trading_days": "非交易日也扫描",
+      "scan_start_time": "扫描开始时间",
+      "scan_end_time": "扫描结束时间",
+      "auto_launch_debate": "触发后自动发起复议辩论",
+      "cooldown_minutes": "同股触发冷却（分钟）",
+      "run_now": "立即扫描",
+      "cancel": "取消",
+      "save": "保存",
+      "load_failed": "加载止损止盈设置失败",
+      "save_success": "止损止盈设置已保存",
+      "save_failed": "保存止损止盈设置失败: {{error}}",
+      "scan_success": "止损止盈扫描完成，触发 {{count}} 项",
+      "scan_failed": "止损止盈扫描失败: {{error}}",
+      "unknown_error": "未知错误"
+    },
     "account_info": {
       "title": "账户信息",
       "starting_capital": "启动资金",

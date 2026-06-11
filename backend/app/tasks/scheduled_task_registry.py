@@ -44,6 +44,7 @@ def load_scheduled_tasks() -> ScheduledTaskSnapshot:
     from app.tasks import llm_usage_cleanup_scheduler
     from app.tasks import market_watch_scheduler
     from app.tasks import pending_order_match_scheduler
+    from app.tasks import position_discipline_scheduler
     from app.tasks import stock_analysis_scheduler
 
     tasks: list[ScheduledTask] = []
@@ -58,6 +59,7 @@ def load_scheduled_tasks() -> ScheduledTaskSnapshot:
         llm_usage_cleanup_scheduler,
         account_equity_snapshot_scheduler,
         pending_order_match_scheduler,
+        position_discipline_scheduler,
     ):
         module_snapshot = module.get_scheduled_tasks()
         tasks.extend(module_snapshot.tasks)

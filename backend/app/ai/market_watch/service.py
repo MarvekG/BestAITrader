@@ -21,10 +21,12 @@ from app.ai.market_watch.audit import is_in_cooldown as audit_is_in_cooldown
 from app.ai.market_watch.audit import publish_market_watch_event_payload
 from app.ai.market_watch.audit import publish_market_watch_documents_payload
 from app.ai.market_watch.schemas import (
+    DebateParameters,
     MarketWatchMarkdownDocument,
     MarketWatchSettingsResponse,
     MarketWatchSourceConfig,
     MarketWatchSourceType,
+    WatchAiDecision,
     parse_market_watch_time,
     trading_frequency_label,
     trading_frequency_to_code,

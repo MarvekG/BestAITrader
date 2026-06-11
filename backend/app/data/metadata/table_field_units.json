@@ -22,6 +22,23 @@
       },
       "precision": 0
     },
+    "shares_to_hundred_million": {
+      "zh": {
+        "unit": [
+          "units.yi",
+          "units.shares"
+        ],
+        "scale": 1e-8
+      },
+      "en": {
+        "unit": [
+          "units.billion",
+          "units.shares"
+        ],
+        "scale": 1e-9
+      },
+      "precision": 2
+    },
     "lots": {
       "zh": {
         "unit": "units.lots",
@@ -443,6 +460,43 @@
         "scale": 100
       },
       "precision": 2
+    }
+  },
+  "canonical_metrics": {
+    "market_cap": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "net_cash": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "per_share_net_cash": {
+      "zh": {
+        "unit": "units.cny_per_share",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny_per_share",
+        "scale": 1
+      },
+      "precision": 2
+    },
+    "net_cash_to_mcap": {
+      "$ref": "percent"
+    },
+    "net_cash_to_price": {
+      "$ref": "percent"
+    },
+    "pe_ttm": {
+      "$ref": "multiple"
+    },
+    "pb": {
+      "$ref": "multiple"
+    },
+    "dividend_yield": {
+      "$ref": "percent"
+    },
+    "total_share": {
+      "$ref": "shares_to_hundred_million"
     }
   },
   "portfolio.performance": {

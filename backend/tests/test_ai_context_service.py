@@ -4,6 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.ai.json_utils import stable_json_dumps
+from app.ai.llm_engine.context.providers import _compact_series_payload
 from app.ai.llm_engine.context.service import AIContextService
 from app.ai.llm_engine.context.technical import TechnicalSource
 from app.ai.llm_engine.context.types import AI_CONTEXT_SECTION_ORDER, AIContextLayer
@@ -22,6 +24,32 @@ class _FakeProvider:
 
     async def build(self, runtime, sections):
         return AIContextLayer(self.name, self.payload)
+
+
+def test_stable_json_dumps_defaults_to_compact_output():
+    result = stable_json_dumps({"b": 2, "a": {"c": 3}})
+
+    assert result == '{"a":{"c":3},"b":2}'
+
+
+def test_compact_series_payload_uses_csv_rows():
+    payload = _compact_series_payload(
+        [
+            {"date": "2026-06-10", "close": "10.2元", "note": "plain"},
+            {"date": "2026-06-11", "close": "10.5元", "note": "has,comma"},
+        ],
+        columns=["date", "close", "note"],
+        window_days=30,
+    )
+
+    assert payload == {
+        "status": "available",
+        "format": "csv_rows",
+        "columns": ["date", "close", "note"],
+        "rows": ["2026-06-10,10.2元,plain", '2026-06-11,10.5元,"has,comma"'],
+        "record_count": 2,
+        "window_days": 30,
+    }
 
 
 @pytest.mark.asyncio
