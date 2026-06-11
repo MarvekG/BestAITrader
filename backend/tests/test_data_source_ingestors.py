@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.data.ingestors.manager import ingestor_manager
 from app.data.ingestors.plugins.tushare_ingestor import TushareIngestor
 from app.core.utils.date_utils import normalize_compact_date
+from app.models.data_storage import StockBasic
 
 
 @pytest.fixture
@@ -191,6 +192,56 @@ class TestTushareIngestor:
             )
 
             assert result is False, "没有 token 应该返回 False"
+
+    @pytest.mark.asyncio
+    async def test_fetch_stock_valuation_keeps_share_fields_in_valuation(self, test_stock_code, db_session):
+        """daily_basic 同步应把股本字段保留在估值表写入数据中。"""
+        db_session.add(StockBasic(stock_code=test_stock_code, name="平安银行", data_source="tushare"))
+        db_session.commit()
+
+        mock_pro = Mock()
+        mock_pro.daily_basic = Mock(return_value=pd.DataFrame({
+            'ts_code': [test_stock_code],
+            'trade_date': ['20260610'],
+            'close': [10.0],
+            'pe': [8.0],
+            'pe_ttm': [8.5],
+            'pb': [1.2],
+            'ps': [1.0],
+            'ps_ttm': [1.1],
+            'dv_ratio': [3.0],
+            'dv_ttm': [3.2],
+            'total_share': [500000.0],
+            'float_share': [450000.0],
+            'free_share': [400000.0],
+            'total_mv': [5_000_000.0],
+            'circ_mv': [4_500_000.0],
+            'turnover_rate': [0.8],
+            'turnover_rate_f': [1.0],
+            'volume_ratio': [0.9],
+        }))
+
+        mock_ingestion_service = Mock()
+        mock_ingestion_service.write_dataframe = Mock(return_value=True)
+
+        with patch('app.data.ingestors.plugins.tushare_ingestor.DataIngestionService', return_value=mock_ingestion_service), \
+             patch('app.data.ingestors.plugins.tushare_ingestor.ts.set_token'), \
+             patch('app.data.ingestors.plugins.tushare_ingestor.ts.pro_api', return_value=Mock()):
+            ingestor = TushareIngestor()
+        ingestor._run_in_executor = AsyncMock(side_effect=lambda func, *args, **kwargs: func(*args, **kwargs))
+
+        with patch.object(ingestor, 'pro', mock_pro):
+            result = await ingestor.fetch_and_ingest_stock_valuation(test_stock_code, start_date='2026-06-10')
+
+        assert result is True
+        stock = db_session.query(StockBasic).filter(StockBasic.stock_code == test_stock_code).first()
+        assert stock.total_share is None
+        assert stock.float_share is None
+
+        df_arg = mock_ingestion_service.write_dataframe.call_args[0][1]
+        assert df_arg['total_share'].iloc[0] == 500000.0 * 10000
+        assert df_arg['float_share'].iloc[0] == 450000.0 * 10000
+        assert df_arg['free_share'].iloc[0] == 400000.0 * 10000
 
     @pytest.mark.asyncio
     async def test_fetch_financial_indicators_uses_fina_indicator_without_storing_definitions(

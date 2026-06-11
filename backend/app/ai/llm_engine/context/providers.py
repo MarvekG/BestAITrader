@@ -8,8 +8,10 @@ from app.ai.llm_engine.context.types import AIContextLayer, AIContextPayload
 from app.crud.account import ensure_user_account
 from app.models.user import User
 from app.data.metadata.field_units import format_payload_values
+from app.models.data_storage import StockValuationHistory
 from app.performance.service import get_latest_performance_summary
 from app.portfolio.service import get_portfolio_overview
+from sqlalchemy import desc
 
 
 def _wrap_dict(reader: Any, raw: Any) -> Any:
@@ -46,15 +48,34 @@ def _items_payload(items: Any, *, empty_status: str = "missing", **extra: Any) -
 class MetadataProvider:
     name = "metadata"
 
+    def _latest_valuation(self, db: Any, stock_code: str) -> Any:
+        """读取最新估值记录。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 标准股票代码。
+
+        Returns:
+            最新估值记录；不存在时返回 None。
+        """
+        return db.query(StockValuationHistory).filter(
+            StockValuationHistory.stock_code == stock_code,
+        ).order_by(desc(StockValuationHistory.data_date)).first()
+
     async def build(self, runtime: Any, sections: Mapping[str, AIContextPayload]) -> AIContextLayer:
         with runtime.db_session() as db:
             stock = runtime.get_stock_basic(db)
+            latest_valuation = self._latest_valuation(db, runtime.stock_code)
+            total_share = latest_valuation.total_share if latest_valuation else None
+            float_share = latest_valuation.float_share if latest_valuation else None
             company = {
                 "industry": stock.industry if stock else None,
                 "area": stock.area if stock else None,
                 "list_date": str(stock.list_date) if stock and stock.list_date else None,
-                "total_share": stock.total_share if stock else None,
-                "float_share": stock.float_share if stock else None,
+                "total_share": total_share,
+                "float_share": float_share,
+                "share_unit": "shares" if total_share or float_share else None,
+                "share_source": "stock_valuation_history" if total_share or float_share else None,
             }
             payload = {
                 "status": "available" if stock else "missing",

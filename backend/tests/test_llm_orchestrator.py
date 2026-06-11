@@ -16,7 +16,7 @@ from app.ai.llm_engine.orchestrator import (
 from app.ai.llm_engine.models import PMDecision
 from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER, AGENT_ROLE_PORTFOLIO_MANAGER, AGENT_ROLE_RISK
 from app.models.account import Account
-from app.models.data_storage import KlineData, StockBasic, StockRealtimeMarket
+from app.models.data_storage import KlineData, StockBasic, StockRealtimeMarket, StockValuationHistory
 from app.models.debate_message import DebateMessage
 from app.models.order import Order
 from app.models.position import Position
@@ -130,6 +130,48 @@ async def test_fetch_context_node(initial_state):
         assert result["static_context"] == _expected_static_context()
         assert result["context"] == {}
         assert MockService.called
+
+
+@pytest.mark.asyncio
+async def test_fetch_context_metadata_uses_share_fields_from_valuation(initial_state, db_session):
+    user = User(
+        username="metadata_valuation_share_user",
+        email="metadata_valuation_share_user@example.com",
+        password_hash="hashed",
+    )
+    db_session.add(user)
+    db_session.flush()
+    db_session.add(
+        DebateSession(
+            user_id=user.id,
+            stock_code="000001.SZ",
+            trading_frequency="swing",
+            trading_strategy="momentum",
+            status="active",
+            session_id=initial_state["session_id"],
+        )
+    )
+    db_session.add(StockBasic(stock_code="000001.SZ", name="平安银行", industry="银行"))
+    db_session.add(
+        StockValuationHistory(
+            stock_code="000001.SZ",
+            data_date=datetime(2026, 6, 10).date(),
+            total_share=5_000_000_000,
+            float_share=4_500_000_000,
+        )
+    )
+    db_session.commit()
+
+    from app.ai.llm_engine.context.providers import MetadataProvider
+    from app.ai.llm_engine.context.service import AIContextService
+
+    with patch("app.ai.llm_engine.context.runtime.SessionLocal", return_value=db_session):
+        context = await AIContextService(providers=[MetadataProvider()]).build("000001.SZ")
+
+    assert context["metadata"]["company"]["total_share"] == 5_000_000_000
+    assert context["metadata"]["company"]["float_share"] == 4_500_000_000
+    assert context["metadata"]["company"]["share_unit"] == "shares"
+    assert context["metadata"]["company"]["share_source"] == "stock_valuation_history"
 
 
 @pytest.mark.asyncio

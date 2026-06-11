@@ -1093,6 +1093,38 @@ def test_get_generic_db_data_selects_requested_columns(db_session, test_db, monk
     assert rows == [{"date": date(2024, 1, 2), "close": 10.5}]
 
 
+def test_get_stock_basic_info_returns_share_fields(db_session, test_db, monkeypatch):
+    from app.ai.agentic.tooling import stock_tools as stock_tools_module
+    from app.ai.agentic.tooling.stock_tools import StockTools
+    from app.models.data_storage import StockBasic, StockValuationHistory
+
+    monkeypatch.setattr(stock_tools_module, "SessionLocal", test_db)
+    db_session.add(
+        StockBasic(
+            stock_code="000001.SZ",
+            name="平安银行",
+            industry="银行",
+            market="SZ",
+        )
+    )
+    db_session.add(
+        StockValuationHistory(
+            stock_code="000001.SZ",
+            data_date=date(2026, 6, 10),
+            total_share=5_000_000_000,
+            float_share=4_500_000_000,
+        )
+    )
+    db_session.commit()
+
+    result = StockTools.get_stock_basic_info("000001.SZ")
+
+    assert result["total_share"] == 5_000_000_000
+    assert result["float_share"] == 4_500_000_000
+    assert result["share_unit"] == "shares"
+    assert result["share_source"] == "stock_valuation_history"
+
+
 @pytest.mark.asyncio
 async def test_query_stock_data_passes_columns_to_generic_db_data():
     from app.ai.agentic.tools import query_stock_data
