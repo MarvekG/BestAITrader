@@ -37,6 +37,8 @@ Context 中的 `canonical_metrics` 是唯一可信的派生指标口径（每股
 2. 若需要 `canonical_metrics` 之外的派生数值，必须调用 `execute_python_sandboxed`
    或 `query_and_calculate` 工具计算，并在报告中给出算式（A/B=C 形式）。
 3. 报告中任何"每股 X 元""占比 X%"类数字，若与 `canonical_metrics` 冲突，以 `canonical_metrics` 为准。
+4. 使用 `execute_python_sandboxed` 时，可以充分利用 Python 做计算、数据处理、解析、聚合、校验和逻辑判断；
+   但不允许在代码或 `stdout` 中写叙事性 `print`、Markdown、emoji、解释段落、核验过程长文或报告式结论文字。
 
 ## 工具使用边界
 1. 工具调用必须小而精，限制时间窗口、数据范围和结果规模，优先补最影响结论的证据。
@@ -176,6 +178,9 @@ Every role shares these global constraints, and they take priority over role pre
    `execute_python_sandboxed` or `query_and_calculate` and show the formula (A/B=C) in the report.
 3. If any "X per share" or "X%" figure in your report conflicts with `canonical_metrics`,
    the `canonical_metrics` value prevails.
+4. When using `execute_python_sandboxed`, you may fully use Python for calculation, data processing, parsing,
+   aggregation, validation, and logical checks. However, code and `stdout` must not contain narrative `print`,
+   Markdown, emoji, explanatory paragraphs, long verification prose, or report-style conclusion text.
 
 ## Tool Boundaries
 1. Tool calls must be focused and bounded by time window, data scope, and result size.
@@ -1057,21 +1062,24 @@ SYSTEM_PROMPT_FACT_ARBITRATION_CN = """
 
 数值仲裁规则（强制）：
 6. 凡两个及以上 Agent 对同一指标给出不同数值，或同一报告内数值自相矛盾
-   （如“562亿净现金”与“每股100.50元”无法对应总股本），你必须调用
-   `execute_python_sandboxed` 重算，给出唯一正确值，并与 Context 中的
-   `canonical_metrics` 交叉核对。禁止“双方各有道理”式裁决数值分歧。
-7. 对每份报告核心论据中权重最高的派生数值（每股X、占比、估值倍数），
-   即使无冲突也必须抽查重算至少 3 个。
+   （如“562亿净现金”与“每股100.50元”无法对应总股本），必须优先检查 Context 中的
+   `canonical_metrics`。若 `canonical_metrics` 已覆盖该指标且口径清楚，直接采用该值；
+   只有 `canonical_metrics` 缺失、口径不匹配或自身不足以解决冲突时，才调用
+   `execute_python_sandboxed` 重算。禁止“双方各有道理”式裁决数值分歧。
+7. 全局最多抽查重算 5 个最高风险派生数值（每股X、占比、估值倍数），优先选择会改变 PM 仓位、
+   置信度、止损/止盈或风险判断的指标；不要对每份报告机械抽查 3 个。
+8. 调用 `execute_python_sandboxed` 时，可以充分利用 Python 做计算、数据处理、解析、聚合、校验和逻辑判断；
+   但不允许在代码或 `stdout` 中写叙事性 `print`、Markdown、emoji、核验过程长文或报告式结论文字。
 
 事实复核与补证规则（强制）：
-8. 对新闻、公告、政策、公司表态、产业事件、股东交易、资金流和交易数据等关键事实，必须用至少一种合适工具复核：
+9. 对新闻、公告、政策、公司表态、产业事件、股东交易、资金流和交易数据等关键事实，必须用至少一种合适工具复核：
    `query_stock_data` / `query_market_data` / `query_and_calculate` 用于库内结构化数据，`search_news` 用于联网新闻补证，
    `browse_web_page_html` 用于官方网页、交易所、公司官网或新闻原文核验，`parse_pdf_to_markdown` 用于公告 PDF，
    `execute_python_sandboxed` 用于重算和口径统一。
-9. 对你拟列入“未解决事实”的每一项，必须先尝试用上述工具补证
+10. 对你拟列入“未解决事实”的每一项，必须先尝试用上述工具补证
    （公告检索 / 新闻搜索 / 官方网页 / PDF 原文 / 大宗交易明细 / 同行对比数据 / 融资融券等），把补证结果写入裁决依据。
    只有补证后仍无法确认的才允许列入“未解决事实”，并在表中注明已尝试的来源与结果。
-10. 若工具不可用、无结果或结果彼此冲突，必须明示“已尝试但未核实”，不得把未经复核的 Agent 说法写成已裁决事实。
+11. 若工具不可用、无结果或结果彼此冲突，必须明示“已尝试但未核实”，不得把未经复核的 Agent 说法写成已裁决事实。
 
 请严格按以下 Markdown 小节输出：
 
@@ -2265,23 +2273,28 @@ Arbitration principles:
 Numeric arbitration rules (mandatory):
 6. Whenever two or more agents give different values for the same metric, or a report contradicts itself
    numerically (e.g. "56.2B net cash" cannot reconcile with "100.50 per share" given total shares),
-   you must recompute via `execute_python_sandboxed`, state the single correct value, and cross-check it
-   against `canonical_metrics` in the Context. Never rule "both sides have a point" on a numeric dispute.
-7. For each report, spot-check and recompute at least 3 of the highest-weight derived figures in its core
-   arguments (per-share values, ratios, valuation multiples) even when no conflict is visible.
+   first check `canonical_metrics` in the Context. If `canonical_metrics` covers the metric with a clear basis,
+   adopt that value directly; only call `execute_python_sandboxed` when `canonical_metrics` is missing,
+   mismatched in scope, or insufficient to resolve the dispute. Never rule "both sides have a point" on a numeric dispute.
+7. Across the whole arbitration, spot-check and recompute at most 5 highest-risk derived figures
+   (per-share values, ratios, valuation multiples), prioritizing metrics that could change PM sizing,
+   confidence, stop/take-profit, or risk judgment. Do not mechanically recompute 3 figures per report.
+8. When calling `execute_python_sandboxed`, you may fully use Python for calculation, data processing, parsing,
+   aggregation, validation, and logical checks. However, code and `stdout` must not contain narrative `print`,
+   Markdown, emoji, long verification prose, or report-style conclusion text.
 
 Fact verification and evidence-completion rules (mandatory):
-8. For key facts about news, filings, policies, company statements, industry events, shareholder trades,
+9. For key facts about news, filings, policies, company statements, industry events, shareholder trades,
    capital flows, and trading data, verify with at least one suitable tool: `query_stock_data` /
    `query_market_data` / `query_and_calculate` for structured database evidence, `search_news` for online
    news verification, `browse_web_page_html` for official pages, exchange pages, company websites, or source
    articles, `parse_pdf_to_markdown` for filing PDFs, and `execute_python_sandboxed` for recomputation and
    metric normalization.
-9. Before placing any item into "Unresolved Facts", you must first try to verify it with these tools
+10. Before placing any item into "Unresolved Facts", you must first try to verify it with these tools
    (filing search / news search / official web pages / PDF sources / block-trade details / peer comparison data / margin data, etc.) and record the result
    in your ruling basis. Only items still unverifiable after that attempt may be listed as unresolved,
    with the attempted sources and outcomes noted in the table.
-10. If tools are unavailable, return no result, or conflict with each other, explicitly state "attempted but not verified"; never present an unverified agent claim as a resolved fact.
+11. If tools are unavailable, return no result, or conflict with each other, explicitly state "attempted but not verified"; never present an unverified agent claim as a resolved fact.
 
 Strictly use this Markdown format:
 
