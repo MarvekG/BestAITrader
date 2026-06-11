@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List
 
 from app.ai.agentic.mcp.models import MCPServerConfig, MCPToolPreviewRequest
@@ -45,18 +46,53 @@ def build_mcp_catalog_prompt() -> str:
     if not enabled_configs:
         return "No MCP tools are enabled for LLM use."
 
-    lines = [
-        "# MCP Tool Usage",
-        "",
-        "You may use the following MCP tools when they are relevant to the user's research task.",
-        "Treat MCP results as external evidence: cite the tool/source in your answer and explain conflicts with internal data.",
-        "Do not use MCP tools to place trades or bypass the portfolio manager, risk checks, or TradingService.",
-        "Use only the allowed tools listed for each MCP server.",
-        "",
-        "## Enabled MCP Servers",
-    ]
+    lines = ["# MCP Tools", ""]
     for config in enabled_configs:
         lines.append(f"- {config.name}: {', '.join(config.allowed_tools)}")
+    return "\n".join(lines).strip()
+
+
+async def build_mcp_tools_documentation() -> str:
+    """生成前端展示用的 MCP 工具说明。
+
+    Returns:
+        已启用 MCP Server 的工具描述和入参 schema 文本；没有启用工具时返回简短提示。
+    """
+    enabled_configs = [config for config in load_mcp_server_configs() if config.enabled and config.allowed_tools]
+    if not enabled_configs:
+        return "No MCP tools are enabled for LLM use."
+
+    lines = ["# MCP Tools", ""]
+    for config in enabled_configs:
+        lines.append(f"## {config.name}")
+        try:
+            tools = await list_mcp_langchain_tools(config.name)
+        except Exception as exc:
+            logger.warning(
+                "MCP server tools unavailable for documentation",
+                extra={"name": config.name, "error": str(exc)},
+            )
+            lines.append(f"Tools unavailable: {exc}")
+            lines.append("")
+            continue
+
+        items = [tool_to_item(config.name, tool) for tool in filter_allowed_tools(config, tools)]
+        if not items:
+            lines.append("No allowed tools are available from this server.")
+            lines.append("")
+            continue
+        for item in items:
+            lines.append(f"### {item['name']}")
+            if item["description"]:
+                lines.append(str(item["description"]))
+            schema = item.get("input_schema") or {}
+            if schema:
+                lines.append("")
+                lines.append("Input schema:")
+                lines.append("```json")
+                lines.append(json.dumps(schema, ensure_ascii=False, indent=2))
+                lines.append("```")
+            lines.append("")
     return "\n".join(lines).strip()
 
 

@@ -86,8 +86,35 @@ def test_build_mcp_catalog_prompt_lists_enabled_server_tools(db_session):
 
     assert "网页抓取" in prompt
     assert "bulk_fetch" in prompt
-    assert "external evidence" in prompt
-    assert "Do not use MCP tools to place trades" in prompt
+    assert "external evidence" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_build_mcp_tools_documentation_shows_tool_description_and_schema(monkeypatch, db_session):
+    class FakeArgsSchema:
+        @classmethod
+        def model_json_schema(cls):
+            return {"type": "object", "properties": {"url": {"type": "string"}}}
+
+    class FakeTool:
+        name = "网页抓取__get"
+        description = "Fetch a page with browser impersonation."
+        args_schema = FakeArgsSchema
+
+    async def fake_get_tools(name):
+        return [FakeTool()]
+
+    mcp_registry.update_mcp_server(
+        "网页抓取",
+        MCPServerUpdateRequest(enabled=True, allowed_tools=["get"]),
+    )
+    monkeypatch.setattr(mcp_runtime, "list_mcp_langchain_tools", fake_get_tools)
+
+    documentation = await mcp_runtime.build_mcp_tools_documentation()
+
+    assert "### get" in documentation
+    assert "Fetch a page with browser impersonation." in documentation
+    assert '"url"' in documentation
 
 
 @pytest.mark.asyncio

@@ -16,7 +16,7 @@ from app.ai.agentic.mcp.registry import (
 )
 from app.ai.agentic.mcp.runtime import (
     MCPRuntimeError,
-    build_mcp_catalog_prompt,
+    build_mcp_tools_documentation,
     invoke_mcp_tool,
     list_mcp_tools,
     preview_mcp_tools,
@@ -189,9 +189,9 @@ async def invoke_registered_mcp_server_tool(
 
 @router.get("/prompt", response_model=Dict[str, Any])
 async def get_mcp_catalog_prompt() -> Dict[str, Any]:
-    """获取 MCP catalog prompt。
+    """获取 MCP 工具说明。
 
     Returns:
-        MCP prompt 文本。
+        前端展示用的 MCP 工具说明文本。
     """
-    return {"status": "success", "prompt": build_mcp_catalog_prompt()}
+    return {"status": "success", "prompt": await build_mcp_tools_documentation()}
