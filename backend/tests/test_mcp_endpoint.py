@@ -10,7 +10,7 @@ def test_mcp_server_crud_api(client, auth_headers, tmp_path, monkeypatch):
         "/api/v1/mcp/servers",
         headers=auth_headers,
         json={
-            "name": "fake_docs",
+            "name": "公告检索",
             "enabled": True,
             "url": "http://127.0.0.1:8000/mcp",
         },
@@ -22,20 +22,20 @@ def test_mcp_server_crud_api(client, auth_headers, tmp_path, monkeypatch):
 
     list_response = client.get("/api/v1/mcp/servers", headers=auth_headers)
     assert list_response.status_code == 200
-    assert list_response.json()["count"] == 1
+    assert list_response.json()["count"] == 2
 
     prompt_response = client.get("/api/v1/mcp/prompt", headers=auth_headers)
     assert prompt_response.status_code == 200
-    assert "fake_docs" in prompt_response.json()["prompt"]
+    assert "公告检索" in prompt_response.json()["prompt"]
 
     update_response = client.put(
-        "/api/v1/mcp/servers/fake_docs",
+        "/api/v1/mcp/servers/%E5%85%AC%E5%91%8A%E6%A3%80%E7%B4%A2",
         headers=auth_headers,
         json={"enabled": False},
     )
     assert update_response.status_code == 200
     assert update_response.json()["server"]["enabled"] is False
 
-    delete_response = client.delete("/api/v1/mcp/servers/fake_docs", headers=auth_headers)
+    delete_response = client.delete("/api/v1/mcp/servers/%E5%85%AC%E5%91%8A%E6%A3%80%E7%B4%A2", headers=auth_headers)
     assert delete_response.status_code == 200
-    assert delete_response.json() == {"status": "success", "name": "fake_docs"}
+    assert delete_response.json() == {"status": "success", "name": "公告检索"}

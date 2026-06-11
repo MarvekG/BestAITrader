@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from urllib.parse import urlparse
 from typing import Any, Dict, List
@@ -12,7 +11,13 @@ from app.core.config import PROJECT_ROOT
 
 MCP_RUNTIME_ROOT = PROJECT_ROOT.parent / "runtimes" / "mcp"
 MCP_SERVERS_FILE = MCP_RUNTIME_ROOT / "servers.json"
-SERVER_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+DEFAULT_MCP_SERVERS = [
+    {
+        "name": "网页抓取",
+        "enabled": False,
+        "url": "http://scrapling-mcp:8765/mcp",
+    }
+]
 
 
 def _ensure_runtime_dir() -> None:
@@ -30,7 +35,7 @@ def _read_raw_payload() -> Dict[str, Any]:
         ValueError: 配置文件不是合法 JSON 对象时抛出。
     """
     if not MCP_SERVERS_FILE.exists():
-        return {"servers": []}
+        return {"servers": DEFAULT_MCP_SERVERS}
     try:
         payload = json.loads(MCP_SERVERS_FILE.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -68,10 +73,10 @@ def _validate_server_name(name: str) -> str:
         规整后的 MCP Server 名称。
 
     Raises:
-        ValueError: 名称为空或格式非法时抛出。
+        ValueError: 名称为空或过长时抛出。
     """
     normalized = str(name or "").strip()
-    if not SERVER_NAME_PATTERN.fullmatch(normalized):
+    if not normalized or len(normalized) > 64:
         raise ValueError(f"Invalid MCP server name: {normalized}")
     return normalized
 

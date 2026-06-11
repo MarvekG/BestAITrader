@@ -56,6 +56,8 @@ Frontend Settings
 
 MCP Server 配置存储在运行时目录，例如 `runtimes/mcp/servers.json`。该目录用于本地运行态文件，不作为源码配置提交。
 
+当配置文件不存在时，系统预置一个默认禁用的 HTTP MCP Server：`name=网页抓取`、`url=http://scrapling-mcp:8765/mcp`。用户删除或保存配置后，以运行时配置文件为准，不在每次启动时反复重建默认项。
+
 配置字段：
 
 | 字段 | 类型 | 说明 |

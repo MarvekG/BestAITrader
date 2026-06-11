@@ -16,9 +16,11 @@ import {
   Space,
   Spin,
   Statistic,
+  Switch,
   Table,
   Tabs,
   Tag,
+  Tooltip,
   Upload,
 } from 'antd';
 import type { RcFile, UploadFile } from 'antd/es/upload/interface';
@@ -40,6 +42,8 @@ import { newsPluginsApi } from '../api/newsPlugins';
 import type { NewsPluginBatchUploadResult, NewsPluginItem, NewsPluginMutationResult } from '../api/newsPlugins';
 import { skillsApi } from '../api/skills';
 import type { SkillItem } from '../api/skills';
+import { mcpApi } from '../api/mcp';
+import type { MCPServerItem, MCPToolItem } from '../api/mcp';
 import { useTranslation } from 'react-i18next';
 import { getApiErrorMessage, getApiErrorResponseData } from '../utils/errorUtils';
 import { useSearchParams } from 'react-router-dom';
@@ -95,6 +99,12 @@ type AiFunctionTaskTracker = {
   userInput: string;
 };
 
+type MCPServerFormValues = {
+  name: string;
+  enabled?: boolean;
+  url: string;
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
@@ -140,6 +150,7 @@ const SETTINGS_TAB_KEYS = new Set([
   'datasources',
   'prompts',
   'news_plugins',
+  'mcp',
   'skills',
   'memory-preview',
   'memory-recall-audits',
@@ -266,6 +277,19 @@ export const SettingsPage: React.FC = () => {
   const [newsPluginDeleting, setNewsPluginDeleting] = useState<Record<string, boolean>>({});
   const [selectedNewsPluginKeys, setSelectedNewsPluginKeys] = useState<string[]>([]);
   const [newsPluginBatchDeleting, setNewsPluginBatchDeleting] = useState(false);
+  const [mcpServers, setMcpServers] = useState<MCPServerItem[]>([]);
+  const [mcpServersLoading, setMcpServersLoading] = useState(false);
+  const [mcpModalOpen, setMcpModalOpen] = useState(false);
+  const [mcpSaving, setMcpSaving] = useState(false);
+  const [editingMcpServer, setEditingMcpServer] = useState<MCPServerItem | null>(null);
+  const [mcpActionLoading, setMcpActionLoading] = useState<Record<string, boolean>>({});
+  const [mcpToolsModalOpen, setMcpToolsModalOpen] = useState(false);
+  const [mcpToolsLoading, setMcpToolsLoading] = useState(false);
+  const [mcpToolsServerName, setMcpToolsServerName] = useState('');
+  const [mcpTools, setMcpTools] = useState<MCPToolItem[]>([]);
+  const [mcpPrompt, setMcpPrompt] = useState('');
+  const [mcpPromptLoading, setMcpPromptLoading] = useState(false);
+  const [mcpForm] = Form.useForm<MCPServerFormValues>();
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [skillModalOpen, setSkillModalOpen] = useState(false);
@@ -878,6 +902,150 @@ export const SettingsPage: React.FC = () => {
       setNewsPluginsLoading(false);
     }
   }, [message, t]);
+
+  const loadMcpServers = useCallback(async () => {
+    setMcpServersLoading(true);
+    try {
+      const res = await mcpApi.list();
+      if (res.status === 'success') {
+        setMcpServers(res.items || []);
+      } else {
+        message.error(res.message || t('settings.mcp.load_failed'));
+      }
+    } catch (error) {
+      message.error(getApiErrorMessage(error, t('settings.test_failed')));
+    } finally {
+      setMcpServersLoading(false);
+    }
+  }, [message, t]);
+
+  const loadMcpPrompt = useCallback(async () => {
+    setMcpPromptLoading(true);
+    try {
+      const res = await mcpApi.getPrompt();
+      if (res.status === 'success') {
+        setMcpPrompt(res.prompt || '');
+      } else {
+        message.error(res.message || t('settings.mcp.prompt_load_failed'));
+      }
+    } catch (error) {
+      message.error(getApiErrorMessage(error, t('settings.test_failed')));
+    } finally {
+      setMcpPromptLoading(false);
+    }
+  }, [message, t]);
+
+  const openMcpCreateModal = () => {
+    setEditingMcpServer(null);
+    mcpForm.setFieldsValue({ name: '', enabled: false, url: '' });
+    setMcpModalOpen(true);
+  };
+
+  const openMcpEditModal = (server: MCPServerItem) => {
+    setEditingMcpServer(server);
+    mcpForm.setFieldsValue(server);
+    setMcpModalOpen(true);
+  };
+
+  const handleSaveMcpServer = async () => {
+    const values = await mcpForm.validateFields();
+    setMcpSaving(true);
+    try {
+      const payload = {
+        name: values.name.trim(),
+        enabled: Boolean(values.enabled),
+        url: values.url.trim(),
+      };
+      const res = editingMcpServer
+        ? await mcpApi.update(editingMcpServer.name, { enabled: payload.enabled, url: payload.url })
+        : await mcpApi.create(payload);
+      if (res.status === 'success') {
+        message.success(t('settings.mcp.saved'));
+        setMcpModalOpen(false);
+        setEditingMcpServer(null);
+        await Promise.all([loadMcpServers(), loadMcpPrompt()]);
+      } else {
+        message.error(res.message || t('settings.mcp.save_failed'));
+      }
+    } catch (error) {
+      message.error(getApiErrorMessage(error, t('settings.test_failed')));
+    } finally {
+      setMcpSaving(false);
+    }
+  };
+
+  const setMcpServerLoading = (name: string, loading: boolean) => {
+    setMcpActionLoading((prev) => ({ ...prev, [name]: loading }));
+  };
+
+  const handleToggleMcpServer = async (server: MCPServerItem, enabled: boolean) => {
+    setMcpServerLoading(server.name, true);
+    try {
+      const res = await mcpApi.update(server.name, { enabled });
+      if (res.status === 'success') {
+        message.success(t('settings.mcp.saved'));
+        await Promise.all([loadMcpServers(), loadMcpPrompt()]);
+      } else {
+        message.error(res.message || t('settings.mcp.save_failed'));
+      }
+    } catch (error) {
+      message.error(getApiErrorMessage(error, t('settings.test_failed')));
+    } finally {
+      setMcpServerLoading(server.name, false);
+    }
+  };
+
+  const handleDeleteMcpServer = async (server: MCPServerItem) => {
+    setMcpServerLoading(server.name, true);
+    try {
+      const res = await mcpApi.delete(server.name);
+      if (res.status === 'success') {
+        message.success(t('settings.mcp.deleted'));
+        await Promise.all([loadMcpServers(), loadMcpPrompt()]);
+      } else {
+        message.error(res.message || t('settings.mcp.delete_failed'));
+      }
+    } catch (error) {
+      message.error(getApiErrorMessage(error, t('settings.test_failed')));
+    } finally {
+      setMcpServerLoading(server.name, false);
+    }
+  };
+
+  const handleTestMcpServer = async (server: MCPServerItem) => {
+    setMcpServerLoading(server.name, true);
+    try {
+      const res = await mcpApi.test(server.name);
+      if (res.status === 'success') {
+        message.success(t('settings.mcp.test_success', { count: res.tool_count ?? res.count ?? 0 }));
+      } else {
+        message.error(res.message || t('settings.mcp.test_failed'));
+      }
+    } catch (error) {
+      message.error(getApiErrorMessage(error, t('settings.test_failed')));
+    } finally {
+      setMcpServerLoading(server.name, false);
+    }
+  };
+
+  const handleOpenMcpTools = async (server: MCPServerItem) => {
+    setMcpToolsServerName(server.name);
+    setMcpTools([]);
+    setMcpToolsModalOpen(true);
+    setMcpToolsLoading(true);
+    try {
+      const res = await mcpApi.listTools(server.name);
+      if (res.status === 'success') {
+        setMcpTools(res.items || []);
+      } else {
+        message.error(res.message || t('settings.mcp.tools_load_failed'));
+      }
+    } catch (error) {
+      message.error(getApiErrorMessage(error, t('settings.test_failed')));
+    } finally {
+      setMcpToolsLoading(false);
+    }
+  };
 
   const getNewsPluginUploadFiles = (): RcFile[] => {
     return newsPluginFileList
@@ -1552,9 +1720,13 @@ export const SettingsPage: React.FC = () => {
     loadStats();
     loadNewsPlugins();
     loadNewsTestTools();
+    loadMcpServers();
+    loadMcpPrompt();
     loadSkills();
     loadSkillPrompt();
   }, [
+    loadMcpPrompt,
+    loadMcpServers,
     loadNewsPlugins,
     loadNewsTestTools,
     loadPrompts,
@@ -1666,6 +1838,88 @@ export const SettingsPage: React.FC = () => {
     deletableNewsPluginKeys.length > 0 && selectedNewsPluginKeys.length === deletableNewsPluginKeys.length;
   const someDeletableNewsPluginsSelected =
     selectedNewsPluginKeys.length > 0 && selectedNewsPluginKeys.length < deletableNewsPluginKeys.length;
+
+  const mcpServerColumns: ColumnsType<MCPServerItem> = [
+    {
+      title: t('settings.mcp.name'),
+      dataIndex: 'name',
+      key: 'name',
+      width: 180,
+      render: (value: string) => <Tag>{value}</Tag>,
+    },
+    {
+      title: t('settings.mcp.enabled'),
+      dataIndex: 'enabled',
+      key: 'enabled',
+      width: 120,
+      render: (enabled: boolean, record) => (
+        <Switch
+          checked={enabled}
+          loading={!!mcpActionLoading[record.name]}
+          onChange={(checked) => void handleToggleMcpServer(record, checked)}
+        />
+      ),
+    },
+    {
+      title: t('settings.mcp.url'),
+      dataIndex: 'url',
+      key: 'url',
+      ellipsis: true,
+      render: (value: string) => <Tooltip title={value}>{value}</Tooltip>,
+    },
+    {
+      title: t('settings.mcp.actions'),
+      key: 'actions',
+      width: 340,
+      render: (_, record) => (
+        <Space wrap>
+          <Button size="small" onClick={() => openMcpEditModal(record)}>
+            {t('settings.edit')}
+          </Button>
+          <Button size="small" loading={!!mcpActionLoading[record.name]} onClick={() => void handleTestMcpServer(record)}>
+            {t('settings.mcp.test')}
+          </Button>
+          <Button size="small" onClick={() => void handleOpenMcpTools(record)}>
+            {t('settings.mcp.view_tools')}
+          </Button>
+          <Popconfirm
+            title={t('settings.mcp.delete_confirm')}
+            okText={t('common.confirm')}
+            cancelText={t('common.cancel')}
+            onConfirm={() => void handleDeleteMcpServer(record)}
+          >
+            <Button danger size="small" loading={!!mcpActionLoading[record.name]}>
+              {t('settings.mcp.delete_server')}
+            </Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
+
+  const mcpToolColumns: ColumnsType<MCPToolItem> = [
+    {
+      title: t('settings.mcp.tool_name'),
+      dataIndex: 'name',
+      key: 'name',
+      width: 180,
+      render: (value: string) => <Tag>{value}</Tag>,
+    },
+    {
+      title: t('settings.mcp.langchain_name'),
+      dataIndex: 'langchain_name',
+      key: 'langchain_name',
+      width: 220,
+      ellipsis: true,
+    },
+    {
+      title: t('settings.mcp.tool_description'),
+      dataIndex: 'description',
+      key: 'description',
+      ellipsis: true,
+      render: (value: string) => value || '-',
+    },
+  ];
 
   return (
     <div style={{ padding: 24 }}>
@@ -1849,6 +2103,49 @@ export const SettingsPage: React.FC = () => {
                 }}
               />
             </Card>
+          )
+        },
+        {
+          key: 'mcp',
+          label: t('settings.mcp.management'),
+          children: (
+            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+              <Card
+                title={t('settings.mcp.management')}
+                extra={
+                  <Space>
+                    <Button onClick={() => void loadMcpPrompt()} loading={mcpPromptLoading}>
+                      {t('settings.mcp.refresh_prompt')}
+                    </Button>
+                    <Button onClick={() => void loadMcpServers()} loading={mcpServersLoading}>
+                      {t('settings.mcp.refresh')}
+                    </Button>
+                    <Button type="primary" onClick={openMcpCreateModal}>
+                      {t('settings.mcp.add_server')}
+                    </Button>
+                  </Space>
+                }
+              >
+                <Table<MCPServerItem>
+                  rowKey="name"
+                  dataSource={mcpServers}
+                  columns={mcpServerColumns}
+                  loading={mcpServersLoading}
+                  pagination={false}
+                  locale={{ emptyText: t('settings.mcp.empty') }}
+                  scroll={{ x: 860 }}
+                  size="small"
+                />
+              </Card>
+              <Card title={t('settings.mcp.prompt_title')}>
+                <pre
+                  className="bg-gray-800 p-3 rounded text-sm text-gray-300 max-h-60"
+                  style={promptTextBlockStyle}
+                >
+                  {mcpPromptLoading ? t('common.loading_stats') : (mcpPrompt || t('settings.mcp.prompt_empty'))}
+                </pre>
+              </Card>
+            </Space>
           )
         },
         {
@@ -2435,6 +2732,65 @@ export const SettingsPage: React.FC = () => {
           )
         }
       ]} />
+
+      <Modal
+        open={mcpModalOpen}
+        title={editingMcpServer ? t('settings.mcp.edit_server') : t('settings.mcp.add_server')}
+        onCancel={() => {
+          setMcpModalOpen(false);
+          setEditingMcpServer(null);
+        }}
+        onOk={() => void handleSaveMcpServer()}
+        okText={t('common.confirm')}
+        cancelText={t('common.cancel')}
+        confirmLoading={mcpSaving}
+        destroyOnHidden
+      >
+        <Form<MCPServerFormValues> form={mcpForm} layout="vertical">
+          <Form.Item
+            label={t('settings.mcp.name')}
+            name="name"
+            rules={[
+              { required: true, message: t('settings.mcp.name_required') },
+              { max: 64, message: t('settings.mcp.name_invalid') },
+            ]}
+          >
+            <Input disabled={!!editingMcpServer} placeholder="网页抓取" />
+          </Form.Item>
+          <Form.Item
+            label={t('settings.mcp.url')}
+            name="url"
+            rules={[
+              { required: true, message: t('settings.mcp.url_required') },
+              { type: 'url', message: t('settings.mcp.url_invalid') },
+            ]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item label={t('settings.mcp.enabled')} name="enabled" valuePropName="checked">
+            <Switch />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        open={mcpToolsModalOpen}
+        title={t('settings.mcp.tools_title', { name: mcpToolsServerName })}
+        onCancel={() => setMcpToolsModalOpen(false)}
+        footer={null}
+        width={900}
+      >
+        <Table<MCPToolItem>
+          rowKey={(record) => `${record.server}:${record.name}`}
+          dataSource={mcpTools}
+          columns={mcpToolColumns}
+          loading={mcpToolsLoading}
+          pagination={false}
+          locale={{ emptyText: t('settings.mcp.tools_empty') }}
+          scroll={{ x: 760 }}
+          size="small"
+        />
+      </Modal>
 
       <Modal
         open={newsPluginModalOpen}

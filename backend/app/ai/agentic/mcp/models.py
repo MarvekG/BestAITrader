@@ -5,15 +5,12 @@ from typing import Any, Dict, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
-MCP_SERVER_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
-
-
 class MCPServerConfig(BaseModel):
     """MCP Server 运行时配置。"""
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(..., pattern=MCP_SERVER_NAME_PATTERN)
+    name: str = Field(..., min_length=1, max_length=64)
     enabled: bool = False
     url: str = Field(..., min_length=1)
 
@@ -23,7 +20,7 @@ class MCPServerCreateRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    name: str = Field(..., pattern=MCP_SERVER_NAME_PATTERN)
+    name: str = Field(..., min_length=1, max_length=64)
     enabled: bool = False
     url: str = Field(..., min_length=1)
 
