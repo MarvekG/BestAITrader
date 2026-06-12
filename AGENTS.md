@@ -31,7 +31,7 @@
 - 配置变更后重建容器：`docker compose up -d --force-recreate <service>`，不要只用 `restart`。
 
 ## 修改前先读
-- 部署/环境：`docs/001-deployment.md`，Windows WSL2 读 `docs/004-windows-wsl-docker-engine-deployment.md`。
+- 部署/环境：`docs/002-deployment.md`，Windows WSL2 读 `docs/004-windows-wsl-docker-engine-deployment.md`。
 - 后端能力地图：`backend/app/README.md`。
 - 交易链路：`backend/app/trading/README.md`。
 - Debate 工作流：`backend/app/ai/llm_engine/README.md`。
@@ -50,7 +50,7 @@
 - 新增新闻源：按 `backend/app/ai/agentic/tooling/news_plugins/README.md` 做插件，不新增平行工具。
 - 新增数据源：按 `backend/app/data/ingestors/plugins/README.md` 做 ingestor，写入走 `DataIngestionService.write_dataframe()`。
 - 改交易/组合/风控：先读 `backend/app/trading/README.md`，保持 API/Service/Engine 分层和风控预检。
-- 改 Memory/经验复盘：先读 Memory 09/10 文档，语义判断走 LLM schema/prompt/eval，不写关键词规则。
+- 改 Memory/经验复盘：先读 `backend/app/ai/experience/DESIGN.md` 和 `backend/app/ai/experience/MEMORY_PROTOCOL_PROMPT_DESIGN.md`，语义判断走 LLM schema/prompt/eval，不写关键词规则。
 
 ## 架构约定
 - 后端 LLM 接入固定走 LiteLLM Proxy 与模型别名，真实 provider key、模型名和 base URL 放在本地 `litellm/config.yaml`，不要写入后端代码或提交仓库；公开或多人环境还必须轮换 `general_settings.master_key` 并同步后端/Memory 使用的 LiteLLM API key。

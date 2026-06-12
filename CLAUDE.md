@@ -119,7 +119,7 @@ docker compose up -d --force-recreate <service>
 
 根据改动范围查阅以下文档（路径相对于仓库根目录）：
 
-- **部署/环境**: `docs/001-deployment.md`
+- **部署/环境**: `docs/002-deployment.md`
 - **Windows WSL2**: `docs/004-windows-wsl-docker-engine-deployment.md`
 - **后端能力地图**: `backend/app/README.md`
 - **交易链路**: `backend/app/trading/README.md`

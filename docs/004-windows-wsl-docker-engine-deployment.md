@@ -4,7 +4,7 @@
 Plugin 准备天枢智投（Best-AI-Trader）的运行环境。
 
 这是 Windows 用户的推荐方案。它保留 Docker Compose 一体化部署的稳定性，同时减少桌面后台、
-许可证、GUI 和资源管理方式。应用配置和服务启动步骤不在本文维护，统一见 [部署指南](./01-deployment.md)。
+许可证、GUI 和资源管理方式。应用配置和服务启动步骤不在本文维护，统一见 [部署指南](./002-deployment.md)。
 
 ## 1. 推荐环境结构
 
@@ -448,7 +448,7 @@ ls -la backend/.env.example memo/.env.example docker-compose.yml nginx.conf
 到这里，Windows WSL2、Docker Engine、Docker Compose Plugin 和项目代码已经准备完成。应用配置、LiteLLM 配置、启动服务、停止服务和修改配置后的重建命令统一维护在：
 
 ```text
-docs/001-deployment.md
+docs/002-deployment.md
 ```
 
 继续执行部署时，在 WSL Ubuntu 中保持当前项目目录：
@@ -457,7 +457,7 @@ docs/001-deployment.md
 cd /opt/codes/Best-AI-Trader
 ```
 
-然后按 [部署指南](./01-deployment.md) 完成 `.env`、`litellm/config.yaml` 和 Compose 启动。
+然后按 [部署指南](./002-deployment.md) 完成 `.env`、`litellm/config.yaml` 和 Compose 启动。
 
 ## 12. WSL 常见问题
 
