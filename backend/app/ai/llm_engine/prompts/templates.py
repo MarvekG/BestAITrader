@@ -1321,7 +1321,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 **【最终结构化输出格式】**:
 - 最终输出必须是一个合法 JSON 对象，不能输出任何 JSON 之外的文字、Markdown、代码围栏或解释。
 - JSON 对象必须符合系统随后提供的 `PMDecision` schema，并完整包含 `decision`、`confidence_score`、`target_position`、`verdict_summary`、`investment_plan`、`price_range`、`stop_loss`、`take_profit`、`holding_horizon_days`、`risk_assessment`、`execution_details`、`report_markdown` 字段。
-- `decision` 字段只能是 `"buy"`、`"sell"`、`"hold"`；`report_markdown` 中的“建议”必须同步写出同一个结构化枚举值和中文含义，例如 `decision="buy"（买入）`。
+- `decision` 字段只能是 `"buy"`、`"sell"`、`"hold"`；`report_markdown` 中的“建议”必须与结构化字段含义一致，用自然语言展示为“买入 / 卖出 / 持有或观望”，不要在正文中写 `decision="..."` 这类字段赋值表达。
 - Markdown 决策报告只能放在 `report_markdown` 字段中；不要直接输出裸 Markdown 报告。
 - 如果需要体现 plan、研究路径或证据核验顺序，必须写入 `report_markdown` 或相应结构化摘要字段，不要在 JSON 外单独输出。
 - `report_markdown` 可以包含换行、列表和表格，但必须作为 JSON 字符串正确转义。
@@ -1333,7 +1333,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 
 ## 1. 辩论总结与判决 (Debate Summary & Verdict)
 作为投资组合经理和辩论主持人，我已评估了双方观点。
-*   **判决结果**: **[支持看跌/支持看涨/中性]** -> 建议 **[decision="buy"（买入）/ decision="sell"（卖出）/ decision="hold"（观望）]**。
+*   **判决结果**: **[支持看跌/支持看涨/中性]** -> 建议 **[买入 / 卖出 / 持有或观望]**。
 *   **综合评分/投资评级**: [0-10 或 0-100] / [买入/持有/卖出] (评分依据: ...)
 *   **核心理由 (Rationale)**:
     1.  [价格 vs 价值]: ...
@@ -2183,7 +2183,7 @@ If `execute_trading_order` fails, is skipped, or remains unfilled, `execution_de
 **[FINAL STRUCTURED OUTPUT FORMAT]**:
 - The final output must be one valid JSON object, with no text, Markdown, code fence, or explanation outside JSON.
 - The JSON object must satisfy the `PMDecision` schema provided by the system and include `decision`, `confidence_score`, `target_position`, `verdict_summary`, `investment_plan`, `price_range`, `stop_loss`, `take_profit`, `holding_horizon_days`, `risk_assessment`, `execution_details`, and `report_markdown`.
-- The `decision` field must be exactly `"buy"`, `"sell"`, or `"hold"`; the recommendation inside `report_markdown` must repeat the same structured enum value and display label, for example `decision="buy"` (Buy).
+- The `decision` field must be exactly `"buy"`, `"sell"`, or `"hold"`; the recommendation inside `report_markdown` must stay semantically consistent with the structured field and be written as natural display text such as "Buy", "Sell", or "Hold/Wait". Do not write field-assignment text such as `decision="..."` in the report body.
 - Markdown decision report must appear only in the `report_markdown` field. Do not output a raw Markdown report directly.
 - If you need to show a plan, research path, or evidence-checking order, put it inside `report_markdown` or the appropriate structured summary field. Do not output it outside JSON.
 - `report_markdown` may contain newlines, lists, and tables, but it must be correctly escaped as a JSON string.
@@ -2195,7 +2195,7 @@ Inside the `report_markdown` field, strictly follow this Markdown format:
 
 ## 1. Debate Summary & Verdict
 As PM and Debate Host, I have evaluated both sides.
-*   **Verdict**: **[Support Bear/Support Bull/Neutral]** -> Recommend **[decision="buy" (Buy) / decision="sell" (Sell) / decision="hold" (Hold)]**.
+*   **Verdict**: **[Support Bear/Support Bull/Neutral]** -> Recommend **[Buy / Sell / Hold or Wait]**.
 *   **Comprehensive Score / Investment Rating**: [0-10 or 0-100] / [Buy/Hold/Sell] (Basis: ...)
 *   **Rationale**:
     1.  [Price vs Value]: ...
