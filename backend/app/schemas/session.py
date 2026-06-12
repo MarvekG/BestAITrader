@@ -4,12 +4,16 @@ from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict
 
 
+SESSION_SOURCE_VALUES = "^(manual|scheduled|market_watch|stop_loss|take_profit)$"
+
+
 # 基本会话模型
 class SessionBase(BaseModel):
     user_id: Optional[int] = None
     stock_code: str
     trading_frequency: str
     trading_strategy: str
+    source: str = Field(default="manual", pattern=SESSION_SOURCE_VALUES)
 
 
 # 创建会话模型
@@ -21,6 +25,7 @@ class SessionCreate(SessionBase):
 class SessionUpdate(BaseModel):
     status: Optional[str] = Field(None, pattern="^(active|completed|archived)$")
     stock_code: Optional[str] = None
+    source: Optional[str] = Field(None, pattern=SESSION_SOURCE_VALUES)
 
 
 # 会话响应模型

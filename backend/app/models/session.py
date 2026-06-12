@@ -16,6 +16,7 @@ class Session(Base):
     stock_code = Column(String(10), index=True)
     trading_frequency = Column(String(50), nullable=False)
     trading_strategy = Column(String(50), nullable=False)
+    source = Column(String(20), nullable=False, default="manual")
     created_at = Column(DateTime, default=datetime.now)
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     status = Column(Enum("active", "completed", "failed", "archived", name="session_status"), default="active")

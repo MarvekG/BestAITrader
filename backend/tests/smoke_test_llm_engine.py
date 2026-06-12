@@ -36,6 +36,25 @@ def _create_session(client, auth_headers, stock_code: str) -> str:
     return response.json()["session_id"]
 
 
+def test_create_session_returns_source(client, auth_headers, db_session):
+    stock_code = "000063.SZ"
+    _seed_stock_basic(db_session, stock_code, "ZTE")
+
+    response = client.post(
+        "/api/v1/sessions/",
+        json={
+            "stock_code": stock_code,
+            "trading_frequency": "swing",
+            "trading_strategy": "trend_following",
+            "source": "manual",
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 201
+    assert response.json()["source"] == "manual"
+
+
 def _build_run_payload(session_id: str, stock_code: str) -> dict:
     return {
         "session_id": session_id,

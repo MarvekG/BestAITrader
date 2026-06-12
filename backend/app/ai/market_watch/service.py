@@ -686,6 +686,7 @@ async def _maybe_launch_debate(
     decision: Any,
     debate_launcher: Any | None,
     background_tasks: BackgroundTasks | None,
+    session_source: str = "market_watch",
 ) -> dict[str, Any]:
     if not should_launch_debate(decision):
         logger.info(
@@ -785,6 +786,7 @@ async def _maybe_launch_debate(
             decision=decision,
             debate_launcher=debate_launcher,
             background_tasks=background_tasks,
+            session_source=session_source,
         )
     except LaunchSchedulingError as exc:
         logger.exception(
@@ -907,6 +909,7 @@ async def _create_and_schedule_debate(
     decision: Any,
     debate_launcher: Any | None,
     background_tasks: BackgroundTasks | None,
+    session_source: str,
 ) -> dict[str, str]:
     parameters = decision.debate_parameters
     stock_code = decision.stock_code
@@ -920,6 +923,7 @@ async def _create_and_schedule_debate(
                 stock_code=stock_code,
                 trading_frequency=trading_frequency,
                 trading_strategy=trading_strategy,
+                source=session_source,
             ),
         )
         session_id = str(session.session_id)

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release Note 生成"
+  short_description: "生成发布说明并附迁移命令"
+  default_prompt: "使用 $release-note-db-migration 生成 release note，并加入“数据库迁移的升级和回滚”章节。"
