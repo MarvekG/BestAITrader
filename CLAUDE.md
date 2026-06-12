@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **前端**：React 18, TypeScript, Vite, Ant Design 5, react-i18next
 - **AI 引擎**：LiteLLM Proxy (统一 LLM 接入), LangGraph (多 Agent 工作流)
 - **记忆系统**：MemoFlux (`memo/` 子目录，独立子项目，通过 HTTP 集成)
-- **部署**：Docker Compose 编排所有服务（PostgreSQL, Redis, LiteLLM, Memory, Backend, Frontend, Nginx）
+- **部署**：Docker Compose 编排所有服务（PostgreSQL, Redis, LiteLLM, MemoFlux, Sandbox, WebFetch, Scrapling MCP, Backend, Frontend, Nginx）
 
 ## 常用命令
 

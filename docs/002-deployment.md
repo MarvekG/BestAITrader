@@ -75,6 +75,7 @@ docker compose ps
 ```bash
 docker compose exec backend curl -f http://127.0.0.1:8000/health
 docker compose exec sandbox curl -f http://127.0.0.1:8030/health
+docker compose exec webfetch curl -f http://127.0.0.1:8010/health
 curl -f http://localhost
 curl -f http://localhost:4000/health/liveliness
 ```
@@ -85,6 +86,10 @@ curl -f http://localhost:4000/health/liveliness
 - LiteLLM 管理系统：`http://localhost:4000/ui`
 
 `sandbox` 是独立 Python 沙箱服务，内置 Deno + Pyodide，用于后端 Agent 工具执行受限 Python 计算；生产 Compose 默认只在内部网络暴露，开发 Compose 额外映射 `8030:8030` 便于调试。
+
+`webfetch` 是独立网页渲染和抓取服务，用于浏览器工具和 PDF 下载解析；生产 Compose 默认只在内部网络暴露，开发 Compose 额外映射 `8010:8010` 便于调试。
+
+`scrapling.mcp` 是预置的可选 MCP 网页抓取服务，默认由运行时扩展配置控制是否暴露给 Agent 工具池。
 
 修改配置后不要只用 `restart`，需要重建对应服务：
 

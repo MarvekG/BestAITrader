@@ -3,7 +3,7 @@
 ## 项目定位
 - 天枢智投是面向 A 股投研、AI 多智能体决策、模拟交易、长期记忆和经验复盘的研究系统。
 - 主栈：FastAPI + SQLAlchemy + PostgreSQL/Redis + LiteLLM Proxy + LangGraph/LangChain + React 18/Vite/TypeScript/Ant Design + MemoFlux。
-- 完整部署由根 `docker-compose.yml` 编排 PostgreSQL、Redis、LiteLLM、Memory、Backend、Frontend、Nginx；源码调试使用 `docker-compose.dev.yml`。
+- 完整部署由根 `docker-compose.yml` 编排 PostgreSQL、Redis、LiteLLM、MemoFlux、Sandbox、WebFetch、Scrapling MCP、Backend、Frontend、Nginx；源码调试使用 `docker-compose.dev.yml`。
 
 ## 关键目录
 - `backend/app/main.py`：FastAPI 应用、lifespan 启停副作用、HTTP access log、CORS、WebSocket 挂载。
@@ -36,7 +36,7 @@
 - 交易链路：`backend/app/trading/README.md`。
 - Debate 工作流：`backend/app/ai/llm_engine/README.md`。
 - AI 选股：`backend/app/ai/stock_picker/README.md`。
-- 经验复盘：`backend/app/ai/experience/README.md`；注意该 README 中“最终 JSON 前必须调用 `write_memory`”的描述与当前代码/测试不一致，当前允许无新增可复用经验时不写 Memory，以 `backend/app/ai/experience/workflow.py` 和 `backend/tests/test_experience_workflow.py` 为准。
+- 经验复盘：`backend/app/ai/experience/README.md`；当前允许无新增可复用经验时不写 Memory，以 `backend/app/ai/experience/workflow.py` 和 `backend/tests/test_experience_workflow.py` 为准。
 - Skills Loader：`backend/app/ai/agentic/skills_loader/README.md`。
 - 新闻插件：`backend/app/ai/agentic/tooling/news_plugins/README.md`。
 - 安全/合规/数据源：`SECURITY.md`、`LEGAL.md`、`DATA_SOURCES.md`、`CONTRIBUTING.md`。

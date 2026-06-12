@@ -37,7 +37,7 @@
 - **数据工程底座**：使用 PostgreSQL、JSONB、API 注册表和数据刷新调度承载 A 股核心数据与长尾异构数据。
 - **模拟交易引擎**：支持账户、订单、成交记录、持仓、FIFO 批次账本、费用、A 股一手和 T+1 约束。
 - **实时可观测体验**：异步任务、WebSocket、前端审计页和统一日志让 AI 分析过程可看、可查、可复盘。
-- **Docker 一体化部署**：PostgreSQL、Redis、pgvector、MemoFlux、后端、前端和 Nginx 一套 Compose 拉起。
+- **Docker 一体化部署**：PostgreSQL、Redis、LiteLLM、MemoFlux、独立沙箱、网页抓取、后端、前端和 Nginx 一套 Compose 拉起。
 
 ## 先进 AI 特性
 
@@ -59,7 +59,7 @@
 
 ## 部署
 
-当前推荐并支持的完整启动方式是 Docker Compose。服务会启动 PostgreSQL、Redis、MemoFlux、Memory pgvector、FastAPI 后端、React 前端和 Nginx 统一入口。
+当前推荐并支持的完整启动方式是 Docker Compose。服务会启动 PostgreSQL、Redis、LiteLLM、MemoFlux、Memory pgvector、独立 Python 沙箱、独立 WebFetch 网页渲染服务、可选 Scrapling MCP、FastAPI 后端、React 前端和 Nginx 统一入口。
 
 完整部署步骤、环境变量、启动停止、验证和排障见 [部署指南](./docs/002-deployment.md)。
 Windows 用户建议使用
@@ -76,7 +76,7 @@ Windows 用户建议使用
 | 可审计性 | 结论难以回放 | session、message、task、order、memory 和 WebSocket 事件可追踪 |
 | 模拟交易 | 简化买卖记录 | 订单、账户、持仓、成交、费用、T+1、FIFO 批次账本 |
 | 选股流程 | 直接让模型挑股票 | 股票池过滤、因子初排、候选压缩、LLM 深研、推荐生成 |
-| 工程化程度 | 单脚本或单服务 | FastAPI、React、PostgreSQL、Redis、pgvector、Nginx、Docker Compose 一体化 |
+| 工程化程度 | 单脚本或单服务 | FastAPI、React、PostgreSQL、Redis、pgvector、LiteLLM、独立沙箱、WebFetch、Nginx、Docker Compose 一体化 |
 
 ## 核心场景
 
