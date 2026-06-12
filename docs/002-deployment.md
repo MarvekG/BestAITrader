@@ -1,8 +1,18 @@
 # 部署指南
 
-第一次启动只需要三步：clone 仓库、复制并修改配置、启动。
+推荐使用根目录的交互式部署脚本。脚本只依赖 Python 标准库，会校验外部 API Key，生成本地配置，然后一键启动 Docker Compose。
 
-## 1. Clone 仓库
+## 1. 准备环境
+
+确认已安装 Docker Engine、Docker Compose v2 和 Python 3.11+：
+
+```bash
+docker version
+docker compose version
+python3 --version
+```
+
+获取代码：
 
 ```bash
 git clone <repo-url> Best-AI-Trader
@@ -10,34 +20,17 @@ cd Best-AI-Trader
 git submodule update --init --recursive
 ```
 
-启动前确认已安装 Docker Engine 和 Docker Compose v2：
+## 2. 准备密钥
 
-```bash
-docker version
-docker compose version
-```
+运行脚本前准备以下信息：
 
-## 2. 复制配置文件并修改配置
-
-```bash
-cp backend/.env.example backend/.env
-cp memo/.env.example memo/.env
-cp litellm/config.example.yaml litellm/config.yaml
-```
-
-修改 `backend/.env`，至少填写：
-
-```env
-FIRST_SUPERUSER=tradeuser
-FIRST_SUPERUSER_EMAIL=tradeuser@example.com
-FIRST_SUPERUSER_PASSWORD=<your-unique-password>
-SECRET_KEY=<random-secret>
-
-TUSHARE_API=http://api.waditu.com/dataapi
-TUSHARE_TOKEN=your-tushare-token
-TAVILY_API_KEY=your-tavily-api-key
-NEWS_API_KEY=your-newsapi-key
-```
+- 初始超级用户密码：至少 12 位。
+- LLM API Base URL、API Key、供应商真实模型名：要求兼容 OpenAI `chat/completions` 接口。
+- LiteLLM provider/model 写法：例如 DeepSeek 可填 `deepseek/deepseek-v4-flash`；后端仍使用固定别名 `backend`、
+  `backend-thinking` 和 `memory`。
+- Tushare Token：用于 A 股数据接入，建议确认已有足够接口权限。
+- Tavily API Key：用于搜索。
+- NewsAPI API Key：用于新闻检索。
 
 申请地址：
 
@@ -45,54 +38,81 @@ NEWS_API_KEY=your-newsapi-key
 - Tavily：https://www.tavily.com/
 - NewsAPI：https://newsapi.org/
 
-生成 `SECRET_KEY`：
+## 3. 一键部署
+
+在项目根目录运行：
 
 ```bash
-python -c "import secrets; print(secrets.token_urlsafe(48))"
+python3 deploy.py
 ```
 
-修改 `litellm/config.yaml`，保留 `gpt-4o-mini`、`backend`、`backend-thinking`、`memory` 四个 `model_name`，只替换每个模型下的真实供应商配置：
+脚本会执行以下步骤：
 
-```yaml
-litellm_params:
-  api_key: sk-your-provider-key
-  api_base: https://api.your-provider.example
-```
+1. 交互式读取初始用户、LLM、Tushare、Tavily 和 NewsAPI 配置。
+2. 调用对应服务验证 Key 是否可用；验证失败会要求重新输入。
+   Tushare 默认用低门槛 `daily` 日线接口校验；如果返回频率超限，脚本会视为 Token 已被服务端识别但当前暂时限流，并允许继续。
+3. 生成 `backend/.env`、`memo/.env`、`litellm/config.yaml`。
+4. 执行 `docker compose pull`、`docker compose up -d`、`docker compose ps`。
+5. 检查 backend、sandbox、webfetch 和 memo 健康状态，并用生成的 LiteLLM master key 调用 `backend` 模型别名。
 
-确认 `memo/.env` 中的 `MEMOFLUX_LLM_API_KEY` 等于 `litellm/config.yaml` 里的 `general_settings.master_key`。
-
-不要提交真实的 `.env`、`litellm/config.yaml`、API key 或数据库数据。
-
-## 3. 启动
+已有本地配置时，脚本会先询问是否覆盖。确认要覆盖也可以直接运行：
 
 ```bash
-docker compose up -d
-docker compose ps
+python3 deploy.py --overwrite
 ```
 
-验证：
+只生成配置、不启动容器：
 
 ```bash
-docker compose exec backend curl -f http://127.0.0.1:8000/health
-docker compose exec sandbox curl -f http://127.0.0.1:8030/health
-docker compose exec webfetch curl -f http://127.0.0.1:8010/health
-curl -f http://localhost
-curl -f http://localhost:4000/health/liveliness
+python3 deploy.py --no-start
 ```
 
-访问：
+启动后跳过健康检查：
+
+```bash
+python3 deploy.py --no-health-check
+```
+
+## 4. 访问系统
+
+部署完成后访问：
 
 - 主系统：`http://localhost`
 - LiteLLM 管理系统：`http://localhost:4000/ui`
 
-`sandbox` 是独立 Python 沙箱服务，内置 Deno + Pyodide，用于后端 Agent 工具执行受限 Python 计算；生产 Compose 默认只在内部网络暴露，开发 Compose 额外映射 `8030:8030` 便于调试。
+默认生成的后端配置会关闭运行时扩展、维护端点和 OpenAPI 文档。`/api/v1/testing/*` 仍按后端鉴权边界挂载。需要临时安装
+Skill、新闻插件或执行维护操作时，手动修改 `backend/.env` 后重建后端容器。
 
-`webfetch` 是独立网页渲染和抓取服务，用于浏览器工具和 PDF 下载解析；生产 Compose 默认只在内部网络暴露，开发 Compose 额外映射 `8010:8010` 便于调试。
+## 5. 常用命令
 
-`scrapling.mcp` 是预置的可选 MCP 网页抓取服务，默认由运行时扩展配置控制是否暴露给 Agent 工具池。
-
-修改配置后不要只用 `restart`，需要重建对应服务：
+查看服务：
 
 ```bash
-docker compose up -d --force-recreate <service>
+docker compose ps
 ```
+
+查看日志：
+
+```bash
+docker compose logs -f backend
+docker compose logs -f litellm
+```
+
+修改配置后重建服务，不要只用 `restart`：
+
+```bash
+docker compose up -d --force-recreate backend memo litellm
+```
+
+停止服务：
+
+```bash
+docker compose down
+```
+
+## 6. 注意事项
+
+- 不要提交真实的 `.env`、`litellm/config.yaml`、API key、Cookie、JWT 或数据库数据。
+- 生产或公网部署前建议按 `SECURITY.md` 收紧 Nginx、LiteLLM 暴露面、上传大小、超时和访问控制。
+- `sandbox`、`webfetch` 和 `scrapling.mcp` 默认只在 Compose 内部网络访问。
+- 当前 Compose 使用已发布镜像，不需要在本机源码构建镜像。
