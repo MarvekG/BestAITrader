@@ -4,7 +4,7 @@
 Plugin 准备天枢智投（Best-AI-Trader）的运行环境。
 
 这是 Windows 用户的推荐方案。它保留 Docker Compose 一体化部署的稳定性，同时减少桌面后台、
-许可证、GUI 和资源管理方式。应用配置和服务启动步骤不在本文维护，统一见 [部署指南](./01-deployment.md)。
+许可证、GUI 和资源管理方式。应用配置和服务启动步骤不在本文维护，统一见 [部署指南](./002-deployment.md)。
 
 ## 1. 推荐环境结构
 
@@ -17,6 +17,10 @@ Windows
         ├── Nginx             -> 暴露到 Windows 浏览器
         ├── Frontend          -> React/Vite 前端
         ├── Backend           -> FastAPI 后端
+        ├── Sandbox           -> Deno + Pyodide Python 沙箱服务
+        ├── WebFetch          -> 网页渲染、抓取和 PDF 下载辅助服务
+        ├── Scrapling MCP     -> 可选 MCP 网页抓取服务
+        ├── LiteLLM           -> LLM 代理和模型别名网关
         ├── PostgreSQL        -> 主业务库
         ├── Redis             -> 缓存和任务辅助
         ├── MemoFlux          -> 长期记忆服务
@@ -37,10 +41,9 @@ http://localhost:8080
 
 ## 2. 为什么不建议原生 Windows 手动部署
 
-天枢智投（Best-AI-Trader）不是一个单进程应用。完整部署至少包含后端、前端、Nginx、PostgreSQL、Redis、pgvector 和
-MemoFlux。原生 Windows 手动部署会遇到这些问题：
+天枢智投（Best-AI-Trader）不是一个单进程应用。完整部署至少包含后端、前端、Nginx、PostgreSQL、Redis、pgvector、LiteLLM、MemoFlux、独立沙箱、网页渲染和可选 MCP 服务。原生 Windows 手动部署会遇到这些问题：
 
-- Python、Node、PostgreSQL、pgvector、Redis 和浏览器运行时需要分别安装和维护。
+- Python、Node、PostgreSQL、pgvector、Redis、LiteLLM、Deno/Pyodide、浏览器运行时和 MCP 服务需要分别安装和维护。
 - 本项目的 Compose 健康检查、服务名网络、命名卷和容器内路径天然按 Linux 容器设计。
 - pgvector 和数据库扩展在 Windows 原生环境下更容易遇到版本和编译问题。
 - 长期运行、重启恢复、备份恢复和日志排查会比 Compose 模式复杂。
@@ -448,7 +451,7 @@ ls -la backend/.env.example memo/.env.example docker-compose.yml nginx.conf
 到这里，Windows WSL2、Docker Engine、Docker Compose Plugin 和项目代码已经准备完成。应用配置、LiteLLM 配置、启动服务、停止服务和修改配置后的重建命令统一维护在：
 
 ```text
-docs/001-deployment.md
+docs/002-deployment.md
 ```
 
 继续执行部署时，在 WSL Ubuntu 中保持当前项目目录：
@@ -457,7 +460,7 @@ docs/001-deployment.md
 cd /opt/codes/Best-AI-Trader
 ```
 
-然后按 [部署指南](./01-deployment.md) 完成 `.env`、`litellm/config.yaml` 和 Compose 启动。
+然后按 [部署指南](./002-deployment.md) 完成 `.env`、`litellm/config.yaml` 和 Compose 启动。
 
 ## 12. WSL 常见问题
 

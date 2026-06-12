@@ -3,7 +3,7 @@
 ## 项目定位
 - 天枢智投是面向 A 股投研、AI 多智能体决策、模拟交易、长期记忆和经验复盘的研究系统。
 - 主栈：FastAPI + SQLAlchemy + PostgreSQL/Redis + LiteLLM Proxy + LangGraph/LangChain + React 18/Vite/TypeScript/Ant Design + MemoFlux。
-- 完整部署由根 `docker-compose.yml` 编排 PostgreSQL、Redis、LiteLLM、Memory、Backend、Frontend、Nginx；源码调试使用 `docker-compose.dev.yml`。
+- 完整部署由根 `docker-compose.yml` 编排 PostgreSQL、Redis、LiteLLM、MemoFlux、Sandbox、WebFetch、Scrapling MCP、Backend、Frontend、Nginx；源码调试使用 `docker-compose.dev.yml`。
 
 ## 关键目录
 - `backend/app/main.py`：FastAPI 应用、lifespan 启停副作用、HTTP access log、CORS、WebSocket 挂载。
@@ -31,12 +31,12 @@
 - 配置变更后重建容器：`docker compose up -d --force-recreate <service>`，不要只用 `restart`。
 
 ## 修改前先读
-- 部署/环境：`docs/001-deployment.md`，Windows WSL2 读 `docs/004-windows-wsl-docker-engine-deployment.md`。
+- 部署/环境：`docs/002-deployment.md`，Windows WSL2 读 `docs/004-windows-wsl-docker-engine-deployment.md`。
 - 后端能力地图：`backend/app/README.md`。
 - 交易链路：`backend/app/trading/README.md`。
 - Debate 工作流：`backend/app/ai/llm_engine/README.md`。
 - AI 选股：`backend/app/ai/stock_picker/README.md`。
-- 经验复盘：`backend/app/ai/experience/README.md`；注意该 README 中“最终 JSON 前必须调用 `write_memory`”的描述与当前代码/测试不一致，当前允许无新增可复用经验时不写 Memory，以 `backend/app/ai/experience/workflow.py` 和 `backend/tests/test_experience_workflow.py` 为准。
+- 经验复盘：`backend/app/ai/experience/README.md`；当前允许无新增可复用经验时不写 Memory，以 `backend/app/ai/experience/workflow.py` 和 `backend/tests/test_experience_workflow.py` 为准。
 - Skills Loader：`backend/app/ai/agentic/skills_loader/README.md`。
 - 新闻插件：`backend/app/ai/agentic/tooling/news_plugins/README.md`。
 - 安全/合规/数据源：`SECURITY.md`、`LEGAL.md`、`DATA_SOURCES.md`、`CONTRIBUTING.md`。
@@ -50,7 +50,7 @@
 - 新增新闻源：按 `backend/app/ai/agentic/tooling/news_plugins/README.md` 做插件，不新增平行工具。
 - 新增数据源：按 `backend/app/data/ingestors/plugins/README.md` 做 ingestor，写入走 `DataIngestionService.write_dataframe()`。
 - 改交易/组合/风控：先读 `backend/app/trading/README.md`，保持 API/Service/Engine 分层和风控预检。
-- 改 Memory/经验复盘：先读 Memory 09/10 文档，语义判断走 LLM schema/prompt/eval，不写关键词规则。
+- 改 Memory/经验复盘：先读 `backend/app/ai/experience/DESIGN.md` 和 `backend/app/ai/experience/MEMORY_PROTOCOL_PROMPT_DESIGN.md`，语义判断走 LLM schema/prompt/eval，不写关键词规则。
 
 ## 架构约定
 - 后端 LLM 接入固定走 LiteLLM Proxy 与模型别名，真实 provider key、模型名和 base URL 放在本地 `litellm/config.yaml`，不要写入后端代码或提交仓库；公开或多人环境还必须轮换 `general_settings.master_key` 并同步后端/Memory 使用的 LiteLLM API key。

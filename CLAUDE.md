@@ -14,7 +14,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **前端**：React 18, TypeScript, Vite, Ant Design 5, react-i18next
 - **AI 引擎**：LiteLLM Proxy (统一 LLM 接入), LangGraph (多 Agent 工作流)
 - **记忆系统**：MemoFlux (`memo/` 子目录，独立子项目，通过 HTTP 集成)
-- **部署**：Docker Compose 编排所有服务（PostgreSQL, Redis, LiteLLM, Memory, Backend, Frontend, Nginx）
+- **部署**：Docker Compose 编排所有服务（PostgreSQL, Redis, LiteLLM, MemoFlux, Sandbox, WebFetch, Scrapling MCP, Backend, Frontend, Nginx）
 
 ## 常用命令
 
@@ -119,7 +119,7 @@ docker compose up -d --force-recreate <service>
 
 根据改动范围查阅以下文档（路径相对于仓库根目录）：
 
-- **部署/环境**: `docs/001-deployment.md`
+- **部署/环境**: `docs/002-deployment.md`
 - **Windows WSL2**: `docs/004-windows-wsl-docker-engine-deployment.md`
 - **后端能力地图**: `backend/app/README.md`
 - **交易链路**: `backend/app/trading/README.md`

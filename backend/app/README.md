@@ -34,7 +34,7 @@ Agent 可以调用 Python 做数值计算和表格分析，但不是直接执行
 
 ### 工程闭环完整
 
-后端有异步任务、Redis 通知、WebSocket 订阅、LLM token 统计、Prompt 静态查看、系统自检、数据库备份恢复、数据刷新调度、任务中断恢复和结构化日志。它不是一个脚本，而是一套可以部署、排障、观察和迭代的系统。
+后端有异步任务、Redis 通知、WebSocket 订阅、LLM token 统计、Prompt 静态查看、系统自检、数据库备份恢复、数据刷新调度、任务中断恢复、独立沙箱服务、独立网页渲染服务和结构化日志。它不是一个脚本，而是一套可以部署、排障、观察和迭代的系统。
 
 ## 2. 怎么实现
 
@@ -76,14 +76,17 @@ Agent 可以调用 Python 做数值计算和表格分析，但不是直接执行
 - [`ai/agentic/tools.py`](./ai/agentic/tools.py)：统一股票数据、市场数据、数据库查询、同步数据、沙箱计算和交易工具。
 - [`ai/agentic/tooling/news_tool.py`](./ai/agentic/tooling/news_tool.py)：`search_news` 统一入口。
 - [`ai/agentic/tooling/news_plugins/registry.py`](./ai/agentic/tooling/news_plugins/registry.py)：新闻插件自动发现和注册。
-- [`ai/agentic/tooling/python_sandbox.py`](./ai/agentic/tooling/python_sandbox.py)：Deno + Pyodide Python 沙箱。
+- [`ai/agentic/tooling/python_sandbox.py`](./ai/agentic/tooling/python_sandbox.py)：后端 AST 校验和独立 `sandbox` 服务 HTTP 调用入口。
+- [`ai/agentic/tooling/browser_tool.py`](./ai/agentic/tooling/browser_tool.py)：独立 `webfetch` 服务网页渲染和 HTML/Markdown 抓取入口。
+- [`ai/agentic/tooling/pdf_tool.py`](./ai/agentic/tooling/pdf_tool.py)：通过 `webfetch` 下载 PDF 后解析为 Markdown。
 - [`ai/agentic/skills_loader/runtime.py`](./ai/agentic/skills_loader/runtime.py)：Skills loader 运行时工具。
 - [`ai/agentic/memory_tools.py`](./ai/agentic/memory_tools.py)：通过 MemoFlux 提供 Memory 召回和写入工具。
 
 关键机制：
 
 - `search_news` 要求 Agent 显式选择来源，避免所有新闻源混在一起造成证据污染。
-- 沙箱用 AST 拦截危险语法和调用，再交给 Pyodide 执行纯计算任务。
+- 沙箱在后端先用 AST 拦截危险语法和调用，再通过 `PY_SANDBOX_BASE_URL` 交给独立 `sandbox` 容器执行纯计算任务。
+- 浏览器和 PDF 工具通过 `WEBFETCH_BASE_URL` 调用独立 `webfetch` 容器，后端不直接管理浏览器生命周期。
 - Skills 用 `SKILL.md + references + scripts` 扩展 Agent 能力，当前内置 Tushare 数据 skill。
 - 新增 Skills 的完整规范见 [`ai/agentic/skills_loader/README.md`](./ai/agentic/skills_loader/README.md)。
 - 替换和开发新闻插件的完整规范见 [`ai/agentic/tooling/news_plugins/README.md`](./ai/agentic/tooling/news_plugins/README.md)。
@@ -120,7 +123,7 @@ Agent 可以调用 Python 做数值计算和表格分析，但不是直接执行
 
 - 选股先用确定性规则压缩候选池，再让 LLM 做整池深研，避免全市场逐只调用模型。
 - 复盘读取 PM 决策后的市场结果，检查收益、回撤、相对指数、相对行业表现。
-- 经验复盘要求写入 MemoFlux Memory，把有效经验沉淀给后续分析使用。
+- 经验复盘只在提炼出可复用赚钱经验、失败教训、仓位纪律或流程改进时写入 MemoFlux Memory；没有新增可复用经验时允许跳过写入。
 
 ### 2.6 模拟交易账本
 
@@ -171,7 +174,8 @@ Agent 可以调用 Python 做数值计算和表格分析，但不是直接执行
 | 财报字段本地化 | `data/metadata/financial_report_localizer.py` | 把 JSONB 财报字段转成更适合中文 Agent 阅读的结构 |
 | 多源新闻插件注册 | `ai/agentic/tooling/news_plugins/registry.py` | 自动扫描内置和 external 新闻插件，形成可选来源列表 |
 | 统一新闻工具 | `ai/agentic/tooling/news_tool.py` | `search_news` 强制指定来源，避免多源结果混杂 |
-| Deno + Pyodide 沙箱 | `ai/agentic/tooling/python_sandbox.py` | AST 校验危险 import/call，再在受限运行时执行计算 |
+| 独立 Python 沙箱 | `ai/agentic/tooling/python_sandbox.py` | 后端 AST 校验危险 import/call，再通过 `sandbox` 服务受限执行计算 |
+| 独立 WebFetch 服务 | `ai/agentic/tooling/browser_tool.py` | 通过 `webfetch` 服务渲染网页并返回 HTML 或 Markdown |
 | Skills Loader | `ai/agentic/skills_loader/runtime.py` | 让 Agent 读取 `SKILL.md`、references 和 scripts 扩展专业能力 |
 | Memory 工具绑定 | `ai/agentic/memory_tools.py` | 自动绑定用户和股票 scope，提供 `recall_memory` / `write_memory` |
 | 数据源插件发现 | `data/ingestors/plugin_loader.py` | 自动发现 `*_ingestor.py`，无需手动改注册表 |
@@ -180,7 +184,7 @@ Agent 可以调用 Python 做数值计算和表格分析，但不是直接执行
 | 技术指标批量计算 | `data/analytics/indicators.py` | 计算 MA、MACD、RSI、KDJ、CCI、WR、BOLL、ATR、OBV 等指标 |
 | 自动刷新调度 | `data/refresh_scheduler.py` | APScheduler 错峰刷新日线、指数、资金流、龙虎榜、北向、热榜和实时行情 |
 | AI 智能选股任务 | `ai/stock_picker/service.py` | 股票池过滤、因子初排、LLM 深研、推荐生成和事件记录 |
-| 经验复盘任务 | `ai/experience/workflow.py` | 基于 PM 决策后的真实价格路径，输出复盘 JSON 并要求写入记忆 |
+| 经验复盘任务 | `ai/experience/workflow.py` | 基于 PM 决策后的真实价格路径输出复盘 JSON，并按可复用经验价值选择是否写入记忆 |
 | 经验复盘调度 | `tasks/experience_review_scheduler.py` | 默认关闭，可配置盘后扫描可复盘 session 并自动发起经验分析任务 |
 | FIFO 持仓账本 | `trading/trading_engine.py` | 维护买入批次、T+1 可卖股数、费用、止损/止盈判断 |
 | 交易一致性写库 | `trading/service.py` | 对账户和持仓加锁，统一写 orders、positions、trade_records |
