@@ -11,10 +11,17 @@ export interface Session {
   ended_at?: string | null;
   trading_frequency: string;
   trading_strategy: string;
+  source: 'manual' | 'scheduled' | 'market_watch' | 'stop_loss' | 'take_profit';
 }
 
 export const sessionApi = {
-  create: (data: { stock_code: string; stock_name?: string; trading_frequency: string; trading_strategy: string }) =>
+  create: (data: {
+    stock_code: string;
+    stock_name?: string;
+    trading_frequency: string;
+    trading_strategy: string;
+    source?: Session['source'];
+  }) =>
     apiClient.post<Session>('/sessions/', data),
 
   list: (params?: { status?: string }) =>

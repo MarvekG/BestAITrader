@@ -18,7 +18,7 @@ from app.models.stock_warehouse import StockWarehouse
 from app.tasks.stock_analysis_scheduler import DEFAULT_TRADING_FREQUENCY, DEFAULT_TRADING_STRATEGY
 from app.trading.discipline_settings import PositionDisciplineSettingsResponse
 from app.trading.discipline_settings import get_position_discipline_settings
-from app.trading.pm_rules import evaluate_position_disciplines
+from app.trading.pm_rules import TRIGGER_STOP_LOSS, TRIGGER_TAKE_PROFIT, evaluate_position_disciplines
 
 logger = get_logger(__name__)
 
@@ -26,6 +26,11 @@ PM_DISCIPLINE_TRIGGER_LABELS = {
     "stop_loss": "PM stop-loss trigger",
     "take_profit": "PM take-profit trigger",
     "horizon_expired": "PM holding horizon expired",
+}
+
+PM_DISCIPLINE_SESSION_SOURCES = {
+    TRIGGER_STOP_LOSS: "stop_loss",
+    TRIGGER_TAKE_PROFIT: "take_profit",
 }
 
 
@@ -167,6 +172,7 @@ async def _handle_position_discipline_trigger(
         decision=decision,
         debate_launcher=debate_launcher,
         background_tasks=background_tasks,
+        session_source=PM_DISCIPLINE_SESSION_SOURCES.get(item["trigger"], "market_watch"),
     )
 
 

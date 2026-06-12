@@ -104,6 +104,14 @@ const getStockAnalysisQuestion = (task: AsyncTaskRecord): string => (
 
 const formatTaskDate = (value?: string | null): string => (value ? new Date(value).toLocaleString() : '-');
 
+const sessionSourceColor: Record<Session['source'], string> = {
+  manual: 'blue',
+  scheduled: 'purple',
+  market_watch: 'cyan',
+  stop_loss: 'red',
+  take_profit: 'green',
+};
+
 interface DebateManagementPanelProps {
   isActive?: boolean;
 }
@@ -259,6 +267,14 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
         const color = status === 'active' ? 'green' : 'default';
         return <Tag color={color}>{status.toUpperCase()}</Tag>;
       },
+    },
+    {
+      title: t('session.col_source'),
+      dataIndex: 'source',
+      width: 100,
+      render: (source: Session['source']) => (
+        <Tag color={sessionSourceColor[source] || 'default'}>{t(`session.source_${source || 'manual'}`)}</Tag>
+      ),
     },
     {
       title: t('session.col_created'),

@@ -278,6 +278,7 @@ async def _launch_analysis(
                     stock_code=stock.stock_code,
                     trading_frequency=stock.auto_analysis_trading_frequency or DEFAULT_TRADING_FREQUENCY,
                     trading_strategy=stock.auto_analysis_trading_strategy or DEFAULT_TRADING_STRATEGY,
+                    source="scheduled",
                 ),
             )
             task_info = task_manager.submit_task(
