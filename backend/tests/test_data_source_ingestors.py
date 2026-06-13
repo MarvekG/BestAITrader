@@ -391,6 +391,19 @@ class TestTushareIngestor:
         assert not hasattr(TushareIngestor, "fetch_and_ingest_board_concept")
 
     @pytest.mark.asyncio
+    async def test_fetch_all_stock_basic_does_not_retry_entire_batch_on_executor_failure(self):
+        """全量基础信息同步遇到执行器异常时不重复重跑整个批次。"""
+        with patch('app.data.ingestors.plugins.tushare_ingestor.DataIngestionService', return_value=Mock()), \
+             patch('app.data.ingestors.plugins.tushare_ingestor.ts.pro_api', return_value=Mock()):
+            ingestor = TushareIngestor()
+        ingestor._run_in_executor = AsyncMock(side_effect=ConnectionError("upstream closed"))
+
+        with pytest.raises(ConnectionError):
+            await ingestor.fetch_and_ingest_all_stock_basic()
+
+        assert ingestor._run_in_executor.await_count == 1
+
+    @pytest.mark.asyncio
     async def test_fetch_stock_earnings_forecast_ignores_missing_update_flag(
         self, test_stock_code
     ):
