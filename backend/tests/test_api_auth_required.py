@@ -122,34 +122,6 @@ def test_cors_does_not_allow_arbitrary_origins_by_default(client):
     assert "access-control-allow-origin" not in response.headers
 
 
-@pytest.mark.parametrize(
-    ("method", "path", "kwargs"),
-    [
-        ("get", "/api/v1/sources/database/backup", {}),
-        (
-            "post",
-            "/api/v1/sources/database/import",
-            {"files": {"file": ("backup.dump", b"dump", "application/octet-stream")}},
-        ),
-    ],
-)
-def test_database_backup_import_endpoints_can_be_disabled(client, auth_headers, monkeypatch, method, path, kwargs):
-    monkeypatch.setattr("app.core.config.settings.ENABLE_MAINTENANCE_ENDPOINTS", False)
-
-    response = getattr(client, method)(path, headers=auth_headers, **kwargs)
-
-    assert response.status_code == 404
-
-
-def test_testing_endpoints_ignore_maintenance_switch(client, auth_headers, monkeypatch):
-    monkeypatch.setattr("app.core.config.settings.ENABLE_MAINTENANCE_ENDPOINTS", False)
-
-    response = client.get("/api/v1/testing/tools", headers=auth_headers)
-
-    assert response.status_code == 200
-    assert response.json()["status"] == "success"
-
-
 def test_access_log_redacts_sensitive_query_string_values(client, caplog):
     caplog.set_level(logging.INFO, logger="app.main")
 

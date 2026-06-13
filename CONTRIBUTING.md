@@ -34,7 +34,7 @@
 
 ## 安全敏感改动
 
-涉及鉴权、授权、插件执行、依赖安装、浏览器自动化、数据库备份/导入或外部网络访问的改动必须：
+涉及鉴权、授权、插件执行、依赖安装、浏览器自动化或外部网络访问的改动必须：
 
 - 默认采用适合私有本地环境的保守行为；
 - 将管理或诊断接口置于鉴权之后；
@@ -105,7 +105,7 @@ For changes that affect analysis, stock recommendations, trading behavior, or da
 ## Security-Sensitive Changes
 
 For changes involving authentication, authorization, plugin execution, dependency installation, browser automation,
-database backup/import, or external network access:
+or external network access:
 
 - default to private/local-safe behavior;
 - gate admin or diagnostic endpoints behind authentication;

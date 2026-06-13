@@ -34,7 +34,7 @@ Agent 可以调用 Python 做数值计算和表格分析，但不是直接执行
 
 ### 工程闭环完整
 
-后端有异步任务、Redis 通知、WebSocket 订阅、LLM token 统计、Prompt 静态查看、系统自检、数据库备份恢复、数据刷新调度、任务中断恢复、独立沙箱服务、独立网页渲染服务和结构化日志。它不是一个脚本，而是一套可以部署、排障、观察和迭代的系统。
+后端有异步任务、Redis 通知、WebSocket 订阅、LLM token 统计、Prompt 静态查看、系统自检、数据刷新调度、任务中断恢复、独立沙箱服务、独立网页渲染服务和结构化日志。它不是一个脚本，而是一套可以部署、排障、观察和迭代的系统。
 
 ## 2. 怎么实现
 
@@ -149,7 +149,6 @@ Agent 可以调用 Python 做数值计算和表格分析，但不是直接执行
 - [`api/endpoints/testing.py`](./api/endpoints/testing.py)：系统自检接口。
 - [`api/endpoints/prompt.py`](./api/endpoints/prompt.py)：Prompt 静态查看。
 - [`api/endpoints/llm.py`](./api/endpoints/llm.py)：LLM 健康检查、模型信息和用量统计。
-- [`core/database_maintenance.py`](./core/database_maintenance.py)：PostgreSQL 备份、恢复和后端 reload 触发。
 - [`core/logger.py`](./core/logger.py)：结构化日志和 request id 注入。
 
 关键机制：
@@ -157,7 +156,6 @@ Agent 可以调用 Python 做数值计算和表格分析，但不是直接执行
 - WebSocket 支持按资源订阅，前端重连后会自动恢复订阅。
 - 自检中心覆盖 Redis、DB、Tushare、Tavily、沙箱、Skills、新闻插件、MemoFlux 读写和 DB schema。
 - Prompt 由代码中的静态模板管理，避免运行时覆盖破坏 LLM 缓存前缀稳定性。
-- 数据库备份恢复通过 `pg_dump` / `pg_restore` 封装，适合小团队部署和迁移。
 
 ## 3. 详细技术点清单
 
@@ -193,7 +191,6 @@ Agent 可以调用 Python 做数值计算和表格分析，但不是直接执行
 | Prompt 静态查看 | `api/endpoints/prompt.py` | 前端可查看当前 Agent prompt，运行时不支持覆盖 |
 | LLM 用量统计与探针 | `api/endpoints/llm.py` | 合并后端和 Memory 的模型调用次数、token 用量，并提供 LLM thinking / tool / skills 探针 |
 | 系统自检中心 | `api/endpoints/testing.py` | 覆盖 DB、Redis、Tushare、Tavily、新闻插件、沙箱、Skills、Memory |
-| 数据库备份恢复 | `core/database_maintenance.py` | 封装 `pg_dump` / `pg_restore`，支持导出、导入和 reload 触发 |
 | 结构化日志 | `core/logger.py` | 注入 request id、source 和 extra 字段，后端日志同时输出 console 和文件 |
 | 用户股票仓库 | `api/endpoints/stock_warehouse.py` | 用户级股票池、上证 50 初始化、添加时补齐基础信息、删除时检查持仓 |
 
