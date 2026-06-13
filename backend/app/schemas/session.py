@@ -45,3 +45,12 @@ class SessionResponse(SessionBase):
     current_position: Optional[Dict[str, Any]] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SessionListResponse(BaseModel):
+    """会话分页列表响应。"""
+
+    total: int
+    items: list[SessionResponse]
+    limit: int
+    skip: int

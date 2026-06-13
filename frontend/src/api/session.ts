@@ -14,6 +14,21 @@ export interface Session {
   source: 'manual' | 'scheduled' | 'market_watch' | 'stop_loss' | 'take_profit';
 }
 
+export interface SessionListResponse {
+  total: number;
+  items: Session[];
+  limit: number;
+  skip: number;
+}
+
+export interface SessionListParams {
+  status?: string;
+  source?: Session['source'];
+  q?: string;
+  skip?: number;
+  limit?: number;
+}
+
 export const sessionApi = {
   create: (data: {
     stock_code: string;
@@ -24,8 +39,23 @@ export const sessionApi = {
   }) =>
     apiClient.post<Session>('/sessions/', data),
 
-  list: (params?: { status?: string }) =>
+  list: (params?: SessionListParams) =>
     apiClient.get<Session[]>('/sessions/', { params }),
+
+  listPaginated: async (params?: SessionListParams): Promise<SessionListResponse> => {
+    const response = await apiClient.get<SessionListResponse | Session[]>('/sessions/', {
+      params: { ...params, paginated: true },
+    });
+    if (Array.isArray(response)) {
+      return {
+        total: response.length,
+        items: response,
+        limit: params?.limit ?? response.length,
+        skip: params?.skip ?? 0,
+      };
+    }
+    return response;
+  },
 
   get: (id: string) =>
     apiClient.get<Session>(`/sessions/${id}`),

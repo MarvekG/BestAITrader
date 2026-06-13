@@ -112,7 +112,6 @@ docker compose down
 
 ## 6. 注意事项
 
-- 不要提交真实的 `.env`、`litellm/config.yaml`、API key、Cookie、JWT 或数据库数据。
 - 生产或公网部署前建议按 `SECURITY.md` 收紧 Nginx、LiteLLM 暴露面、上传大小、超时和访问控制。
 - `sandbox`、`webfetch` 和 `scrapling.mcp` 默认只在 Compose 内部网络访问。
 - 当前 Compose 使用已发布镜像，不需要在本机源码构建镜像。
