@@ -1,12 +1,13 @@
 from datetime import datetime
-from fastapi import Body
+from fastapi import Body, Query
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from typing import Iterable, List, Optional
 from uuid import UUID
 
 from app.core.database import get_db
-from app.schemas.session import SessionCreate, SessionUpdate, SessionResponse
+from app.schemas.session import SessionCreate, SessionUpdate, SessionResponse, SessionListResponse
 from app.crud.session import crud_session
 from app.core.logger import logger
 from app.core.i18n import i18n_service
@@ -18,6 +19,7 @@ from app.models.order import Order
 from app.models.trade_record import TradeRecord
 from app.models.debate_message import DebateMessage
 from app.models.async_task import AsyncTask
+from app.models.data_storage import StockBasic
 from app.models.session import Session as AnalysisSession
 
 router = APIRouter()
@@ -108,21 +110,42 @@ def create_session(
         raise HTTPException(status_code=500, detail="Failed to create session")
 
 
-@router.get("/", response_model=List[SessionResponse])
+@router.get("/", response_model=List[SessionResponse] | SessionListResponse)
 def get_sessions(
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
     status: Optional[str] = None,
+    source: Optional[str] = None,
+    q: Optional[str] = None,
+    paginated: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Get session list, support filtering by status"""
-    logger.info(f"Fetching sessions list, status={status}", extra={"source": "api"})
-    filters = {"user_id": current_user.id}
+    logger.info(
+        "Fetching sessions list",
+        extra={"source": "api", "status": status, "session_source": source, "paginated": paginated},
+    )
+    query = db.query(AnalysisSession).filter(AnalysisSession.user_id == current_user.id)
     if status:
-        filters["status"] = status
-    sessions = crud_session.get_multi(db=db, skip=skip, limit=limit, **filters)
+        query = query.filter(AnalysisSession.status == status)
+    if source:
+        query = query.filter(AnalysisSession.source == source)
+    if q:
+        search = f"%{q.strip()}%"
+        query = query.outerjoin(StockBasic, StockBasic.stock_code == AnalysisSession.stock_code)
+        query = query.filter(
+            or_(
+                AnalysisSession.stock_code.ilike(search),
+                StockBasic.name.ilike(search),
+            )
+        )
+
+    total = query.count()
+    sessions = query.order_by(AnalysisSession.created_at.desc()).offset(skip).limit(limit).all()
     _populate_session_metadata(db, sessions)
+    if paginated:
+        return {"total": total, "items": sessions, "limit": limit, "skip": skip}
     return sessions
 
 

@@ -260,6 +260,36 @@ class TestSessionAPI:
         assert len(payload) == 1
         assert payload[0]["ended_at"] == "2024-01-02T03:04:05"
 
+    def test_get_sessions_paginated_searches_stock_name(self, client, auth_headers, db_session):
+        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+        _seed_stock_basic(db_session, stock_code="600519.SH", name="Kweichow Moutai")
+        _create_session(client, auth_headers, "000001.SZ")
+        _create_session(client, auth_headers, "600519.SH")
+
+        response = client.get(
+            "/api/v1/sessions/",
+            params={"paginated": True, "skip": 0, "limit": 1, "q": "Moutai"},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["total"] == 1
+        assert payload["skip"] == 0
+        assert payload["limit"] == 1
+        assert len(payload["items"]) == 1
+        assert payload["items"][0]["stock_code"] == "600519.SH"
+        assert payload["items"][0]["stock_name"] == "Kweichow Moutai"
+
+        strategy_response = client.get(
+            "/api/v1/sessions/",
+            params={"paginated": True, "q": "trend_following"},
+            headers=auth_headers,
+        )
+
+        assert strategy_response.status_code == 200
+        assert strategy_response.json()["total"] == 0
+
 
 class TestDataAPI:
     def test_get_stock_data(self, client, auth_headers):

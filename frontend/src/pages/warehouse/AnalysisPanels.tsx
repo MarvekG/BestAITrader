@@ -124,6 +124,10 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
   const [reportModalVisible, setReportModalVisible] = useState(false);
   const [reportSessionId, setReportSessionId] = useState<string | null>(null);
   const [searchText, setSearchText] = useState('');
+  const [debouncedSearchText, setDebouncedSearchText] = useState('');
+  const [sessionsTotal, setSessionsTotal] = useState(0);
+  const [sessionsPage, setSessionsPage] = useState(1);
+  const [sessionsPageSize, setSessionsPageSize] = useState(10);
   const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
   const [autoRefreshIntervalSeconds, setAutoRefreshIntervalSeconds] = useState(
     DEFAULT_DEBATE_SESSION_AUTO_REFRESH_SECONDS,
@@ -132,43 +136,59 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
   const navigate = useNavigate();
   const { message } = AntdApp.useApp();
 
-  const fetchSessions = useCallback(async () => {
+  const fetchSessions = useCallback(async (page: number, pageSize: number) => {
     setLoading(true);
     try {
-      const data = await sessionApi.list({});
-      const sortedData = data.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      setSessions(sortedData);
+      const response = await sessionApi.listPaginated({
+        skip: (page - 1) * pageSize,
+        limit: pageSize,
+        q: debouncedSearchText.trim() || undefined,
+      });
+      setSessions(response.items);
+      setSessionsTotal(response.total);
+      setSessionsPage(page);
+      setSessionsPageSize(pageSize);
+      setSelectedRowKeys([]);
     } catch {
       message.error(t('session.load_failed'));
     } finally {
       setLoading(false);
     }
-  }, [message, t]);
+  }, [debouncedSearchText, message, t]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearchText(searchText);
+      setSessionsPage(1);
+    }, 300);
+
+    return () => window.clearTimeout(timer);
+  }, [searchText]);
 
   useEffect(() => {
     if (!isActive) return;
-    void fetchSessions();
-  }, [fetchSessions, isActive]);
+    void fetchSessions(sessionsPage, sessionsPageSize);
+  }, [fetchSessions, isActive, sessionsPage, sessionsPageSize]);
 
   useEffect(() => {
     if (!isActive || !autoRefreshEnabled) return undefined;
 
     const timer = window.setInterval(() => {
-      void fetchSessions();
+      void fetchSessions(sessionsPage, sessionsPageSize);
     }, autoRefreshIntervalSeconds * 1000);
 
     return () => window.clearInterval(timer);
-  }, [autoRefreshEnabled, autoRefreshIntervalSeconds, fetchSessions, isActive]);
+  }, [autoRefreshEnabled, autoRefreshIntervalSeconds, fetchSessions, isActive, sessionsPage, sessionsPageSize]);
 
   useEffect(() => {
     const handleDebateSessionsRefresh = () => {
-      void fetchSessions();
+      void fetchSessions(sessionsPage, sessionsPageSize);
     };
     window.addEventListener(DEBATE_SESSIONS_REFRESH_EVENT, handleDebateSessionsRefresh);
     return () => {
       window.removeEventListener(DEBATE_SESSIONS_REFRESH_EVENT, handleDebateSessionsRefresh);
     };
-  }, [fetchSessions]);
+  }, [fetchSessions, sessionsPage, sessionsPageSize]);
 
   const handleResume = (session: Session) => {
     setActiveSession(session);
@@ -180,7 +200,7 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
     try {
       await sessionApi.archive(sessionId);
       message.success(t('session.archived_msg'));
-      fetchSessions();
+      fetchSessions(sessionsPage, sessionsPageSize);
     } catch (error) {
       const errorMessage = getApiErrorMessage(error, t('common.error'));
       message.error(errorMessage);
@@ -198,7 +218,7 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
         try {
           await sessionApi.delete(sessionId);
           message.success(t('session.deleted_msg'));
-          fetchSessions();
+          fetchSessions(sessionsPage, sessionsPageSize);
         } catch (error) {
           const errorMessage = getApiErrorMessage(error, t('common.error'));
           message.error(errorMessage);
@@ -221,7 +241,7 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
           const res = await sessionApi.batchDelete(selectedRowKeys as string[]);
           message.success(res.message || t('session.batch_deleted_msg'));
           setSelectedRowKeys([]);
-          fetchSessions();
+          fetchSessions(1, sessionsPageSize);
         } catch (error) {
           const errorMessage = getApiErrorMessage(error, t('common.error'));
           message.error(errorMessage);
@@ -243,7 +263,7 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
           const res = await sessionApi.batchArchive(selectedRowKeys as string[]);
           message.success(res.message || t('session.batch_archived_msg'));
           setSelectedRowKeys([]);
-          fetchSessions();
+          fetchSessions(sessionsPage, sessionsPageSize);
         } catch (error) {
           const errorMessage = getApiErrorMessage(error, t('common.error'));
           message.error(errorMessage);
@@ -334,12 +354,6 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
     },
   ];
 
-  const filteredSessions = sessions.filter(
-    (session) =>
-      session.stock_name.toLowerCase().includes(searchText.toLowerCase()) ||
-      session.stock_code.toLowerCase().includes(searchText.toLowerCase()),
-  );
-
   const rowSelection = {
     selectedRowKeys,
     onChange: (newSelectedRowKeys: React.Key[]) => setSelectedRowKeys(newSelectedRowKeys),
@@ -355,7 +369,7 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
           <Button danger icon={<DeleteOutlined />} onClick={handleBatchDelete} disabled={selectedRowKeys.length === 0}>
             {t('session.batch_delete')}
           </Button>
-          <Button icon={<FolderOpenOutlined />} onClick={fetchSessions}>{t('session.refresh')}</Button>
+          <Button icon={<FolderOpenOutlined />} onClick={() => fetchSessions(sessionsPage, sessionsPageSize)}>{t('session.refresh')}</Button>
           <Checkbox
             checked={autoRefreshEnabled}
             onChange={(event) => setAutoRefreshEnabled(event.target.checked)}
@@ -387,14 +401,17 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
 
       <Table
         rowSelection={rowSelection}
-        dataSource={filteredSessions}
+        dataSource={sessions}
         columns={columns}
         rowKey="session_id"
         loading={loading}
         pagination={{
+          current: sessionsPage,
+          pageSize: sessionsPageSize,
+          total: sessionsTotal,
           showSizeChanger: true,
           pageSizeOptions: ['10', '20', '50', '100'],
-          defaultPageSize: 10,
+          onChange: (page, pageSize) => fetchSessions(page, pageSize),
         }}
         locale={{
           triggerDesc: t('common.sort_desc'),
