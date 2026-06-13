@@ -177,7 +177,7 @@ docker compose up -d --force-recreate <service>
 
 - 除 `/health`, `/api/v1/auth/register`, `/api/v1/auth/login`, `/api/v1/general/i18n/{lang}` 外，HTTP 业务路由**默认必须要求登录**
 - WebSocket 禁止使用 JWT query token，必须先通过已鉴权 HTTP 换 30 秒一次性 ticket
-- `/api/v1/testing/*`, 数据库备份/导入、数据源配置、新闻插件、Skills、运行时依赖安装都属于高风险面，**必须保持鉴权**
+- `/api/v1/testing/*`, 数据源配置、新闻插件、Skills、运行时依赖安装都属于高风险面，**必须保持鉴权**
 - `ENABLE_OPENAPI_DOCS` 默认开启会暴露 `/api/v1/docs`, `/api/v1/redoc`, `/api/v1/openapi.json`；**生产部署必须关闭或加访问控制**
 - `ENABLE_RUNTIME_EXTENSIONS` 控制插件/Skill 管理与依赖安装入口
 - 根 `nginx.conf` 是实际 Compose 代理配置，公开部署前要收紧 `client_max_body_size`、长超时、请求速率和 LiteLLM `4000` 暴露面

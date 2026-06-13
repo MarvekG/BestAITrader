@@ -35,6 +35,7 @@ logs
 backend/logs
 backend/runtime/snapshots/
 runtimes/
+backups/
 docs/superpowers/
 litellm/config.yaml
 

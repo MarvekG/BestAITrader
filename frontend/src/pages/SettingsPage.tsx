@@ -335,11 +335,6 @@ export const SettingsPage: React.FC = () => {
     status: undefined,
     errorCode: '',
   });
-  const [backupLoading, setBackupLoading] = useState(false);
-  const [importLoading, setImportLoading] = useState(false);
-  const [backupFileList, setBackupFileList] = useState<UploadFile[]>([]);
-  const [importConfirmOpen, setImportConfirmOpen] = useState(false);
-
   // System Testing Handlers
   const handleTestRedis = async () => {
     setTestRedisLoading(true);
@@ -1887,47 +1882,6 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleDownloadDatabaseBackup = async () => {
-    setBackupLoading(true);
-    try {
-      const anchor = document.createElement('a');
-      anchor.href = '/api/v1/sources/database/backup';
-      anchor.rel = 'noopener';
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      message.success(t('settings.database_backup_success'));
-    } catch (error) {
-      message.error(getApiErrorMessage(error, t('settings.test_failed')));
-    } finally {
-      setBackupLoading(false);
-    }
-  };
-
-  const doImportDatabaseBackup = async () => {
-    const file = backupFileList[0]?.originFileObj;
-    if (!file) {
-      message.warning(t('settings.select_backup_file_first'));
-      return;
-    }
-
-    setImportLoading(true);
-    try {
-      const res = await sourcesApi.importDatabaseBackup(file);
-      message.success(res.message || t('settings.database_import_success'));
-      setBackupFileList([]);
-      setImportConfirmOpen(false);
-    } catch (error) {
-      message.error(getApiErrorMessage(error, t('settings.test_failed')));
-    } finally {
-      setImportLoading(false);
-    }
-  };
-
-  const handleImportDatabaseBackup = () => {
-    setImportConfirmOpen(true);
-  };
-
   const deletableNewsPluginKeys = newsPlugins
     .filter((plugin) => plugin.can_delete)
     .map((plugin) => plugin.plugin_id || plugin.module_name);
@@ -2069,42 +2023,6 @@ export const SettingsPage: React.FC = () => {
                 </Form>
               </Card>
 
-              <Card title={t('settings.database_maintenance')}>
-                <div className="flex flex-col gap-4">
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
-                      <div className="text-white font-medium">{t('settings.database_backup')}: {t('settings.database_backup_desc')}</div>
-                    </div>
-                    <Button type="primary" onClick={handleDownloadDatabaseBackup} loading={backupLoading}>
-                      {t('settings.download_backup')}
-                    </Button>
-                  </div>
-                  <br />
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex-1">
-                      <div className="text-white font-medium">{t('settings.database_import')}: {t('settings.database_import_desc')}</div>
-                      <Upload
-                        accept=".dump"
-                        beforeUpload={() => false}
-                        maxCount={1}
-                        fileList={backupFileList}
-                        onChange={({ fileList }) => setBackupFileList(fileList.slice(-1))}
-                      >
-                        <Button>{t('settings.select_backup_file')}</Button>
-                      </Upload>
-                    </div>
-                    <Button
-                      danger
-                      type="primary"
-                      onClick={handleImportDatabaseBackup}
-                      loading={importLoading}
-                      disabled={backupFileList.length === 0}
-                    >
-                      {t('settings.import_backup')}
-                    </Button>
-                  </div>
-                </div>
-              </Card>
             </div>
           )
         },
@@ -3030,26 +2948,6 @@ export const SettingsPage: React.FC = () => {
         </Upload>
       </Modal>
 
-      <Modal
-        open={importConfirmOpen}
-        title={t('settings.database_import_confirm_title')}
-        onCancel={() => {
-          if (!importLoading) {
-            setImportConfirmOpen(false);
-          }
-        }}
-        onOk={doImportDatabaseBackup}
-        okText={t('settings.confirm_import')}
-        cancelText={t('settings.cancel')}
-        okButtonProps={{ danger: true, loading: importLoading, disabled: importLoading }}
-        cancelButtonProps={{ disabled: importLoading }}
-        maskClosable={!importLoading}
-        closable={!importLoading}
-        keyboard={!importLoading}
-        confirmLoading={importLoading}
-      >
-        {t('settings.database_import_confirm_text')}
-      </Modal>
     </div>
   );
 };

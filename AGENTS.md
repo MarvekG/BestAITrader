@@ -84,10 +84,9 @@
 ## 高风险边界
 - 除 `/health`、`/api/v1/auth/register`、`/api/v1/auth/login`、`/api/v1/general/i18n/{lang}` 外，HTTP 业务路由默认必须要求登录；新增公开端点需同步测试白名单。
 - WebSocket 禁止使用 JWT query token；必须先通过已鉴权 HTTP 换 30 秒一次性 ticket。
-- `/api/v1/testing/*`、数据库备份/导入、数据源配置、新闻插件、Skills、运行时依赖安装都属于高风险面，必须保持鉴权。
+- `/api/v1/testing/*`、数据源配置、新闻插件、Skills、运行时依赖安装都属于高风险面，必须保持鉴权。
 - `ENABLE_OPENAPI_DOCS` 默认开启会暴露 `/api/v1/docs`、`/api/v1/redoc`、`/api/v1/openapi.json`；生产或公开部署必须关闭或加访问控制。
 - `ENABLE_RUNTIME_EXTENSIONS` 控制插件/Skill 管理与依赖安装入口，不等价于停止已安装 external 插件被 registry 扫描。
-- `ENABLE_MAINTENANCE_ENDPOINTS` 只控制数据库 backup/import，不关闭 testing、sources、plugins 或 skills。
 - 根 `nginx.conf` 是实际 Compose 代理配置；`frontend/nginx.conf` 当前不是根 Compose 使用的入口。公开部署前要收紧根 Nginx 的 `client_max_body_size`、长超时、请求速率和 LiteLLM `4000` 暴露面。
 - `backend/app/ai/agentic/skills_loader/skills/` 与 `backend/app/ai/agentic/tooling/news_plugins/external/` 可能包含运行时上传或独立外部仓库内容，提交前必须核验 tracked 状态和敏感信息。
 - `backend/scripts/clear_tables.py` 是破坏性脚本，会对 PostgreSQL 执行 `TRUNCATE TABLE ... CASCADE`。
@@ -202,7 +201,7 @@ def add(a: int, b: int) -> int:
 - 禁止使用 eval/exec
 
 ## Git 分支策略
-- 禁止在 `main` 分支上直接提交或推送；所有改动必须从 `main` 拉取新分支，提交后推送到功能分支并通过 PR 合并。
+- 禁止在 `main` 分支上直接提交或推送；当用户要求提交且当前位于 `main` 时，Agent 应自主创建语义化功能分支（如 `chore/remove-database-maintenance`），不再向用户询问分支名；提交后推送到功能分支并通过 PR 合并。
 - 禁止默认创建或使用独立 `git worktree`。除非用户明确要求使用 worktree，否则所有改动都应在当前工作区完成，并严格保护已有未提交改动。
 - 禁止默认使用 `git commit --amend` 修改既有提交；除非用户明确要求 amend，否则后续修改必须创建新的普通提交。
 

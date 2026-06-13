@@ -11,7 +11,6 @@
 | 风险面 | 风险 | 生产控制要求 |
 | --- | --- | --- |
 | `/api/v1/testing/*` | 诊断接口可能触发外部调用、schema 检查、记忆预览和工具执行探测。 | 始终注册；默认仍要求登录。 |
-| `/api/v1/sources/database/backup`、`/api/v1/sources/database/import` | 可导出或恢复数据库备份。 | 不需要在线备份/导入时设置 `ENABLE_MAINTENANCE_ENDPOINTS=false`；默认仍要求登录。 |
 | `/api/v1/sources/*` | 可读取数据源配置并更新 API token。 | 默认要求登录；生产环境应脱敏密钥并限制运维访问面。 |
 | `/api/v1/news-plugins/*` | 允许上传和注册 Python 新闻插件。 | 不需要安装或管理插件时设置 `ENABLE_RUNTIME_EXTENSIONS=false`。 |
 | `/api/v1/skills/*` | 允许上传 skill 文件夹并暴露 prompt/catalog。 | 不需要安装或管理 Skill 时设置 `ENABLE_RUNTIME_EXTENSIONS=false`。 |
@@ -27,8 +26,7 @@
   如果部署方只希望生成分析报告、不希望 AI 写入模拟订单和持仓记录，可以设置 `ENABLE_AUTO_TRADE=false`。
 - 安装新的 Skill 或新闻插件前，将 `ENABLE_RUNTIME_EXTENSIONS=true` 写入 `.env` 并重启后端；
   安装完成后建议设置 `ENABLE_RUNTIME_EXTENSIONS=false` 并再次重启后端。
-- 不需要在线数据库备份/导入时，设置 `ENABLE_MAINTENANCE_ENDPOINTS=false`；数据源配置、同步、删除和清表等基础功能不受该开关控制。
-- 所有管理、诊断、上传、备份、恢复和配置接口默认都必须保持登录态要求。
+- 所有管理、诊断、上传和配置接口默认都必须保持登录态要求。
 - 限制 CORS origins，不要使用 `allow_origins=["*"]`。
 - 使用 TLS 和反向代理，并配置请求体大小、请求速率和超时限制。
 - PostgreSQL、Redis 和 memory 服务应保持在私有网络内。
@@ -89,7 +87,6 @@ use is not permitted by the repository license.
 | Surface | Risk | Required Production Control |
 | --- | --- | --- |
 | `/api/v1/testing/*` | Diagnostics can trigger external calls, schema inspection, memory preview, and tool execution probes. | Always registered; authentication is still required by default. |
-| `/api/v1/sources/database/backup`, `/api/v1/sources/database/import` | Can export or restore database backups. | Set `ENABLE_MAINTENANCE_ENDPOINTS=false` when online backup/import is not needed; authentication is still required by default. |
 | `/api/v1/sources/*` | Can expose data-source configuration and update API tokens. | Authentication is required by default; redact secrets and limit operational access in production. |
 | `/api/v1/news-plugins/*` | Allows Python plugin upload and registration. | Set `ENABLE_RUNTIME_EXTENSIONS=false` when plugin management is not needed. |
 | `/api/v1/skills/*` | Allows skill folder upload and prompt/catalog exposure. | Set `ENABLE_RUNTIME_EXTENSIONS=false` when Skill management is not needed. |
@@ -107,9 +104,7 @@ use is not permitted by the repository license.
   should generate analysis reports without writing simulated orders or positions.
 - Before installing new Skills or news plugins, set `ENABLE_RUNTIME_EXTENSIONS=true` in `.env` and restart the backend.
   After installation, set `ENABLE_RUNTIME_EXTENSIONS=false` and restart the backend again.
-- Set `ENABLE_MAINTENANCE_ENDPOINTS=false` when online database backup/import is not needed. Data-source
-  configuration, sync, delete, and table-clear capabilities are not controlled by this switch.
-- Keep authentication required for all management, diagnostic, upload, backup, restore, and configuration endpoints.
+- Keep authentication required for all management, diagnostic, upload, and configuration endpoints.
 - Restrict CORS origins instead of using `allow_origins=["*"]`.
 - Run behind TLS and a reverse proxy that enforces body-size, request-rate, and timeout limits.
 - Keep PostgreSQL, Redis, and memory services on a private network.

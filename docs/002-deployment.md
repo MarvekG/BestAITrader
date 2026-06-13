@@ -80,8 +80,8 @@ python3 deploy.py --no-health-check
 - 主系统：`http://localhost`
 - LiteLLM 管理系统：`http://localhost:4000/ui`
 
-默认生成的后端配置会关闭运行时扩展、维护端点和 OpenAPI 文档。`/api/v1/testing/*` 仍按后端鉴权边界挂载。需要临时安装
-Skill、新闻插件或执行维护操作时，手动修改 `backend/.env` 后重建后端容器。
+默认生成的后端配置会关闭运行时扩展和 OpenAPI 文档。`/api/v1/testing/*` 仍按后端鉴权边界挂载。需要临时安装
+Skill 或新闻插件时，手动修改 `backend/.env` 后重建后端容器。
 
 ## 5. 常用命令
 
@@ -108,6 +108,18 @@ docker compose up -d --force-recreate backend memo litellm
 
 ```bash
 docker compose down
+```
+
+备份主系统数据库和 Memo 数据库。脚本会先提示将停止 `backend`、`memo`，输入 `BACKUP` 确认后继续，完成后自动拉起服务：
+
+```bash
+scripts/database-maintenance.sh backup
+```
+
+恢复主系统数据库和 Memo 数据库。脚本会先提示将停止 `backend`、`memo`，输入 `RESTORE` 确认后继续，完成后自动拉起服务：
+
+```bash
+scripts/database-maintenance.sh restore backups/best-ai-trader-YYYYMMDD-HHMMSS
 ```
 
 ## 6. 注意事项
