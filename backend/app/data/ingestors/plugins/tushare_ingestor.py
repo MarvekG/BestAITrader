@@ -9,7 +9,6 @@ from app.data.ingestors.base_ingestor import BaseIngestor
 from app.data.ingestors.plugins.column_mapping import ColumnMapper
 from app.core.utils.formatters import StockCodeStandardizer
 from app.core.utils.date_utils import normalize_compact_date
-from app.core.utils.backoff import backoff
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -561,7 +560,6 @@ class TushareIngestor(BaseIngestor):
             logger.error(f"Failed to ingest company profile {stock_code}: {e}")
             return False
 
-    @backoff(max_tries=3, base_delay=2.0, retry_on=(Exception,))
     async def fetch_and_ingest_all_stock_basic(self) -> bool:
         """
         全量采集 A 股基础信息并写入股票基础表。
