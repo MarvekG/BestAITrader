@@ -110,16 +110,16 @@ docker compose up -d --force-recreate backend memo litellm
 docker compose down
 ```
 
-备份主数据库：
+备份主系统数据库和 Memo 数据库。脚本会先提示将停止 `backend`、`memo`，输入 `BACKUP` 确认后继续，完成后自动拉起服务：
 
 ```bash
 scripts/database-maintenance.sh backup
 ```
 
-恢复主数据库：
+恢复主系统数据库和 Memo 数据库。脚本会先提示将停止 `backend`、`memo`，输入 `RESTORE` 确认后继续，完成后自动拉起服务：
 
 ```bash
-scripts/database-maintenance.sh restore backups/best-ai-trader-trading-YYYYMMDD-HHMMSS.dump
+scripts/database-maintenance.sh restore backups/best-ai-trader-YYYYMMDD-HHMMSS
 ```
 
 ## 6. 注意事项

@@ -1,32 +1,43 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-
+PROJECT_ROOT="${PROJECT_ROOT:-${PWD}}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
-DB_SERVICE="${DB_SERVICE:-postgres}"
-DB_USER="${DB_USER:-tradeuser}"
-DB_NAME="${DB_NAME:-trading}"
 BACKUP_DIR="${BACKUP_DIR:-${PROJECT_ROOT}/backups}"
+
+APP_SERVICES="${APP_SERVICES:-backend memo}"
+BACKEND_DB_SERVICE="${BACKEND_DB_SERVICE:-postgres}"
+BACKEND_DB_USER="${BACKEND_DB_USER:-tradeuser}"
+BACKEND_DB_NAME="${BACKEND_DB_NAME:-trading}"
+MEMO_DB_SERVICE="${MEMO_DB_SERVICE:-memo-postgres}"
+MEMO_DB_USER="${MEMO_DB_USER:-tradeuser}"
+MEMO_DB_NAME="${MEMO_DB_NAME:-memory}"
 
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/database-maintenance.sh backup [output.dump]
-  scripts/database-maintenance.sh restore <backup.dump>
+  scripts/database-maintenance.sh backup [backup-dir]
+  scripts/database-maintenance.sh restore <backup-dir>
+
+This script stops backend and memo during backup or restore, then starts them again.
+Run it from the repository root, or set PROJECT_ROOT=/path/to/Best-AI-Trader.
 
 Environment overrides:
+  PROJECT_ROOT=/path/to/Best-AI-Trader
   COMPOSE_FILE=docker-compose.dev.yml
-  DB_SERVICE=postgres
-  DB_USER=tradeuser
-  DB_NAME=trading
   BACKUP_DIR=/path/to/backups
+  APP_SERVICES="backend memo"
+  BACKEND_DB_SERVICE=postgres
+  BACKEND_DB_USER=tradeuser
+  BACKEND_DB_NAME=trading
+  MEMO_DB_SERVICE=memo-postgres
+  MEMO_DB_USER=tradeuser
+  MEMO_DB_NAME=memory
 
 Examples:
   scripts/database-maintenance.sh backup
-  scripts/database-maintenance.sh backup backups/manual.dump
-  scripts/database-maintenance.sh restore backups/best-ai-trader-trading-20260613-153000.dump
+  scripts/database-maintenance.sh backup backups/manual-20260613
+  scripts/database-maintenance.sh restore backups/best-ai-trader-20260613-153000
   COMPOSE_FILE=docker-compose.dev.yml scripts/database-maintenance.sh backup
 EOF
 }
@@ -35,70 +46,134 @@ compose() {
   docker compose -f "${PROJECT_ROOT}/${COMPOSE_FILE}" "$@"
 }
 
-require_file() {
-  local path="$1"
-  if [[ ! -f "${path}" ]]; then
-    printf 'Backup file not found: %s\n' "${path}" >&2
+require_project_root() {
+  if [[ ! -f "${PROJECT_ROOT}/${COMPOSE_FILE}" ]]; then
+    printf 'Compose file not found: %s\n' "${PROJECT_ROOT}/${COMPOSE_FILE}" >&2
+    printf 'Run from the repository root or set PROJECT_ROOT.\n' >&2
     exit 1
   fi
 }
 
-backup_database() {
-  local output_path="${1:-}"
-  if [[ -z "${output_path}" ]]; then
-    mkdir -p "${BACKUP_DIR}"
-    output_path="${BACKUP_DIR}/best-ai-trader-${DB_NAME}-$(date +%Y%m%d-%H%M%S).dump"
+confirm_downtime() {
+  local action="$1"
+  printf '%s requires stopping services: %s\n' "${action}" "${APP_SERVICES}"
+  printf 'Type %s to stop services and continue: ' "${action}"
+  local confirmation
+  read -r confirmation
+  if [[ "${confirmation}" != "${action}" ]]; then
+    printf '%s cancelled.\n' "${action}"
+    exit 1
   fi
+}
 
-  mkdir -p "$(dirname "${output_path}")"
-  printf 'Backing up %s/%s to %s\n' "${DB_SERVICE}" "${DB_NAME}" "${output_path}"
-  compose exec -T "${DB_SERVICE}" pg_dump \
-    --username "${DB_USER}" \
-    --dbname "${DB_NAME}" \
+stop_app_services() {
+  printf 'Stopping services: %s\n' "${APP_SERVICES}"
+  compose stop ${APP_SERVICES}
+}
+
+start_app_services() {
+  printf 'Starting services: %s\n' "${APP_SERVICES}"
+  compose up -d ${APP_SERVICES}
+}
+
+dump_database() {
+  local service="$1"
+  local user="$2"
+  local database="$3"
+  local output_path="$4"
+
+  printf 'Backing up %s/%s to %s\n' "${service}" "${database}" "${output_path}"
+  compose exec -T "${service}" pg_dump \
+    --username "${user}" \
+    --dbname "${database}" \
     --format=custom \
     --no-owner \
     --no-privileges \
     > "${output_path}"
-  printf 'Backup completed: %s\n' "${output_path}"
 }
 
 restore_database() {
-  local input_path="$1"
-  require_file "${input_path}"
+  local service="$1"
+  local user="$2"
+  local database="$3"
+  local input_path="$4"
 
-  printf 'Restoring %s into %s/%s\n' "${input_path}" "${DB_SERVICE}" "${DB_NAME}"
-  printf 'This will clean and replace database objects in %s. Type RESTORE to continue: ' "${DB_NAME}"
-  local confirmation
-  read -r confirmation
-  if [[ "${confirmation}" != "RESTORE" ]]; then
-    printf 'Restore cancelled.\n'
+  if [[ ! -f "${input_path}" ]]; then
+    printf 'Backup file not found: %s\n' "${input_path}" >&2
     exit 1
   fi
 
-  compose exec -T "${DB_SERVICE}" pg_restore \
-    --username "${DB_USER}" \
-    --dbname "${DB_NAME}" \
+  printf 'Restoring %s into %s/%s\n' "${input_path}" "${service}" "${database}"
+  compose exec -T "${service}" pg_restore \
+    --username "${user}" \
+    --dbname "${database}" \
     --clean \
     --if-exists \
     --no-owner \
     --no-privileges \
     --exit-on-error \
     < "${input_path}"
-  printf 'Restore completed: %s\n' "${input_path}"
+}
+
+backup_all() {
+  local output_dir="${1:-}"
+  if [[ -z "${output_dir}" ]]; then
+    output_dir="${BACKUP_DIR}/best-ai-trader-$(date +%Y%m%d-%H%M%S)"
+  fi
+
+  require_project_root
+  confirm_downtime "BACKUP"
+  mkdir -p "${output_dir}"
+  stop_app_services
+  trap start_app_services EXIT
+
+  dump_database "${BACKEND_DB_SERVICE}" "${BACKEND_DB_USER}" "${BACKEND_DB_NAME}" "${output_dir}/backend.dump"
+  dump_database "${MEMO_DB_SERVICE}" "${MEMO_DB_USER}" "${MEMO_DB_NAME}" "${output_dir}/memo.dump"
+  cat > "${output_dir}/manifest.txt" <<EOF
+created_at=$(date -Iseconds)
+compose_file=${COMPOSE_FILE}
+backend_db_service=${BACKEND_DB_SERVICE}
+backend_db_name=${BACKEND_DB_NAME}
+memo_db_service=${MEMO_DB_SERVICE}
+memo_db_name=${MEMO_DB_NAME}
+EOF
+  printf 'Backup completed: %s\n' "${output_dir}"
+}
+
+restore_all() {
+  local input_dir="$1"
+
+  require_project_root
+  if [[ ! -d "${input_dir}" ]]; then
+    printf 'Backup directory not found: %s\n' "${input_dir}" >&2
+    exit 1
+  fi
+
+  confirm_downtime "RESTORE"
+  stop_app_services
+  trap start_app_services EXIT
+
+  restore_database "${BACKEND_DB_SERVICE}" "${BACKEND_DB_USER}" "${BACKEND_DB_NAME}" "${input_dir}/backend.dump"
+  restore_database "${MEMO_DB_SERVICE}" "${MEMO_DB_USER}" "${MEMO_DB_NAME}" "${input_dir}/memo.dump"
+  printf 'Restore completed: %s\n' "${input_dir}"
 }
 
 main() {
   local command="${1:-help}"
   case "${command}" in
     backup)
-      backup_database "${2:-}"
+      if [[ $# -gt 2 ]]; then
+        usage
+        exit 1
+      fi
+      backup_all "${2:-}"
       ;;
     restore)
       if [[ $# -ne 2 ]]; then
         usage
         exit 1
       fi
-      restore_database "$2"
+      restore_all "$2"
       ;;
     help|--help|-h)
       usage
