@@ -86,6 +86,12 @@ const formatEventPayloadValue = (value: unknown) => {
   return String(value);
 };
 
+const formatTextList = (value: unknown) => {
+  if (!Array.isArray(value)) return '-';
+  const items = value.map((item) => String(item).trim()).filter(Boolean);
+  return items.length > 0 ? items.join(' / ') : '-';
+};
+
 const factorLimitCaps: Record<'warehouse' | 'core' | 'all', number> = {
   warehouse: 20,
   core: 30,
@@ -232,7 +238,11 @@ export const AIStockPickerPage: React.FC = () => {
       if (!quantSupport) return '-';
       return [
         `${t('ai_stock_picker.quant_support.style_fit')} ${quantSupport.style_fit_score}`,
+        `${t('ai_stock_picker.quant_support.profit_condition')} ${quantSupport.profit_condition_score ?? '-'}`,
+        `${t('ai_stock_picker.quant_support.trend_quality')} ${quantSupport.trend_quality_score ?? '-'}`,
         `${t('ai_stock_picker.quant_support.liquidity')} ${quantSupport.liquidity_score}`,
+        `${t('ai_stock_picker.quant_support.valuation_safety')} ${quantSupport.valuation_safety_score ?? '-'}`,
+        `${t('ai_stock_picker.quant_support.volatility')} ${quantSupport.volatility_score ?? '-'}`,
         `${t('ai_stock_picker.quant_support.risk_penalty')} ${quantSupport.risk_penalty}`,
       ].join(' / ');
     },
@@ -1019,6 +1029,24 @@ export const AIStockPickerPage: React.FC = () => {
                 { title: t('ai_stock_picker.recommendations_table.holding_horizon'), dataIndex: 'holding_horizon' },
                 { title: t('ai_stock_picker.recommendations_table.entry_logic'), dataIndex: 'recommendation_reason', ellipsis: true },
                 {
+                  title: t('ai_stock_picker.recommendations_table.trend_evidence'),
+                  dataIndex: 'trend_evidence',
+                  ellipsis: true,
+                  render: (value: string[] | undefined) => formatTextList(value),
+                },
+                {
+                  title: t('ai_stock_picker.recommendations_table.risk_evidence'),
+                  dataIndex: 'risk_evidence',
+                  ellipsis: true,
+                  render: (value: string[] | undefined) => formatTextList(value),
+                },
+                {
+                  title: t('ai_stock_picker.recommendations_table.invalidation_conditions'),
+                  dataIndex: 'invalidation_conditions',
+                  ellipsis: true,
+                  render: (value: string[] | undefined) => formatTextList(value),
+                },
+                {
                   title: t('ai_stock_picker.fields.status'),
                   dataIndex: 'decision',
                   render: (value: string) => (
@@ -1030,7 +1058,7 @@ export const AIStockPickerPage: React.FC = () => {
                 {
                   title: t('ai_stock_picker.recommendations_table.risk_flags'),
                   dataIndex: 'risk_flags',
-                  render: (value: string[]) => value?.length ? value.join(' / ') : '-',
+                  render: (value: string[]) => formatTextList(value),
                 },
                 {
                   title: t('common.action'),
@@ -1111,7 +1139,21 @@ export const AIStockPickerPage: React.FC = () => {
                 },
                 {
                   title: t('ai_stock_picker.candidates_table.thesis'),
-                  render: (_, record: StockPickerCandidate) => record.research_payload?.thesis || '-',
+                  render: (_, record: StockPickerCandidate) => (
+                    String(record.research_payload?.profit_logic || record.research_payload?.thesis || '-')
+                  ),
+                },
+                {
+                  title: t('ai_stock_picker.candidates_table.trend_evidence'),
+                  render: (_, record: StockPickerCandidate) => formatTextList(record.research_payload?.trend_evidence),
+                },
+                {
+                  title: t('ai_stock_picker.candidates_table.risk_evidence'),
+                  render: (_, record: StockPickerCandidate) => formatTextList(record.research_payload?.risk_evidence),
+                },
+                {
+                  title: t('ai_stock_picker.candidates_table.invalidation_conditions'),
+                  render: (_, record: StockPickerCandidate) => formatTextList(record.research_payload?.invalidation_conditions),
                 },
                 { title: t('ai_stock_picker.candidates_table.eliminated_reason'), dataIndex: 'eliminated_reason' },
               ]}

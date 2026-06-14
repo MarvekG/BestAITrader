@@ -1500,6 +1500,82 @@
     }
   },
   "technical.indicators": {},
+  "stock_picker.quant_inputs": {
+    "pe": {
+      "$ref": "multiple"
+    },
+    "pb": {
+      "$ref": "multiple"
+    },
+    "ps_ttm": {
+      "$ref": "multiple"
+    },
+    "dividend_yield": {
+      "$ref": "percent"
+    },
+    "market_cap": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "close": {
+      "$ref": "cny"
+    },
+    "volume": {
+      "$ref": "shares"
+    },
+    "turnover_amount": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "macd": {
+      "$ref": "points"
+    },
+    "macd_signal": {
+      "$ref": "points"
+    },
+    "macd_hist": {
+      "$ref": "points"
+    },
+    "rsi_12": {
+      "$ref": "points"
+    },
+    "rsi_24": {
+      "$ref": "points"
+    },
+    "kdj_j": {
+      "$ref": "points"
+    },
+    "atr": {
+      "$ref": "cny"
+    },
+    "atr_pct": {
+      "$ref": "percent"
+    }
+  },
+  "stock_picker.quant_support": {
+    "style_fit_score": {
+      "$ref": "points"
+    },
+    "trend_quality_score": {
+      "$ref": "points"
+    },
+    "liquidity_score": {
+      "$ref": "points"
+    },
+    "valuation_safety_score": {
+      "$ref": "points"
+    },
+    "volatility_score": {
+      "$ref": "points"
+    },
+    "risk_penalty": {
+      "$ref": "points"
+    },
+    "profit_condition_score": {
+      "$ref": "points"
+    },
+    "final_quant_score": {
+      "$ref": "points"
+    }
+  },
   "technical.realtime_market": {
     "price": {
       "zh": {

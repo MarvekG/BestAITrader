@@ -8,7 +8,7 @@ from app.core.i18n import i18n_service
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["format_payload_values"]
+__all__ = ["format_payload_values", "get_field_unit_metadata", "get_table_unit_metadata"]
 
 _table_field_unit_config: Dict[str, Any] | None = None
 
@@ -182,6 +182,68 @@ def _resolve_field_display(config: dict[str, Any], *, language: str | None = Non
     unit_key = language_config.get("unit")
     scale = language_config.get("scale", 1)
     return unit_key, _resolve_scale(scale)
+
+
+def get_field_unit_metadata(
+    table_name: str,
+    field_name: str,
+    *,
+    language: str | None = None,
+) -> dict[str, Any] | None:
+    """读取字段单位展示元数据。
+
+    Args:
+        table_name: 标准表名或虚拟上下文表名。
+        field_name: 标准字段名。
+        language: 可选语言代码；为空时使用系统语言。
+
+    Returns:
+        包含单位文案、单位 i18n key、展示倍率和精度的元数据；字段未配置单位时返回 None。
+    """
+    config = _get_field_unit_config(table_name, field_name)
+    if not config:
+        return None
+
+    unit_key, scale = _resolve_field_display(config, language=language)
+    if not unit_key:
+        return None
+
+    return {
+        "unit": _localized_unit(unit_key, language=language),
+        "unit_key": unit_key,
+        "scale": scale,
+        "precision": int(config.get("precision", 2)),
+    }
+
+
+def get_table_unit_metadata(table_name: str, *, language: str | None = None) -> dict[str, dict[str, Any]]:
+    """读取标准表已显式配置的字段单位元数据。
+
+    Args:
+        table_name: 标准表名或虚拟上下文表名。
+        language: 可选语言代码；为空时使用系统语言。
+
+    Returns:
+        以字段名为 key 的单位元数据映射；未配置单位的表返回空字典。
+    """
+    table_config = _load_table_field_unit_config().get(table_name, {})
+    if not isinstance(table_config, dict):
+        return {}
+
+    result = {}
+    default_ref = table_config.get("$default_ref")
+    if isinstance(default_ref, str):
+        default_metadata = get_field_unit_metadata(table_name, "$default", language=language)
+        if default_metadata:
+            result["$default"] = {"unit": default_metadata["unit"]}
+
+    for field_name in table_config:
+        if field_name.startswith("$"):
+            continue
+        metadata = get_field_unit_metadata(table_name, field_name, language=language)
+        if metadata:
+            result[field_name] = {"unit": metadata["unit"]}
+    return result
 
 
 def _get_field_unit_config(table_name: str, field_name: str) -> dict[str, Any] | None:

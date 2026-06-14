@@ -15,6 +15,11 @@ async def test_get_database_schema_returns_model_columns():
     kline_columns = {column["name"] for column in result["schemas"]["KlineData"]}
     assert {"stock_code", "date", "open", "close"}.issubset(kline_columns)
 
+    assert result["field_units"]["FinancialIndicator"]["roe"]["unit"] == "%"
+
+    balance_default_unit = result["field_units"]["StockBalanceSheet"]["$default"]
+    assert balance_default_unit["unit"] == "亿元"
+
 
 @pytest.mark.asyncio
 async def test_query_and_calculate_rejects_unknown_table_without_db_access():

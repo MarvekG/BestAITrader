@@ -314,8 +314,12 @@ def _mock_stock_picker_llm(monkeypatch, *, cash_ratio: float = 12.0):
                 "stock_code": "688023.SH",
                 "ai_score": 88,
                 "thesis": "景气度和资金面更强。",
+                "profit_logic": "景气趋势和资金面支持赚钱概率。",
                 "catalysts": ["订单改善"],
+                "trend_evidence": ["趋势质量改善"],
+                "risk_evidence": ["波动较大"],
                 "risks": ["波动较大"],
+                "invalidation_conditions": ["趋势转弱"],
                 "style_fit_explanation": "更适合成长风格。",
                 "holding_horizon": "mid_term",
                 "decision": "keep",
@@ -805,7 +809,9 @@ class TestAIStockPickerAPI:
         assert result_response.status_code == 200
         payload = result_response.json()
         assert payload["summary"]["selection_logic"] == "LLM 研究结果已生成推荐股票列表"
-        assert payload["recommendations"]["stocks"][0]["recommendation_reason"] == "景气度和资金面更强。"
+        assert payload["recommendations"]["stocks"][0]["recommendation_reason"] == "景气趋势和资金面支持赚钱概率。"
+        assert payload["recommendations"]["stocks"][0]["trend_evidence"] == ["趋势质量改善"]
+        assert payload["recommendations"]["stocks"][0]["invalidation_conditions"] == ["趋势转弱"]
         assert payload["summary"]["research_mode"] == "llm"
         assert payload["summary"]["top_candidates"][0]["decision"] in {"keep", "watch"}
 
@@ -1199,6 +1205,9 @@ class TestAIStockPickerStages:
         assert ranked == sorted(ranked, key=lambda item: item.factor_score, reverse=True)
         assert ranked[0].factor_score >= ranked[-1].factor_score
         assert ranked[0].research_payload["quant_support"]["final_quant_score"] == ranked[0].factor_score
+        assert "profit_condition_score" in ranked[0].research_payload["quant_support"]
+        assert "profit_logic" in ranked[0].research_payload["quant_summary"]
+        assert ranked[0].research_payload["quant_summary"]["trend_evidence"]
 
     def test_get_core_codes_uses_tushare_index_constituents(self, db_session, monkeypatch):
         stock_picker_service = _get_stock_picker_service()
@@ -1366,6 +1375,8 @@ class TestAIStockPickerStages:
         assert ranked[0].stock_code == stock_code
         assert ranked[0].factor_score == expected_support["final_quant_score"]
         assert ranked[0].research_payload["quant_support"] == expected_support
+        assert ranked[0].research_payload["quant_summary"]["profit_logic"]
+        assert ranked[0].research_payload["quant_summary"]["invalidation_conditions"]
 
     def test_rank_candidates_raises_on_missing_required_quant_data(self, db_session):
         stock_picker_service = _get_stock_picker_service()
@@ -1479,6 +1490,65 @@ class TestAIStockPickerStages:
         assert [item.stock_code for item in value_ranked] == ["688312.SH", "688311.SH"]
         assert momentum_ranked[0].factor_score > momentum_ranked[1].factor_score
         assert value_ranked[0].factor_score > value_ranked[1].factor_score
+
+    def test_compute_quant_support_does_not_reward_invalid_valuation(self):
+        stock_picker_service = _get_stock_picker_service()
+        valid_inputs = {
+            "pe": 12.0,
+            "pb": 1.4,
+            "ps_ttm": 3.0,
+            "dividend_yield": 3.0,
+            "market_cap": 120000000000.0,
+            "close": 40.0,
+            "volume": 30000000.0,
+            "turnover_amount": 900000000.0,
+            "macd": 0.45,
+            "macd_signal": 0.25,
+            "macd_hist": 0.2,
+            "rsi_12": 58.0,
+            "rsi_24": 52.0,
+            "kdj_j": 66.0,
+            "atr": 1.2,
+            "atr_pct": 3.0,
+        }
+        invalid_inputs = dict(valid_inputs, pe=-12.0, pb=0.0, ps_ttm=-3.0)
+
+        valid_support = stock_picker_service._compute_quant_support("value", valid_inputs)
+        invalid_support = stock_picker_service._compute_quant_support("value", invalid_inputs)
+
+        assert invalid_support["valuation_safety_score"] < valid_support["valuation_safety_score"]
+        assert invalid_support["risk_penalty"] > valid_support["risk_penalty"]
+        assert invalid_support["final_quant_score"] < valid_support["final_quant_score"]
+
+    def test_resolve_quant_inputs_rejects_invalid_price_or_atr(self):
+        stock_picker_service = _get_stock_picker_service()
+        basic = StockBasic(stock_code="688399.SH", name="异常数值样本")
+        val = StockValuationHistory(
+            stock_code="688399.SH",
+            pe_ttm=12.0,
+            pb=1.5,
+            ps_ttm=3.0,
+            dividend_yield=2.0,
+            total_market_value=100000000000.0,
+        )
+        indicators = StockIndicators(
+            stock_code="688399.SH",
+            macd=0.3,
+            macd_signal=0.1,
+            rsi_12=55.0,
+            rsi_24=52.0,
+            kdj_j=62.0,
+            atr=1.0,
+        )
+
+        zero_close = KlineData(stock_code="688399.SH", close=0.0, volume=10000000.0, turnover=500000000.0)
+        with pytest.raises(ValueError, match="kline.close<=0"):
+            stock_picker_service._resolve_quant_inputs(basic, val, zero_close, indicators)
+
+        valid_kline = KlineData(stock_code="688399.SH", close=40.0, volume=10000000.0, turnover=500000000.0)
+        indicators.atr = -1.0
+        with pytest.raises(ValueError, match="stock_indicators.atr<0"):
+            stock_picker_service._resolve_quant_inputs(basic, val, valid_kline, indicators)
 
     def test_rank_candidates_limits_single_industry_concentration(self, db_session):
         stock_picker_service = _get_stock_picker_service()
@@ -1608,8 +1678,12 @@ class TestAIStockPickerStages:
                     "stock_code": "688021.SH",
                     "ai_score": 95,
                     "thesis": "AI 强烈看好。",
+                    "profit_logic": "趋势和订单证据支持赚钱概率。",
                     "catalysts": ["订单加速"],
+                    "trend_evidence": ["趋势走强"],
+                    "risk_evidence": ["波动偏高"],
                     "risks": ["波动偏高"],
+                    "invalidation_conditions": ["趋势破位"],
                     "style_fit_explanation": "更适合成长。",
                     "holding_horizon": "mid_term",
                     "decision": "keep",
@@ -1639,7 +1713,12 @@ class TestAIStockPickerStages:
         assert normalized[0].final_score == 81.25
         assert normalized[1].final_score == 72.5
         assert normalized[0].research_payload["thesis"] == "AI 强烈看好。"
+        assert normalized[0].research_payload["profit_logic"] == "趋势和订单证据支持赚钱概率。"
+        assert normalized[0].research_payload["trend_evidence"] == ["趋势走强"]
+        assert normalized[0].research_payload["risk_evidence"] == ["波动偏高"]
+        assert normalized[0].research_payload["invalidation_conditions"] == ["趋势破位"]
         assert normalized[1].research_payload["thesis"] == "量化辅助观点B"
+        assert "profit_logic" in normalized[1].research_payload
         assert normalized[0].decision == "keep"
         assert normalized[1].decision == "watch"
 
@@ -1779,6 +1858,23 @@ class TestAIStockPickerStages:
         assert tool_calls
         assert tool_calls[0]["stock_code"] == "688021.SH"
         assert [item["stock_code"] for item in payload["research"]] == ["688021.SH", "688022.SH"]
+
+    def test_llm_candidate_summaries_include_numeric_units(self):
+        stock_picker_service = _get_stock_picker_service()
+        ranked = [_make_ranked_candidate("688021.SH", stock_name="奥福环保", factor_score=66.0)]
+        ranked[0].research_payload["quant_inputs"] = {
+            "pe": 12.5,
+            "dividend_yield": 2.3,
+            "turnover_amount": 1200000000.0,
+            "atr_pct": 3.2,
+        }
+
+        summaries = stock_picker_service._build_llm_candidate_summaries(ranked)
+
+        assert summaries[0]["formatted_quant_inputs"]["pe"] == "12.5倍"
+        assert summaries[0]["formatted_quant_inputs"]["dividend_yield"] == "2.3%"
+        assert summaries[0]["formatted_quant_inputs"]["turnover_amount"] == "12亿元"
+        assert summaries[0]["formatted_quant_support"]["final_quant_score"] == "66点"
 
     @pytest.mark.asyncio
     async def test_request_llm_research_requires_evidence_tool_after_loader_tool(self, monkeypatch):
@@ -2219,7 +2315,11 @@ class TestAIStockPickerStages:
                 decision="drop" if idx == 3 else "keep",
                 research_payload={
                     "thesis": f"{name} 的研究逻辑",
+                    "profit_logic": f"{name} 的赚钱逻辑",
+                    "trend_evidence": [f"{name} 趋势证据"],
+                    "risk_evidence": [f"{name} 风险证据"],
                     "risks": [f"{name} 风险"],
+                    "invalidation_conditions": [f"{name} 失效条件"],
                     "holding_horizon": "mid_term",
                 },
             )
@@ -2245,6 +2345,10 @@ class TestAIStockPickerStages:
 
         assert [item["rank"] for item in items] == [1, 2, 3]
         assert [item["stock_code"] for item in items] == ["688023.SH", "688022.SH", "688021.SH"]
+        assert items[0]["recommendation_reason"] == "安恒信息 的赚钱逻辑"
+        assert items[0]["trend_evidence"] == ["安恒信息 趋势证据"]
+        assert items[0]["risk_evidence"] == ["安恒信息 风险证据"]
+        assert items[0]["invalidation_conditions"] == ["安恒信息 失效条件"]
         assert all(item["decision"] == "keep" for item in items)
         assert summary["selected_count"] == 3
         assert summary["recommended_stock_codes"] == ["688023.SH", "688022.SH", "688021.SH"]

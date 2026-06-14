@@ -266,6 +266,36 @@ def test_format_payload_values_formats_realtime_market_units(monkeypatch):
     assert result["total_market_cap"] == "15788.28亿元"
 
 
+def test_format_payload_values_formats_stock_picker_units(monkeypatch):
+    monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "zh")
+
+    quant_inputs = format_payload_values(
+        "stock_picker.quant_inputs",
+        {
+            "pe": 12.5,
+            "pb": 1.8,
+            "dividend_yield": 2.3,
+            "turnover_amount": 1200000000,
+            "atr_pct": 3.2,
+        },
+    )
+    quant_support = format_payload_values(
+        "stock_picker.quant_support",
+        {
+            "trend_quality_score": 26.75,
+            "final_quant_score": 66.0,
+        },
+    )
+
+    assert quant_inputs["pe"] == "12.5倍"
+    assert quant_inputs["pb"] == "1.8倍"
+    assert quant_inputs["dividend_yield"] == "2.3%"
+    assert quant_inputs["turnover_amount"] == "12亿元"
+    assert quant_inputs["atr_pct"] == "3.2%"
+    assert quant_support["trend_quality_score"] == "26.75点"
+    assert quant_support["final_quant_score"] == "66点"
+
+
 def test_table_field_units_use_language_specific_schema():
     config_path = Path(__file__).resolve().parents[1] / "app" / "data" / "metadata" / "table_field_units.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))

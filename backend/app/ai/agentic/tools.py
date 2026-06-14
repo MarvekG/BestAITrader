@@ -11,6 +11,7 @@ from app.data.ingestors.manager import ingestor_manager
 from app.core.logger import get_logger
 from app.trading.trading_engine import TradingEngine
 from app.data.metadata.financial_report_localizer import localize_financial_report_data_field
+from app.data.metadata.field_units import get_field_unit_metadata, get_table_unit_metadata
 
 from datetime import date, datetime
 import uuid
@@ -899,6 +900,9 @@ async def get_database_schema() -> Dict[str, Any]:
         - `nullable`: 是否允许为空
         - `primary_key`: 是否为主键
         - `doc`: 字段的说明文档（如有）
+        - `unit`: 字段展示单位（命中标准字段单位配置时返回）
+
+    返回结果还包含 `field_units` 字典，用于展示 JSONB payload 或未展开指标字段的单位。
 
     使用场景：在规划复杂的跨表查询、确认字段名称或理解数据维度之前调用。
     """
@@ -913,22 +917,34 @@ async def get_database_schema() -> Dict[str, Any]:
         }
         
         all_schemas = {}
+        all_field_units = {}
         for table_name, model in available_models.items():
             mapper = inspect(model)
+            table = getattr(model, "__table__", None)
+            db_table_name = getattr(model, "__tablename__", table_name)
+            schema_name = getattr(table, "schema", None)
+            unit_table_name = f"{schema_name}.{db_table_name}" if schema_name else db_table_name
             columns = []
             for column in mapper.attrs:
                 if hasattr(column, "columns"):
                     col_obj = column.columns[0]
-                    columns.append({
+                    column_schema = {
                         "name": column.key,
                         "type": str(col_obj.type),
                         "nullable": col_obj.nullable,
                         "primary_key": col_obj.primary_key,
                         "doc": getattr(column, "doc", "") or ""
-                    })
+                    }
+                    unit_metadata = get_field_unit_metadata(unit_table_name, column.key)
+                    if unit_metadata:
+                        column_schema["unit"] = unit_metadata["unit"]
+                    columns.append(column_schema)
             all_schemas[table_name] = columns
+            table_unit_metadata = get_table_unit_metadata(unit_table_name)
+            if table_unit_metadata:
+                all_field_units[table_name] = table_unit_metadata
 
-        return {"schemas": all_schemas}
+        return {"schemas": all_schemas, "field_units": all_field_units}
     except Exception as exc:
         logger.exception("get_database_schema failed: %s", exc)
         return {"error": str(exc)}
@@ -977,7 +993,7 @@ async def query_and_calculate(
     avg_close = float(np.mean(closes)) if closes else None
     ```
 
-    推荐的可审计结果结构:
+    推荐的可审计结果结构（数据计算结果能明确单位的，尽量在输出字段或文本中直接带上单位）:
     ```python
     {
         "scope": {
@@ -986,12 +1002,14 @@ async def query_and_calculate(
             "date_range": [start_date, end_date],
         },
         "row_count": len(data),
+        "avg_close_元每股": avg_close,
     }
     ```
     字段要求:
     - 最低限度必填: `scope`, `row_count`。
     - `scope` 的内部字段按任务类型调整，不强制固定键名。
     - 不限制数据输出形式；可以按任务需要输出额外字段。
+    - 数据计算结果能明确单位的，尽量在输出字段名或文本中直接带上单位，例如 `avg_close_元每股`、`volume_股`、`amount_元`、`return_pct`。
     使用这种结构可以让模型不查看全量 K 线、资金流或财务明细，也能知道计算范围、样本数量、
     以及按任务需要返回的计算结果。
 
