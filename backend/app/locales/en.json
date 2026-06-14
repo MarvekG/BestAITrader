@@ -2462,7 +2462,11 @@
     },
     "quant_support": {
       "style_fit": "Style Fit",
+      "profit_condition": "Profit Setup",
+      "trend_quality": "Trend Quality",
       "liquidity": "Liquidity",
+      "valuation_safety": "Valuation Safety",
+      "volatility": "Volatility Control",
       "risk_penalty": "Risk Penalty"
     },
     "fields": {
@@ -2569,6 +2573,9 @@
       "conviction_score": "Conviction",
       "holding_horizon": "Holding Horizon",
       "entry_logic": "Recommendation Reason",
+      "trend_evidence": "Trend Evidence",
+      "risk_evidence": "Risk Evidence",
+      "invalidation_conditions": "Invalidation",
       "risk_flags": "Risk Flags"
     },
     "candidates_table": {
@@ -2580,6 +2587,9 @@
       "quant_support": "Quant Support",
       "decision": "Decision",
       "thesis": "Research Summary",
+      "trend_evidence": "Trend Evidence",
+      "risk_evidence": "Risk Evidence",
+      "invalidation_conditions": "Invalidation",
       "eliminated_reason": "Eliminated Reason"
     },
     "decisions": {

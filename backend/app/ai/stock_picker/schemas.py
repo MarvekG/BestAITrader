@@ -57,15 +57,23 @@ class StockPickerRecommendationResponse(BaseModel):
     rank: int
     conviction_score: float
     recommendation_reason: str
+    profit_logic: Optional[str] = ""
+    trend_evidence: List[str] = Field(default_factory=list)
+    risk_evidence: List[str] = Field(default_factory=list)
     risk_flags: List[str]
+    invalidation_conditions: List[str] = Field(default_factory=list)
     holding_horizon: str
     decision: str
 
 
 class StockPickerQuantSupportResponse(BaseModel):
     style_fit_score: float
+    trend_quality_score: Optional[float] = None
     liquidity_score: float
+    valuation_safety_score: Optional[float] = None
+    volatility_score: Optional[float] = None
     risk_penalty: float
+    profit_condition_score: Optional[float] = None
     final_quant_score: float
 
 

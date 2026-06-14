@@ -2462,7 +2462,11 @@
     },
     "quant_support": {
       "style_fit": "风格",
+      "profit_condition": "赚钱条件",
+      "trend_quality": "趋势质量",
       "liquidity": "流动性",
+      "valuation_safety": "估值安全",
+      "volatility": "波动控制",
       "risk_penalty": "风险扣分"
     },
     "fields": {
@@ -2569,6 +2573,9 @@
       "conviction_score": "信念分",
       "holding_horizon": "持有周期",
       "entry_logic": "推荐理由",
+      "trend_evidence": "趋势证据",
+      "risk_evidence": "风险证据",
+      "invalidation_conditions": "失效条件",
       "risk_flags": "风险提示"
     },
     "candidates_table": {
@@ -2580,6 +2587,9 @@
       "quant_support": "量化辅助",
       "decision": "决策",
       "thesis": "研究摘要",
+      "trend_evidence": "趋势证据",
+      "risk_evidence": "风险证据",
+      "invalidation_conditions": "失效条件",
       "eliminated_reason": "淘汰原因"
     },
     "decisions": {

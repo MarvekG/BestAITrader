@@ -35,15 +35,23 @@ export interface StockPickerRecommendationItem {
   rank: number;
   conviction_score: number;
   recommendation_reason: string;
+  profit_logic?: string;
+  trend_evidence?: string[];
+  risk_evidence?: string[];
   risk_flags: string[];
+  invalidation_conditions?: string[];
   holding_horizon: string;
   decision: string;
 }
 
 export interface StockPickerQuantSupport {
   style_fit_score: number;
+  trend_quality_score?: number | null;
   liquidity_score: number;
+  valuation_safety_score?: number | null;
+  volatility_score?: number | null;
   risk_penalty: number;
+  profit_condition_score?: number | null;
   final_quant_score: number;
 }
 

@@ -30,6 +30,7 @@ from app.core.i18n import i18n_service
 from app.core.logger import get_logger
 from app.core.utils.converters import safe_float
 from app.crud.llm_usage_log import record_llm_usage
+from app.data.metadata.field_units import format_payload_values
 from app.models.data_storage import KlineData, StockBasic, StockValuationHistory
 from app.data.analytics.core_index import get_core_index_constituent_codes
 from app.models.stock_indicators import StockIndicators
@@ -139,8 +140,12 @@ class StockResearchOutputItem(BaseModel):
     stock_code: str = Field(..., min_length=1)
     ai_score: float = Field(..., ge=0, le=100)
     thesis: str = Field(..., min_length=1)
+    profit_logic: str = ""
     catalysts: List[str] = Field(default_factory=list)
+    trend_evidence: List[str] = Field(default_factory=list)
+    risk_evidence: List[str] = Field(default_factory=list)
     risks: List[str] = Field(default_factory=list)
+    invalidation_conditions: List[str] = Field(default_factory=list)
     style_fit_explanation: str = Field(..., min_length=1)
     holding_horizon: str = Field(..., min_length=1)
     decision: Literal["keep", "watch", "drop"]
@@ -732,8 +737,12 @@ class StockPickerService:
                     "stock_name": research_payload.get("stock_name") or candidate.stock_code,
                     "rank": rank,
                     "conviction_score": round(candidate.final_score, 2),
-                    "recommendation_reason": research_payload.get("thesis", ""),
+                    "recommendation_reason": research_payload.get("profit_logic") or research_payload.get("thesis", ""),
+                    "profit_logic": research_payload.get("profit_logic", ""),
+                    "trend_evidence": research_payload.get("trend_evidence", []),
+                    "risk_evidence": research_payload.get("risk_evidence", []),
                     "risk_flags": candidate_risks,
+                    "invalidation_conditions": research_payload.get("invalidation_conditions", []),
                     "holding_horizon": research_payload.get("holding_horizon", ""),
                     "decision": candidate.decision,
                 }
@@ -980,6 +989,7 @@ class StockPickerService:
                 "stock_name": basic.name,
                 "industry": basic.industry,
                 "market": basic.market,
+                "quant_inputs": quant_inputs,
                 "quant_support": quant_support,
                 "quant_summary": self._build_quant_summary(style, basic, quant_inputs, quant_support),
             }
@@ -1185,6 +1195,24 @@ class StockPickerService:
         assert atr is not None
         assert macd is not None
         assert macd_signal is not None
+        if close <= 0:
+            raise ValueError(
+                self._t(
+                    "errors.fragments.missing_quant_fields",
+                    stock_code=basic.stock_code,
+                    stock_name=basic.name or basic.stock_code,
+                    fields="kline.close<=0",
+                )
+            )
+        if atr < 0:
+            raise ValueError(
+                self._t(
+                    "errors.fragments.missing_quant_fields",
+                    stock_code=basic.stock_code,
+                    stock_name=basic.name or basic.stock_code,
+                    fields="stock_indicators.atr<0",
+                )
+            )
 
         return {
             "pe": safe_float(raw_values["valuation.pe_ttm"], allow_non_finite=False) or 0.0,
@@ -1210,11 +1238,22 @@ class StockPickerService:
         style: str,
         quant_inputs: Dict[str, float],
     ) -> Dict[str, float]:
+        """
+        计算候选股票的赚钱条件辅助分。
+
+        Args:
+            style: 用户选择的选股风格。
+            quant_inputs: 从最新估值、日线和技术指标抽取的量化输入。
+
+        Returns:
+            量化辅助分，保留既有核心字段，并补充趋势、估值、波动和赚钱条件证据分。
+        """
         pe = quant_inputs["pe"]
         pb = quant_inputs["pb"]
         ps_ttm = quant_inputs["ps_ttm"]
         dividend_yield = quant_inputs["dividend_yield"]
         market_cap = quant_inputs["market_cap"]
+        close = quant_inputs["close"]
         turnover_amount = quant_inputs["turnover_amount"]
         volume = quant_inputs["volume"]
         macd_hist = quant_inputs["macd_hist"]
@@ -1222,46 +1261,122 @@ class StockPickerService:
         rsi_24 = quant_inputs["rsi_24"]
         kdj_j = quant_inputs["kdj_j"]
         atr_pct = quant_inputs["atr_pct"]
-        liquidity_score = min(turnover_amount / 1e9, 18) + min(volume / 1e8, 12)
+        positive_pe = pe if pe > 0 else None
+        positive_pb = pb if pb > 0 else None
+        positive_ps_ttm = ps_ttm if ps_ttm > 0 else None
+        dividend_yield_score = min(max(0.0, dividend_yield), 8.0)
+        nonnegative_market_cap = max(0.0, market_cap)
+        nonnegative_turnover_amount = max(0.0, turnover_amount)
+        nonnegative_volume = max(0.0, volume)
+        macd_hist_pct = (macd_hist / close * 100.0) if close > 0 else 0.0
+        macd_momentum_score = min(max(0.0, macd_hist_pct) * 25, 18)
+        macd_balance_score = min(max(0.0, macd_hist_pct) * 16, 10)
+        liquidity_score = min(nonnegative_turnover_amount / 1e9, 18) + min(nonnegative_volume * 100 / 1e8, 12)
         technical_momentum_score = (
-            min(max(0.0, macd_hist) * 120, 18)
-            + max(0.0, rsi_12 - 50) * 0.45
-            + max(0.0, kdj_j - 50) * 0.12
+            macd_momentum_score
+            + min(max(0.0, rsi_12 - 50) * 0.45, 14)
+            + min(max(0.0, kdj_j - 50) * 0.12, 8)
+            - max(0.0, rsi_12 - 82) * 0.5
+            - max(0.0, kdj_j - 95) * 0.25
         )
+        technical_momentum_score = max(0.0, min(45.0, technical_momentum_score))
         technical_balance_score = (
-            min(max(0.0, macd_hist) * 80, 10)
-            + max(0.0, rsi_12 - 48) * 0.25
+            macd_balance_score
+            + min(max(0.0, rsi_12 - 48) * 0.25, 8)
+            - max(0.0, rsi_12 - 75) * 0.3
         )
+        technical_balance_score = max(0.0, min(25.0, technical_balance_score))
+        trend_quality_score = (
+            macd_momentum_score
+            + min(max(0.0, rsi_12 - 50) * 0.55, 16)
+            + min(max(0.0, rsi_12 - rsi_24) * 1.2, 10)
+            + min(max(0.0, kdj_j - 50) * 0.12, 8)
+            - max(0.0, rsi_12 - 78) * 0.8
+            - max(0.0, kdj_j - 92) * 0.45
+        )
+        trend_quality_score = max(0.0, min(45.0, trend_quality_score))
         stability_score = max(0.0, 18 - atr_pct * 4) + max(0.0, 15 - abs(rsi_24 - 50) * 0.3)
+        volatility_score = max(0.0, min(25.0, 25 - atr_pct * 4))
+        valuation_safety_score = (
+            (max(0.0, 25 - positive_pe) * 0.8 if positive_pe is not None else 0.0)
+            + (max(0.0, 3.5 - positive_pb) * 4 if positive_pb is not None else 0.0)
+            + (max(0.0, 8 - positive_ps_ttm) * 1.5 if positive_ps_ttm is not None else 0.0)
+            + min(dividend_yield_score, 5.0) * 1.2
+        )
+        valuation_safety_score = max(0.0, min(35.0, valuation_safety_score))
 
         if style == "momentum":
-            style_fit_score = technical_momentum_score
+            style_fit_score = technical_momentum_score + trend_quality_score * 0.5 + liquidity_score * 0.35
         elif style == "value":
-            style_fit_score = max(0.0, 22 - pe) * 1.7 + max(0.0, 3.2 - pb) * 8 + dividend_yield * 5
+            style_fit_score = (
+                (max(0.0, 22 - positive_pe) * 1.7 if positive_pe is not None else 0.0)
+                + (max(0.0, 3.2 - positive_pb) * 8 if positive_pb is not None else 0.0)
+                + dividend_yield_score * 5
+                + trend_quality_score * 0.35
+                + volatility_score * 0.25
+            )
         elif style == "growth":
-            style_fit_score = technical_momentum_score * 0.7 + max(0.0, 10 - ps_ttm) * 5
+            style_fit_score = (
+                technical_momentum_score * 0.65
+                + trend_quality_score * 0.55
+                + (max(0.0, 10 - positive_ps_ttm) * 5 if positive_ps_ttm is not None else 0.0)
+            )
         elif style == "defensive":
-            style_fit_score = dividend_yield * 6 + min(market_cap / 1e11, 14) + stability_score
+            style_fit_score = (
+                dividend_yield_score * 6
+                + min(nonnegative_market_cap / 1e11, 14)
+                + stability_score
+                + volatility_score * 0.45
+            )
         else:
             style_fit_score = (
                 technical_balance_score * 1.15
                 + stability_score * 0.35
-                + max(0.0, 18 - pe) * 0.6
-                + max(0.0, 2.5 - pb) * 2.5
-                + min(dividend_yield, 5.0) * 0.8
+                + trend_quality_score * 0.45
+                + (max(0.0, 18 - positive_pe) * 0.6 if positive_pe is not None else 0.0)
+                + (max(0.0, 2.5 - positive_pb) * 2.5 if positive_pb is not None else 0.0)
+                + min(dividend_yield_score, 5.0) * 0.8
             )
 
-        risk_penalty = (
-            max(0.0, pe - 45) * 0.35
-            + max(0.0, pb - 6) * 1.5
-            + max(0.0, atr_pct - 4) * 3
-            + max(0.0, 5e8 - turnover_amount) / 1e8 * 0.5
+        invalid_valuation_penalty = (
+            (8.0 if positive_pe is None else 0.0)
+            + (4.0 if positive_pb is None else 0.0)
+            + (4.0 if positive_ps_ttm is None else 0.0)
         )
-        final_quant_score = max(0.0, min(100.0, style_fit_score + liquidity_score - risk_penalty))
+        risk_penalty = max(
+            0.0,
+            min(
+                30.0,
+                (max(0.0, positive_pe - 45) * 0.35 if positive_pe is not None else 0.0)
+                + (max(0.0, positive_pb - 6) * 1.5 if positive_pb is not None else 0.0)
+                + (max(0.0, positive_ps_ttm - 20) * 0.5 if positive_ps_ttm is not None else 0.0)
+                + invalid_valuation_penalty
+                + max(0.0, atr_pct - 4) * 3
+                + max(0.0, 5e8 - nonnegative_turnover_amount) / 1e8 * 0.5
+                + max(0.0, rsi_12 - 82) * 0.8
+                + max(0.0, kdj_j - 95) * 0.5,
+            ),
+        )
+        profit_condition_score = max(
+            0.0,
+            min(
+                100.0,
+                style_fit_score
+                + liquidity_score * 0.8
+                + valuation_safety_score * 0.35
+                + volatility_score * 0.25
+                - risk_penalty,
+            ),
+        )
+        final_quant_score = profit_condition_score
         return {
             "style_fit_score": round(max(0.0, min(100.0, style_fit_score)), 2),
+            "trend_quality_score": round(max(0.0, min(100.0, trend_quality_score)), 2),
             "liquidity_score": round(max(0.0, min(30.0, liquidity_score)), 2),
-            "risk_penalty": round(max(0.0, min(30.0, risk_penalty)), 2),
+            "valuation_safety_score": round(max(0.0, min(35.0, valuation_safety_score)), 2),
+            "volatility_score": round(max(0.0, min(25.0, volatility_score)), 2),
+            "risk_penalty": round(risk_penalty, 2),
+            "profit_condition_score": round(profit_condition_score, 2),
             "final_quant_score": round(final_quant_score, 2),
         }
 
@@ -1272,16 +1387,58 @@ class StockPickerService:
         quant_inputs: Dict[str, float],
         quant_support: Dict[str, float],
     ) -> Dict[str, Any]:
+        """
+        构建候选股票的赚钱条件量化摘要。
+
+        Args:
+            style: 用户选择的选股风格。
+            basic: 股票基础信息。
+            quant_inputs: 量化输入指标。
+            quant_support: 量化辅助分。
+
+        Returns:
+            面向 LLM 和前端展示的赚钱逻辑、趋势证据、风险证据和失效条件。
+        """
+        style_label = STYLE_LABELS.get(style, style)
+        trend_evidence = [
+            f"MACD 柱 {quant_inputs['macd_hist']:.4f}",
+            f"RSI12 {quant_inputs['rsi_12']:.2f} / RSI24 {quant_inputs['rsi_24']:.2f}",
+            f"KDJ-J {quant_inputs['kdj_j']:.2f}",
+            f"趋势质量 {quant_support.get('trend_quality_score', 0.0):.2f} 分",
+        ]
+        risk_evidence = [
+            f"ATR 波动率 {quant_inputs['atr_pct']:.2f}%",
+            f"PE(TTM) {quant_inputs['pe']:.2f} 倍 / PB {quant_inputs['pb']:.2f} 倍",
+            f"流动性 {quant_support['liquidity_score']:.2f} 分",
+            f"风险扣分 {quant_support['risk_penalty']:.2f} 分",
+        ]
+        invalidation_conditions = [
+            "趋势信号转弱或量价配合失效",
+            "波动率继续抬升并超过当前风格可承受范围",
+            "估值、流动性或行业环境出现新的不利证据",
+        ]
+        profit_logic = (
+            f"{basic.name} 在 {style_label} 风格下的赚钱条件 {quant_support.get('profit_condition_score', 0.0):.2f} 分，"
+            f"核心依据是趋势质量 {quant_support.get('trend_quality_score', 0.0):.2f} 分、"
+            f"流动性 {quant_support['liquidity_score']:.2f} 分、"
+            f"估值安全 {quant_support.get('valuation_safety_score', 0.0):.2f} 分，"
+            f"同时风险扣分 {quant_support['risk_penalty']:.2f} 分。"
+        )
         return {
-            "style_label": STYLE_LABELS.get(style, style),
+            "style_label": style_label,
+            "profit_logic": profit_logic,
+            "trend_evidence": trend_evidence,
+            "risk_evidence": risk_evidence,
+            "invalidation_conditions": invalidation_conditions,
             "thesis": (
-                f"{basic.name} 的量化辅助信号显示风格匹配分 {quant_support['style_fit_score']:.2f}，"
-                f"流动性分 {quant_support['liquidity_score']:.2f}，风险扣分 {quant_support['risk_penalty']:.2f}。"
+                f"{basic.name} 的量化辅助信号显示风格匹配 {quant_support['style_fit_score']:.2f} 分，"
+                f"赚钱条件 {quant_support.get('profit_condition_score', quant_support['final_quant_score']):.2f} 分，"
+                f"流动性 {quant_support['liquidity_score']:.2f} 分，风险扣分 {quant_support['risk_penalty']:.2f} 分。"
             ),
             "catalysts": [
                 f"行业：{basic.industry or '未分类'}",
                 f"市场：{basic.market or '未分类'}",
-                f"PE(TTM)：{quant_inputs['pe']:.2f}",
+                f"PE(TTM)：{quant_inputs['pe']:.2f} 倍",
                 f"股息率：{quant_inputs['dividend_yield']:.2f}%",
                 f"MACD 柱：{quant_inputs['macd_hist']:.4f}",
                 f"RSI12：{quant_inputs['rsi_12']:.2f}",
@@ -1289,11 +1446,11 @@ class StockPickerService:
             ],
             "risks": [
                 "结果仍依赖市场数据完整性",
-                "技术指标和估值指标只作为 LLM 研究的辅助证据",
+                "趋势、估值、波动和流动性只说明当前证据质量，不承诺未来收益",
             ],
             "support_note": (
-                f"{STYLE_LABELS.get(style, style)} 风格下，最终量化辅助分 "
-                f"{quant_support['final_quant_score']:.2f}。"
+                f"{style_label} 风格下，最终量化辅助分 "
+                f"{quant_support['final_quant_score']:.2f} 分。"
             ),
         }
 
@@ -1325,18 +1482,7 @@ class StockPickerService:
         recommendation_count: int,
     ) -> Optional[Dict[str, Any]]:
         start_time, end_time = self._research_time_window()
-        candidate_summaries = [
-            {
-                "stock_code": candidate.stock_code,
-                "stock_name": candidate.stock_name,
-                "industry": candidate.industry,
-                "market": candidate.market,
-                "factor_score": round(candidate.factor_score, 2),
-                "quant_support": candidate.research_payload.get("quant_support", {}),
-                "quant_summary": candidate.research_payload.get("quant_summary", {}),
-            }
-            for candidate in ranked
-        ]
+        candidate_summaries = self._build_llm_candidate_summaries(ranked)
         skills_catalog_prompt = build_skills_catalog_prompt()
         skills_prompt_suffix = f"\n\n{skills_catalog_prompt}" if skills_catalog_prompt else ""
         agentic_tools = get_all_tools()
@@ -1361,21 +1507,25 @@ class StockPickerService:
             SystemMessage(
                 content=(
                     "你是资深 A 股选股研究员，负责对同一批候选股票做整池比较研究，并给出结构化研究结论。"
+                    "你的目标是找出当前证据下更可能赚钱且风险可控的候选，而不是预测未来涨幅、目标价或确定性收益数字。"
                     "请像原有 agentic 分析流程那样先思考研究路径，再主动调用工具补充证据，然后基于证据完成论证。"
                     "你必须先调用 backend/app/ai/agentic/tools.py 中的一个或多个工具，然后才能输出最终结论。"
                     "不要把候选池拆成多个独立任务；要在同一个研究会话里，对整批股票做横向比较、取舍、排序和论证。"
                     "你可以自行决定调用哪些现有工具、调用多少次、如何组合工具，只要这些调用能帮助你获取足够证据。"
                     "你的结论必须以研究判断和工具证据为主导，量化因子只作为辅助参考，不要机械跟随 factor_score。"
+                    "请重点说明赚钱逻辑、趋势证据、风险证据和失效条件；趋势是关键证据之一，但不能替代估值、流动性、波动和行业环境判断。"
                     "完成工具调用和比较分析后，再一次性输出最终 JSON 对象。"
                     f"{skills_prompt_suffix}"
                     f"最终输出必须满足以下 JSON Schema: {stable_json_dumps(StockResearchOutput.model_json_schema())}"
                     "\n\n"
                     "You are a senior A-share stock research analyst. Your job is to evaluate the entire candidate pool comparatively and produce a structured research output."
+                    "Your goal is to identify candidates that are more likely to make money with controllable risk based on current evidence, not to predict future return numbers, target prices, or guaranteed outcomes."
                     "Follow the spirit of the original agentic analyst flow: first decide the research approach, then proactively call tools to gather evidence, and finally reason from that evidence."
                     "You must call one or more tools from backend/app/ai/agentic/tools.py before giving the final answer."
                     "Do not split the candidate pool into isolated tasks. Keep the whole pool in one research session and make comparative judgments across all candidates."
                     "You should decide for yourself which existing tools to call, how many times to call them, and how to combine them, as long as you gather enough evidence."
                     "Your final judgment must be driven by research reasoning and tool evidence, with quantitative factor signals used only as supporting context."
+                    "Explain the profit logic, trend evidence, risk evidence, and invalidation conditions. Trend is important evidence, but it must be weighed with valuation, liquidity, volatility, and sector context."
                     "After gathering evidence and completing the comparative analysis, return exactly one final JSON object."
                     f"{skills_prompt_suffix}"
                     f"Your final output must satisfy this JSON Schema: {stable_json_dumps(StockResearchOutput.model_json_schema())}"
@@ -1385,8 +1535,12 @@ class StockPickerService:
                 content=(
                     f"风格 / Style: {STYLE_LABELS.get(style, style)}\n"
                     f"推荐股票数 / Target recommendation count: {recommendation_count}\n"
+                    "请以赚钱概率和风险可控为核心比较候选，明确每只股票的赚钱逻辑、趋势证据、风险证据和失效条件；不要输出目标价、固定涨幅或确定性收益承诺。"
+                    "候选池 JSON 中的 formatted_quant_inputs 和 formatted_quant_support 已按标准单位格式化，可直接用于理解金额、百分比、倍数和评分。"
                     "请自行判断需要调用哪些工具来补足证据，并在证据充分后再给出结论。"
                     "可以灵活组合任意相关工具，只要能够补足当前候选池比较所需的证据。"
+                    "Compare candidates by profit probability and controllable risk. State profit logic, trend evidence, risk evidence, and invalidation conditions; do not output target prices, fixed gains, or guaranteed returns."
+                    "Use formatted_quant_inputs and formatted_quant_support in the candidate JSON for unit-aware raw indicators and model scores."
                     "Decide for yourself which tools are needed, gather enough evidence, and only then provide your conclusion. You may combine any relevant tools as needed to complete the comparative research.\n"
                     "候选股票池如下，请整体比较而不是孤立点评 / Candidate pool below; compare them as a whole rather than in isolation:\n"
                     f"{stable_json_dumps(candidate_summaries)}\n"
@@ -1546,6 +1700,38 @@ class StockPickerService:
             logger.warning("LLM research generation failed: %s", exc)
         return None
 
+    def _build_llm_candidate_summaries(self, ranked: List[RankedCandidate]) -> List[Dict[str, Any]]:
+        """
+        构建发送给 LLM 的候选池摘要，并补齐数值单位说明。
+
+        Args:
+            ranked: 已完成因子初排的候选股票列表。
+
+        Returns:
+            包含原始量化指标、量化评分和对应单位说明的候选摘要列表。
+        """
+        return [
+            {
+                "stock_code": candidate.stock_code,
+                "stock_name": candidate.stock_name,
+                "industry": candidate.industry,
+                "market": candidate.market,
+                "factor_score": round(candidate.factor_score, 2),
+                "quant_inputs": candidate.research_payload.get("quant_inputs", {}),
+                "formatted_quant_inputs": format_payload_values(
+                    "stock_picker.quant_inputs",
+                    candidate.research_payload.get("quant_inputs", {}),
+                ),
+                "quant_support": candidate.research_payload.get("quant_support", {}),
+                "formatted_quant_support": format_payload_values(
+                    "stock_picker.quant_support",
+                    candidate.research_payload.get("quant_support", {}),
+                ),
+                "quant_summary": candidate.research_payload.get("quant_summary", {}),
+            }
+            for candidate in ranked
+        ]
+
     @staticmethod
     def _parse_json_response_content(content: Any) -> Optional[Dict[str, Any]]:
         if isinstance(content, dict):
@@ -1583,6 +1769,34 @@ class StockPickerService:
         except Exception as exc:
             logger.warning("Invalid research output payload: %s", exc)
             return None
+
+    @staticmethod
+    def _optional_text(value: Any) -> str:
+        """
+        将可选文本字段规范化为空字符串或去空白字符串。
+
+        Args:
+            value: 待规范化的字段值。
+
+        Returns:
+            规范化后的字符串。
+        """
+        return str(value).strip() if value is not None else ""
+
+    @staticmethod
+    def _optional_text_list(value: Any) -> List[str]:
+        """
+        将可选文本列表字段规范化为字符串列表。
+
+        Args:
+            value: 待规范化的字段值。
+
+        Returns:
+            去除空值后的字符串列表。
+        """
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]
 
     def _research_time_window(self) -> tuple[str, str]:
         end_dt = self._now()
@@ -1632,11 +1846,26 @@ class StockPickerService:
             risks = raw_item.get("risks")
             catalysts = raw_item.get("catalysts")
             research_payload = dict(base.research_payload)
+            quant_summary = research_payload["quant_summary"]
+            profit_logic = self._optional_text(raw_item.get("profit_logic")) or quant_summary.get("profit_logic", "")
+            trend_evidence = self._optional_text_list(raw_item.get("trend_evidence")) or quant_summary.get(
+                "trend_evidence",
+                [],
+            )
+            risk_evidence = self._optional_text_list(raw_item.get("risk_evidence")) or quant_summary.get("risk_evidence", [])
+            invalidation_conditions = self._optional_text_list(raw_item.get("invalidation_conditions")) or quant_summary.get(
+                "invalidation_conditions",
+                [],
+            )
             research_payload.update(
                 {
-                    "thesis": str(raw_item.get("thesis") or research_payload["quant_summary"]["thesis"]),
-                    "catalysts": catalysts if isinstance(catalysts, list) else research_payload["quant_summary"]["catalysts"],
-                    "risks": risks if isinstance(risks, list) and risks else research_payload["quant_summary"]["risks"],
+                    "thesis": str(raw_item.get("thesis") or quant_summary["thesis"]),
+                    "profit_logic": profit_logic,
+                    "catalysts": catalysts if isinstance(catalysts, list) else quant_summary["catalysts"],
+                    "trend_evidence": trend_evidence,
+                    "risk_evidence": risk_evidence,
+                    "risks": risks if isinstance(risks, list) and risks else quant_summary["risks"],
+                    "invalidation_conditions": invalidation_conditions,
                     "style_fit_explanation": str(
                         raw_item.get("style_fit_explanation")
                         or f"{base.stock_name} 与 {STYLE_LABELS.get(style, style)} 风格匹配。"
@@ -1738,8 +1967,13 @@ class StockPickerService:
                     "stock_code": candidate.stock_code,
                     "rank": rank,
                     "conviction_score": round(candidate.final_score, 2),
-                    "recommendation_reason": candidate.research_payload.get("thesis", ""),
+                    "recommendation_reason": candidate.research_payload.get("profit_logic")
+                    or candidate.research_payload.get("thesis", ""),
+                    "profit_logic": candidate.research_payload.get("profit_logic", ""),
+                    "trend_evidence": candidate.research_payload.get("trend_evidence", []),
+                    "risk_evidence": candidate.research_payload.get("risk_evidence", []),
                     "risk_flags": candidate.research_payload.get("risks", []),
+                    "invalidation_conditions": candidate.research_payload.get("invalidation_conditions", []),
                     "holding_horizon": candidate.research_payload.get(
                         "holding_horizon",
                         self._holding_horizon(run.style),
@@ -1787,6 +2021,8 @@ class StockPickerService:
                 "ai_score": round(candidate.ai_score, 2),
                 "final_score": round(candidate.final_score, 2),
                 "quant_support": candidate.research_payload.get("quant_support"),
+                "profit_logic": candidate.research_payload.get("profit_logic"),
+                "trend_evidence": candidate.research_payload.get("trend_evidence"),
                 "decision": candidate.decision,
             }
             for candidate in sorted_researched[:5]
