@@ -1520,7 +1520,7 @@
       "$ref": "cny"
     },
     "volume": {
-      "$ref": "shares"
+      "$ref": "lots"
     },
     "turnover_amount": {
       "$ref": "cny_to_hundred_million"

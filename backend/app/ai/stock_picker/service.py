@@ -1271,7 +1271,7 @@ class StockPickerService:
         macd_hist_pct = (macd_hist / close * 100.0) if close > 0 else 0.0
         macd_momentum_score = min(max(0.0, macd_hist_pct) * 25, 18)
         macd_balance_score = min(max(0.0, macd_hist_pct) * 16, 10)
-        liquidity_score = min(nonnegative_turnover_amount / 1e9, 18) + min(nonnegative_volume / 1e8, 12)
+        liquidity_score = min(nonnegative_turnover_amount / 1e9, 18) + min(nonnegative_volume * 100 / 1e8, 12)
         technical_momentum_score = (
             macd_momentum_score
             + min(max(0.0, rsi_12 - 50) * 0.45, 14)

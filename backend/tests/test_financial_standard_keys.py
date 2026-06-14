@@ -275,6 +275,7 @@ def test_format_payload_values_formats_stock_picker_units(monkeypatch):
             "pe": 12.5,
             "pb": 1.8,
             "dividend_yield": 2.3,
+            "volume": 2032355.46,
             "turnover_amount": 1200000000,
             "atr_pct": 3.2,
         },
@@ -290,6 +291,7 @@ def test_format_payload_values_formats_stock_picker_units(monkeypatch):
     assert quant_inputs["pe"] == "12.5倍"
     assert quant_inputs["pb"] == "1.8倍"
     assert quant_inputs["dividend_yield"] == "2.3%"
+    assert quant_inputs["volume"] == "2032355手"
     assert quant_inputs["turnover_amount"] == "12亿元"
     assert quant_inputs["atr_pct"] == "3.2%"
     assert quant_support["trend_quality_score"] == "26.75点"

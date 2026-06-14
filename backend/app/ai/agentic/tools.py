@@ -11,7 +11,7 @@ from app.data.ingestors.manager import ingestor_manager
 from app.core.logger import get_logger
 from app.trading.trading_engine import TradingEngine
 from app.data.metadata.financial_report_localizer import localize_financial_report_data_field
-from app.data.metadata.field_units import get_field_unit_metadata, get_table_unit_metadata
+from app.data.metadata.field_units import get_schema_field_unit, get_schema_table_units
 
 from datetime import date, datetime
 import uuid
@@ -935,12 +935,12 @@ async def get_database_schema() -> Dict[str, Any]:
                         "primary_key": col_obj.primary_key,
                         "doc": getattr(column, "doc", "") or ""
                     }
-                    unit_metadata = get_field_unit_metadata(unit_table_name, column.key)
-                    if unit_metadata:
-                        column_schema["unit"] = unit_metadata["unit"]
+                    unit = get_schema_field_unit(unit_table_name, column.key)
+                    if unit:
+                        column_schema["unit"] = unit
                     columns.append(column_schema)
             all_schemas[table_name] = columns
-            table_unit_metadata = get_table_unit_metadata(unit_table_name)
+            table_unit_metadata = get_schema_table_units(unit_table_name)
             if table_unit_metadata:
                 all_field_units[table_name] = table_unit_metadata
 
