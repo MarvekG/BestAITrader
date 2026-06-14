@@ -28,13 +28,23 @@ async def test_get_database_schema_returns_model_columns():
     assert northbound_schema["hold_ratio"]["unit"] == "比例"
     assert northbound_schema["net_buy_amount"]["unit"] == "元"
 
+    dragon_tiger_schema = {column["name"]: column for column in result["schemas"]["DragonTigerData"]}
+    assert dragon_tiger_schema["net_buy_amount"]["unit"] == "元"
+    assert dragon_tiger_schema["floating_market_capitalization"]["unit"] == "元"
+
+    realtime_schema = {column["name"]: column for column in result["schemas"]["StockRealtimeMarket"]}
+    assert realtime_schema["total_market_cap"]["unit"] == "元"
+
+    industry_schema = {column["name"]: column for column in result["schemas"]["IndustryData"]}
+    assert industry_schema["total_market_cap"]["unit"] == "万元"
+
     assert result["field_units"]["FinancialIndicator"]["roe"]["unit"] == "%"
 
     balance_default_unit = result["field_units"]["StockBalanceSheet"]["$default"]
     assert balance_default_unit["unit"] == "元"
 
     sector_schema = {column["name"]: column for column in result["schemas"]["SectorMoneyFlow"]}
-    assert "unit" not in sector_schema["net_inflow"]
+    assert sector_schema["net_inflow"]["unit"] == "元"
 
 
 @pytest.mark.asyncio

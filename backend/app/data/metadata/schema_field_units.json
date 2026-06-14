@@ -16,6 +16,7 @@
   "data.stock_hot_rank": {
     "rank": "名",
     "rank_change": "名",
+    "hot_value": "分",
     "current_rank": "名",
     "new_fans": "%",
     "irons_fans": "%"
@@ -31,18 +32,18 @@
     "hold_value_change": "元"
   },
   "data.dragon_tiger_data": {
-    "net_buy_amount": "万元",
-    "buy_amount": "万元",
-    "sell_amount": "万元",
+    "net_buy_amount": "元",
+    "buy_amount": "元",
+    "sell_amount": "元",
     "price_change_percent": "%",
     "sequence_number": "序号",
     "close_price": "元",
-    "total_trade_amount": "万元",
-    "market_total_trade_amount": "万元",
+    "total_trade_amount": "元",
+    "market_total_trade_amount": "元",
     "net_buy_ratio": "%",
     "trade_amount_ratio": "%",
     "turnover_rate": "%",
-    "floating_market_capitalization": "万元",
+    "floating_market_capitalization": "元",
     "post_1_day_price_change_percent": "%",
     "post_2_day_price_change_percent": "%",
     "post_5_day_price_change_percent": "%",
@@ -109,6 +110,7 @@
     "latest_price": "点",
     "change_amount": "点",
     "change_percent": "%",
+    "total_market_cap": "万元",
     "turnover_rate": "%",
     "rising_stocks_count": "只",
     "falling_stocks_count": "只",
@@ -214,6 +216,7 @@
   "data.stock_earnings_forecast": {
     "net_profit_min": "万元",
     "net_profit_max": "万元",
+    "prev_year_profit": "万元",
     "growth_min": "%",
     "growth_max": "%"
   },
@@ -244,10 +247,16 @@
     "premium_rate": "%"
   },
   "data.sector_money_flow": {
+    "net_inflow": "元",
     "net_inflow_rate": "%",
+    "main_net_inflow": "元",
+    "huge_net_inflow": "元",
     "huge_net_inflow_rate": "%",
+    "large_net_inflow": "元",
     "large_net_inflow_rate": "%",
+    "medium_net_inflow": "元",
     "medium_net_inflow_rate": "%",
+    "small_net_inflow": "元",
     "small_net_inflow_rate": "%",
     "close_price": "元",
     "change_percent": "%"
