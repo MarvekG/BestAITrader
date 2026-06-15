@@ -6,6 +6,7 @@ from uuid import UUID
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
+from app.ai.agentic.tool_output_summarizer import should_summarize_tool_output, summarize_tool_output
 from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_providers.factory import build_chat_model, get_llm_provider
 from app.ai.stock_picker.interactive_research.constants import phase_instructions, prompt_language, research_agent_system_prompt
@@ -137,7 +138,7 @@ class InteractiveResearchWorkflow:
                 continue
 
             for tool_call in evidence_tool_calls:
-                trace_item = await self._execute_tool_call(run_id, tool_map, messages, tool_call, iteration_index)
+                trace_item = await self._execute_tool_call(run_id, tool_map, messages, tool_call, iteration_index, llm)
                 tool_trace.append(trace_item)
 
             queued_after_tool = self._process_queued_user_inputs(run_id)
@@ -266,6 +267,7 @@ class InteractiveResearchWorkflow:
         messages: List[Any],
         tool_call: Dict[str, Any],
         iteration_index: int,
+        llm: Any,
     ) -> Dict[str, Any]:
         """执行 LLM 返回的单个工具调用，并同步写消息流。
 
@@ -275,6 +277,7 @@ class InteractiveResearchWorkflow:
             messages: LLM 消息上下文。
             tool_call: LangChain tool call 载荷。
             iteration_index: 当前迭代序号。
+            llm: 当前研究主 LLM，用于复用工具结果压缩链路。
 
         Returns:
             工具调用轨迹。
@@ -292,6 +295,17 @@ class InteractiveResearchWorkflow:
             try:
                 raw_result = await tool.ainvoke(tool_args)
                 result_text = _json_tool_result(raw_result)
+                if should_summarize_tool_output(tool_name, result_text):
+                    result_text = await summarize_tool_output(
+                        llm,
+                        role_name="interactive_stock_research",
+                        tool_name=tool_name,
+                        content=result_text,
+                        tool_args=tool_args,
+                        workflow="interactive_stock_research",
+                        stage="tool_summary",
+                        iteration_index=iteration_index,
+                    )
                 trace_item["success"] = True
             except Exception as exc:
                 result_text = f"Error: {exc}"

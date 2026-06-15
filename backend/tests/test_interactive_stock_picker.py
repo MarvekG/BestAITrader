@@ -574,6 +574,37 @@ async def test_mixed_evidence_and_flow_control_executes_tool_before_decision(db_
 
 
 @pytest.mark.asyncio
+async def test_search_news_result_reuses_tool_output_summarizer(db_session, monkeypatch):
+    """新闻搜索结果进入 agent 上下文前应复用现有工具输出压缩链路。"""
+    user_id = _create_user_id(db_session)
+    service, _, _ = _service_with_fake_runner()
+    run = service.create_run(user_id, _request_data())
+    run_id = run.run_id
+
+    def fake_should_summarize(tool_name, content):
+        """只对 search_news 触发压缩。"""
+        return tool_name == "search_news" and "Semiconductor policy catalyst" in content
+
+    async def fake_summarize_tool_output(*args, **kwargs):
+        """返回可断言的压缩结果。"""
+        return "[Structured Summary of search_news]:\ncompressed policy catalyst facts"
+
+    monkeypatch.setattr(workflow_module, "should_summarize_tool_output", fake_should_summarize)
+    monkeypatch.setattr(workflow_module, "summarize_tool_output", fake_summarize_tool_output)
+
+    await service.process_action(run_id, user_id, "approve")
+    await _execute_background(monkeypatch, service, db_session, run_id)
+    tool_result = (
+        db_session.query(InteractiveResearchMessage)
+        .filter_by(run_id=run_id, message_type="tool_result")
+        .one()
+    )
+
+    assert "compressed policy catalyst facts" in tool_result.content
+    assert "compressed policy catalyst facts" in tool_result.payload["result_preview"]
+
+
+@pytest.mark.asyncio
 async def test_running_user_input_is_queued_and_processed_after_tool_step(db_session, monkeypatch):
     """运行中插入的用户输入先排队，下一轮工具安全点后并入上下文。"""
     user_id = _create_user_id(db_session)
