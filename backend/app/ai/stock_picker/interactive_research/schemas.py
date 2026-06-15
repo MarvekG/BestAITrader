@@ -18,6 +18,7 @@ class InteractiveResearchRunCreate(BaseModel):
     excluded_industries: List[str] = Field(default_factory=list)
     exclude_recent_ipos: bool = False
     min_listing_days: Optional[int] = Field(default=None, ge=1, le=5000)
+    max_iterations: int = Field(default=60, ge=10)
 
 
 class InteractiveResearchMessageCreate(BaseModel):

@@ -1,9 +1,23 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
+
+from langchain.tools import tool
+from pydantic import BaseModel, Field
 
 
 FLOW_CONTROL_STATUSES = {"continue", "ask", "done"}
+FLOW_CONTROL_TOOL_NAME = "control_research_flow"
+
+
+class FlowControlToolInput(BaseModel):
+    """Research Agent 流程控制工具入参。"""
+
+    action: Literal["continue", "ask", "done"] = Field(
+        ...,
+        description="下一步流程动作：continue 继续研究，ask 暂停并向用户提问，done 输出最终答案。",
+    )
+    message: str = Field(..., min_length=1, description="展示给用户的进展、问题或最终 Markdown 答案。")
 
 
 @dataclass(frozen=True)
@@ -14,33 +28,46 @@ class FlowControlDecision:
     message: str
 
 
-def parse_flow_control_decision(content: Any) -> FlowControlDecision:
-    """解析 LLM 输出的首行动作协议。
+@tool(
+    FLOW_CONTROL_TOOL_NAME,
+    args_schema=FlowControlToolInput,
+    description=(
+        "Internal control tool for the interactive stock research workflow. Use it when you want "
+        "to report progress, ask the user a question, or provide the final answer. Do not call it in the same "
+        "assistant turn as evidence-gathering tools."
+    ),
+)
+async def control_research_flow(action: str, message: str) -> dict[str, str]:
+    """返回流程控制参数，实际状态迁移由 workflow 处理。
 
     Args:
-        content: LLM 返回的文本内容，第一行必须是 ACTION: CONTINUE|ASK|DONE。
+        action: 下一步流程动作。
+        message: 展示给用户的进展、问题或最终答案。
+
+    Returns:
+        结构化流程控制参数。
+    """
+    return {"action": action, "message": message}
+
+
+def flow_control_decision_from_tool_args(args: Any) -> FlowControlDecision:
+    """从流程控制工具参数解析决策。
+
+    Args:
+        args: LLM tool_call 中的 args 字段。
 
     Returns:
         已校验的流程控制决策。
 
     Raises:
-        ValueError: 内容缺少动作行、动作不合法或正文为空时抛出。
+        ValueError: 参数缺失、动作不合法或正文为空时抛出。
     """
-    raw_content = str(content or "").strip()
-    if not raw_content:
-        raise ValueError("Flow control output cannot be empty")
-
-    first_line, separator, remainder = raw_content.partition("\n")
-    if not separator:
-        raise ValueError("Flow control output must start with ACTION and include body text")
-    prefix, action_separator, action = first_line.strip().partition(":")
-    if prefix.strip().lower() != "action" or not action_separator:
-        raise ValueError("Flow control first line must be ACTION: CONTINUE|ASK|DONE")
-
-    status = action.strip().lower()
-    message = remainder.strip()
-    if status not in FLOW_CONTROL_STATUSES:
-        raise ValueError(f"Unsupported flow control action: {status}")
+    if not isinstance(args, dict):
+        raise ValueError("Flow control tool args must be an object")
+    action = str(args.get("action") or "").strip().lower()
+    message = str(args.get("message") or "").strip()
+    if action not in FLOW_CONTROL_STATUSES:
+        raise ValueError(f"Unsupported flow control action: {action}")
     if not message:
-        raise ValueError("Flow control body cannot be empty")
-    return FlowControlDecision(status=status, message=message)
+        raise ValueError("Flow control message cannot be empty")
+    return FlowControlDecision(status=action, message=message)

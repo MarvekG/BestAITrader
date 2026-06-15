@@ -6,6 +6,7 @@ from langchain_core.messages import AIMessage
 
 from app.ai.stock_picker.interactive_research import service as service_module
 from app.ai.stock_picker.interactive_research import workflow as workflow_module
+from app.ai.stock_picker.interactive_research.flow_control import FLOW_CONTROL_TOOL_NAME, control_research_flow
 from app.ai.stock_picker.interactive_research.models import InteractiveResearchMessage
 from app.ai.stock_picker.interactive_research.service import InteractiveResearchService
 from app.crud.user import create_user
@@ -56,7 +57,7 @@ class FakeInteractiveResearchToolRegistry:
         Returns:
             fake 工具列表。
         """
-        return self.tools
+        return [*self.tools, control_research_flow]
 
 
 class FakeInteractiveResearchLLM:
@@ -71,6 +72,7 @@ class FakeInteractiveResearchLLM:
         self.asked = False
         self.invalid_final_response_once = False
         self.invalid_final_returned = False
+        self.multiple_final_control_calls = False
 
     def bind_tools(self, tools):
         """记录绑定工具并返回自身。
@@ -96,12 +98,36 @@ class FakeInteractiveResearchLLM:
         first_content = str(getattr(messages[0], "content", "") or "") if messages else ""
         if "planning stage" in first_content or "规划阶段" in first_content:
             self.plan_calls += 1
-            return AIMessage(content="ACTION: CONTINUE\nPlan updated: exclude banks and favor AI hardware.")
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": FLOW_CONTROL_TOOL_NAME,
+                        "args": {
+                            "action": "continue",
+                            "message": "Plan updated: exclude banks and favor AI hardware.",
+                        },
+                        "id": "control-plan-1",
+                    }
+                ],
+            )
 
         self.research_calls += 1
         if self.ask_on_first_research and not self.asked:
             self.asked = True
-            return AIMessage(content="ACTION: ASK\nShould the research focus only on semiconductor equipment?")
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": FLOW_CONTROL_TOOL_NAME,
+                        "args": {
+                            "action": "ask",
+                            "message": "Should the research focus only on semiconductor equipment?",
+                        },
+                        "id": "control-ask-1",
+                    }
+                ],
+            )
         if self.research_calls == 1 or (self.ask_on_first_research and self.research_calls == 2):
             return AIMessage(
                 content="",
@@ -115,9 +141,33 @@ class FakeInteractiveResearchLLM:
             )
         if self.invalid_final_response_once and not self.invalid_final_returned:
             self.invalid_final_returned = True
-            return AIMessage(content="## Final Research\nRaw markdown answer without flow-control action.")
+            return AIMessage(content="## Final Research\nRaw markdown answer without flow-control tool call.")
         return AIMessage(
-            content="ACTION: DONE\n## Final Research\nSemiconductor equipment remains the focus based on tool evidence."
+            content="",
+            tool_calls=[
+                {
+                    "name": FLOW_CONTROL_TOOL_NAME,
+                    "args": {
+                        "action": "done",
+                        "message": "## Final Research\nSemiconductor equipment remains the focus based on tool evidence.",
+                    },
+                    "id": "control-done-1",
+                },
+                *(
+                    [
+                        {
+                            "name": FLOW_CONTROL_TOOL_NAME,
+                            "args": {
+                                "action": "done",
+                                "message": "## Final Research\nLast control decision should be used.",
+                            },
+                            "id": "control-done-2",
+                        }
+                    ]
+                    if self.multiple_final_control_calls
+                    else []
+                ),
+            ],
         )
 
 
@@ -172,6 +222,7 @@ async def test_interactive_tool_registry_reuses_agentic_tool_layers_and_filters_
     assert "normal_tool" in tool_names
     assert "skill_tool" in tool_names
     assert "mcp_tool" in tool_names
+    assert FLOW_CONTROL_TOOL_NAME in tool_names
     assert "execute_trading_order" not in tool_names
     assert loaded_layers == ["normal", "skill", "mcp"]
 
@@ -279,6 +330,17 @@ def _message_types(db_session, run_id):
     ]
 
 
+@pytest.fixture(autouse=True)
+def _interactive_research_session(db_session, monkeypatch):
+    """让交互式研究 service 在测试中使用同一个 SQLite 会话。
+
+    Args:
+        db_session: SQLite 测试数据库会话。
+        monkeypatch: pytest monkeypatch fixture。
+    """
+    monkeypatch.setattr(service_module, "SessionLocal", lambda: nullcontext(db_session))
+
+
 async def _execute_background(monkeypatch, service, db_session, run_id, plan_payload=None):
     """通过真实后台入口驱动交互式研究 workflow。
 
@@ -289,7 +351,6 @@ async def _execute_background(monkeypatch, service, db_session, run_id, plan_pay
         run_id: 研究 run ID。
         plan_payload: 可选计划 payload。
     """
-    monkeypatch.setattr(service_module, "SessionLocal", lambda: nullcontext(db_session))
     monkeypatch.setattr(workflow_module, "SessionLocal", lambda: nullcontext(db_session))
     await service.execute_workflow_background(run_id, plan_payload)
 
@@ -299,8 +360,8 @@ def test_create_run_writes_user_message_plan_card_and_checkpoint(db_session):
     user_id = _create_user_id(db_session)
     service, _, _ = _service_with_fake_runner()
 
-    run = service.create_run(db_session, user_id, _request_data())
-    messages = service.get_messages(db_session, run.run_id, user_id)
+    run = service.create_run(user_id, _request_data())
+    messages = service.get_messages(run.run_id, user_id)
 
     assert run.status == "awaiting_plan_approval"
     assert [message.message_type for message in messages] == ["user_input", "plan_card"]
@@ -310,6 +371,7 @@ def test_create_run_writes_user_message_plan_card_and_checkpoint(db_session):
     assert serialized_plan_message["markdown"].startswith("### 研究计划")
     assert "- **股票来源**:" in serialized_plan_message["markdown"]
     assert run.checkpoint_payload["plan_payload"]["selection_mode"] == "llm_driven"
+    assert run.checkpoint_payload["plan_payload"]["research_budget"]["max_tool_calls"] == 60
     assert run.checkpoint_payload["plan_payload"]["tool_policy"]["allowed_tools"] == "all_non_trading_agentic_tools"
     assert "trading" in run.checkpoint_payload["plan_payload"]["tool_policy"]["blocked_tools"]
     assert set(service.serialize_run_summary(run)) == {
@@ -343,8 +405,8 @@ async def test_realtime_update_pushes_markdown_display_message(db_session, monke
 
     user_id = _create_user_id(db_session)
     service, _, _ = _service_with_fake_runner()
-    run = service.create_run(db_session, user_id, _request_data())
-    plan_message = service.get_messages(db_session, run.run_id, user_id)[1]
+    run = service.create_run(user_id, _request_data())
+    plan_message = service.get_messages(run.run_id, user_id)[1]
     pushed_payload = {}
 
     async def fake_send_stock_picker_update(**kwargs):
@@ -384,10 +446,10 @@ async def test_plan_stage_user_input_iterates_plan_card(db_session):
     """计划确认阶段的普通聊天输入应迭代 plan，而不是走 revise action。"""
     user_id = _create_user_id(db_session)
     service, _, _ = _service_with_fake_runner()
-    run = service.create_run(db_session, user_id, _request_data())
+    run = service.create_run(user_id, _request_data())
 
-    message = await service.append_user_message(db_session, run.run_id, user_id, "Exclude banks and favor AI hardware")
-    messages = service.get_messages(db_session, run.run_id, user_id)
+    message = await service.append_user_message(run.run_id, user_id, "Exclude banks and favor AI hardware")
+    messages = service.get_messages(run.run_id, user_id)
     plan_cards = [item for item in messages if item.message_type == "plan_card"]
 
     assert message.status == "completed"
@@ -401,15 +463,15 @@ async def test_approve_plan_runs_single_chat_workflow_and_writes_final_result(db
     """确认计划后执行单 Agent 工具循环并把结果写入消息流。"""
     user_id = _create_user_id(db_session)
     service, fake_llm, fake_tool = _service_with_fake_runner()
-    run = service.create_run(db_session, user_id, _request_data())
+    run = service.create_run(user_id, _request_data())
     run_id = run.run_id
 
-    approved = await service.process_action(db_session, run_id, user_id, "approve")
+    approved = await service.process_action(run_id, user_id, "approve")
     assert approved.status == "researching"
     assert fake_tool.calls == []
 
     await _execute_background(monkeypatch, service, db_session, run_id)
-    completed = service.get_run(db_session, run_id, user_id)
+    completed = service.get_run(run_id, user_id)
     final_message = (
         db_session.query(InteractiveResearchMessage)
         .filter_by(run_id=run_id, message_type="final_result")
@@ -417,7 +479,7 @@ async def test_approve_plan_runs_single_chat_workflow_and_writes_final_result(db
     )
 
     assert completed.status == "completed"
-    assert [tool.name for tool in fake_llm.bound_tools] == ["search_news"]
+    assert [tool.name for tool in fake_llm.bound_tools] == ["search_news", FLOW_CONTROL_TOOL_NAME]
     assert fake_tool.calls[0]["keyword"] == "semiconductor policy catalyst"
     assert "tool_start" in _message_types(db_session, run_id)
     assert "tool_result" in _message_types(db_session, run_id)
@@ -431,12 +493,12 @@ async def test_invalid_flow_control_output_retries_before_completing(db_session,
     user_id = _create_user_id(db_session)
     service, fake_llm, _ = _service_with_fake_runner()
     fake_llm.invalid_final_response_once = True
-    run = service.create_run(db_session, user_id, _request_data())
+    run = service.create_run(user_id, _request_data())
     run_id = run.run_id
 
-    await service.process_action(db_session, run_id, user_id, "approve")
+    await service.process_action(run_id, user_id, "approve")
     await _execute_background(monkeypatch, service, db_session, run_id)
-    completed = service.get_run(db_session, run_id, user_id)
+    completed = service.get_run(run_id, user_id)
     final_message = (
         db_session.query(InteractiveResearchMessage)
         .filter_by(run_id=run_id, message_type="final_result")
@@ -449,23 +511,43 @@ async def test_invalid_flow_control_output_retries_before_completing(db_session,
 
 
 @pytest.mark.asyncio
+async def test_multiple_flow_control_calls_use_last_decision(db_session, monkeypatch):
+    """同轮多个流程控制工具调用时应使用最后一个决策。"""
+    user_id = _create_user_id(db_session)
+    service, fake_llm, _ = _service_with_fake_runner()
+    fake_llm.multiple_final_control_calls = True
+    run = service.create_run(user_id, _request_data())
+    run_id = run.run_id
+
+    await service.process_action(run_id, user_id, "approve")
+    await _execute_background(monkeypatch, service, db_session, run_id)
+    final_message = (
+        db_session.query(InteractiveResearchMessage)
+        .filter_by(run_id=run_id, message_type="final_result")
+        .one()
+    )
+
+    assert "Last control decision should be used" in final_message.payload["answer_markdown"]
+
+
+@pytest.mark.asyncio
 async def test_running_user_input_is_queued_and_processed_after_tool_step(db_session, monkeypatch):
     """运行中插入的用户输入先排队，下一轮工具安全点后并入上下文。"""
     user_id = _create_user_id(db_session)
     service, _, _ = _service_with_fake_runner()
-    run = service.create_run(db_session, user_id, _request_data())
+    run = service.create_run(user_id, _request_data())
     run_id = run.run_id
     plan_payload = run.checkpoint_payload["plan_payload"]
     run.status = "researching"
     run.current_stage = "researching"
     db_session.commit()
 
-    message = await service.append_user_message(db_session, run_id, user_id, "Also avoid crowded momentum names")
+    message = await service.append_user_message(run_id, user_id, "Also avoid crowded momentum names")
     message_id = message.message_id
     assert message.status == "queued"
 
     await _execute_background(monkeypatch, service, db_session, run_id, plan_payload=plan_payload)
-    completed = service.get_run(db_session, run_id, user_id)
+    completed = service.get_run(run_id, user_id)
     message = db_session.query(InteractiveResearchMessage).filter_by(message_id=message_id).one()
 
     assert message.status == "completed"
@@ -478,25 +560,25 @@ async def test_answer_pending_question_writes_parented_user_message_and_continue
     """awaiting_user_input 的回答应关联问题并继续执行 workflow。"""
     user_id = _create_user_id(db_session)
     service, fake_llm, _ = _service_with_fake_runner()
-    run = service.create_run(db_session, user_id, _request_data())
+    run = service.create_run(user_id, _request_data())
     run_id = run.run_id
     fake_llm.ask_on_first_research = True
 
-    approved = await service.process_action(db_session, run_id, user_id, "approve")
+    approved = await service.process_action(run_id, user_id, "approve")
     assert approved.status == "researching"
 
     await _execute_background(monkeypatch, service, db_session, run_id)
-    paused = service.get_run(db_session, run_id, user_id)
+    paused = service.get_run(run_id, user_id)
     assert paused.status == "awaiting_user_input"
     pending_message_id = paused.pending_message_id
 
-    answer = await service.append_user_message(db_session, run_id, user_id, "Focus on semiconductor equipment only")
-    paused = service.get_run(db_session, run_id, user_id)
+    answer = await service.append_user_message(run_id, user_id, "Focus on semiconductor equipment only")
+    paused = service.get_run(run_id, user_id)
     assert answer.parent_message_id == pending_message_id
     assert paused.status == "researching"
 
     await _execute_background(monkeypatch, service, db_session, run_id)
-    completed = service.get_run(db_session, run_id, user_id)
+    completed = service.get_run(run_id, user_id)
 
     assert completed.status == "completed"
     assert completed.pending_message_id is None
@@ -507,9 +589,9 @@ async def test_cancel_run_marks_terminal_without_artifacts(db_session):
     """cancel 立即终止 run 且只写系统消息。"""
     user_id = _create_user_id(db_session)
     service, _, _ = _service_with_fake_runner()
-    run = service.create_run(db_session, user_id, _request_data())
+    run = service.create_run(user_id, _request_data())
 
-    cancelled = await service.process_action(db_session, run.run_id, user_id, "cancel", content="User stopped")
+    cancelled = await service.process_action(run.run_id, user_id, "cancel", content="User stopped")
 
     assert cancelled.status == "cancelled"
     assert cancelled.finished_at is not None

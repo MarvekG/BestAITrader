@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List, Optional
 from app.ai.agentic.mcp.runtime import get_mcp_tools
 from app.ai.agentic.skills_loader.runtime import get_skills_loader_tools
 from app.ai.agentic.tools import get_all_tools
+from app.ai.stock_picker.interactive_research.flow_control import control_research_flow
 
 
 ToolLoaderFactory = Callable[[Dict[str, Any]], "InteractiveResearchToolRegistry"]
@@ -48,6 +49,7 @@ class InteractiveResearchToolRegistry:
         tools.extend(get_all_tools())
         tools.extend(get_skills_loader_tools())
         tools.extend(await get_mcp_tools())
+        tools.append(control_research_flow)
 
         self._tools = [tool for tool in tools if not is_trading_tool_name(str(getattr(tool, "name", "") or ""))]
         return list(self._tools)

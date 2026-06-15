@@ -9,7 +9,11 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_providers.factory import build_chat_model, get_llm_provider
 from app.ai.stock_picker.interactive_research.constants import phase_instructions, prompt_language, research_agent_system_prompt
-from app.ai.stock_picker.interactive_research.flow_control import FlowControlDecision, parse_flow_control_decision
+from app.ai.stock_picker.interactive_research.flow_control import (
+    FLOW_CONTROL_TOOL_NAME,
+    FlowControlDecision,
+    flow_control_decision_from_tool_args,
+)
 from app.ai.stock_picker.interactive_research.models import InteractiveResearchMessage, InteractiveResearchRun
 from app.ai.stock_picker.interactive_research.persistence import append_message, write_checkpoint
 from app.ai.stock_picker.interactive_research.serializers import serialize_message, serialize_run_summary
@@ -22,36 +26,31 @@ from app.crud.llm_usage_log import record_llm_usage
 
 LLMFactory = Callable[[], Any]
 WorkflowNotificationCallback = Callable[[Dict[str, Any]], Awaitable[None]]
-MAX_INTERACTIVE_RESEARCH_ITERATIONS = 8
+DEFAULT_INTERACTIVE_RESEARCH_ITERATIONS = 60
+MIN_INTERACTIVE_RESEARCH_ITERATIONS = 10
 MAX_FLOW_CONTROL_RETRIES = 2
-FLOW_CONTROL_PROTOCOL_INSTRUCTION = (
-    "When you do not call tools, use this exact response protocol:\n"
-    "ACTION: CONTINUE|ASK|DONE\n"
-    "<body text>\n"
-    "Use CONTINUE for progress updates, ASK only when the user must unblock the research, and DONE only for "
-    "the final Markdown answer. Do not return JSON for this protocol."
-)
-
-FLOW_CONTROL_PROTOCOL_INSTRUCTIONS = {
-    "zh": (
-        "当你不调用工具时，必须使用以下精确响应协议：\n"
-        "ACTION: CONTINUE|ASK|DONE\n"
-        "<正文>\n"
-        "CONTINUE 用于进展更新；只有用户必须补充信息才能继续研究时才使用 ASK；"
-        "DONE 只用于最终 Markdown 答案。不要用 JSON 返回该协议。"
-    ),
-    "en": FLOW_CONTROL_PROTOCOL_INSTRUCTION,
-}
 FLOW_CONTROL_RETRY_MARKER = "FLOW_CONTROL_RETRY"
 
 
 def flow_control_protocol_instruction() -> str:
-    """返回当前语言下的流程控制协议提示词。
+    """返回当前语言下的流程控制工具提示词。
 
     Returns:
-        流程控制协议提示词。
+        流程控制工具提示词。
     """
-    return FLOW_CONTROL_PROTOCOL_INSTRUCTIONS[prompt_language()]
+    if prompt_language() == "en":
+        return (
+            f"When you are not calling evidence tools, use `{FLOW_CONTROL_TOOL_NAME}` to decide the next step. "
+            "Use action=continue for progress updates, action=ask only when the user must unblock the research, "
+            "and action=done only for the final Markdown answer. Do not mix evidence tools and "
+            f"`{FLOW_CONTROL_TOOL_NAME}` in the same assistant turn."
+        )
+    return (
+        f"当你不调用证据工具时，使用 `{FLOW_CONTROL_TOOL_NAME}` 决定下一步。"
+        "action=continue 用于进展更新；只有用户必须补充信息才能继续研究时才使用 action=ask；"
+        "action=done 只用于最终 Markdown 答案。不要在同一轮同时调用证据工具和 "
+        f"`{FLOW_CONTROL_TOOL_NAME}`。"
+    )
 
 
 def _t(key: str, **kwargs: Any) -> str:
@@ -107,12 +106,18 @@ class InteractiveResearchWorkflow:
             run_snapshot["queued_before"],
         )
         tools = await self._load_tools(run_id, run_snapshot["user_id"])
-        tool_map = {str(getattr(tool, "name", "")): tool for tool in tools if getattr(tool, "name", "")}
+        tool_map = {
+            str(getattr(tool, "name", "")): tool
+            for tool in tools
+            if getattr(tool, "name", "") and str(getattr(tool, "name", "")) != FLOW_CONTROL_TOOL_NAME
+        }
         llm = self._build_llm()
         llm_with_tools = llm.bind_tools(tools)
         final_content = ""
+        iteration_budget = self._iteration_budget(plan_payload)
+        stopped_by_iteration_limit = False
 
-        for iteration_index in range(1, self._iteration_budget(plan_payload) + 1):
+        for iteration_index in range(1, iteration_budget + 1):
             response = await llm_with_tools.ainvoke(messages)
             record_llm_usage(
                 response,
@@ -126,8 +131,9 @@ class InteractiveResearchWorkflow:
             response, invalid_tool_calls = self._llm_provider.sanitize_tool_call_response_for_replay(response)
             messages.append(response)
             tool_calls = list(getattr(response, "tool_calls", []) or [])
-            if not tool_calls and not invalid_tool_calls:
-                decision = self._parse_flow_control_or_retry(messages, getattr(response, "content", "") or "")
+            flow_control_calls, evidence_tool_calls = _partition_tool_calls(tool_calls)
+            if not evidence_tool_calls and flow_control_calls:
+                decision = self._parse_flow_control_tool_or_retry(messages, flow_control_calls)
                 if decision is None:
                     continue
                 if decision.status == "ask":
@@ -144,9 +150,16 @@ class InteractiveResearchWorkflow:
                 )
                 continue
 
-            for tool_call in tool_calls:
+            if not evidence_tool_calls and not invalid_tool_calls:
+                messages.append(HumanMessage(content=_missing_flow_control_tool_retry_message()))
+                continue
+
+            for tool_call in evidence_tool_calls:
                 trace_item = await self._execute_tool_call(run_id, tool_map, messages, tool_call, iteration_index)
                 tool_trace.append(trace_item)
+
+            if evidence_tool_calls and flow_control_calls:
+                messages.append(HumanMessage(content=_mixed_tool_call_retry_message()))
 
             queued_after_tool = self._process_queued_user_inputs(run_id)
             if queued_after_tool:
@@ -159,13 +172,14 @@ class InteractiveResearchWorkflow:
                 )
 
         if not final_content:
+            stopped_by_iteration_limit = True
             messages.append(
                 HumanMessage(
-                    content=_iteration_budget_instruction()
+                    content=_iteration_budget_instruction(iteration_budget)
                 )
             )
             for retry_index in range(MAX_FLOW_CONTROL_RETRIES + 1):
-                final_response = await llm.ainvoke(messages)
+                final_response = await llm_with_tools.ainvoke(messages)
                 record_llm_usage(
                     final_response,
                     settings.LLM_MODEL,
@@ -173,14 +187,35 @@ class InteractiveResearchWorkflow:
                     workflow="interactive_stock_research",
                     stage="agent_loop",
                     call_kind="final_no_tools",
-                    iteration_index=self._iteration_budget(plan_payload) + 1 + retry_index,
+                    iteration_index=iteration_budget + 1 + retry_index,
                 )
+                final_response, invalid_tool_calls = self._llm_provider.sanitize_tool_call_response_for_replay(final_response)
                 messages.append(final_response)
-                final_content = self._parse_final_content_or_retry(messages, getattr(final_response, "content", "") or "")
+                tool_calls = list(getattr(final_response, "tool_calls", []) or [])
+                flow_control_calls, evidence_tool_calls = _partition_tool_calls(tool_calls)
+                if evidence_tool_calls:
+                    messages.append(HumanMessage(content=_final_must_use_control_tool_retry_message()))
+                    continue
+                if invalid_tool_calls:
+                    messages.append(
+                        HumanMessage(content=self._llm_provider.build_invalid_tool_call_retry_message(invalid_tool_calls))
+                    )
+                    continue
+                decision = self._parse_flow_control_tool_or_retry(messages, flow_control_calls, final_only=True)
+                final_content = decision.message if decision is not None else ""
                 if final_content:
                     break
+            if not final_content:
+                final_content = _iteration_budget_fallback_answer(iteration_budget)
 
-        await self._synthesize_final_message(run_id, plan_payload, tool_trace, final_content)
+        await self._synthesize_final_message(
+            run_id,
+            plan_payload,
+            tool_trace,
+            final_content,
+            stopped_by_iteration_limit=stopped_by_iteration_limit,
+            iteration_budget=iteration_budget,
+        )
 
     async def _start_research_run(
         self,
@@ -380,6 +415,9 @@ class InteractiveResearchWorkflow:
         plan_payload: Dict[str, Any],
         tool_trace: List[Dict[str, Any]],
         final_content: str,
+        *,
+        stopped_by_iteration_limit: bool = False,
+        iteration_budget: int = 0,
     ) -> None:
         """写入最终消息，不使用本地固定评分或基础股票池。
 
@@ -388,6 +426,8 @@ class InteractiveResearchWorkflow:
             plan_payload: 已确认计划 payload。
             tool_trace: 工具调用轨迹。
             final_content: LLM 最终回答。
+            stopped_by_iteration_limit: 是否因迭代预算耗尽提前终止。
+            iteration_budget: 本轮研究允许的最大迭代次数。
         """
         with SessionLocal() as db:
             run = db.query(InteractiveResearchRun).filter(InteractiveResearchRun.run_id == run_id).first()
@@ -402,6 +442,8 @@ class InteractiveResearchWorkflow:
                 "requirement_summary": plan_payload.get("objective_summary") or run.raw_requirement,
                 "selection_mode": "llm_driven",
                 "answer_markdown": final_content,
+                "stopped_by_iteration_limit": stopped_by_iteration_limit,
+                "iteration_budget": iteration_budget,
                 "evidence_summary": {
                     "tool_call_count": len(tool_trace),
                     "tool_names": [item.get("name") for item in tool_trace],
@@ -668,48 +710,35 @@ class InteractiveResearchWorkflow:
             return self._llm_factory()
         return build_chat_model(model=settings.LLM_MODEL, temperature=0.2)
 
-    def _parse_flow_control_or_retry(self, messages: List[Any], content: Any) -> Optional[FlowControlDecision]:
-        """解析流程控制协议，失败时把纠错指令加入下一轮上下文。
+    def _parse_flow_control_tool_or_retry(
+        self,
+        messages: List[Any],
+        flow_control_calls: List[Dict[str, Any]],
+        *,
+        final_only: bool = False,
+    ) -> Optional[FlowControlDecision]:
+        """解析流程控制工具调用，失败时把纠错指令加入下一轮上下文。
 
         Args:
             messages: 当前 LLM 消息上下文。
-            content: LLM 本轮返回内容。
+            flow_control_calls: 本轮流程控制工具调用列表。
+            final_only: 是否只允许最终完成动作。
 
         Returns:
             解析成功的流程控制决策；需要重试时返回 None。
         """
         try:
-            return parse_flow_control_decision(content)
+            if not flow_control_calls:
+                raise ValueError(f"Expected at least one {FLOW_CONTROL_TOOL_NAME} call")
+            decision = flow_control_decision_from_tool_args(flow_control_calls[-1].get("args"))
+            if final_only and decision.status != "done":
+                raise ValueError(f"Final response must use action=done, got {decision.status}")
+            return decision
         except ValueError as exc:
             if _flow_control_retry_count(messages) >= MAX_FLOW_CONTROL_RETRIES:
-                raise ValueError(f"LLM flow-control protocol invalid after retry: {exc}") from exc
-            messages.append(HumanMessage(content=_build_flow_control_retry_message(exc)))
+                raise ValueError(f"LLM flow-control tool call invalid after retry: {exc}") from exc
+            messages.append(HumanMessage(content=_build_flow_control_retry_message(exc, final_only=final_only)))
             return None
-
-    def _parse_final_content_or_retry(self, messages: List[Any], content: Any) -> str:
-        """解析最终无工具回答协议，失败时要求 LLM 重新输出。
-
-        Args:
-            messages: 当前 LLM 消息上下文。
-            content: LLM 最终回答内容。
-
-        Returns:
-            最终 Markdown 正文。
-        """
-        try:
-            decision = parse_flow_control_decision(content)
-        except ValueError as exc:
-            if _flow_control_retry_count(messages) >= MAX_FLOW_CONTROL_RETRIES:
-                raise ValueError(f"LLM final protocol invalid after retry: {exc}") from exc
-            messages.append(HumanMessage(content=_build_flow_control_retry_message(exc, final_only=True)))
-            return ""
-        if decision.status != "done":
-            exc = ValueError(f"Final response must use ACTION: DONE, got {decision.status}")
-            if _flow_control_retry_count(messages) >= MAX_FLOW_CONTROL_RETRIES:
-                raise exc
-            messages.append(HumanMessage(content=_build_flow_control_retry_message(exc, final_only=True)))
-            return ""
-        return decision.message
 
     def _iteration_budget(self, plan_payload: Dict[str, Any]) -> int:
         """读取并限制工具循环预算。
@@ -721,8 +750,8 @@ class InteractiveResearchWorkflow:
             工具循环上限。
         """
         budget = plan_payload.get("research_budget") if isinstance(plan_payload.get("research_budget"), dict) else {}
-        max_tool_calls = int(budget.get("max_tool_calls") or MAX_INTERACTIVE_RESEARCH_ITERATIONS)
-        return max(1, min(max_tool_calls, MAX_INTERACTIVE_RESEARCH_ITERATIONS))
+        max_tool_calls = int(budget.get("max_tool_calls") or DEFAULT_INTERACTIVE_RESEARCH_ITERATIONS)
+        return max(MIN_INTERACTIVE_RESEARCH_ITERATIONS, max_tool_calls)
 
     def _plan_payload_from_checkpoint(self, run: InteractiveResearchRun) -> Dict[str, Any]:
         """从 run checkpoint 中读取计划。
@@ -779,38 +808,39 @@ def _json_tool_result(value: Any) -> str:
 
 
 def _build_flow_control_retry_message(exc: ValueError, *, final_only: bool = False) -> str:
-    """生成流程控制协议纠错提示。
+    """生成流程控制工具纠错提示。
 
     Args:
         exc: 解析失败的错误。
-        final_only: 是否要求最终回答必须使用 DONE。
+        final_only: 是否要求最终回答必须使用 action=done。
 
     Returns:
         用于下一轮 LLM 的纠错消息。
     """
     if prompt_language() == "en":
-        action_rule = "Use ACTION: DONE only." if final_only else "Use one of ACTION: CONTINUE, ACTION: ASK, ACTION: DONE."
+        action_rule = "Use action=done only." if final_only else "Use one of action=continue, action=ask, action=done."
         return (
             f"{FLOW_CONTROL_RETRY_MARKER}\n"
-            "Your previous response did not follow the required flow-control protocol and was not shown to the user. "
+            f"Your previous response did not call `{FLOW_CONTROL_TOOL_NAME}` with valid arguments and was not shown "
+            "to the user. "
             f"Parser error: {exc}.\n"
             f"{flow_control_protocol_instruction()}\n"
             f"{action_rule}\n"
-            "Re-output the response now with the ACTION line first and the body starting on the second line."
+            f"Call `{FLOW_CONTROL_TOOL_NAME}` now with valid structured arguments."
         )
-    action_rule = "只能使用 ACTION: DONE。" if final_only else "只能使用 ACTION: CONTINUE、ACTION: ASK 或 ACTION: DONE。"
+    action_rule = "只能使用 action=done。" if final_only else "只能使用 action=continue、action=ask 或 action=done。"
     return (
         f"{FLOW_CONTROL_RETRY_MARKER}\n"
-        "你上一次回复没有遵循必需的流程控制协议，且不会展示给用户。"
+        f"你上一次回复没有用合法参数调用 `{FLOW_CONTROL_TOOL_NAME}`，且不会展示给用户。"
         f"解析错误: {exc}.\n"
         f"{flow_control_protocol_instruction()}\n"
         f"{action_rule}\n"
-        "现在重新输出，第一行必须是 ACTION 行，正文从第二行开始。"
+        f"现在用合法结构化参数调用 `{FLOW_CONTROL_TOOL_NAME}`。"
     )
 
 
 def _flow_control_retry_count(messages: List[Any]) -> int:
-    """统计当前上下文中流程控制协议纠错次数。
+    """统计当前上下文中流程控制工具纠错次数。
 
     Args:
         messages: 当前 LLM 消息上下文。
@@ -822,6 +852,74 @@ def _flow_control_retry_count(messages: List[Any]) -> int:
         1
         for message in messages
         if FLOW_CONTROL_RETRY_MARKER in str(getattr(message, "content", ""))
+    )
+
+
+def _partition_tool_calls(tool_calls: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """拆分流程控制工具调用和证据工具调用。
+
+    Args:
+        tool_calls: LLM 返回的工具调用列表。
+
+    Returns:
+        流程控制工具调用列表、证据工具调用列表。
+    """
+    flow_control_calls = [call for call in tool_calls if str(call.get("name") or "") == FLOW_CONTROL_TOOL_NAME]
+    evidence_tool_calls = [call for call in tool_calls if str(call.get("name") or "") != FLOW_CONTROL_TOOL_NAME]
+    return flow_control_calls, evidence_tool_calls
+
+
+def _missing_flow_control_tool_retry_message() -> str:
+    """生成缺少流程控制工具调用的纠错提示。
+
+    Returns:
+        当前提示词语言下的纠错提示。
+    """
+    if prompt_language() == "en":
+        return (
+            f"{FLOW_CONTROL_RETRY_MARKER}\n"
+            f"You did not call any tool. If you do not need evidence tools, use `{FLOW_CONTROL_TOOL_NAME}` with "
+            "structured arguments."
+        )
+    return (
+        f"{FLOW_CONTROL_RETRY_MARKER}\n"
+        f"你没有调用任何工具。如果不需要证据工具，请使用 `{FLOW_CONTROL_TOOL_NAME}` 并提供结构化参数。"
+    )
+
+
+def _mixed_tool_call_retry_message() -> str:
+    """生成证据工具和流程控制工具混用的纠错提示。
+
+    Returns:
+        当前提示词语言下的纠错提示。
+    """
+    if prompt_language() == "en":
+        return (
+            f"{FLOW_CONTROL_RETRY_MARKER}\n"
+            f"Do not call evidence tools and `{FLOW_CONTROL_TOOL_NAME}` in the same assistant turn. The evidence "
+            "tools were executed; decide the next step in a later turn."
+        )
+    return (
+        f"{FLOW_CONTROL_RETRY_MARKER}\n"
+        f"不要在同一轮同时调用证据工具和 `{FLOW_CONTROL_TOOL_NAME}`。本轮已执行证据工具；下一轮再决定流程。"
+    )
+
+
+def _final_must_use_control_tool_retry_message() -> str:
+    """生成最终阶段错误调用证据工具的纠错提示。
+
+    Returns:
+        当前提示词语言下的纠错提示。
+    """
+    if prompt_language() == "en":
+        return (
+            f"{FLOW_CONTROL_RETRY_MARKER}\n"
+            f"The tool budget is exhausted. Do not call evidence tools. Call `{FLOW_CONTROL_TOOL_NAME}` with "
+            "action=done and the final Markdown answer."
+        )
+    return (
+        f"{FLOW_CONTROL_RETRY_MARKER}\n"
+        f"工具预算已耗尽。不要再调用证据工具。请调用 `{FLOW_CONTROL_TOOL_NAME}`，action=done，message 为最终 Markdown 答案。"
     )
 
 
@@ -847,22 +945,61 @@ def _research_continuation_instruction() -> str:
         当前提示词语言下的继续研究指令。
     """
     if prompt_language() == "en":
-        return "Continue the research. Use tools if evidence is needed, ask if blocked, or return done."
-    return "继续研究。需要证据时使用工具；被用户信息阻塞时提问；已经完成时返回 DONE。"
+        return (
+            "Continue the research. Use evidence tools if evidence is needed, or call "
+            f"`{FLOW_CONTROL_TOOL_NAME}` if you need to report progress, ask the user, or finish."
+        )
+    return (
+        "继续研究。需要证据时使用证据工具；如果需要汇报进展、向用户提问或完成，"
+        f"调用 `{FLOW_CONTROL_TOOL_NAME}`。"
+    )
 
 
-def _iteration_budget_instruction() -> str:
+def _iteration_budget_instruction(iteration_budget: int) -> str:
     """返回工具循环预算耗尽后的最终回答指令。
+
+    Args:
+        iteration_budget: 已耗尽的最大迭代次数。
 
     Returns:
         当前提示词语言下的最终回答指令。
     """
     if prompt_language() == "en":
         return (
-            "You have reached the tool iteration budget. Stop calling tools and produce the final "
-            "Deep Research answer based on the collected evidence."
+            f"You have reached the evidence-tool iteration budget of {iteration_budget} iterations. Stop calling "
+            f"evidence tools and call `{FLOW_CONTROL_TOOL_NAME}` with action=done and the final Deep Research "
+            "Markdown answer. The answer must explicitly state that the iteration limit was exceeded and the "
+            "research was terminated early."
         )
-    return "你已达到工具迭代预算。停止调用工具，并基于已收集证据生成最终 Deep Research 答案。"
+    return (
+        f"你已达到 {iteration_budget} 次证据工具迭代预算。停止调用证据工具，并调用 "
+        f"`{FLOW_CONTROL_TOOL_NAME}`，action=done，message 为最终 Deep Research Markdown 答案。"
+        "答案必须明确说明迭代次数超限，研究已提前终止。"
+    )
+
+
+def _iteration_budget_fallback_answer(iteration_budget: int) -> str:
+    """生成预算耗尽且模型未给出最终答案时的兜底答案。
+
+    Args:
+        iteration_budget: 已耗尽的最大迭代次数。
+
+    Returns:
+        最终 Markdown 答案。
+    """
+    if prompt_language() == "en":
+        return (
+            "## Final Research\n\n"
+            f"The research was terminated early because the iteration limit of {iteration_budget} was exceeded. "
+            "The model did not provide a compliant final answer after retry, so no additional evidence tools were "
+            "called. Please review the evidence collected in the chat stream before using these conclusions."
+        )
+    return (
+        "## 最终研究结论\n\n"
+        f"本次研究因达到 {iteration_budget} 次迭代次数上限而提前终止。"
+        "模型在重试后仍未给出合规最终答案，因此系统未继续调用证据工具。"
+        "请结合聊天流中已收集的证据审阅本次结论。"
+    )
 
 
 def _tool_policy_instruction() -> str:

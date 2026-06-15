@@ -115,6 +115,7 @@ export interface InteractiveResearchRunCreatePayload {
   excluded_industries?: string[];
   exclude_recent_ipos?: boolean;
   min_listing_days?: number | null;
+  max_iterations?: number;
 }
 
 export interface InteractiveResearchRunSummary {

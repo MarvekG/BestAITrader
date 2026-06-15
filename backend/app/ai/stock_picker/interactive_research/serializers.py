@@ -233,6 +233,7 @@ def _humanize_key(key: str) -> str:
         "style": _t("markdown.labels.style"),
         "estimated_duration": _t("markdown.labels.estimated_duration"),
         "estimated_tokens": _t("markdown.labels.estimated_tokens"),
+        "max_tool_calls": _t("markdown.labels.max_iterations"),
         "selection_mode": _t("markdown.labels.selection_mode"),
         "tool_scope": _t("markdown.labels.tool_scope"),
         "tool_name": _t("markdown.labels.tool"),

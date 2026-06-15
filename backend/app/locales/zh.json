@@ -2450,6 +2450,7 @@
         "updated_at": "更新时间",
         "estimated_duration": "预计耗时",
         "estimated_tokens": "预计 Token",
+        "max_iterations": "最大迭代次数",
         "factor_count": "AI 因子数",
         "search_required": "需要搜索"
       },
@@ -2483,7 +2484,8 @@
         "message_failed": "发送消息失败"
       },
       "validations": {
-        "message_required": "请输入消息内容"
+        "message_required": "请输入消息内容",
+        "max_iterations_min": "最大迭代次数不能低于 10"
       },
       "placeholders": {
         "message": "补充约束、回答问题或说明新的研究要求；Enter 发送，Shift+Enter 换行"
@@ -2539,6 +2541,7 @@
             "style": "风格",
             "estimated_duration": "预计耗时",
             "estimated_tokens": "预计 Token",
+            "max_iterations": "最大迭代次数",
             "selection_mode": "选择模式",
             "tool_scope": "工具范围",
             "status": "状态"

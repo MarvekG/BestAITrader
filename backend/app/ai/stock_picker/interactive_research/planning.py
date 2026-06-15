@@ -39,6 +39,7 @@ def parse_requirement(request_data: Dict[str, Any]) -> Dict[str, Any]:
         "excluded_industries": list(request_data.get("excluded_industries") or []),
         "exclude_recent_ipos": bool(request_data.get("exclude_recent_ipos") or False),
         "min_listing_days": request_data.get("min_listing_days"),
+        "max_iterations": max(10, int(request_data.get("max_iterations") or 60)),
         "recent_ipo_risk_factor": not bool(request_data.get("exclude_recent_ipos") or False),
         "hard_exclusions": hard_exclusions,
         "open_questions": build_open_questions(request_data, scope, risk_level),
@@ -103,27 +104,26 @@ def build_research_budget(parsed_requirement: Dict[str, Any]) -> Dict[str, Any]:
     """
     depth = parsed_requirement["research_depth"]
     expected_count = int(parsed_requirement.get("expected_count") or 5)
+    max_iterations = max(10, int(parsed_requirement.get("max_iterations") or 60))
     budget_by_depth = {
         "light": {
-            "max_tool_calls": 12,
             "max_human_rounds": 2,
             "estimated_tokens": "50k-150k",
             "estimated_duration": "5-15 min",
         },
         "standard": {
-            "max_tool_calls": 30,
             "max_human_rounds": 5,
             "estimated_tokens": "200k-500k",
             "estimated_duration": "15-30 min",
         },
         "deep": {
-            "max_tool_calls": 60,
             "max_human_rounds": 6,
             "estimated_tokens": "500k-1M+",
             "estimated_duration": "30-60 min",
         },
     }
     budget = dict(budget_by_depth[depth])
+    budget["max_tool_calls"] = max_iterations
     budget["expected_count"] = expected_count
     return budget
 
@@ -227,6 +227,7 @@ def build_plan_preview_payload(plan_payload: Dict[str, Any]) -> Dict[str, Any]:
         "style": (plan_payload.get("chat_context") or {}).get("style"),
         "selection_mode": plan_payload.get("selection_mode"),
         "tool_scope": (plan_payload.get("tool_policy") or {}).get("allowed_tools"),
+        "max_tool_calls": (plan_payload.get("research_budget") or {}).get("max_tool_calls"),
         "estimated_duration": (plan_payload.get("research_budget") or {}).get("estimated_duration"),
         "estimated_tokens": (plan_payload.get("research_budget") or {}).get("estimated_tokens"),
         "open_questions": plan_payload.get("open_questions") or [],

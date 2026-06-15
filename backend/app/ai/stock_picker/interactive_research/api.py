@@ -2,7 +2,6 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 
 from app.ai.stock_picker.interactive_research.schemas import (
     InteractiveResearchActionRequest,
@@ -15,7 +14,6 @@ from app.ai.stock_picker.interactive_research.schemas import (
     InteractiveResearchRunSummary,
 )
 from app.ai.stock_picker.interactive_research.service import interactive_research_service
-from app.core.database import get_db
 from app.core.i18n import i18n_service
 from app.core.security import get_current_user
 from app.models.user import User
@@ -55,12 +53,11 @@ def _raise_service_error(exc: Exception) -> None:
     ) from exc
 
 
-def _require_run(run_id: UUID, db: Session, current_user: User):
+def _require_run(run_id: UUID, current_user: User):
     """获取当前用户拥有的 run，不存在时抛出 404。
 
     Args:
         run_id: 研究 run ID。
-        db: 数据库会话。
         current_user: 当前认证用户。
 
     Returns:
@@ -69,7 +66,7 @@ def _require_run(run_id: UUID, db: Session, current_user: User):
     Raises:
         HTTPException: run 不存在时抛出。
     """
-    run = interactive_research_service.get_run(db, run_id, current_user.id)
+    run = interactive_research_service.get_run(run_id, current_user.id)
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_t("errors.run_not_found"))
     return run
@@ -78,14 +75,12 @@ def _require_run(run_id: UUID, db: Session, current_user: User):
 @router.post("/runs", response_model=InteractiveResearchRunResponse, status_code=status.HTTP_201_CREATED)
 async def create_interactive_research_run(
     payload: InteractiveResearchRunCreate,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """提交自然语言需求并生成等待确认的研究计划。
 
     Args:
         payload: 自然语言需求和初始研究约束。
-        db: 数据库会话依赖。
         current_user: 当前认证用户依赖。
 
     Returns:
@@ -95,47 +90,43 @@ async def create_interactive_research_run(
         HTTPException: 当前用户已有活跃 run 或写入失败时抛出。
     """
     try:
-        run = interactive_research_service.create_run(db, current_user.id, payload.model_dump())
+        run = interactive_research_service.create_run(current_user.id, payload.model_dump())
     except Exception as exc:
         _raise_service_error(exc)
     return InteractiveResearchRunResponse(
         run=InteractiveResearchRunSummary(**interactive_research_service.serialize_run_summary(run)),
         messages=[
             InteractiveResearchMessageResponse(**interactive_research_service.serialize_message(item))
-            for item in interactive_research_service.get_messages(db, run.run_id, current_user.id)
+            for item in interactive_research_service.get_messages(run.run_id, current_user.id)
         ],
     )
 
 
 @router.get("/runs", response_model=list[InteractiveResearchRunSummary])
 async def list_interactive_research_runs(
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """查询当前用户的聊天式 Deep Research run 列表。
 
     Args:
-        db: 数据库会话依赖。
         current_user: 当前认证用户依赖。
 
     Returns:
         当前用户的 run 摘要列表。
     """
-    runs = interactive_research_service.list_runs(db, current_user.id)
+    runs = interactive_research_service.list_runs(current_user.id)
     return [InteractiveResearchRunSummary(**interactive_research_service.serialize_run_summary(run)) for run in runs]
 
 
 @router.get("/runs/{run_id}", response_model=InteractiveResearchRunSummary)
 async def get_interactive_research_run(
     run_id: UUID,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """查询单个聊天式 Deep Research run。
 
     Args:
         run_id: 研究 run ID。
-        db: 数据库会话依赖。
         current_user: 当前认证用户依赖。
 
     Returns:
@@ -144,21 +135,19 @@ async def get_interactive_research_run(
     Raises:
         HTTPException: run 不存在时抛出。
     """
-    run = _require_run(run_id, db, current_user)
+    run = _require_run(run_id, current_user)
     return InteractiveResearchRunSummary(**interactive_research_service.serialize_run_summary(run))
 
 
 @router.get("/runs/{run_id}/messages", response_model=list[InteractiveResearchMessageResponse])
 async def get_interactive_research_messages(
     run_id: UUID,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """查询聊天消息流。
 
     Args:
         run_id: 研究 run ID。
-        db: 数据库会话依赖。
         current_user: 当前认证用户依赖。
 
     Returns:
@@ -167,8 +156,8 @@ async def get_interactive_research_messages(
     Raises:
         HTTPException: run 不存在时抛出。
     """
-    _require_run(run_id, db, current_user)
-    messages = interactive_research_service.get_messages(db, run_id, current_user.id)
+    _require_run(run_id, current_user)
+    messages = interactive_research_service.get_messages(run_id, current_user.id)
     return [
         InteractiveResearchMessageResponse(**interactive_research_service.serialize_message(item))
         for item in messages
@@ -180,7 +169,6 @@ async def append_interactive_research_message(
     run_id: UUID,
     payload: InteractiveResearchMessageCreate,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """用户追加输入、回答问题或补充要求。
@@ -189,7 +177,6 @@ async def append_interactive_research_message(
         run_id: 研究 run ID。
         payload: 用户消息内容。
         background_tasks: FastAPI 后台任务。
-        db: 数据库会话依赖。
         current_user: 当前认证用户依赖。
 
     Returns:
@@ -204,7 +191,6 @@ async def append_interactive_research_message(
     """
     try:
         message = await interactive_research_service.append_user_message(
-            db,
             run_id,
             current_user.id,
             payload.content,
@@ -213,7 +199,7 @@ async def append_interactive_research_message(
         )
     except Exception as exc:
         _raise_service_error(exc)
-    run = _require_run(run_id, db, current_user)
+    run = _require_run(run_id, current_user)
     return InteractiveResearchMessageAppendResponse(
         run=InteractiveResearchRunSummary(**interactive_research_service.serialize_run_summary(run)),
         message=InteractiveResearchMessageResponse(**interactive_research_service.serialize_message(message)),
@@ -225,7 +211,6 @@ async def run_interactive_research_action(
     run_id: UUID,
     payload: InteractiveResearchActionRequest,
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """执行 approve 或 cancel 动作。
@@ -234,7 +219,6 @@ async def run_interactive_research_action(
         run_id: 研究 run ID。
         payload: 动作请求。
         background_tasks: FastAPI 后台任务。
-        db: 数据库会话依赖。
         current_user: 当前认证用户依赖。
 
     Returns:
@@ -250,7 +234,6 @@ async def run_interactive_research_action(
     """
     try:
         run = await interactive_research_service.process_action(
-            db,
             run_id,
             current_user.id,
             payload.action,
@@ -264,6 +247,6 @@ async def run_interactive_research_action(
         run=InteractiveResearchRunSummary(**interactive_research_service.serialize_run_summary(run)),
         messages=[
             InteractiveResearchMessageResponse(**interactive_research_service.serialize_message(item))
-            for item in interactive_research_service.get_messages(db, run_id, current_user.id)
+            for item in interactive_research_service.get_messages(run_id, current_user.id)
         ],
     )

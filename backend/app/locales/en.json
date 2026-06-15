@@ -2450,6 +2450,7 @@
         "updated_at": "Updated At",
         "estimated_duration": "Estimated Duration",
         "estimated_tokens": "Estimated Tokens",
+        "max_iterations": "Max Iterations",
         "factor_count": "AI Factor Count",
         "search_required": "Search Required"
       },
@@ -2483,7 +2484,8 @@
         "message_failed": "Failed to send message"
       },
       "validations": {
-        "message_required": "Enter message content"
+        "message_required": "Enter message content",
+        "max_iterations_min": "Max iterations cannot be lower than 10"
       },
       "placeholders": {
         "message": "Add constraints, answer a question, or describe a new requirement. Enter sends, Shift+Enter inserts a line break"
@@ -2539,6 +2541,7 @@
             "style": "Style",
             "estimated_duration": "Estimated Duration",
             "estimated_tokens": "Estimated Tokens",
+            "max_iterations": "Max Iterations",
             "selection_mode": "Selection Mode",
             "tool_scope": "Tool Scope",
             "status": "Status"

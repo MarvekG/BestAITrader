@@ -8,6 +8,7 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   Popconfirm,
   Select,
   Space,
@@ -44,6 +45,7 @@ const { Text } = Typography;
 
 interface TextFormValues {
   content: string;
+  max_iterations: number;
 }
 
 const activeStatuses = new Set([
@@ -218,13 +220,16 @@ export const InteractiveResearchTab: React.FC = () => {
   }, []);
 
   const createRunFromInput = React.useCallback(
-    async (content: string) => {
+    async (content: string, maxIterations: number) => {
       if (activeRun && activeRun.run_id !== selectedRun?.run_id) {
         setSelectedRunId(activeRun.run_id);
         message.warning(t('ai_stock_picker.interactive.messages.active_run_exists', { run_id: activeRun.run_id }));
         return;
       }
-      const payload: InteractiveResearchRunCreatePayload = { requirement: content };
+      const payload: InteractiveResearchRunCreatePayload = {
+        requirement: content,
+        max_iterations: maxIterations,
+      };
       const response = await interactiveStockPickerApi.createRun(payload);
       updateDetailsFromResponse(response);
       await loadRuns();
@@ -251,11 +256,12 @@ export const InteractiveResearchTab: React.FC = () => {
     try {
       const values = await messageForm.validateFields();
       const content = values.content.trim();
+      const maxIterations = Math.max(10, Number(values.max_iterations || 60));
       setSubmitting(true);
       if (canSendMessage) {
         await appendMessageFromInput(content);
       } else {
-        await createRunFromInput(content);
+        await createRunFromInput(content, maxIterations);
       }
       messageForm.resetFields();
     } catch (error) {
@@ -457,7 +463,17 @@ export const InteractiveResearchTab: React.FC = () => {
           </div>
         </Spin>
 
-        <Form form={messageForm} layout="vertical">
+        <Form form={messageForm} layout="vertical" initialValues={{ max_iterations: 60 }}>
+          {!canSendMessage && (
+            <Form.Item
+              name="max_iterations"
+              label={t('ai_stock_picker.interactive.fields.max_iterations')}
+              rules={[{ type: 'number', min: 10, message: t('ai_stock_picker.interactive.validations.max_iterations_min') }]}
+              style={{ marginBottom: 8 }}
+            >
+              <InputNumber min={10} precision={0} style={{ width: 180 }} />
+            </Form.Item>
+          )}
           <Form.Item
             name="content"
             rules={[{ required: true, message: t('ai_stock_picker.interactive.validations.message_required') }]}
