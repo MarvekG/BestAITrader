@@ -2470,7 +2470,8 @@
         "resume": "Resume",
         "cancel": "Cancel Research",
         "open_active_run": "Open Active Run",
-        "send_message": "Send"
+        "send_message": "Send",
+        "fullscreen": "Fullscreen"
       },
       "confirmations": {
         "cancel_run": "Cancel this AI Deep Research stock-picking run?"
