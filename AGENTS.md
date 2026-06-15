@@ -26,9 +26,10 @@
 - 后端定向测试：`pytest backend/tests/test_api_auth_required.py`。
 - MemoFlux 测试：在 `memo/` 下运行 `pytest tests`。
 - 前端质量门禁：`cd frontend && npm run lint && npm run typecheck && npm run build`。
-- 本地镜像部署：`docker compose up -d`。
-- 本地源码调试：`docker compose -f docker-compose.dev.yml up -d --build`。
-- 配置变更后重建容器：`docker compose up -d --force-recreate <service>`，不要只用 `restart`。
+- 默认本地开发启动：`docker compose -f docker-compose.dev.yml up -d`。
+- 开发阶段源码目录已挂载进容器，代码修改通常无需重建容器即可生效；只有依赖、Dockerfile、镜像构建上下文或启动命令变更时才需要 `--build`。
+- 完整镜像部署：`docker compose up -d`。
+- 配置变更后重建开发容器：`docker compose -f docker-compose.dev.yml up -d --force-recreate <service>`，不要只用 `restart`。
 
 ## 修改前先读
 - 部署/环境：`docs/002-deployment.md`，Windows WSL2 读 `docs/004-windows-wsl-docker-engine-deployment.md`。
