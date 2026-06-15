@@ -42,14 +42,14 @@ def flow_control_protocol_instruction() -> str:
         return (
             f"When you are not calling evidence tools, use `{FLOW_CONTROL_TOOL_NAME}` to decide the next step. "
             "Use action=continue for progress updates, action=ask only when the user must unblock the research, "
-            "and action=done only for the final Markdown answer. Do not mix evidence tools and "
-            f"`{FLOW_CONTROL_TOOL_NAME}` in the same assistant turn."
+            "and action=done only for the final Markdown answer. If you also call evidence tools, those tool calls "
+            "will be executed before the flow-control decision is applied."
         )
     return (
         f"当你不调用证据工具时，使用 `{FLOW_CONTROL_TOOL_NAME}` 决定下一步。"
         "action=continue 用于进展更新；只有用户必须补充信息才能继续研究时才使用 action=ask；"
-        "action=done 只用于最终 Markdown 答案。不要在同一轮同时调用证据工具和 "
-        f"`{FLOW_CONTROL_TOOL_NAME}`。"
+        "action=done 只用于最终 Markdown 答案。如果同一轮也调用证据工具，系统会先执行证据工具，"
+        "再应用流程控制决策。"
     )
 
 
@@ -132,34 +132,13 @@ class InteractiveResearchWorkflow:
             messages.append(response)
             tool_calls = list(getattr(response, "tool_calls", []) or [])
             flow_control_calls, evidence_tool_calls = _partition_tool_calls(tool_calls)
-            if not evidence_tool_calls and flow_control_calls:
-                decision = self._parse_flow_control_tool_or_retry(messages, flow_control_calls)
-                if decision is None:
-                    continue
-                if decision.status == "ask":
-                    await self._pause_for_user_question(run_id, plan_payload, decision.message)
-                    return
-                if decision.status == "done":
-                    final_content = decision.message
-                    break
-                await self._append_assistant_text(run_id, decision.message)
-                messages.append(
-                    HumanMessage(
-                        content=_research_continuation_instruction()
-                    )
-                )
-                continue
-
-            if not evidence_tool_calls and not invalid_tool_calls:
+            if not evidence_tool_calls and not flow_control_calls and not invalid_tool_calls:
                 messages.append(HumanMessage(content=_missing_flow_control_tool_retry_message()))
                 continue
 
             for tool_call in evidence_tool_calls:
                 trace_item = await self._execute_tool_call(run_id, tool_map, messages, tool_call, iteration_index)
                 tool_trace.append(trace_item)
-
-            if evidence_tool_calls and flow_control_calls:
-                messages.append(HumanMessage(content=_mixed_tool_call_retry_message()))
 
             queued_after_tool = self._process_queued_user_inputs(run_id)
             if queued_after_tool:
@@ -170,6 +149,19 @@ class InteractiveResearchWorkflow:
                 messages.append(
                     HumanMessage(content=self._llm_provider.build_invalid_tool_call_retry_message(invalid_tool_calls))
                 )
+
+            if flow_control_calls:
+                decision = self._parse_flow_control_tool_or_retry(messages, flow_control_calls)
+                if decision is None:
+                    continue
+                if decision.status == "ask":
+                    await self._pause_for_user_question(run_id, plan_payload, decision.message)
+                    return
+                if decision.status == "done":
+                    final_content = decision.message
+                    break
+                await self._append_assistant_text(run_id, decision.message)
+                messages.append(HumanMessage(content=_research_continuation_instruction()))
 
         if not final_content:
             stopped_by_iteration_limit = True
@@ -884,24 +876,6 @@ def _missing_flow_control_tool_retry_message() -> str:
     return (
         f"{FLOW_CONTROL_RETRY_MARKER}\n"
         f"你没有调用任何工具。如果不需要证据工具，请使用 `{FLOW_CONTROL_TOOL_NAME}` 并提供结构化参数。"
-    )
-
-
-def _mixed_tool_call_retry_message() -> str:
-    """生成证据工具和流程控制工具混用的纠错提示。
-
-    Returns:
-        当前提示词语言下的纠错提示。
-    """
-    if prompt_language() == "en":
-        return (
-            f"{FLOW_CONTROL_RETRY_MARKER}\n"
-            f"Do not call evidence tools and `{FLOW_CONTROL_TOOL_NAME}` in the same assistant turn. The evidence "
-            "tools were executed; decide the next step in a later turn."
-        )
-    return (
-        f"{FLOW_CONTROL_RETRY_MARKER}\n"
-        f"不要在同一轮同时调用证据工具和 `{FLOW_CONTROL_TOOL_NAME}`。本轮已执行证据工具；下一轮再决定流程。"
     )
 
 

@@ -33,8 +33,8 @@ class FlowControlDecision:
     args_schema=FlowControlToolInput,
     description=(
         "Internal control tool for the interactive stock research workflow. Use it when you want "
-        "to report progress, ask the user a question, or provide the final answer. Do not call it in the same "
-        "assistant turn as evidence-gathering tools."
+        "to report progress, ask the user a question, or provide the final answer. If the same assistant turn also "
+        "contains evidence-gathering tools, the workflow executes those tools before applying this decision."
     ),
 )
 async def control_research_flow(action: str, message: str) -> dict[str, str]:

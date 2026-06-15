@@ -73,6 +73,7 @@ class FakeInteractiveResearchLLM:
         self.invalid_final_response_once = False
         self.invalid_final_returned = False
         self.multiple_final_control_calls = False
+        self.mixed_tool_and_flow_control = False
 
     def bind_tools(self, tools):
         """记录绑定工具并返回自身。
@@ -126,6 +127,25 @@ class FakeInteractiveResearchLLM:
                         },
                         "id": "control-ask-1",
                     }
+                ],
+            )
+        if self.mixed_tool_and_flow_control and self.research_calls == 1:
+            return AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "search_news",
+                        "args": {"keyword": "semiconductor policy catalyst", "source": "interactive_research"},
+                        "id": "tool-call-1",
+                    },
+                    {
+                        "name": FLOW_CONTROL_TOOL_NAME,
+                        "args": {
+                            "action": "done",
+                            "message": "## Final Research\nMixed turn flow control completed after tool execution.",
+                        },
+                        "id": "control-done-mixed",
+                    },
                 ],
             )
         if self.research_calls == 1 or (self.ask_on_first_research and self.research_calls == 2):
@@ -528,6 +548,29 @@ async def test_multiple_flow_control_calls_use_last_decision(db_session, monkeyp
     )
 
     assert "Last control decision should be used" in final_message.payload["answer_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_mixed_evidence_and_flow_control_executes_tool_before_decision(db_session, monkeypatch):
+    """同轮同时有证据工具和流程控制时，应先执行证据工具再应用流程决策。"""
+    user_id = _create_user_id(db_session)
+    service, fake_llm, fake_tool = _service_with_fake_runner()
+    fake_llm.mixed_tool_and_flow_control = True
+    run = service.create_run(user_id, _request_data())
+    run_id = run.run_id
+
+    await service.process_action(run_id, user_id, "approve")
+    await _execute_background(monkeypatch, service, db_session, run_id)
+    completed = service.get_run(run_id, user_id)
+    final_message = (
+        db_session.query(InteractiveResearchMessage)
+        .filter_by(run_id=run_id, message_type="final_result")
+        .one()
+    )
+
+    assert completed.status == "completed"
+    assert fake_tool.calls[0]["keyword"] == "semiconductor policy catalyst"
+    assert "Mixed turn flow control completed" in final_message.payload["answer_markdown"]
 
 
 @pytest.mark.asyncio
