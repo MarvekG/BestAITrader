@@ -16,7 +16,7 @@ from app.ai.stock_picker.interactive_research.flow_control import (
     flow_control_decision_from_tool_args,
 )
 from app.ai.stock_picker.interactive_research.models import InteractiveResearchMessage, InteractiveResearchRun
-from app.ai.stock_picker.interactive_research.persistence import append_message, write_checkpoint
+from app.ai.stock_picker.interactive_research.persistence import accumulate_llm_usage, append_message, write_checkpoint
 from app.ai.stock_picker.interactive_research.serializers import serialize_message, serialize_run_summary
 from app.ai.stock_picker.interactive_research.tool_registry import InteractiveResearchToolRegistry, ToolLoaderFactory
 from app.core.config import settings
@@ -120,11 +120,9 @@ class InteractiveResearchWorkflow:
 
         for iteration_index in range(1, iteration_budget + 1):
             response = await llm_with_tools.ainvoke(messages)
-            record_llm_usage(
+            self._record_and_accumulate_llm_usage(
+                run_id,
                 response,
-                settings.LLM_MODEL,
-                "interactive_stock_research",
-                workflow="interactive_stock_research",
                 stage="agent_loop",
                 call_kind="agent",
                 iteration_index=iteration_index,
@@ -173,11 +171,9 @@ class InteractiveResearchWorkflow:
             )
             for retry_index in range(MAX_FLOW_CONTROL_RETRIES + 1):
                 final_response = await llm_with_tools.ainvoke(messages)
-                record_llm_usage(
+                self._record_and_accumulate_llm_usage(
+                    run_id,
                     final_response,
-                    settings.LLM_MODEL,
-                    "interactive_stock_research",
-                    workflow="interactive_stock_research",
                     stage="agent_loop",
                     call_kind="final_no_tools",
                     iteration_index=iteration_budget + 1 + retry_index,
@@ -715,6 +711,40 @@ class InteractiveResearchWorkflow:
         if self._llm_factory:
             return self._llm_factory()
         return build_chat_model(model=settings.LLM_MODEL, temperature=0.2)
+
+    def _record_and_accumulate_llm_usage(
+        self,
+        run_id: UUID,
+        response: Any,
+        *,
+        stage: str,
+        call_kind: str,
+        iteration_index: int,
+    ) -> None:
+        """记录单次 LLM usage，并同步累加到 run checkpoint。
+
+        Args:
+            run_id: 当前研究 run ID。
+            response: LLM 返回对象。
+            stage: workflow 阶段。
+            call_kind: LLM 调用类型。
+            iteration_index: 调用迭代序号。
+        """
+        usage_record = record_llm_usage(
+            response,
+            settings.LLM_MODEL,
+            "interactive_stock_research",
+            session_id=run_id,
+            workflow="interactive_stock_research",
+            stage=stage,
+            call_kind=call_kind,
+            iteration_index=iteration_index,
+        )
+        with SessionLocal() as db:
+            run = db.query(InteractiveResearchRun).filter(InteractiveResearchRun.run_id == run_id).first()
+            if run is not None:
+                accumulate_llm_usage(db, run, usage_record)
+                db.commit()
 
     def _parse_flow_control_tool_or_retry(
         self,

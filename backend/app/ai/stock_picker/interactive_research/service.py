@@ -21,7 +21,7 @@ from app.ai.stock_picker.interactive_research.flow_control import (
     flow_control_decision_from_tool_args,
 )
 from app.ai.stock_picker.interactive_research.models import InteractiveResearchMessage, InteractiveResearchRun
-from app.ai.stock_picker.interactive_research.persistence import append_message, write_checkpoint
+from app.ai.stock_picker.interactive_research.persistence import accumulate_llm_usage, append_message, write_checkpoint
 from app.ai.stock_picker.interactive_research.planning import (
     build_plan_payload,
     build_plan_preview_payload,
@@ -38,6 +38,7 @@ from app.ai.stock_picker.interactive_research.workflow import (
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.i18n import i18n_service
+from app.crud.llm_usage_log import record_llm_usage
 
 
 def _t(key: str, **kwargs: Any) -> str:
@@ -539,7 +540,7 @@ class InteractiveResearchService:
         db = self._session_for_run(run)
         plan_payload = self._plan_payload_from_checkpoint(run)
         messages = self._build_plan_turn_messages(run, content, plan_payload)
-        decision = await self._invoke_plan_flow_control(messages)
+        decision = await self._invoke_plan_flow_control(run, messages)
         if decision.status == "ask":
             message = append_message(
                 db,
@@ -618,9 +619,7 @@ class InteractiveResearchService:
             {"content": user_content.strip(), "created_at": datetime.now().isoformat(timespec="seconds")}
         )
         updated_plan["user_inputs"] = user_inputs
-        updated_plan["objective_summary"] = plan_message or (
-            f"{self._plan_objective(updated_plan)}\n{_t('messages.additional_input')}: {user_content.strip()}"
-        )
+        updated_plan["objective_summary"] = self._plan_objective(updated_plan)
         return updated_plan
 
     def _build_plan_turn_messages(
@@ -655,10 +654,11 @@ class InteractiveResearchService:
             return self._llm_factory()
         return build_chat_model(model=settings.LLM_MODEL, temperature=0.2)
 
-    async def _invoke_plan_flow_control(self, messages: List[Any]) -> FlowControlDecision:
+    async def _invoke_plan_flow_control(self, run: InteractiveResearchRun, messages: List[Any]) -> FlowControlDecision:
         """调用计划阶段 LLM，并在协议错误时要求重输。
 
         Args:
+            run: 当前研究 run。
             messages: 计划阶段 LLM 消息上下文。
 
         Returns:
@@ -672,6 +672,19 @@ class InteractiveResearchService:
         retry_count = 0
         while True:
             response = await llm_with_tools.ainvoke(messages)
+            usage_record = record_llm_usage(
+                response,
+                settings.LLM_MODEL,
+                "interactive_stock_research",
+                session_id=run.run_id,
+                workflow="interactive_stock_research",
+                stage="planning",
+                call_kind="plan_control",
+                iteration_index=retry_count + 1,
+            )
+            db = object_session(run)
+            if db is not None:
+                accumulate_llm_usage(db, run, usage_record)
             messages.append(response)
             try:
                 tool_calls = [
@@ -854,7 +867,8 @@ def _build_planning_stage_prompt(plan_payload: Dict[str, Any]) -> str:
             "ask one user question, or mark the plan done. "
             f"{flow_control_protocol_instruction()} "
             "Use action=continue to update the plan, action=ask when a user answer is needed, and action=done "
-            "when the user clearly wants to start research.\n\n"
+            "when the user clearly wants to start research. For action=continue, message is shown to the user, "
+            "so keep it as a concise Markdown change summary and do not paste the full JSON plan.\n\n"
             f"Current plan:\n{stable_json_dumps(plan_payload)}"
         )
     return (
@@ -862,7 +876,8 @@ def _build_planning_stage_prompt(plan_payload: Dict[str, Any]) -> str:
         f"使用 `{FLOW_CONTROL_TOOL_NAME}` 判断是继续细化计划、向用户提出一个问题，还是标记计划完成。"
         f"{flow_control_protocol_instruction()} "
         "使用 action=continue 更新计划；只有需要用户回答时使用 action=ask；"
-        "用户明确希望开始研究时使用 action=done。\n\n"
+        "用户明确希望开始研究时使用 action=done。action=continue 的 message 会展示给用户，"
+        "必须写成简短 Markdown 变更摘要，不要粘贴完整 JSON 计划。\n\n"
         f"当前计划:\n{stable_json_dumps(plan_payload)}"
     )
 

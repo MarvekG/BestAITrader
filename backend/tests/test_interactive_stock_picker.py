@@ -389,11 +389,13 @@ def test_create_run_writes_user_message_plan_card_and_checkpoint(db_session):
     assert serialized_plan_message["display_type"] == "assistant"
     assert serialized_plan_message["execution_status"] == "completed"
     assert serialized_plan_message["markdown"].startswith("### 研究计划")
-    assert "- **股票来源**:" in serialized_plan_message["markdown"]
+    assert serialized_plan_message["payload"]["preview"]["scope"] == "all"
     assert run.checkpoint_payload["plan_payload"]["selection_mode"] == "llm_driven"
     assert run.checkpoint_payload["plan_payload"]["research_budget"]["max_tool_calls"] == 60
     assert run.checkpoint_payload["plan_payload"]["tool_policy"]["allowed_tools"] == "all_non_trading_agentic_tools"
     assert "trading" in run.checkpoint_payload["plan_payload"]["tool_policy"]["blocked_tools"]
+    run.checkpoint_payload = {**run.checkpoint_payload, "llm_usage": None}
+    assert service.serialize_run_summary(run)["llm_usage"] == {}
     assert set(service.serialize_run_summary(run)) == {
         "run_id",
         "user_id",
@@ -404,6 +406,7 @@ def test_create_run_writes_user_message_plan_card_and_checkpoint(db_session):
         "raw_requirement",
         "pending_message_id",
         "checkpoint_payload",
+        "llm_usage",
         "cache_context_version",
         "version",
         "error_message",
@@ -682,6 +685,7 @@ def test_interactive_http_contract_is_chat_only(client, auth_headers):
     assert create_response.status_code == 201
     run_id = create_response.json()["run"]["run_id"]
 
+    list_response = client.get("/api/v1/ai-stock-picker/interactive/runs", headers=auth_headers)
     messages_response = client.get(f"/api/v1/ai-stock-picker/interactive/runs/{run_id}/messages", headers=auth_headers)
     result_response = client.get(f"/api/v1/ai-stock-picker/interactive/runs/{run_id}/result", headers=auth_headers)
     artifacts_response = client.get(
@@ -694,6 +698,9 @@ def test_interactive_http_contract_is_chat_only(client, auth_headers):
         headers=auth_headers,
     )
 
+    assert list_response.status_code == 200
+    assert list_response.json()[0]["run_id"] == run_id
+    assert "llm_usage" in list_response.json()[0]
     assert messages_response.status_code == 200
     assert result_response.status_code == 404
     assert artifacts_response.status_code == 404

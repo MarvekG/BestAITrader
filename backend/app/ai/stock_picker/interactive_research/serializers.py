@@ -34,6 +34,9 @@ def serialize_run_summary(run: InteractiveResearchRun) -> Dict[str, Any]:
     Returns:
         可被 Pydantic 响应模型校验且可直接 JSON 序列化的字典。
     """
+    checkpoint_payload = run.checkpoint_payload or {}
+    llm_usage_payload = checkpoint_payload.get("llm_usage") if isinstance(checkpoint_payload, dict) else {}
+    llm_usage = llm_usage_payload if isinstance(llm_usage_payload, dict) else {}
     return jsonable_encoder({
         "run_id": run.run_id,
         "user_id": run.user_id,
@@ -43,13 +46,14 @@ def serialize_run_summary(run: InteractiveResearchRun) -> Dict[str, Any]:
         "title": run.title,
         "raw_requirement": run.raw_requirement,
         "pending_message_id": run.pending_message_id,
-        "checkpoint_payload": run.checkpoint_payload or {},
+        "checkpoint_payload": checkpoint_payload,
         "cache_context_version": run.cache_context_version,
         "version": run.version,
         "error_message": run.error_message,
         "created_at": run.created_at,
         "updated_at": run.updated_at,
         "finished_at": run.finished_at,
+        "llm_usage": llm_usage,
     })
 
 
@@ -116,16 +120,9 @@ def _build_plan_card_markdown(content: str, payload: Dict[str, Any]) -> str:
     Returns:
         计划卡片 Markdown。
     """
-    preview = payload.get("preview") if isinstance(payload.get("preview"), dict) else {}
     lines = [f"### {_t('markdown.titles.plan')}"]
     if content:
         lines.extend(["", content])
-    if preview:
-        lines.append("")
-        for key, value in preview.items():
-            if value is None or value == "":
-                continue
-            lines.append(f"- **{_humanize_key(str(key))}**: {_markdown_value(value)}")
     return "\n".join(lines).strip()
 
 

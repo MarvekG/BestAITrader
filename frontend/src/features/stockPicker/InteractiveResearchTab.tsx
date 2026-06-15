@@ -182,6 +182,20 @@ const getToolName = (item: InteractiveResearchMessage): string | null => {
   return typeof toolName === 'string' && toolName.trim() ? toolName.trim() : null;
 };
 
+const getPlanPreview = (item: InteractiveResearchMessage): Record<string, unknown> | null => {
+  if (item.message_type !== 'plan_card') {
+    return null;
+  }
+  const payload = asRecord(item.payload);
+  const preview = payload.preview;
+  return isRecord(preview) ? preview : null;
+};
+
+const getNumberValue = (value: unknown): number => {
+  const numberValue = Number(value || 0);
+  return Number.isFinite(numberValue) ? numberValue : 0;
+};
+
 const getStatusColor = (status: string) => {
   if (status === 'completed') return 'green';
   if (status === 'cancelled') return 'default';
@@ -230,6 +244,11 @@ export const InteractiveResearchTab: React.FC = () => {
 
   const getPhaseLabel = React.useCallback(
     (phase: string) => t(`ai_stock_picker.interactive.phases.${phase}`, { defaultValue: phase }),
+    [t],
+  );
+
+  const getPreviewLabel = React.useCallback(
+    (key: string) => t(`ai_stock_picker.interactive.fields.${key}`, { defaultValue: key.replace(/_/g, ' ') }),
     [t],
   );
 
@@ -430,6 +449,7 @@ export const InteractiveResearchTab: React.FC = () => {
       const isToolStart = item.message_type === 'tool_start';
       const isToolMessage = isToolResult || isToolStart;
       const toolName = isToolMessage ? getToolName(item) : null;
+      const planPreview = getPlanPreview(item);
       let toolJsonPreview: string | null = null;
       if (isToolResult) {
         toolJsonPreview = getToolResultPreview(item);
@@ -469,9 +489,25 @@ export const InteractiveResearchTab: React.FC = () => {
             {isToolMessage ? (
               toolJsonPreview && <pre className="interactive-research-json-result">{toolJsonPreview}</pre>
             ) : (
-              <div className="interactive-research-markdown">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
-              </div>
+              <>
+                <div className="interactive-research-markdown">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+                </div>
+                {planPreview && (
+                  <Descriptions size="small" column={1} style={{ marginTop: 8 }}>
+                    {Object.entries(planPreview).map(([key, value]) => {
+                      if (value === null || value === undefined || value === '') {
+                        return null;
+                      }
+                      return (
+                        <Descriptions.Item key={key} label={getPreviewLabel(key)}>
+                          {Array.isArray(value) || isRecord(value) ? JSON.stringify(value) : String(value)}
+                        </Descriptions.Item>
+                      );
+                    })}
+                  </Descriptions>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -482,6 +518,7 @@ export const InteractiveResearchTab: React.FC = () => {
       token.colorBorderSecondary,
       token.colorFillAlter,
       token.colorPrimaryBg,
+      getPreviewLabel,
       t,
     ],
   );
@@ -577,6 +614,15 @@ export const InteractiveResearchTab: React.FC = () => {
             </Descriptions.Item>
             <Descriptions.Item label={t('ai_stock_picker.interactive.fields.updated_at')}>
               {dayjs(selectedRun.updated_at).format('YYYY-MM-DD HH:mm:ss')}
+            </Descriptions.Item>
+            <Descriptions.Item label={t('ai_stock_picker.interactive.fields.llm_calls')}>
+              {getNumberValue(selectedRun.llm_usage?.calls).toLocaleString()}
+            </Descriptions.Item>
+            <Descriptions.Item label={t('ai_stock_picker.interactive.fields.total_tokens')}>
+              {getNumberValue(selectedRun.llm_usage?.total_tokens).toLocaleString()}
+            </Descriptions.Item>
+            <Descriptions.Item label={t('ai_stock_picker.interactive.fields.input_output_tokens')}>
+              {getNumberValue(selectedRun.llm_usage?.input_tokens).toLocaleString()} / {getNumberValue(selectedRun.llm_usage?.output_tokens).toLocaleString()}
             </Descriptions.Item>
           </Descriptions>
         )}
