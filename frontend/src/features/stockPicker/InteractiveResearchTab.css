@@ -72,3 +72,35 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+.interactive-research-message-panel {
+  min-height: 40vh;
+  max-height: 50vh;
+  padding: 12px;
+  overflow: auto;
+}
+
+.interactive-research-fullscreen-modal .ant-modal-content {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  border-radius: 0;
+}
+
+.interactive-research-fullscreen-modal .ant-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.interactive-research-fullscreen-modal .ant-spin-nested-loading,
+.interactive-research-fullscreen-modal .ant-spin-container {
+  height: 100%;
+}
+
+.interactive-research-message-panel-fullscreen {
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  overflow: auto;
+}

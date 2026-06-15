@@ -9,6 +9,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Popconfirm,
   Select,
   Space,
@@ -20,6 +21,7 @@ import {
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
+  FullscreenOutlined,
   MessageOutlined,
   ReloadOutlined,
   SendOutlined,
@@ -234,6 +236,7 @@ export const InteractiveResearchTab: React.FC = () => {
   const [loadingDetails, setLoadingDetails] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [actionLoading, setActionLoading] = React.useState<InteractiveResearchAction | null>(null);
+  const [chatFullscreenOpen, setChatFullscreenOpen] = React.useState(false);
   const selectedRunIdRef = React.useRef<string | null>(null);
   const messagesEndRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -555,6 +558,29 @@ export const InteractiveResearchTab: React.FC = () => {
     );
   }, [actionLoading, canApprovePlan, canCancelRun, handleRunAction, selectedRun, t]);
 
+  const renderMessagesPanel = React.useCallback(
+    (className?: string) => (
+      <Spin spinning={loadingDetails}>
+        <div
+          className={['interactive-research-message-panel', className].filter(Boolean).join(' ')}
+          style={{
+            border: `1px solid ${token.colorBorderSecondary}`,
+            borderRadius: token.borderRadius,
+            background: token.colorBgContainer,
+          }}
+        >
+          {sortedMessages.length === 0 ? (
+            <Empty description={t('ai_stock_picker.interactive.empty.no_messages')} />
+          ) : (
+            sortedMessages.map(renderMessageItem)
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+      </Spin>
+    ),
+    [loadingDetails, renderMessageItem, sortedMessages, t, token.borderRadius, token.colorBgContainer, token.colorBorderSecondary],
+  );
+
   const runOptions = React.useMemo(
     () =>
       runs.map((run) => ({
@@ -585,6 +611,9 @@ export const InteractiveResearchTab: React.FC = () => {
           />
           <Button icon={<ReloadOutlined />} onClick={() => refreshSelectedRun()} loading={loadingRuns}>
             {t('warehouse.refresh')}
+          </Button>
+          <Button icon={<FullscreenOutlined />} onClick={() => setChatFullscreenOpen(true)}>
+            {t('ai_stock_picker.interactive.actions.fullscreen')}
           </Button>
           {renderRunActions()}
         </Space>
@@ -628,26 +657,7 @@ export const InteractiveResearchTab: React.FC = () => {
         )}
         {selectedRun?.error_message && <Alert type="error" showIcon message={selectedRun.error_message} />}
 
-        <Spin spinning={loadingDetails}>
-          <div
-            style={{
-              minHeight: '40vh',
-              maxHeight: '50vh',
-              overflow: 'auto',
-              padding: 12,
-              border: `1px solid ${token.colorBorderSecondary}`,
-              borderRadius: token.borderRadius,
-              background: token.colorBgContainer,
-            }}
-          >
-            {sortedMessages.length === 0 ? (
-              <Empty description={t('ai_stock_picker.interactive.empty.no_messages')} />
-            ) : (
-              sortedMessages.map(renderMessageItem)
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-        </Spin>
+        {renderMessagesPanel()}
 
         <Form form={messageForm} layout="vertical" initialValues={{ max_iterations: 60 }}>
           <Form.Item
@@ -692,6 +702,17 @@ export const InteractiveResearchTab: React.FC = () => {
           </Space>
         </Form>
       </Space>
+      <Modal
+        className="interactive-research-fullscreen-modal"
+        footer={null}
+        open={chatFullscreenOpen}
+        title={t('ai_stock_picker.interactive.cards.chat')}
+        style={{ top: 0, maxWidth: '100vw', paddingBottom: 0 }}
+        width="100vw"
+        onCancel={() => setChatFullscreenOpen(false)}
+      >
+        {renderMessagesPanel('interactive-research-message-panel-fullscreen')}
+      </Modal>
     </Card>
   );
 };

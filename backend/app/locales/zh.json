@@ -2470,7 +2470,8 @@
         "resume": "继续",
         "cancel": "取消研究",
         "open_active_run": "打开运行中任务",
-        "send_message": "发送"
+        "send_message": "发送",
+        "fullscreen": "全屏查看"
       },
       "confirmations": {
         "cancel_run": "确认取消这次AI深度研究选股？"
