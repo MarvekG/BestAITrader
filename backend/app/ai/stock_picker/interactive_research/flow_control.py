@@ -5,6 +5,12 @@ from typing import Any, Literal
 from langchain.tools import tool
 from pydantic import BaseModel, Field
 
+from app.ai.stock_picker.interactive_research.constants import (
+    FLOW_CONTROL_TOOL_ACTION_DESCRIPTION,
+    FLOW_CONTROL_TOOL_DESCRIPTION,
+    FLOW_CONTROL_TOOL_MESSAGE_DESCRIPTION,
+)
+
 
 FLOW_CONTROL_STATUSES = {"continue", "ask", "done"}
 FLOW_CONTROL_TOOL_NAME = "control_research_flow"
@@ -15,9 +21,9 @@ class FlowControlToolInput(BaseModel):
 
     action: Literal["continue", "ask", "done"] = Field(
         ...,
-        description="下一步流程动作：continue 继续研究，ask 暂停并向用户提问，done 输出最终答案。",
+        description=FLOW_CONTROL_TOOL_ACTION_DESCRIPTION,
     )
-    message: str = Field(..., min_length=1, description="展示给用户的进展、问题或最终 Markdown 答案。")
+    message: str = Field(..., min_length=1, description=FLOW_CONTROL_TOOL_MESSAGE_DESCRIPTION)
 
 
 @dataclass(frozen=True)
@@ -31,11 +37,7 @@ class FlowControlDecision:
 @tool(
     FLOW_CONTROL_TOOL_NAME,
     args_schema=FlowControlToolInput,
-    description=(
-        "Internal control tool for the interactive stock research workflow. Use it when you want "
-        "to report progress, ask the user a question, or provide the final answer. If the same assistant turn also "
-        "contains evidence-gathering tools, the workflow executes those tools before applying this decision."
-    ),
+    description=FLOW_CONTROL_TOOL_DESCRIPTION,
 )
 async def control_research_flow(action: str, message: str) -> dict[str, str]:
     """返回流程控制参数，实际状态迁移由 workflow 处理。

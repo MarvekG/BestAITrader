@@ -9,7 +9,8 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from app.ai.agentic.tool_output_summarizer import should_summarize_tool_output, summarize_tool_output
 from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_providers.factory import build_chat_model, get_llm_provider
-from app.ai.stock_picker.interactive_research.constants import phase_instructions, prompt_language, research_agent_system_prompt
+from app.ai.stock_picker.interactive_research import constants as prompt_constants
+from app.ai.stock_picker.interactive_research.constants import phase_instructions, research_agent_system_prompt
 from app.ai.stock_picker.interactive_research.flow_control import (
     FLOW_CONTROL_TOOL_NAME,
     FlowControlDecision,
@@ -39,19 +40,7 @@ def flow_control_protocol_instruction() -> str:
     Returns:
         流程控制工具提示词。
     """
-    if prompt_language() == "en":
-        return (
-            f"When you are not calling evidence tools, use `{FLOW_CONTROL_TOOL_NAME}` to decide the next step. "
-            "Use action=continue for progress updates, action=ask only when the user must unblock the research, "
-            "and action=done only for the final Markdown answer. If you also call evidence tools, those tool calls "
-            "will be executed before the flow-control decision is applied."
-        )
-    return (
-        f"当你不调用证据工具时，使用 `{FLOW_CONTROL_TOOL_NAME}` 决定下一步。"
-        "action=continue 用于进展更新；只有用户必须补充信息才能继续研究时才使用 action=ask；"
-        "action=done 只用于最终 Markdown 答案。如果同一轮也调用证据工具，系统会先执行证据工具，"
-        "再应用流程控制决策。"
-    )
+    return prompt_constants.flow_control_protocol_instruction(FLOW_CONTROL_TOOL_NAME)
 
 
 def _t(key: str, **kwargs: Any) -> str:
@@ -853,25 +842,11 @@ def _build_flow_control_retry_message(exc: ValueError, *, final_only: bool = Fal
     Returns:
         用于下一轮 LLM 的纠错消息。
     """
-    if prompt_language() == "en":
-        action_rule = "Use action=done only." if final_only else "Use one of action=continue, action=ask, action=done."
-        return (
-            f"{FLOW_CONTROL_RETRY_MARKER}\n"
-            f"Your previous response did not call `{FLOW_CONTROL_TOOL_NAME}` with valid arguments and was not shown "
-            "to the user. "
-            f"Parser error: {exc}.\n"
-            f"{flow_control_protocol_instruction()}\n"
-            f"{action_rule}\n"
-            f"Call `{FLOW_CONTROL_TOOL_NAME}` now with valid structured arguments."
-        )
-    action_rule = "只能使用 action=done。" if final_only else "只能使用 action=continue、action=ask 或 action=done。"
-    return (
-        f"{FLOW_CONTROL_RETRY_MARKER}\n"
-        f"你上一次回复没有用合法参数调用 `{FLOW_CONTROL_TOOL_NAME}`，且不会展示给用户。"
-        f"解析错误: {exc}.\n"
-        f"{flow_control_protocol_instruction()}\n"
-        f"{action_rule}\n"
-        f"现在用合法结构化参数调用 `{FLOW_CONTROL_TOOL_NAME}`。"
+    return prompt_constants.flow_control_retry_message(
+        FLOW_CONTROL_TOOL_NAME,
+        FLOW_CONTROL_RETRY_MARKER,
+        str(exc),
+        final_only=final_only,
     )
 
 
@@ -911,16 +886,7 @@ def _missing_flow_control_tool_retry_message() -> str:
     Returns:
         当前提示词语言下的纠错提示。
     """
-    if prompt_language() == "en":
-        return (
-            f"{FLOW_CONTROL_RETRY_MARKER}\n"
-            f"You did not call any tool. If you do not need evidence tools, use `{FLOW_CONTROL_TOOL_NAME}` with "
-            "structured arguments."
-        )
-    return (
-        f"{FLOW_CONTROL_RETRY_MARKER}\n"
-        f"你没有调用任何工具。如果不需要证据工具，请使用 `{FLOW_CONTROL_TOOL_NAME}` 并提供结构化参数。"
-    )
+    return prompt_constants.missing_flow_control_tool_retry_message(FLOW_CONTROL_TOOL_NAME, FLOW_CONTROL_RETRY_MARKER)
 
 
 def _final_must_use_control_tool_retry_message() -> str:
@@ -929,16 +895,7 @@ def _final_must_use_control_tool_retry_message() -> str:
     Returns:
         当前提示词语言下的纠错提示。
     """
-    if prompt_language() == "en":
-        return (
-            f"{FLOW_CONTROL_RETRY_MARKER}\n"
-            f"The tool budget is exhausted. Do not call evidence tools. Call `{FLOW_CONTROL_TOOL_NAME}` with "
-            "action=done and the final Markdown answer."
-        )
-    return (
-        f"{FLOW_CONTROL_RETRY_MARKER}\n"
-        f"工具预算已耗尽。不要再调用证据工具。请调用 `{FLOW_CONTROL_TOOL_NAME}`，action=done，message 为最终 Markdown 答案。"
-    )
+    return prompt_constants.final_must_use_control_tool_retry_message(FLOW_CONTROL_TOOL_NAME, FLOW_CONTROL_RETRY_MARKER)
 
 
 def _compact_tool_result(result_text: str) -> str:
@@ -960,15 +917,7 @@ def _research_continuation_instruction() -> str:
     Returns:
         当前提示词语言下的继续研究指令。
     """
-    if prompt_language() == "en":
-        return (
-            "Continue the research. Use evidence tools if evidence is needed, or call "
-            f"`{FLOW_CONTROL_TOOL_NAME}` if you need to report progress, ask the user, or finish."
-        )
-    return (
-        "继续研究。需要证据时使用证据工具；如果需要汇报进展、向用户提问或完成，"
-        f"调用 `{FLOW_CONTROL_TOOL_NAME}`。"
-    )
+    return prompt_constants.research_continuation_instruction(FLOW_CONTROL_TOOL_NAME)
 
 
 def _iteration_budget_instruction(iteration_budget: int) -> str:
@@ -980,18 +929,7 @@ def _iteration_budget_instruction(iteration_budget: int) -> str:
     Returns:
         当前提示词语言下的最终回答指令。
     """
-    if prompt_language() == "en":
-        return (
-            f"You have reached the evidence-tool iteration budget of {iteration_budget} iterations. Stop calling "
-            f"evidence tools and call `{FLOW_CONTROL_TOOL_NAME}` with action=done and the final Deep Research "
-            "Markdown answer. The answer must explicitly state that the iteration limit was exceeded and the "
-            "research was terminated early."
-        )
-    return (
-        f"你已达到 {iteration_budget} 次证据工具迭代预算。停止调用证据工具，并调用 "
-        f"`{FLOW_CONTROL_TOOL_NAME}`，action=done，message 为最终 Deep Research Markdown 答案。"
-        "答案必须明确说明迭代次数超限，研究已提前终止。"
-    )
+    return prompt_constants.iteration_budget_instruction(FLOW_CONTROL_TOOL_NAME, iteration_budget)
 
 
 def _iteration_budget_fallback_answer(iteration_budget: int) -> str:
@@ -1003,19 +941,7 @@ def _iteration_budget_fallback_answer(iteration_budget: int) -> str:
     Returns:
         最终 Markdown 答案。
     """
-    if prompt_language() == "en":
-        return (
-            "## Final Research\n\n"
-            f"The research was terminated early because the iteration limit of {iteration_budget} was exceeded. "
-            "The model did not provide a compliant final answer after retry, so no additional evidence tools were "
-            "called. Please review the evidence collected in the chat stream before using these conclusions."
-        )
-    return (
-        "## 最终研究结论\n\n"
-        f"本次研究因达到 {iteration_budget} 次迭代次数上限而提前终止。"
-        "模型在重试后仍未给出合规最终答案，因此系统未继续调用证据工具。"
-        "请结合聊天流中已收集的证据审阅本次结论。"
-    )
+    return prompt_constants.iteration_budget_fallback_answer(iteration_budget)
 
 
 def _tool_policy_instruction() -> str:
@@ -1024,18 +950,7 @@ def _tool_policy_instruction() -> str:
     Returns:
         当前提示词语言下的工具边界提示词。
     """
-    if prompt_language() == "en":
-        return (
-            "You may use any bound non-trading tool. Trading, order, account, portfolio, and position "
-            "tools are not bound.\n"
-            "Use tools when evidence is needed. Tool calls must use native tool_calls, not JSON fields.\n"
-            "Do not place orders or generate portfolio weights."
-        )
-    return (
-        "你可以使用任何已绑定的非交易工具。交易、订单、账户、组合和持仓工具不会被绑定。\n"
-        "需要证据时使用工具。工具调用必须使用原生 tool_calls，不要用 JSON 字段伪造工具调用。\n"
-        "不要下单，也不要生成组合权重。"
-    )
+    return prompt_constants.tool_policy_instruction()
 
 
 def _approved_plan_label() -> str:
@@ -1044,7 +959,7 @@ def _approved_plan_label() -> str:
     Returns:
         当前提示词语言下的已确认计划标签。
     """
-    return "Approved plan" if prompt_language() == "en" else "已确认计划"
+    return prompt_constants.approved_plan_label()
 
 
 def _additional_user_input_label() -> str:
@@ -1053,4 +968,4 @@ def _additional_user_input_label() -> str:
     Returns:
         当前提示词语言下的补充用户输入标签。
     """
-    return "Additional user input" if prompt_language() == "en" else "补充用户输入"
+    return prompt_constants.additional_user_input_label()

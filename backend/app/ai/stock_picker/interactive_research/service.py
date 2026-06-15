@@ -12,7 +12,9 @@ from app.ai.llm_providers.factory import build_chat_model
 from app.ai.stock_picker.interactive_research.constants import (
     ACTIVE_RESEARCH_STATUSES,
     TERMINAL_RESEARCH_STATUSES,
-    prompt_language,
+    planning_retry_message,
+    planning_stage_prompt,
+    planning_user_message,
 )
 from app.ai.stock_picker.interactive_research.flow_control import (
     FLOW_CONTROL_TOOL_NAME,
@@ -33,7 +35,6 @@ from app.ai.stock_picker.interactive_research.workflow import (
     MAX_FLOW_CONTROL_RETRIES,
     InteractiveResearchWorkflow,
     LLMFactory,
-    flow_control_protocol_instruction,
 )
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -860,26 +861,7 @@ def _build_planning_stage_prompt(plan_payload: Dict[str, Any]) -> str:
     Returns:
         当前系统语言下的计划阶段提示词。
     """
-    if prompt_language() == "en":
-        return (
-            "You control the planning stage for an interactive stock research chat. "
-            f"Use `{FLOW_CONTROL_TOOL_NAME}` to decide whether to continue refining the plan, "
-            "ask one user question, or mark the plan done. "
-            f"{flow_control_protocol_instruction()} "
-            "Use action=continue to update the plan, action=ask when a user answer is needed, and action=done "
-            "when the user clearly wants to start research. For action=continue, message is shown to the user, "
-            "so keep it as a concise Markdown change summary and do not paste the full JSON plan.\n\n"
-            f"Current plan:\n{stable_json_dumps(plan_payload)}"
-        )
-    return (
-        "你负责交互式股票研究聊天的规划阶段。"
-        f"使用 `{FLOW_CONTROL_TOOL_NAME}` 判断是继续细化计划、向用户提出一个问题，还是标记计划完成。"
-        f"{flow_control_protocol_instruction()} "
-        "使用 action=continue 更新计划；只有需要用户回答时使用 action=ask；"
-        "用户明确希望开始研究时使用 action=done。action=continue 的 message 会展示给用户，"
-        "必须写成简短 Markdown 变更摘要，不要粘贴完整 JSON 计划。\n\n"
-        f"当前计划:\n{stable_json_dumps(plan_payload)}"
-    )
+    return planning_stage_prompt(stable_json_dumps(plan_payload), FLOW_CONTROL_TOOL_NAME)
 
 
 def _build_planning_user_message(requirement: str, content: str) -> str:
@@ -892,9 +874,7 @@ def _build_planning_user_message(requirement: str, content: str) -> str:
     Returns:
         当前系统语言下的用户消息。
     """
-    if prompt_language() == "en":
-        return f"Run requirement: {requirement}\nUser input: {content}"
-    return f"运行需求: {requirement}\n用户输入: {content}"
+    return planning_user_message(requirement, content)
 
 
 def _build_planning_retry_message(exc: ValueError) -> str:
@@ -906,16 +886,4 @@ def _build_planning_retry_message(exc: ValueError) -> str:
     Returns:
         当前系统语言下的纠错提示词。
     """
-    if prompt_language() == "en":
-        return (
-            f"Your previous response did not call `{FLOW_CONTROL_TOOL_NAME}` with valid arguments and was not "
-            f"shown to the user. Parser error: {exc}.\n"
-            f"{flow_control_protocol_instruction()}\n"
-            f"Call `{FLOW_CONTROL_TOOL_NAME}` now with valid structured arguments."
-        )
-    return (
-        f"你上一次回复没有用合法参数调用 `{FLOW_CONTROL_TOOL_NAME}`，且不会展示给用户。"
-        f"解析错误: {exc}.\n"
-        f"{flow_control_protocol_instruction()}\n"
-        f"现在用合法结构化参数调用 `{FLOW_CONTROL_TOOL_NAME}`。"
-    )
+    return planning_retry_message(FLOW_CONTROL_TOOL_NAME, str(exc))
