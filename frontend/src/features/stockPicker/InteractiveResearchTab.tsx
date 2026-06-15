@@ -171,6 +171,11 @@ const getToolResultPreview = (item: InteractiveResearchMessage): string | null =
   return formatToolResultPreview(payload.result_preview);
 };
 
+const getToolStartArguments = (item: InteractiveResearchMessage): string | null => {
+  const payload = asRecord(item.payload);
+  return formatToolResultPreview(payload.arguments);
+};
+
 const getStatusColor = (status: string) => {
   if (status === 'completed') return 'green';
   if (status === 'cancelled') return 'default';
@@ -409,7 +414,13 @@ export const InteractiveResearchTab: React.FC = () => {
       const markdown = item.markdown || item.content || '-';
       const executionStatus = item.execution_status || item.status;
       const isToolResult = item.message_type === 'tool_result';
-      const toolResultPreview = isToolResult ? getToolResultPreview(item) : null;
+      const isToolStart = item.message_type === 'tool_start';
+      let toolJsonPreview: string | null = null;
+      if (isToolResult) {
+        toolJsonPreview = getToolResultPreview(item);
+      } else if (isToolStart) {
+        toolJsonPreview = getToolStartArguments(item);
+      }
       const isUser = displayType === 'user';
       return (
         <div
@@ -439,8 +450,8 @@ export const InteractiveResearchTab: React.FC = () => {
               )}
               <Text type="secondary">{dayjs(item.created_at).format('MM-DD HH:mm:ss')}</Text>
             </Space>
-            {isToolResult ? (
-              toolResultPreview && <pre className="interactive-research-json-result">{toolResultPreview}</pre>
+            {isToolResult || isToolStart ? (
+              toolJsonPreview && <pre className="interactive-research-json-result">{toolJsonPreview}</pre>
             ) : (
               <div className="interactive-research-markdown">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
