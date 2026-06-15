@@ -94,7 +94,7 @@ class FakeInteractiveResearchLLM:
             AIMessage 响应。
         """
         first_content = str(getattr(messages[0], "content", "") or "") if messages else ""
-        if "planning stage" in first_content:
+        if "planning stage" in first_content or "规划阶段" in first_content:
             self.plan_calls += 1
             return AIMessage(content="ACTION: CONTINUE\nPlan updated: exclude banks and favor AI hardware.")
 

@@ -312,8 +312,16 @@ export const InteractiveResearchTab: React.FC = () => {
             }}
           >
             <Space size={6} wrap>
-              <Tag color={getRoleColor(displayType)}>{displayType}</Tag>
-              {executionStatus && executionStatus !== 'completed' && <Tag color="orange">{executionStatus}</Tag>}
+              <Tag color={getRoleColor(displayType)}>
+                {t(`ai_stock_picker.interactive.roles.${displayType}`, { defaultValue: displayType })}
+              </Tag>
+              {executionStatus && executionStatus !== 'completed' && (
+                <Tag color="orange">
+                  {t(`ai_stock_picker.interactive.execution_statuses.${executionStatus}`, {
+                    defaultValue: executionStatus,
+                  })}
+                </Tag>
+              )}
               <Text type="secondary">{dayjs(item.created_at).format('MM-DD HH:mm:ss')}</Text>
             </Space>
             <div className="interactive-research-markdown">
@@ -328,6 +336,7 @@ export const InteractiveResearchTab: React.FC = () => {
       token.colorBorderSecondary,
       token.colorFillAlter,
       token.colorPrimaryBg,
+      t,
     ],
   );
 

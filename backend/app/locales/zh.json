@@ -2507,6 +2507,78 @@
         "score": "分数",
         "thesis": "核心逻辑",
         "risks": "风险"
+      },
+      "roles": {
+        "user": "用户",
+        "assistant": "助手",
+        "system": "系统",
+        "tool": "工具"
+      },
+      "execution_statuses": {
+        "queued": "排队中",
+        "completed": "已完成",
+        "failed": "失败"
+      },
+      "backend": {
+        "markdown": {
+          "empty": "-",
+          "titles": {
+            "plan": "研究计划",
+            "tool_start": "工具调用开始",
+            "tool_result": "工具调用结果",
+            "progress": "执行进展",
+            "system_status": "系统状态",
+            "assistant_question": "需要补充信息"
+          },
+          "labels": {
+            "tool": "工具",
+            "description": "说明",
+            "result": "结果",
+            "reason": "原因",
+            "scope": "股票来源",
+            "style": "风格",
+            "estimated_duration": "预计耗时",
+            "estimated_tokens": "预计 Token",
+            "selection_mode": "选择模式",
+            "tool_scope": "工具范围",
+            "status": "状态"
+          },
+          "values": {
+            "yes": "是",
+            "no": "否",
+            "success": "成功",
+            "failed": "失败"
+          }
+        },
+        "messages": {
+          "plan_generated": "研究计划已生成，等待确认。",
+          "plan_approved": "研究计划已确认。",
+          "plan_updated": "已根据补充输入更新研究计划，等待确认。",
+          "research_started": "研究计划已确认，开始 LLM 驱动的研究循环。",
+          "tool_start": "正在调用 {tool_name}，参数由 LLM 选择。",
+          "tool_completed": "工具 {tool_name} 已完成，证据已加入下一轮 Agent 上下文。",
+          "llm_loop_completed": "LLM 驱动的研究循环已完成。",
+          "completed": "Deep Research 运行已完成。",
+          "cancelled": "交互式研究任务已取消。",
+          "queued_input_appended": "新的用户输入已在工具调用后追加，并加入下一轮 Agent 上下文。",
+          "tool_empty_result": "工具返回了空结果。",
+          "answer_received": "已收到回答，研究将从 checkpoint 继续。",
+          "default_title": "AI深度研究选股",
+          "additional_input": "补充输入"
+        },
+        "errors": {
+          "active_run_exists": "当前已有未完成的 Deep Research 任务: {run_id}",
+          "terminal_cannot_accept_messages": "终态任务不能继续追加消息",
+          "unsupported_action": "不支持的操作: {action}",
+          "only_awaiting_plan_approval_can_approve": "只有等待计划确认的任务才能确认计划",
+          "terminal_cannot_cancel": "终态任务不能重复取消",
+          "run_not_found": "Deep Research 任务不存在",
+          "only_awaiting_plan_approval_can_update": "只有等待计划确认的任务才能更新计划",
+          "plan_update_empty": "计划更新指令不能为空",
+          "workflow_failed": "Workflow 执行失败: {error}",
+          "tool_not_allowed": "错误: 工具 {tool_name} 不存在或不允许调用。",
+          "service_error": "Deep Research 服务错误"
+        }
       }
     },
     "scope_options": {

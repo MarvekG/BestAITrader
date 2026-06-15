@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
 from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_providers.factory import build_chat_model, get_llm_provider
-from app.ai.stock_picker.interactive_research.constants import PHASE_INSTRUCTIONS, RESEARCH_AGENT_SYSTEM_PROMPT
+from app.ai.stock_picker.interactive_research.constants import phase_instructions, prompt_language, research_agent_system_prompt
 from app.ai.stock_picker.interactive_research.flow_control import FlowControlDecision, parse_flow_control_decision
 from app.ai.stock_picker.interactive_research.models import InteractiveResearchMessage, InteractiveResearchRun
 from app.ai.stock_picker.interactive_research.persistence import append_message, write_checkpoint
@@ -16,6 +16,7 @@ from app.ai.stock_picker.interactive_research.serializers import serialize_messa
 from app.ai.stock_picker.interactive_research.tool_registry import InteractiveResearchToolRegistry, ToolLoaderFactory
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.core.i18n import i18n_service
 from app.crud.llm_usage_log import record_llm_usage
 
 
@@ -30,6 +31,40 @@ FLOW_CONTROL_PROTOCOL_INSTRUCTION = (
     "Use CONTINUE for progress updates, ASK only when the user must unblock the research, and DONE only for "
     "the final Markdown answer. Do not return JSON for this protocol."
 )
+
+FLOW_CONTROL_PROTOCOL_INSTRUCTIONS = {
+    "zh": (
+        "当你不调用工具时，必须使用以下精确响应协议：\n"
+        "ACTION: CONTINUE|ASK|DONE\n"
+        "<正文>\n"
+        "CONTINUE 用于进展更新；只有用户必须补充信息才能继续研究时才使用 ASK；"
+        "DONE 只用于最终 Markdown 答案。不要用 JSON 返回该协议。"
+    ),
+    "en": FLOW_CONTROL_PROTOCOL_INSTRUCTION,
+}
+FLOW_CONTROL_RETRY_MARKER = "FLOW_CONTROL_RETRY"
+
+
+def flow_control_protocol_instruction() -> str:
+    """返回当前语言下的流程控制协议提示词。
+
+    Returns:
+        流程控制协议提示词。
+    """
+    return FLOW_CONTROL_PROTOCOL_INSTRUCTIONS[prompt_language()]
+
+
+def _t(key: str, **kwargs: Any) -> str:
+    """读取交互式研究 workflow 翻译文案。
+
+    Args:
+        key: backend 命名空间下的翻译 key。
+        **kwargs: 翻译模板变量。
+
+    Returns:
+        当前系统语言下的文案。
+    """
+    return i18n_service.t(f"ai_stock_picker.interactive.backend.{key}", **kwargs)
 
 
 class InteractiveResearchWorkflow:
@@ -104,10 +139,7 @@ class InteractiveResearchWorkflow:
                 await self._append_assistant_text(run_id, decision.message)
                 messages.append(
                     HumanMessage(
-                        content=(
-                            "Continue the research. Use tools if evidence is needed, ask if blocked, "
-                            "or return done."
-                        )
+                        content=_research_continuation_instruction()
                     )
                 )
                 continue
@@ -129,10 +161,7 @@ class InteractiveResearchWorkflow:
         if not final_content:
             messages.append(
                 HumanMessage(
-                    content=(
-                        "You have reached the tool iteration budget. Stop calling tools and produce the final "
-                        "Deep Research answer based on the collected evidence."
-                    )
+                    content=_iteration_budget_instruction()
                 )
             )
             for retry_index in range(MAX_FLOW_CONTROL_RETRIES + 1):
@@ -192,8 +221,8 @@ class InteractiveResearchWorkflow:
                 run,
                 role="system",
                 message_type="system_status",
-                content="Research plan approved. Starting LLM-driven research loop.",
-                payload={"phase_instruction": PHASE_INSTRUCTIONS["research"]},
+                content=_t("messages.research_started"),
+                payload={"phase_instruction": phase_instructions()["research"]},
             )
             snapshot = {
                 "user_id": run.user_id,
@@ -230,7 +259,7 @@ class InteractiveResearchWorkflow:
         trace_item: Dict[str, Any] = {"name": tool_name, "args": tool_args, "success": False}
         tool = tool_map.get(tool_name)
         if tool is None:
-            result_text = f"Error: Tool {tool_name} not found or not allowed."
+            result_text = _t("errors.tool_not_allowed", tool_name=tool_name)
             trace_item["error"] = result_text
         else:
             try:
@@ -276,7 +305,7 @@ class InteractiveResearchWorkflow:
                 run,
                 role="tool",
                 message_type="tool_start",
-                content=f"Calling {tool_name} with LLM-selected arguments.",
+                content=_t("messages.tool_start", tool_name=tool_name),
                 payload={"tool_name": tool_name, "arguments": tool_args, "tool_call_id": tool_call_id},
             )
             await self._notify_change(db, run, start_message, "tool_start")
@@ -328,7 +357,7 @@ class InteractiveResearchWorkflow:
                 run,
                 role="assistant",
                 message_type="progress_update",
-                content=f"Tool {tool_name} completed and its evidence was added to the next agent turn.",
+                content=_t("messages.tool_completed", tool_name=tool_name),
                 payload={"tool_name": tool_name, "success": success},
             )
             current_checkpoint = run.checkpoint_payload or {}
@@ -369,7 +398,7 @@ class InteractiveResearchWorkflow:
             run.current_phase = "synthesis"
             run.version += 1
             final_payload = {
-                "phase_instruction": PHASE_INSTRUCTIONS["synthesis"],
+                "phase_instruction": phase_instructions()["synthesis"],
                 "requirement_summary": plan_payload.get("objective_summary") or run.raw_requirement,
                 "selection_mode": "llm_driven",
                 "answer_markdown": final_content,
@@ -384,7 +413,7 @@ class InteractiveResearchWorkflow:
                 run,
                 role="assistant",
                 message_type="final_result",
-                content=final_content or "LLM-driven research loop completed.",
+                content=final_content or _t("messages.llm_loop_completed"),
                 payload=final_payload,
             )
             await self._notify_change(db, run, final_message, "final_result")
@@ -398,7 +427,7 @@ class InteractiveResearchWorkflow:
                 run,
                 role="system",
                 message_type="system_status",
-                content="Deep Research run completed.",
+                content=_t("messages.completed"),
                 payload={"selection_mode": "llm_driven"},
             )
             await self._notify_change(db, run, status_message, "completed")
@@ -518,7 +547,7 @@ class InteractiveResearchWorkflow:
                 run,
                 role="system",
                 message_type="system_status",
-                content="New user input was appended after the tool call and added to the next agent turn.",
+                content=_t("messages.queued_input_appended"),
                 payload={"queued_message_ids": [message["message_id"] for message in queued_messages]},
             )
             await self._notify_change(db, run, message, "queued_input_appended")
@@ -543,13 +572,10 @@ class InteractiveResearchWorkflow:
         """
         history = self._build_recent_chat_messages(run_id)
         prompt = (
-            f"{RESEARCH_AGENT_SYSTEM_PROMPT}\n"
-            "You may use any bound non-trading tool. Trading, order, account, portfolio, and position "
-            "tools are not bound.\n"
-            "Use tools when evidence is needed. Tool calls must use native tool_calls, not JSON fields.\n"
-            f"{FLOW_CONTROL_PROTOCOL_INSTRUCTION}\n"
-            "Do not place orders or generate portfolio weights.\n\n"
-            f"Approved plan:\n{stable_json_dumps(plan_payload)}"
+            f"{research_agent_system_prompt()}\n"
+            f"{_tool_policy_instruction()}\n"
+            f"{flow_control_protocol_instruction()}\n"
+            f"{_approved_plan_label()}:\n{stable_json_dumps(plan_payload)}"
         )
         messages: List[Any] = [SystemMessage(content=prompt)]
         for item in history:
@@ -575,7 +601,7 @@ class InteractiveResearchWorkflow:
             queued_messages: 已处理的排队用户消息。
         """
         for message in queued_messages:
-            messages.append(HumanMessage(content=f"Additional user input: {message['content']}"))
+            messages.append(HumanMessage(content=f"{_additional_user_input_label()}: {message['content']}"))
 
     def _build_recent_chat_messages(self, run_id: UUID) -> List[Dict[str, Any]]:
         """构造给 agent 使用的最近消息上下文。
@@ -762,13 +788,24 @@ def _build_flow_control_retry_message(exc: ValueError, *, final_only: bool = Fal
     Returns:
         用于下一轮 LLM 的纠错消息。
     """
-    action_rule = "Use ACTION: DONE only." if final_only else "Use one of ACTION: CONTINUE, ACTION: ASK, ACTION: DONE."
+    if prompt_language() == "en":
+        action_rule = "Use ACTION: DONE only." if final_only else "Use one of ACTION: CONTINUE, ACTION: ASK, ACTION: DONE."
+        return (
+            f"{FLOW_CONTROL_RETRY_MARKER}\n"
+            "Your previous response did not follow the required flow-control protocol and was not shown to the user. "
+            f"Parser error: {exc}.\n"
+            f"{flow_control_protocol_instruction()}\n"
+            f"{action_rule}\n"
+            "Re-output the response now with the ACTION line first and the body starting on the second line."
+        )
+    action_rule = "只能使用 ACTION: DONE。" if final_only else "只能使用 ACTION: CONTINUE、ACTION: ASK 或 ACTION: DONE。"
     return (
-        "Your previous response did not follow the required flow-control protocol and was not shown to the user. "
-        f"Parser error: {exc}.\n"
-        f"{FLOW_CONTROL_PROTOCOL_INSTRUCTION}\n"
+        f"{FLOW_CONTROL_RETRY_MARKER}\n"
+        "你上一次回复没有遵循必需的流程控制协议，且不会展示给用户。"
+        f"解析错误: {exc}.\n"
+        f"{flow_control_protocol_instruction()}\n"
         f"{action_rule}\n"
-        "Re-output the response now with the ACTION line first and the body starting on the second line."
+        "现在重新输出，第一行必须是 ACTION 行，正文从第二行开始。"
     )
 
 
@@ -784,7 +821,7 @@ def _flow_control_retry_count(messages: List[Any]) -> int:
     return sum(
         1
         for message in messages
-        if "previous response did not follow the required flow-control protocol" in str(getattr(message, "content", ""))
+        if FLOW_CONTROL_RETRY_MARKER in str(getattr(message, "content", ""))
     )
 
 
@@ -799,5 +836,68 @@ def _compact_tool_result(result_text: str) -> str:
     """
     normalized = " ".join(str(result_text or "").split())
     if len(normalized) <= 500:
-        return normalized or "Tool returned an empty result."
+        return normalized or _t("messages.tool_empty_result")
     return f"{normalized[:500]}..."
+
+
+def _research_continuation_instruction() -> str:
+    """返回研究继续指令。
+
+    Returns:
+        当前提示词语言下的继续研究指令。
+    """
+    if prompt_language() == "en":
+        return "Continue the research. Use tools if evidence is needed, ask if blocked, or return done."
+    return "继续研究。需要证据时使用工具；被用户信息阻塞时提问；已经完成时返回 DONE。"
+
+
+def _iteration_budget_instruction() -> str:
+    """返回工具循环预算耗尽后的最终回答指令。
+
+    Returns:
+        当前提示词语言下的最终回答指令。
+    """
+    if prompt_language() == "en":
+        return (
+            "You have reached the tool iteration budget. Stop calling tools and produce the final "
+            "Deep Research answer based on the collected evidence."
+        )
+    return "你已达到工具迭代预算。停止调用工具，并基于已收集证据生成最终 Deep Research 答案。"
+
+
+def _tool_policy_instruction() -> str:
+    """返回工具边界提示词。
+
+    Returns:
+        当前提示词语言下的工具边界提示词。
+    """
+    if prompt_language() == "en":
+        return (
+            "You may use any bound non-trading tool. Trading, order, account, portfolio, and position "
+            "tools are not bound.\n"
+            "Use tools when evidence is needed. Tool calls must use native tool_calls, not JSON fields.\n"
+            "Do not place orders or generate portfolio weights."
+        )
+    return (
+        "你可以使用任何已绑定的非交易工具。交易、订单、账户、组合和持仓工具不会被绑定。\n"
+        "需要证据时使用工具。工具调用必须使用原生 tool_calls，不要用 JSON 字段伪造工具调用。\n"
+        "不要下单，也不要生成组合权重。"
+    )
+
+
+def _approved_plan_label() -> str:
+    """返回已确认计划标签。
+
+    Returns:
+        当前提示词语言下的已确认计划标签。
+    """
+    return "Approved plan" if prompt_language() == "en" else "已确认计划"
+
+
+def _additional_user_input_label() -> str:
+    """返回补充用户输入标签。
+
+    Returns:
+        当前提示词语言下的补充用户输入标签。
+    """
+    return "Additional user input" if prompt_language() == "en" else "补充用户输入"

@@ -2507,6 +2507,78 @@
         "score": "Score",
         "thesis": "Thesis",
         "risks": "Risks"
+      },
+      "roles": {
+        "user": "User",
+        "assistant": "Assistant",
+        "system": "System",
+        "tool": "Tool"
+      },
+      "execution_statuses": {
+        "queued": "Queued",
+        "completed": "Completed",
+        "failed": "Failed"
+      },
+      "backend": {
+        "markdown": {
+          "empty": "-",
+          "titles": {
+            "plan": "Research Plan",
+            "tool_start": "Tool Call Started",
+            "tool_result": "Tool Call Result",
+            "progress": "Execution Progress",
+            "system_status": "System Status",
+            "assistant_question": "Additional Information Needed"
+          },
+          "labels": {
+            "tool": "Tool",
+            "description": "Description",
+            "result": "Result",
+            "reason": "Reason",
+            "scope": "Stock Source",
+            "style": "Style",
+            "estimated_duration": "Estimated Duration",
+            "estimated_tokens": "Estimated Tokens",
+            "selection_mode": "Selection Mode",
+            "tool_scope": "Tool Scope",
+            "status": "Status"
+          },
+          "values": {
+            "yes": "Yes",
+            "no": "No",
+            "success": "Succeeded",
+            "failed": "Failed"
+          }
+        },
+        "messages": {
+          "plan_generated": "Research plan generated and awaiting approval.",
+          "plan_approved": "Research plan approved.",
+          "plan_updated": "Research plan updated from the additional input and awaiting approval.",
+          "research_started": "Research plan approved. Starting LLM-driven research loop.",
+          "tool_start": "Calling {tool_name} with LLM-selected arguments.",
+          "tool_completed": "Tool {tool_name} completed and its evidence was added to the next agent turn.",
+          "llm_loop_completed": "LLM-driven research loop completed.",
+          "completed": "Deep Research run completed.",
+          "cancelled": "Interactive research run cancelled.",
+          "queued_input_appended": "New user input was appended after the tool call and added to the next agent turn.",
+          "tool_empty_result": "Tool returned an empty result.",
+          "answer_received": "Answer received. Research will continue from the checkpoint.",
+          "default_title": "Deep Research Stock Picker",
+          "additional_input": "Additional input"
+        },
+        "errors": {
+          "active_run_exists": "An unfinished Deep Research run already exists: {run_id}",
+          "terminal_cannot_accept_messages": "Terminal runs cannot accept new messages",
+          "unsupported_action": "Unsupported action: {action}",
+          "only_awaiting_plan_approval_can_approve": "Only awaiting_plan_approval runs can approve a plan",
+          "terminal_cannot_cancel": "Terminal runs cannot be cancelled again",
+          "run_not_found": "Deep Research run does not exist",
+          "only_awaiting_plan_approval_can_update": "Only awaiting_plan_approval runs can update a plan",
+          "plan_update_empty": "Plan update instruction cannot be empty",
+          "workflow_failed": "Workflow failed: {error}",
+          "tool_not_allowed": "Error: Tool {tool_name} not found or not allowed.",
+          "service_error": "Deep Research service error"
+        }
       }
     },
     "scope_options": {

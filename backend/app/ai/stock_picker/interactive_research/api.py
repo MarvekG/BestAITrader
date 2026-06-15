@@ -1,3 +1,4 @@
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
@@ -15,10 +16,24 @@ from app.ai.stock_picker.interactive_research.schemas import (
 )
 from app.ai.stock_picker.interactive_research.service import interactive_research_service
 from app.core.database import get_db
+from app.core.i18n import i18n_service
 from app.core.security import get_current_user
 from app.models.user import User
 
 router = APIRouter()
+
+
+def _t(key: str, **kwargs: Any) -> str:
+    """读取交互式研究 API 翻译文案。
+
+    Args:
+        key: backend 命名空间下的翻译 key。
+        **kwargs: 翻译模板变量。
+
+    Returns:
+        当前系统语言下的文案。
+    """
+    return i18n_service.t(f"ai_stock_picker.interactive.backend.{key}", **kwargs)
 
 
 def _raise_service_error(exc: Exception) -> None:
@@ -36,7 +51,7 @@ def _raise_service_error(exc: Exception) -> None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     raise HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        detail="Deep Research service error",
+        detail=_t("errors.service_error"),
     ) from exc
 
 
@@ -56,7 +71,7 @@ def _require_run(run_id: UUID, db: Session, current_user: User):
     """
     run = interactive_research_service.get_run(db, run_id, current_user.id)
     if run is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deep Research run does not exist")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_t("errors.run_not_found"))
     return run
 
 

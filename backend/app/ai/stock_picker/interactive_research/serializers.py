@@ -9,6 +9,20 @@ from app.ai.stock_picker.interactive_research.models import (
     InteractiveResearchMessage,
     InteractiveResearchRun,
 )
+from app.core.i18n import i18n_service
+
+
+def _t(key: str, **kwargs: Any) -> str:
+    """读取交互式研究后端翻译文案。
+
+    Args:
+        key: backend 命名空间下的翻译 key。
+        **kwargs: 翻译模板变量。
+
+    Returns:
+        当前系统语言下的文案。
+    """
+    return i18n_service.t(f"ai_stock_picker.interactive.backend.{key}", **kwargs)
 
 
 def serialize_run_summary(run: InteractiveResearchRun) -> Dict[str, Any]:
@@ -86,10 +100,10 @@ def build_message_markdown(message: InteractiveResearchMessage) -> str:
     if message.message_type == "progress_update":
         return _build_progress_markdown(content, payload)
     if message.message_type == "system_status":
-        return _build_titled_markdown("系统状态", content, payload)
+        return _build_titled_markdown(_t("markdown.titles.system_status"), content, payload)
     if message.message_type == "assistant_question":
-        return _build_titled_markdown("需要补充信息", content, payload)
-    return content or "-"
+        return _build_titled_markdown(_t("markdown.titles.assistant_question"), content, payload)
+    return content or _t("markdown.empty")
 
 
 def _build_plan_card_markdown(content: str, payload: Dict[str, Any]) -> str:
@@ -103,7 +117,7 @@ def _build_plan_card_markdown(content: str, payload: Dict[str, Any]) -> str:
         计划卡片 Markdown。
     """
     preview = payload.get("preview") if isinstance(payload.get("preview"), dict) else {}
-    lines = ["### 研究计划"]
+    lines = [f"### {_t('markdown.titles.plan')}"]
     if content:
         lines.extend(["", content])
     if preview:
@@ -127,11 +141,11 @@ def _build_tool_start_markdown(content: str, payload: Dict[str, Any]) -> str:
     """
     tool_name = str(payload.get("tool_name") or "").strip()
     arguments = payload.get("arguments") if isinstance(payload.get("arguments"), dict) else {}
-    lines = ["### 工具调用开始"]
+    lines = [f"### {_t('markdown.titles.tool_start')}"]
     if tool_name:
-        lines.append(f"- **工具**: `{tool_name}`")
+        lines.append(f"- **{_t('markdown.labels.tool')}**: `{tool_name}`")
     if content:
-        lines.append(f"- **说明**: {content}")
+        lines.append(f"- **{_t('markdown.labels.description')}**: {content}")
     if arguments:
         lines.extend(["", "```json", stable_json_dumps(arguments), "```"])
     return "\n".join(lines).strip()
@@ -149,11 +163,12 @@ def _build_tool_result_markdown(content: str, payload: Dict[str, Any]) -> str:
     """
     tool_name = str(payload.get("tool_name") or "").strip()
     success = payload.get("success")
-    lines = ["### 工具调用结果"]
+    lines = [f"### {_t('markdown.titles.tool_result')}"]
     if tool_name:
-        lines.append(f"- **工具**: `{tool_name}`")
+        lines.append(f"- **{_t('markdown.labels.tool')}**: `{tool_name}`")
     if success is not None:
-        lines.append(f"- **结果**: {'成功' if bool(success) else '失败'}")
+        result_label = _t("markdown.values.success") if bool(success) else _t("markdown.values.failed")
+        lines.append(f"- **{_t('markdown.labels.result')}**: {result_label}")
     if content:
         lines.extend(["", content])
     return "\n".join(lines).strip()
@@ -169,7 +184,7 @@ def _build_progress_markdown(content: str, payload: Dict[str, Any]) -> str:
     Returns:
         研究进展 Markdown。
     """
-    lines = ["### 执行进展"]
+    lines = [f"### {_t('markdown.titles.progress')}"]
     if content:
         lines.extend(["", content])
     visible_items = [
@@ -200,7 +215,7 @@ def _build_titled_markdown(title: str, content: str, payload: Dict[str, Any]) ->
         lines.extend(["", content])
     reason = payload.get("reason")
     if reason:
-        lines.extend(["", f"- **原因**: {_markdown_value(reason)}"])
+        lines.extend(["", f"- **{_t('markdown.labels.reason')}**: {_markdown_value(reason)}"])
     return "\n".join(lines).strip()
 
 
@@ -214,14 +229,14 @@ def _humanize_key(key: str) -> str:
         面向用户展示的字段名。
     """
     labels = {
-        "scope": "股票来源",
-        "style": "风格",
-        "estimated_duration": "预计耗时",
-        "estimated_tokens": "预计 Token",
-        "selection_mode": "选择模式",
-        "tool_scope": "工具范围",
-        "tool_name": "工具",
-        "success": "状态",
+        "scope": _t("markdown.labels.scope"),
+        "style": _t("markdown.labels.style"),
+        "estimated_duration": _t("markdown.labels.estimated_duration"),
+        "estimated_tokens": _t("markdown.labels.estimated_tokens"),
+        "selection_mode": _t("markdown.labels.selection_mode"),
+        "tool_scope": _t("markdown.labels.tool_scope"),
+        "tool_name": _t("markdown.labels.tool"),
+        "success": _t("markdown.labels.status"),
     }
     return labels.get(key, key.replace("_", " "))
 
@@ -236,7 +251,7 @@ def _markdown_value(value: Any) -> str:
         适合放入 Markdown 列表项的字符串。
     """
     if isinstance(value, bool):
-        return "是" if value else "否"
+        return _t("markdown.values.yes") if value else _t("markdown.values.no")
     if isinstance(value, (dict, list)):
         return f"`{stable_json_dumps(value)}`"
     return str(value)

@@ -9,7 +9,11 @@ from sqlalchemy.orm import Session
 
 from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_providers.factory import build_chat_model
-from app.ai.stock_picker.interactive_research.constants import ACTIVE_RESEARCH_STATUSES, TERMINAL_RESEARCH_STATUSES
+from app.ai.stock_picker.interactive_research.constants import (
+    ACTIVE_RESEARCH_STATUSES,
+    TERMINAL_RESEARCH_STATUSES,
+    prompt_language,
+)
 from app.ai.stock_picker.interactive_research.flow_control import FlowControlDecision, parse_flow_control_decision
 from app.ai.stock_picker.interactive_research.models import InteractiveResearchMessage, InteractiveResearchRun
 from app.ai.stock_picker.interactive_research.persistence import append_message, write_checkpoint
@@ -21,13 +25,28 @@ from app.ai.stock_picker.interactive_research.planning import (
 from app.ai.stock_picker.interactive_research.serializers import serialize_message, serialize_run_summary
 from app.ai.stock_picker.interactive_research.tool_registry import ToolLoaderFactory
 from app.ai.stock_picker.interactive_research.workflow import (
-    FLOW_CONTROL_PROTOCOL_INSTRUCTION,
     MAX_FLOW_CONTROL_RETRIES,
     InteractiveResearchWorkflow,
     LLMFactory,
+    flow_control_protocol_instruction,
 )
 from app.core.config import settings
 from app.core.database import SessionLocal
+from app.core.i18n import i18n_service
+
+
+def _t(key: str, **kwargs: Any) -> str:
+    """读取交互式研究服务翻译文案。
+
+    Args:
+        key: backend 命名空间下的翻译 key。
+        **kwargs: 翻译模板变量。
+
+    Returns:
+        当前系统语言下的文案。
+    """
+    return i18n_service.t(f"ai_stock_picker.interactive.backend.{key}", **kwargs)
+
 
 class InteractiveResearchService:
     """聊天式 Deep Research 选股状态机服务。"""
@@ -74,7 +93,7 @@ class InteractiveResearchService:
             .first()
         )
         if active_run:
-            raise ValueError(f"An unfinished Deep Research run already exists: {active_run.run_id}")
+            raise ValueError(_t("errors.active_run_exists", run_id=active_run.run_id))
 
         parsed_requirement = parse_requirement(request_data)
         plan_payload = build_plan_payload(parsed_requirement)
@@ -109,7 +128,7 @@ class InteractiveResearchService:
             run,
             role="assistant",
             message_type="plan_card",
-            content="Research plan generated and awaiting approval.",
+            content=_t("messages.plan_generated"),
             payload={"preview": plan_preview_payload, "actions": ["approve", "cancel"]},
         )
         write_checkpoint(db, run, reason="plan_drafted", extra_payload={"plan_payload": plan_payload})
@@ -179,7 +198,7 @@ class InteractiveResearchService:
         """
         run = self._require_run(db, run_id, user_id)
         if run.status in TERMINAL_RESEARCH_STATUSES:
-            raise ValueError("Terminal runs cannot accept new messages")
+            raise ValueError(_t("errors.terminal_cannot_accept_messages"))
 
         message_status = "queued" if run.status in {"researching", "reflecting", "synthesizing"} else "completed"
         parent_message_id = (
@@ -249,7 +268,7 @@ class InteractiveResearchService:
         if action == "cancel":
             reason = content or str((payload or {}).get("reason") or "")
             return self.cancel_run(db, run_id, user_id, reason=reason)
-        raise ValueError(f"Unsupported action: {action}")
+        raise ValueError(_t("errors.unsupported_action", action=action))
 
     async def approve_plan(
         self, db: Session, run_id: UUID, user_id: int, background_tasks: Optional[Any] = None
@@ -271,7 +290,7 @@ class InteractiveResearchService:
         """
         run = self._require_run(db, run_id, user_id)
         if run.status != "awaiting_plan_approval":
-            raise ValueError("Only awaiting_plan_approval runs can approve a plan")
+            raise ValueError(_t("errors.only_awaiting_plan_approval_can_approve"))
         plan_payload = self._plan_payload_from_checkpoint(run)
 
         append_message(
@@ -279,7 +298,7 @@ class InteractiveResearchService:
             run,
             role="system",
             message_type="system_status",
-            content="Research plan approved.",
+            content=_t("messages.plan_approved"),
             payload={},
         )
         run.status = "researching"
@@ -319,7 +338,7 @@ class InteractiveResearchService:
         """
         run = self._require_run(db, run_id, user_id)
         if run.status in TERMINAL_RESEARCH_STATUSES:
-            raise ValueError("Terminal runs cannot be cancelled again")
+            raise ValueError(_t("errors.terminal_cannot_cancel"))
 
         run.status = "cancelled"
         run.current_stage = "cancelled"
@@ -331,7 +350,7 @@ class InteractiveResearchService:
             run,
             role="system",
             message_type="system_status",
-            content="Interactive research run cancelled.",
+            content=_t("messages.cancelled"),
             payload={"reason": reason or ""},
         )
         write_checkpoint(db, run, reason="cancelled")
@@ -440,7 +459,7 @@ class InteractiveResearchService:
         """
         run = self.get_run(db, run_id, user_id)
         if run is None:
-            raise LookupError("Deep Research run does not exist")
+            raise LookupError(_t("errors.run_not_found"))
         return run
 
     async def _handle_plan_llm_decision(
@@ -496,9 +515,9 @@ class InteractiveResearchService:
             plan_message: LLM 生成的计划说明；为空时使用默认说明。
         """
         if run.status != "awaiting_plan_approval":
-            raise ValueError("Only awaiting_plan_approval runs can update a plan")
+            raise ValueError(_t("errors.only_awaiting_plan_approval_can_update"))
         if not content.strip():
-            raise ValueError("Plan update instruction cannot be empty")
+            raise ValueError(_t("errors.plan_update_empty"))
 
         plan_payload = self._update_plan_payload_from_message(
             self._plan_payload_from_checkpoint(run),
@@ -513,7 +532,7 @@ class InteractiveResearchService:
             run,
             role="assistant",
             message_type="plan_card",
-            content=plan_message or "Research plan updated from the additional input and awaiting approval.",
+            content=plan_message or _t("messages.plan_updated"),
             payload={"preview": plan_preview_payload, "actions": ["approve", "cancel"]},
         )
         write_checkpoint(db, run, reason="plan_updated", extra_payload={"plan_payload": plan_payload})
@@ -541,7 +560,7 @@ class InteractiveResearchService:
         )
         updated_plan["user_inputs"] = user_inputs
         updated_plan["objective_summary"] = plan_message or (
-            f"{self._plan_objective(updated_plan)}\nAdditional input: {user_content.strip()}"
+            f"{self._plan_objective(updated_plan)}\n{_t('messages.additional_input')}: {user_content.strip()}"
         )
         return updated_plan
 
@@ -561,18 +580,10 @@ class InteractiveResearchService:
         Returns:
             LangChain 消息列表。
         """
-        prompt = (
-            "You control the planning stage for an interactive stock research chat. "
-            "Do not call tools. Decide whether to continue refining the plan, ask one user question, "
-            "or mark the plan done. "
-            f"{FLOW_CONTROL_PROTOCOL_INSTRUCTION} "
-            "Use continue to update the plan, ask when a user answer is needed, done when the user "
-            "clearly wants to start research.\n\n"
-            f"Current plan:\n{stable_json_dumps(plan_payload)}"
-        )
+        prompt = _build_planning_stage_prompt(plan_payload)
         return [
             SystemMessage(content=prompt),
-            HumanMessage(content=f"Run requirement: {run.raw_requirement}\nUser input: {content}"),
+            HumanMessage(content=_build_planning_user_message(run.raw_requirement, content)),
         ]
 
     def _build_llm(self) -> Any:
@@ -610,13 +621,7 @@ class InteractiveResearchService:
                 retry_count += 1
                 messages.append(
                     HumanMessage(
-                        content=(
-                            "Your previous response did not follow the required flow-control protocol and was not "
-                            f"shown to the user. Parser error: {exc}.\n"
-                            f"{FLOW_CONTROL_PROTOCOL_INSTRUCTION}\n"
-                            "Re-output the planning decision now with the ACTION line first and the body starting "
-                            "on the second line."
-                        )
+                        content=_build_planning_retry_message(exc)
                     )
                 )
 
@@ -657,7 +662,7 @@ class InteractiveResearchService:
             run,
             role="system",
             message_type="system_status",
-            content="Answer received. Research will continue from the checkpoint.",
+            content=_t("messages.answer_received"),
             payload={"answer_message_id": str(message.message_id)},
         )
         write_checkpoint(
@@ -697,7 +702,7 @@ class InteractiveResearchService:
             最多 60 字的标题。
         """
         normalized = " ".join(requirement.split())
-        return normalized[:60] or "Deep Research Stock Picker"
+        return normalized[:60] or _t("messages.default_title")
 
     def _handle_workflow_exception(
         self,
@@ -723,7 +728,7 @@ class InteractiveResearchService:
 
         run.status = "failed"
         run.current_stage = "failed"
-        run.error_message = f"Workflow failed: {exc}"
+        run.error_message = _t("errors.workflow_failed", error=exc)
         run.version += 1
         append_message(
             db,
@@ -766,3 +771,71 @@ class InteractiveResearchService:
 
 
 interactive_research_service = InteractiveResearchService()
+
+
+def _build_planning_stage_prompt(plan_payload: Dict[str, Any]) -> str:
+    """构造计划阶段流程控制提示词。
+
+    Args:
+        plan_payload: 当前计划 payload。
+
+    Returns:
+        当前系统语言下的计划阶段提示词。
+    """
+    if prompt_language() == "en":
+        return (
+            "You control the planning stage for an interactive stock research chat. "
+            "Do not call tools. Decide whether to continue refining the plan, ask one user question, "
+            "or mark the plan done. "
+            f"{flow_control_protocol_instruction()} "
+            "Use continue to update the plan, ask when a user answer is needed, done when the user "
+            "clearly wants to start research.\n\n"
+            f"Current plan:\n{stable_json_dumps(plan_payload)}"
+        )
+    return (
+        "你负责交互式股票研究聊天的规划阶段。不要调用工具。"
+        "判断是继续细化计划、向用户提出一个问题，还是标记计划完成。"
+        f"{flow_control_protocol_instruction()} "
+        "使用 CONTINUE 更新计划；只有需要用户回答时使用 ASK；用户明确希望开始研究时使用 DONE。\n\n"
+        f"当前计划:\n{stable_json_dumps(plan_payload)}"
+    )
+
+
+def _build_planning_user_message(requirement: str, content: str) -> str:
+    """构造计划阶段用户消息。
+
+    Args:
+        requirement: run 原始需求。
+        content: 用户本轮输入。
+
+    Returns:
+        当前系统语言下的用户消息。
+    """
+    if prompt_language() == "en":
+        return f"Run requirement: {requirement}\nUser input: {content}"
+    return f"运行需求: {requirement}\n用户输入: {content}"
+
+
+def _build_planning_retry_message(exc: ValueError) -> str:
+    """构造计划阶段协议纠错提示词。
+
+    Args:
+        exc: 协议解析错误。
+
+    Returns:
+        当前系统语言下的纠错提示词。
+    """
+    if prompt_language() == "en":
+        return (
+            "Your previous response did not follow the required flow-control protocol and was not "
+            f"shown to the user. Parser error: {exc}.\n"
+            f"{flow_control_protocol_instruction()}\n"
+            "Re-output the planning decision now with the ACTION line first and the body starting "
+            "on the second line."
+        )
+    return (
+        "你上一次回复没有遵循必需的流程控制协议，且不会展示给用户。"
+        f"解析错误: {exc}.\n"
+        f"{flow_control_protocol_instruction()}\n"
+        "现在重新输出规划决策，第一行必须是 ACTION 行，正文从第二行开始。"
+    )
