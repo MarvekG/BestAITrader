@@ -12,6 +12,7 @@ from app.ai.llm_providers.factory import build_chat_model
 from app.ai.stock_picker.interactive_research.constants import (
     ACTIVE_RESEARCH_STATUSES,
     TERMINAL_RESEARCH_STATUSES,
+    planning_initial_user_message,
     planning_retry_message,
     planning_stage_prompt,
     planning_user_message,
@@ -76,7 +77,7 @@ class InteractiveResearchService:
             notification_callback=self._push_realtime_update,
         )
 
-    def create_run(self, user_id: int, request_data: Dict[str, Any]) -> InteractiveResearchRun:
+    async def create_run(self, user_id: int, request_data: Dict[str, Any]) -> InteractiveResearchRun:
         """创建聊天式研究 run，并写入首条用户消息和计划消息。
 
         Args:
@@ -130,18 +131,45 @@ class InteractiveResearchService:
                 content=parsed_requirement["raw_requirement"],
                 payload={"request": request_data},
             )
+            initial_plan_decision = await self._generate_initial_plan_decision(run, plan_payload)
             append_message(
                 db,
                 run,
                 role="assistant",
                 message_type="plan_card",
-                content=_t("messages.plan_generated"),
+                content=initial_plan_decision.message,
                 payload={"preview": plan_preview_payload, "actions": ["approve", "cancel"]},
             )
             write_checkpoint(db, run, reason="plan_drafted", extra_payload={"plan_payload": plan_payload})
             db.commit()
             db.refresh(run)
             return run
+
+    async def _generate_initial_plan_decision(
+        self,
+        run: InteractiveResearchRun,
+        plan_payload: Dict[str, Any],
+    ) -> FlowControlDecision:
+        """使用 PlanAgent 生成首轮计划卡正文。
+
+        Args:
+            run: 当前研究 run。
+            plan_payload: 本地结构化计划初稿。
+
+        Returns:
+            PlanAgent 生成的首轮计划展示内容。
+
+        Raises:
+            ValueError: PlanAgent 未按首轮计划协议返回 continue 时抛出。
+        """
+        messages = [
+            SystemMessage(content=_build_planning_stage_prompt(plan_payload)),
+            HumanMessage(content=planning_initial_user_message(run.raw_requirement)),
+        ]
+        decision = await self._invoke_plan_flow_control(run, messages)
+        if decision.status != "continue":
+            raise ValueError(f"Initial PlanAgent response must use action=continue, got {decision.status}")
+        return decision
 
     def list_runs(self, user_id: int) -> List[InteractiveResearchRun]:
         """查询当前用户的研究 run 列表。
@@ -176,6 +204,31 @@ class InteractiveResearchService:
                 .filter(InteractiveResearchRun.run_id == run_id, InteractiveResearchRun.user_id == user_id)
                 .first()
             )
+
+    def delete_run(self, run_id: UUID, user_id: int) -> bool:
+        """删除当前用户拥有的聊天式研究 run。
+
+        Args:
+            run_id: 研究 run ID。
+            user_id: 当前用户 ID。
+
+        Returns:
+            删除成功返回 True；run 不存在或不属于当前用户时返回 False。
+        """
+        with SessionLocal() as db:
+            run = (
+                db.query(InteractiveResearchRun)
+                .filter(InteractiveResearchRun.run_id == run_id, InteractiveResearchRun.user_id == user_id)
+                .first()
+            )
+            if run is None:
+                return False
+            db.query(InteractiveResearchMessage).filter(InteractiveResearchMessage.run_id == run_id).delete(
+                synchronize_session=False
+            )
+            db.delete(run)
+            db.commit()
+            return True
 
     async def append_user_message(
         self,

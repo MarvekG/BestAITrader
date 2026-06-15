@@ -2573,6 +2573,7 @@
           "queued_input_appended": "New user input was appended after the tool call and added to the next agent turn.",
           "tool_empty_result": "Tool returned an empty result.",
           "answer_received": "Answer received. Research will continue from the checkpoint.",
+          "run_deleted": "Deep Research run deleted.",
           "default_title": "Deep Research Stock Picker",
           "additional_input": "Additional input"
         },

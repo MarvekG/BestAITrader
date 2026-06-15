@@ -375,12 +375,13 @@ async def _execute_background(monkeypatch, service, db_session, run_id, plan_pay
     await service.execute_workflow_background(run_id, plan_payload)
 
 
-def test_create_run_writes_user_message_plan_card_and_checkpoint(db_session):
+@pytest.mark.asyncio
+async def test_create_run_writes_user_message_plan_card_and_checkpoint(db_session):
     """创建 run 只写聊天消息和 checkpoint，不依赖 artifact。"""
     user_id = _create_user_id(db_session)
     service, _, _ = _service_with_fake_runner()
 
-    run = service.create_run(user_id, _request_data())
+    run = await service.create_run(user_id, _request_data())
     messages = service.get_messages(run.run_id, user_id)
 
     assert run.status == "awaiting_plan_approval"
@@ -428,7 +429,7 @@ async def test_realtime_update_pushes_markdown_display_message(db_session, monke
 
     user_id = _create_user_id(db_session)
     service, _, _ = _service_with_fake_runner()
-    run = service.create_run(user_id, _request_data())
+    run = await service.create_run(user_id, _request_data())
     plan_message = service.get_messages(run.run_id, user_id)[1]
     pushed_payload = {}
 
@@ -469,7 +470,7 @@ async def test_plan_stage_user_input_iterates_plan_card(db_session):
     """计划确认阶段的普通聊天输入应迭代 plan，而不是走 revise action。"""
     user_id = _create_user_id(db_session)
     service, _, _ = _service_with_fake_runner()
-    run = service.create_run(user_id, _request_data())
+    run = await service.create_run(user_id, _request_data())
 
     message = await service.append_user_message(run.run_id, user_id, "Exclude banks and favor AI hardware")
     messages = service.get_messages(run.run_id, user_id)
@@ -486,7 +487,7 @@ async def test_approve_plan_runs_single_chat_workflow_and_writes_final_result(db
     """确认计划后执行单 Agent 工具循环并把结果写入消息流。"""
     user_id = _create_user_id(db_session)
     service, fake_llm, fake_tool = _service_with_fake_runner()
-    run = service.create_run(user_id, _request_data())
+    run = await service.create_run(user_id, _request_data())
     run_id = run.run_id
 
     approved = await service.process_action(run_id, user_id, "approve")
@@ -516,7 +517,7 @@ async def test_invalid_flow_control_output_retries_before_completing(db_session,
     user_id = _create_user_id(db_session)
     service, fake_llm, _ = _service_with_fake_runner()
     fake_llm.invalid_final_response_once = True
-    run = service.create_run(user_id, _request_data())
+    run = await service.create_run(user_id, _request_data())
     run_id = run.run_id
 
     await service.process_action(run_id, user_id, "approve")
@@ -539,7 +540,7 @@ async def test_multiple_flow_control_calls_use_last_decision(db_session, monkeyp
     user_id = _create_user_id(db_session)
     service, fake_llm, _ = _service_with_fake_runner()
     fake_llm.multiple_final_control_calls = True
-    run = service.create_run(user_id, _request_data())
+    run = await service.create_run(user_id, _request_data())
     run_id = run.run_id
 
     await service.process_action(run_id, user_id, "approve")
@@ -559,7 +560,7 @@ async def test_mixed_evidence_and_flow_control_executes_tool_before_decision(db_
     user_id = _create_user_id(db_session)
     service, fake_llm, fake_tool = _service_with_fake_runner()
     fake_llm.mixed_tool_and_flow_control = True
-    run = service.create_run(user_id, _request_data())
+    run = await service.create_run(user_id, _request_data())
     run_id = run.run_id
 
     await service.process_action(run_id, user_id, "approve")
@@ -581,7 +582,7 @@ async def test_search_news_result_reuses_tool_output_summarizer(db_session, monk
     """新闻搜索结果进入 agent 上下文前应复用现有工具输出压缩链路。"""
     user_id = _create_user_id(db_session)
     service, _, _ = _service_with_fake_runner()
-    run = service.create_run(user_id, _request_data())
+    run = await service.create_run(user_id, _request_data())
     run_id = run.run_id
 
     def fake_should_summarize(tool_name, content):
@@ -612,7 +613,7 @@ async def test_running_user_input_is_queued_and_processed_after_tool_step(db_ses
     """运行中插入的用户输入先排队，下一轮工具安全点后并入上下文。"""
     user_id = _create_user_id(db_session)
     service, _, _ = _service_with_fake_runner()
-    run = service.create_run(user_id, _request_data())
+    run = await service.create_run(user_id, _request_data())
     run_id = run.run_id
     plan_payload = run.checkpoint_payload["plan_payload"]
     run.status = "researching"
@@ -637,7 +638,7 @@ async def test_answer_pending_question_writes_parented_user_message_and_continue
     """awaiting_user_input 的回答应关联问题并继续执行 workflow。"""
     user_id = _create_user_id(db_session)
     service, fake_llm, _ = _service_with_fake_runner()
-    run = service.create_run(user_id, _request_data())
+    run = await service.create_run(user_id, _request_data())
     run_id = run.run_id
     fake_llm.ask_on_first_research = True
 
@@ -666,7 +667,7 @@ async def test_cancel_run_marks_terminal_without_artifacts(db_session):
     """cancel 立即终止 run 且只写系统消息。"""
     user_id = _create_user_id(db_session)
     service, _, _ = _service_with_fake_runner()
-    run = service.create_run(user_id, _request_data())
+    run = await service.create_run(user_id, _request_data())
 
     cancelled = await service.process_action(run.run_id, user_id, "cancel", content="User stopped")
 
@@ -675,8 +676,11 @@ async def test_cancel_run_marks_terminal_without_artifacts(db_session):
     assert "system_status" in _message_types(db_session, run.run_id)
 
 
-def test_interactive_http_contract_is_chat_only(client, auth_headers):
+def test_interactive_http_contract_is_chat_only(client, auth_headers, monkeypatch):
     """HTTP 契约只暴露 run、messages 和 actions，不再暴露 result/artifacts。"""
+    fake_llm = FakeInteractiveResearchLLM()
+    monkeypatch.setattr(service_module.interactive_research_service, "_llm_factory", lambda: fake_llm)
+
     create_response = client.post(
         "/api/v1/ai-stock-picker/interactive/runs",
         json={"requirement": "Find resilient A-share policy catalyst opportunities"},
@@ -705,3 +709,54 @@ def test_interactive_http_contract_is_chat_only(client, auth_headers):
     assert result_response.status_code == 404
     assert artifacts_response.status_code == 404
     assert revise_response.status_code == 422
+
+
+def test_delete_interactive_research_run_removes_messages_and_is_user_scoped(
+    client,
+    auth_headers,
+    db_session,
+    monkeypatch,
+):
+    """删除 Deep Research run 时应按用户隔离，并级联删除消息。"""
+    fake_llm = FakeInteractiveResearchLLM()
+    monkeypatch.setattr(service_module.interactive_research_service, "_llm_factory", lambda: fake_llm)
+
+    create_response = client.post(
+        "/api/v1/ai-stock-picker/interactive/runs",
+        json={"requirement": "Find resilient A-share policy catalyst opportunities"},
+        headers=auth_headers,
+    )
+    assert create_response.status_code == 201
+    run_id = create_response.json()["run"]["run_id"]
+
+    other_username = f"interactive_other_{uuid.uuid4().hex[:8]}"
+    create_user(
+        db_session,
+        UserCreate(
+            username=other_username,
+            email=f"{other_username}@example.com",
+            password="password123",
+        ),
+    )
+    login_response = client.post(
+        "/api/v1/auth/login",
+        data={"username": other_username, "password": "password123"},
+    )
+    other_headers = {"Authorization": f"Bearer {login_response.json()['access_token']}"}
+
+    forbidden_response = client.delete(
+        f"/api/v1/ai-stock-picker/interactive/runs/{run_id}",
+        headers=other_headers,
+    )
+    delete_response = client.delete(
+        f"/api/v1/ai-stock-picker/interactive/runs/{run_id}",
+        headers=auth_headers,
+    )
+    missing_response = client.get(f"/api/v1/ai-stock-picker/interactive/runs/{run_id}", headers=auth_headers)
+    messages_count = db_session.query(InteractiveResearchMessage).filter_by(run_id=uuid.UUID(run_id)).count()
+
+    assert forbidden_response.status_code == 404
+    assert delete_response.status_code == 200
+    assert delete_response.json()["message"]
+    assert missing_response.status_code == 404
+    assert messages_count == 0

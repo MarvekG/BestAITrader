@@ -2573,6 +2573,7 @@
           "queued_input_appended": "新的用户输入已在工具调用后追加，并加入下一轮 Agent 上下文。",
           "tool_empty_result": "工具返回了空结果。",
           "answer_received": "已收到回答，研究将从 checkpoint 继续。",
+          "run_deleted": "Deep Research 任务已删除。",
           "default_title": "AI深度研究选股",
           "additional_input": "补充输入"
         },

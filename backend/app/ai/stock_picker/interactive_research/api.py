@@ -90,7 +90,7 @@ async def create_interactive_research_run(
         HTTPException: 当前用户已有活跃 run 或写入失败时抛出。
     """
     try:
-        run = interactive_research_service.create_run(current_user.id, payload.model_dump())
+        run = await interactive_research_service.create_run(current_user.id, payload.model_dump())
     except Exception as exc:
         _raise_service_error(exc)
     return InteractiveResearchRunResponse(
@@ -137,6 +137,29 @@ async def get_interactive_research_run(
     """
     run = _require_run(run_id, current_user)
     return InteractiveResearchRunSummary(**interactive_research_service.serialize_run_summary(run))
+
+
+@router.delete("/runs/{run_id}", status_code=status.HTTP_200_OK)
+async def delete_interactive_research_run(
+    run_id: UUID,
+    current_user: User = Depends(get_current_user),
+):
+    """删除当前用户拥有的聊天式 Deep Research run。
+
+    Args:
+        run_id: 研究 run ID。
+        current_user: 当前认证用户依赖。
+
+    Returns:
+        删除成功消息。
+
+    Raises:
+        HTTPException: run 不存在时抛出。
+    """
+    deleted = interactive_research_service.delete_run(run_id, current_user.id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_t("errors.run_not_found"))
+    return {"message": _t("messages.run_deleted")}
 
 
 @router.get("/runs/{run_id}/messages", response_model=list[InteractiveResearchMessageResponse])
