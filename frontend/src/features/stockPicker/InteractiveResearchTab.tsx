@@ -184,15 +184,6 @@ const getToolName = (item: InteractiveResearchMessage): string | null => {
   return typeof toolName === 'string' && toolName.trim() ? toolName.trim() : null;
 };
 
-const getPlanPreview = (item: InteractiveResearchMessage): Record<string, unknown> | null => {
-  if (item.message_type !== 'plan_card') {
-    return null;
-  }
-  const payload = asRecord(item.payload);
-  const preview = payload.preview;
-  return isRecord(preview) ? preview : null;
-};
-
 const getNumberValue = (value: unknown): number => {
   const numberValue = Number(value || 0);
   return Number.isFinite(numberValue) ? numberValue : 0;
@@ -247,11 +238,6 @@ export const InteractiveResearchTab: React.FC = () => {
 
   const getPhaseLabel = React.useCallback(
     (phase: string) => t(`ai_stock_picker.interactive.phases.${phase}`, { defaultValue: phase }),
-    [t],
-  );
-
-  const getPreviewLabel = React.useCallback(
-    (key: string) => t(`ai_stock_picker.interactive.fields.${key}`, { defaultValue: key.replace(/_/g, ' ') }),
     [t],
   );
 
@@ -452,7 +438,6 @@ export const InteractiveResearchTab: React.FC = () => {
       const isToolStart = item.message_type === 'tool_start';
       const isToolMessage = isToolResult || isToolStart;
       const toolName = isToolMessage ? getToolName(item) : null;
-      const planPreview = getPlanPreview(item);
       let toolJsonPreview: string | null = null;
       if (isToolResult) {
         toolJsonPreview = getToolResultPreview(item);
@@ -496,20 +481,6 @@ export const InteractiveResearchTab: React.FC = () => {
                 <div className="interactive-research-markdown">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
                 </div>
-                {planPreview && (
-                  <Descriptions size="small" column={1} style={{ marginTop: 8 }}>
-                    {Object.entries(planPreview).map(([key, value]) => {
-                      if (value === null || value === undefined || value === '') {
-                        return null;
-                      }
-                      return (
-                        <Descriptions.Item key={key} label={getPreviewLabel(key)}>
-                          {Array.isArray(value) || isRecord(value) ? JSON.stringify(value) : String(value)}
-                        </Descriptions.Item>
-                      );
-                    })}
-                  </Descriptions>
-                )}
               </>
             )}
           </div>
@@ -521,7 +492,6 @@ export const InteractiveResearchTab: React.FC = () => {
       token.colorBorderSecondary,
       token.colorFillAlter,
       token.colorPrimaryBg,
-      getPreviewLabel,
       t,
     ],
   );

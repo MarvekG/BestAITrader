@@ -120,10 +120,7 @@ def _build_plan_card_markdown(content: str, payload: Dict[str, Any]) -> str:
     Returns:
         计划卡片 Markdown。
     """
-    lines = [f"### {_t('markdown.titles.plan')}"]
-    if content:
-        lines.extend(["", content])
-    return "\n".join(lines).strip()
+    return content or _t("markdown.empty")
 
 
 def _build_tool_start_markdown(content: str, payload: Dict[str, Any]) -> str:

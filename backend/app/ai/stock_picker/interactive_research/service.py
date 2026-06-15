@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from sqlalchemy.orm import Session, object_session
 
 from app.ai.json_utils import stable_json_dumps
@@ -13,15 +13,7 @@ from app.ai.stock_picker.interactive_research.constants import (
     ACTIVE_RESEARCH_STATUSES,
     TERMINAL_RESEARCH_STATUSES,
     planning_initial_user_message,
-    planning_retry_message,
     planning_stage_prompt,
-    planning_user_message,
-)
-from app.ai.stock_picker.interactive_research.flow_control import (
-    FLOW_CONTROL_TOOL_NAME,
-    FlowControlDecision,
-    control_research_flow,
-    flow_control_decision_from_tool_args,
 )
 from app.ai.stock_picker.interactive_research.models import InteractiveResearchMessage, InteractiveResearchRun
 from app.ai.stock_picker.interactive_research.persistence import accumulate_llm_usage, append_message, write_checkpoint
@@ -33,7 +25,6 @@ from app.ai.stock_picker.interactive_research.planning import (
 from app.ai.stock_picker.interactive_research.serializers import serialize_message, serialize_run_summary
 from app.ai.stock_picker.interactive_research.tool_registry import ToolLoaderFactory
 from app.ai.stock_picker.interactive_research.workflow import (
-    MAX_FLOW_CONTROL_RETRIES,
     InteractiveResearchWorkflow,
     LLMFactory,
 )
@@ -76,6 +67,7 @@ class InteractiveResearchService:
             llm_factory=llm_factory,
             notification_callback=self._push_realtime_update,
         )
+        self._plan_chat_histories: Dict[UUID, List[Dict[str, str]]] = {}
 
     async def create_run(self, user_id: int, request_data: Dict[str, Any]) -> InteractiveResearchRun:
         """创建聊天式研究 run，并写入首条用户消息和计划消息。
@@ -131,25 +123,29 @@ class InteractiveResearchService:
                 content=parsed_requirement["raw_requirement"],
                 payload={"request": request_data},
             )
-            initial_plan_decision = await self._generate_initial_plan_decision(run, plan_payload)
+            initial_plan_message = await self._generate_initial_plan_message(run, plan_payload)
             append_message(
                 db,
                 run,
                 role="assistant",
                 message_type="plan_card",
-                content=initial_plan_decision.message,
+                content=initial_plan_message,
                 payload={"preview": plan_preview_payload, "actions": ["approve", "cancel"]},
             )
             write_checkpoint(db, run, reason="plan_drafted", extra_payload={"plan_payload": plan_payload})
+            self._plan_chat_histories[run.run_id] = [
+                {"role": "user", "content": parsed_requirement["raw_requirement"]},
+                {"role": "assistant", "content": initial_plan_message},
+            ]
             db.commit()
             db.refresh(run)
             return run
 
-    async def _generate_initial_plan_decision(
+    async def _generate_initial_plan_message(
         self,
         run: InteractiveResearchRun,
         plan_payload: Dict[str, Any],
-    ) -> FlowControlDecision:
+    ) -> str:
         """使用 PlanAgent 生成首轮计划卡正文。
 
         Args:
@@ -157,19 +153,13 @@ class InteractiveResearchService:
             plan_payload: 本地结构化计划初稿。
 
         Returns:
-            PlanAgent 生成的首轮计划展示内容。
-
-        Raises:
-            ValueError: PlanAgent 未按首轮计划协议返回 continue 时抛出。
+            PlanAgent 生成的首轮 Markdown 计划。
         """
         messages = [
             SystemMessage(content=_build_planning_stage_prompt(plan_payload)),
             HumanMessage(content=planning_initial_user_message(run.raw_requirement)),
         ]
-        decision = await self._invoke_plan_flow_control(run, messages)
-        if decision.status != "continue":
-            raise ValueError(f"Initial PlanAgent response must use action=continue, got {decision.status}")
-        return decision
+        return await self._invoke_plan_markdown(run, messages)
 
     def list_runs(self, user_id: int) -> List[InteractiveResearchRun]:
         """查询当前用户的研究 run 列表。
@@ -228,6 +218,7 @@ class InteractiveResearchService:
             )
             db.delete(run)
             db.commit()
+            self._plan_chat_histories.pop(run_id, None)
             return True
 
     async def append_user_message(
@@ -404,6 +395,7 @@ class InteractiveResearchService:
             background_tasks.add_task(self.execute_workflow_background, run.run_id, plan_payload)
 
         db.refresh(run)
+        self._plan_chat_histories.pop(run.run_id, None)
         return run
 
     def cancel_run(
@@ -470,6 +462,7 @@ class InteractiveResearchService:
         write_checkpoint(db, run, reason="cancelled")
         db.commit()
         db.refresh(run)
+        self._plan_chat_histories.pop(run.run_id, None)
         return run
 
     def get_messages(
@@ -584,7 +577,7 @@ class InteractiveResearchService:
         content: str,
         background_tasks: Optional[Any] = None,
     ) -> None:
-        """用 LLM 决定计划阶段是继续迭代、提问还是开始研究。
+        """用 LLM 根据计划阶段历史修订 Markdown 研究计划。
 
         Args:
             run: 当前研究 run。
@@ -594,25 +587,8 @@ class InteractiveResearchService:
         db = self._session_for_run(run)
         plan_payload = self._plan_payload_from_checkpoint(run)
         messages = self._build_plan_turn_messages(run, content, plan_payload)
-        decision = await self._invoke_plan_flow_control(run, messages)
-        if decision.status == "ask":
-            message = append_message(
-                db,
-                run,
-                role="assistant",
-                message_type="assistant_question",
-                content=decision.message,
-                payload={"phase": "planning"},
-            )
-            run.pending_message_id = message.message_id
-            write_checkpoint(db, run, reason="plan_question", extra_payload={"plan_payload": plan_payload})
-            return
-        if decision.status == "done":
-            plan_payload = self._update_plan_payload_from_message(plan_payload, content, decision.message)
-            write_checkpoint(db, run, reason="plan_llm_done", extra_payload={"plan_payload": plan_payload})
-            await self._approve_plan_run(run, background_tasks=background_tasks)
-            return
-        self._patch_plan_from_user_input(run, content, plan_message=decision.message)
+        plan_message = await self._invoke_plan_markdown(run, messages)
+        self._patch_plan_from_user_input(run, content, plan_message=plan_message)
 
     def _patch_plan_from_user_input(
         self,
@@ -646,9 +622,10 @@ class InteractiveResearchService:
             run,
             role="assistant",
             message_type="plan_card",
-            content=plan_message or _t("messages.plan_updated"),
+            content=plan_message,
             payload={"preview": plan_preview_payload, "actions": ["approve", "cancel"]},
         )
+        self._append_plan_chat_history(run, content, plan_message or "")
         write_checkpoint(db, run, reason="plan_updated", extra_payload={"plan_payload": plan_payload})
 
     def _update_plan_payload_from_message(
@@ -693,10 +670,86 @@ class InteractiveResearchService:
             LangChain 消息列表。
         """
         prompt = _build_planning_stage_prompt(plan_payload)
-        return [
-            SystemMessage(content=prompt),
-            HumanMessage(content=_build_planning_user_message(run.raw_requirement, content)),
-        ]
+        messages: List[Any] = [SystemMessage(content=prompt)]
+        history = self._plan_chat_history(run)
+        for item in history:
+            role = item.get("role")
+            item_content = str(item.get("content") or "")
+            if role == "user":
+                messages.append(HumanMessage(content=item_content))
+            elif role == "assistant":
+                messages.append(AIMessage(content=item_content))
+        if not any(isinstance(item, HumanMessage) for item in messages):
+            messages.append(HumanMessage(content=content))
+        elif not history or history[-1].get("content") != content:
+            messages.append(HumanMessage(content=content))
+        return messages
+
+    def _plan_chat_history(self, run: InteractiveResearchRun) -> List[Dict[str, str]]:
+        """读取计划阶段对话历史，优先使用进程内缓存。
+
+        Args:
+            run: 当前研究 run。
+
+        Returns:
+            计划阶段 user/assistant 历史消息。
+        """
+        cached_history = self._plan_chat_histories.get(run.run_id)
+        if cached_history is not None:
+            return list(cached_history)
+        history = self._restore_plan_chat_history_from_messages(run)
+        self._plan_chat_histories[run.run_id] = history
+        return list(history)
+
+    def _restore_plan_chat_history_from_messages(self, run: InteractiveResearchRun) -> List[Dict[str, str]]:
+        """从已持久化消息恢复计划阶段对话历史。
+
+        Args:
+            run: 当前研究 run。
+
+        Returns:
+            从消息表恢复出的计划阶段 user/assistant 历史。
+        """
+        db = self._session_for_run(run)
+        messages = (
+            db.query(InteractiveResearchMessage)
+            .filter(
+                InteractiveResearchMessage.run_id == run.run_id,
+                InteractiveResearchMessage.visible_to_user.is_(True),
+                InteractiveResearchMessage.message_type.in_(["user_input", "plan_card"]),
+            )
+            .order_by(InteractiveResearchMessage.sequence_no.asc())
+            .all()
+        )
+        history = []
+        for item in messages:
+            if item.role == "user":
+                history.append({"role": "user", "content": item.content or ""})
+            elif item.role == "assistant" and item.message_type == "plan_card":
+                history.append({"role": "assistant", "content": item.content or ""})
+        return history
+
+    def _append_plan_chat_history(
+        self,
+        run: InteractiveResearchRun,
+        user_content: str,
+        assistant_content: str,
+    ) -> List[Dict[str, str]]:
+        """追加本轮计划阶段对话到 checkpoint 历史。
+
+        Args:
+            run: 当前研究 run。
+            user_content: 用户本轮输入。
+            assistant_content: PlanAgent 本轮 Markdown 输出。
+
+        Returns:
+            更新后的计划阶段对话历史。
+        """
+        history = self._plan_chat_history(run)
+        history.append({"role": "user", "content": user_content})
+        history.append({"role": "assistant", "content": assistant_content})
+        self._plan_chat_histories[run.run_id] = history
+        return history
 
     def _build_llm(self) -> Any:
         """构造计划阶段使用的 LLM。
@@ -708,56 +761,32 @@ class InteractiveResearchService:
             return self._llm_factory()
         return build_chat_model(model=settings.LLM_MODEL, temperature=0.2)
 
-    async def _invoke_plan_flow_control(self, run: InteractiveResearchRun, messages: List[Any]) -> FlowControlDecision:
-        """调用计划阶段 LLM，并在协议错误时要求重输。
+    async def _invoke_plan_markdown(self, run: InteractiveResearchRun, messages: List[Any]) -> str:
+        """调用计划阶段 LLM 生成 Markdown 研究计划。
 
         Args:
             run: 当前研究 run。
             messages: 计划阶段 LLM 消息上下文。
 
         Returns:
-            解析后的流程控制决策。
-
-        Raises:
-            ValueError: 多次重试后仍无法解析协议时抛出。
+            PlanAgent 输出的 Markdown 正文。
         """
         llm = self._build_llm()
-        llm_with_tools = llm.bind_tools([control_research_flow])
-        retry_count = 0
-        while True:
-            response = await llm_with_tools.ainvoke(messages)
-            usage_record = record_llm_usage(
-                response,
-                settings.LLM_MODEL,
-                "interactive_stock_research",
-                session_id=run.run_id,
-                workflow="interactive_stock_research",
-                stage="planning",
-                call_kind="plan_control",
-                iteration_index=retry_count + 1,
-            )
-            db = object_session(run)
-            if db is not None:
-                accumulate_llm_usage(db, run, usage_record)
-            messages.append(response)
-            try:
-                tool_calls = [
-                    call
-                    for call in list(getattr(response, "tool_calls", []) or [])
-                    if str(call.get("name") or "") == FLOW_CONTROL_TOOL_NAME
-                ]
-                if not tool_calls:
-                    raise ValueError(f"Expected at least one {FLOW_CONTROL_TOOL_NAME} call")
-                return flow_control_decision_from_tool_args(tool_calls[-1].get("args"))
-            except ValueError as exc:
-                if retry_count >= MAX_FLOW_CONTROL_RETRIES:
-                    raise ValueError(f"Plan LLM flow-control tool call invalid after retry: {exc}") from exc
-                retry_count += 1
-                messages.append(
-                    HumanMessage(
-                        content=_build_planning_retry_message(exc)
-                    )
-                )
+        response = await llm.ainvoke(messages)
+        usage_record = record_llm_usage(
+            response,
+            settings.LLM_MODEL,
+            "interactive_stock_research",
+            session_id=run.run_id,
+            workflow="interactive_stock_research",
+            stage="planning",
+            call_kind="plan_markdown",
+            iteration_index=1,
+        )
+        db = object_session(run)
+        if db is not None:
+            accumulate_llm_usage(db, run, usage_record)
+        return str(getattr(response, "content", "") or "").strip()
 
     def _plan_objective(self, plan_payload: Dict[str, Any]) -> str:
         """读取计划目标摘要。
@@ -914,29 +943,4 @@ def _build_planning_stage_prompt(plan_payload: Dict[str, Any]) -> str:
     Returns:
         当前系统语言下的计划阶段提示词。
     """
-    return planning_stage_prompt(stable_json_dumps(plan_payload), FLOW_CONTROL_TOOL_NAME)
-
-
-def _build_planning_user_message(requirement: str, content: str) -> str:
-    """构造计划阶段用户消息。
-
-    Args:
-        requirement: run 原始需求。
-        content: 用户本轮输入。
-
-    Returns:
-        当前系统语言下的用户消息。
-    """
-    return planning_user_message(requirement, content)
-
-
-def _build_planning_retry_message(exc: ValueError) -> str:
-    """构造计划阶段协议纠错提示词。
-
-    Args:
-        exc: 协议解析错误。
-
-    Returns:
-        当前系统语言下的纠错提示词。
-    """
-    return planning_retry_message(FLOW_CONTROL_TOOL_NAME, str(exc))
+    return planning_stage_prompt(stable_json_dumps(plan_payload), "")

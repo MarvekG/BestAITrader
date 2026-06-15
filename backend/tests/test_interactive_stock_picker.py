@@ -68,6 +68,7 @@ class FakeInteractiveResearchLLM:
         self.bound_tools = []
         self.research_calls = 0
         self.plan_calls = 0
+        self.plan_message_counts = []
         self.ask_on_first_research = False
         self.asked = False
         self.invalid_final_response_once = False
@@ -99,19 +100,8 @@ class FakeInteractiveResearchLLM:
         first_content = str(getattr(messages[0], "content", "") or "") if messages else ""
         if "planning stage" in first_content or "规划阶段" in first_content:
             self.plan_calls += 1
-            return AIMessage(
-                content="",
-                tool_calls=[
-                    {
-                        "name": FLOW_CONTROL_TOOL_NAME,
-                        "args": {
-                            "action": "continue",
-                            "message": "Plan updated: exclude banks and favor AI hardware.",
-                        },
-                        "id": "control-plan-1",
-                    }
-                ],
-            )
+            self.plan_message_counts.append(len(messages))
+            return AIMessage(content="Plan updated: exclude banks and favor AI hardware.")
 
         self.research_calls += 1
         if self.ask_on_first_research and not self.asked:
@@ -379,7 +369,7 @@ async def _execute_background(monkeypatch, service, db_session, run_id, plan_pay
 async def test_create_run_writes_user_message_plan_card_and_checkpoint(db_session):
     """创建 run 只写聊天消息和 checkpoint，不依赖 artifact。"""
     user_id = _create_user_id(db_session)
-    service, _, _ = _service_with_fake_runner()
+    service, fake_llm, _ = _service_with_fake_runner()
 
     run = await service.create_run(user_id, _request_data())
     messages = service.get_messages(run.run_id, user_id)
@@ -389,7 +379,11 @@ async def test_create_run_writes_user_message_plan_card_and_checkpoint(db_sessio
     serialized_plan_message = service.serialize_message(messages[1])
     assert serialized_plan_message["display_type"] == "assistant"
     assert serialized_plan_message["execution_status"] == "completed"
-    assert serialized_plan_message["markdown"].startswith("### 研究计划")
+    assert serialized_plan_message["markdown"] == "Plan updated: exclude banks and favor AI hardware."
+    assert "Plan updated" in serialized_plan_message["markdown"]
+    assert "当前完整 PLAN" not in serialized_plan_message["markdown"]
+    assert "objective_summary" not in serialized_plan_message["markdown"]
+    assert "open_questions" not in serialized_plan_message["markdown"]
     assert serialized_plan_message["payload"]["preview"]["scope"] == "all"
     assert run.checkpoint_payload["plan_payload"]["selection_mode"] == "llm_driven"
     assert run.checkpoint_payload["plan_payload"]["research_budget"]["max_tool_calls"] == 60
@@ -428,7 +422,7 @@ async def test_realtime_update_pushes_markdown_display_message(db_session, monke
     from app.websocket import manager as websocket_manager_module
 
     user_id = _create_user_id(db_session)
-    service, _, _ = _service_with_fake_runner()
+    service, fake_llm, _ = _service_with_fake_runner()
     run = await service.create_run(user_id, _request_data())
     plan_message = service.get_messages(run.run_id, user_id)[1]
     pushed_payload = {}
@@ -457,7 +451,7 @@ async def test_realtime_update_pushes_markdown_display_message(db_session, monke
     )
 
     display_message = pushed_payload["payload"]["display_message"]
-    assert pushed_payload["message"].startswith("### 研究计划")
+    assert pushed_payload["message"] == "Plan updated: exclude banks and favor AI hardware."
     assert display_message == {
         "message_type": "assistant",
         "markdown": pushed_payload["message"],
@@ -469,7 +463,7 @@ async def test_realtime_update_pushes_markdown_display_message(db_session, monke
 async def test_plan_stage_user_input_iterates_plan_card(db_session):
     """计划确认阶段的普通聊天输入应迭代 plan，而不是走 revise action。"""
     user_id = _create_user_id(db_session)
-    service, _, _ = _service_with_fake_runner()
+    service, fake_llm, _ = _service_with_fake_runner()
     run = await service.create_run(user_id, _request_data())
 
     message = await service.append_user_message(run.run_id, user_id, "Exclude banks and favor AI hardware")
@@ -479,6 +473,10 @@ async def test_plan_stage_user_input_iterates_plan_card(db_session):
     assert message.status == "completed"
     assert run.status == "awaiting_plan_approval"
     assert len(plan_cards) == 2
+    assert fake_llm.plan_message_counts[-1] > fake_llm.plan_message_counts[0]
+    assert "Plan updated" in plan_cards[-1].content
+    assert "当前完整 PLAN" not in plan_cards[-1].content
+    assert "user_inputs" not in plan_cards[-1].content
     assert run.checkpoint_payload["plan_payload"]["user_inputs"][-1]["content"] == "Exclude banks and favor AI hardware"
 
 
