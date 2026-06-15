@@ -32,11 +32,8 @@ def get_db() -> Iterator[Session]:
     Yields:
         SQLAlchemy session bound to the application engine.
     """
-    db = SessionLocal()
-    try:
+    with SessionLocal() as db:
         yield db
-    finally:
-        db.close()
 
 
 def get_db_session() -> Iterator[Session]:
@@ -46,8 +43,5 @@ def get_db_session() -> Iterator[Session]:
     Yields:
         SQLAlchemy session bound to the application engine.
     """
-    db = SessionLocal()
-    try:
+    with SessionLocal() as db:
         yield db
-    finally:
-        db.close()

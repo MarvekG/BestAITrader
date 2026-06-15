@@ -107,7 +107,9 @@
     "stock_code": "Stock Code",
     "stock_name": "Stock Name",
     "score": "Score",
-    "recommendation": "Recommendation"
+    "recommendation": "Recommendation",
+    "yes": "Yes",
+    "no": "No"
   },
   "institutional_survey": {
     "stock_code": "Stock Code",
@@ -2416,6 +2418,97 @@
   "ai_stock_picker": {
     "title": "AI Stock Picker",
     "description": "Build a candidate pool from the stock warehouse, core indices, or the full market and generate a structured recommended stock list.",
+    "tabs": {
+      "automatic": "Automatic Picker",
+      "interactive": "AI Deep Research Stock Picker"
+    },
+    "interactive": {
+      "statuses": {
+        "drafting_plan": "Drafting Plan",
+        "awaiting_plan_approval": "Awaiting Plan Approval",
+        "researching": "Researching",
+        "awaiting_user_input": "Awaiting User Input",
+        "reflecting": "Reflecting",
+        "synthesizing": "Synthesizing",
+        "completed": "Completed",
+        "cancelled": "Cancelled",
+        "interrupted": "Interrupted",
+        "failed_retryable": "Failed, Retryable",
+        "failed": "Failed"
+      },
+      "phases": {
+        "planning": "Planning",
+        "research": "Research",
+        "reflection": "Reflection",
+        "synthesis": "Synthesis"
+      },
+      "fields": {
+        "scope": "Stock Source",
+        "style": "Style",
+        "status": "Status",
+        "phase": "Phase",
+        "updated_at": "Updated At",
+        "estimated_duration": "Estimated Duration",
+        "estimated_tokens": "Estimated Tokens",
+        "factor_count": "AI Factor Count",
+        "search_required": "Search Required"
+      },
+      "cards": {
+        "chat": "Research Chat"
+      },
+      "actions": {
+        "create_run": "Generate Research Plan",
+        "approve": "Approve and Run",
+        "resume": "Resume",
+        "cancel": "Cancel Research",
+        "open_active_run": "Open Active Run",
+        "send_message": "Send"
+      },
+      "confirmations": {
+        "cancel_run": "Cancel this AI Deep Research stock-picking run?"
+      },
+      "messages": {
+        "load_runs_failed": "Failed to load AI Deep Research stock-picking history",
+        "load_details_failed": "Failed to load AI Deep Research stock-picking detail",
+        "active_run_exists": "An unfinished AI Deep Research stock-picking run already exists ({{run_id}}). Handle it first",
+        "run_created": "Research plan generated and awaiting approval",
+        "approve_success": "Plan approved and execution started",
+        "approve_failed": "Failed to approve plan",
+        "cancel_success": "Research cancelled",
+        "cancel_failed": "Failed to cancel research",
+        "resume_success": "Research resumed",
+        "resume_failed": "Failed to resume research",
+        "cancel_reason": "User cancelled research from frontend",
+        "message_sent": "Message sent",
+        "message_failed": "Failed to send message"
+      },
+      "validations": {
+        "message_required": "Enter message content"
+      },
+      "placeholders": {
+        "message": "Add constraints, answer a question, or describe a new requirement. Enter sends, Shift+Enter inserts a line break"
+      },
+      "empty": {
+        "select_run": "Create or select a research run",
+        "no_messages": "No messages",
+        "no_recommendations": "No recommendations"
+      },
+      "result": {
+        "recommendations": "Recommendations",
+        "watchlist": "Watchlist",
+        "dropped_candidates": "Dropped Candidates",
+        "search_evidence_count": "Search Evidence Count",
+        "coverage_gaps": "Coverage Gaps",
+        "key_sources": "Key Sources"
+      },
+      "result_table": {
+        "stock": "Stock",
+        "decision": "Decision",
+        "score": "Score",
+        "thesis": "Thesis",
+        "risks": "Risks"
+      }
+    },
     "scope_options": {
       "warehouse": "Stock Warehouse",
       "core": "Core Indices",

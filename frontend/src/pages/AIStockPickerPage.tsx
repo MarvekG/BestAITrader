@@ -16,6 +16,7 @@ import {
   Select,
   Space,
   Table,
+  Tabs,
   Tag,
   Typography,
 } from 'antd';
@@ -43,6 +44,7 @@ import { warehouseApi } from '../api/warehouse';
 import { StockPickerUpdateMessage, TaskCompletedMessage, WebSocketMessage } from '../services/websocket';
 import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
 import { formatErrorMessage, getApiErrorDetail } from '../utils/errorUtils';
+import { InteractiveResearchTab } from '../features/stockPicker/InteractiveResearchTab';
 
 const { Title, Paragraph, Text } = Typography;
 
@@ -646,8 +648,8 @@ export const AIStockPickerPage: React.FC = () => {
   };
 
   return (
-    <Space direction="vertical" size={16} style={{ width: '100%' }}>
-      <Card>
+    <Space direction="vertical" size={8} style={{ width: '100%' }}>
+      <Card styles={{ body: { padding: '12px 16px' } }}>
         <Space direction="vertical" size={4}>
           <Title level={3} style={{ margin: 0 }}>
             <RobotOutlined /> {t('ai_stock_picker.title')}
@@ -685,24 +687,31 @@ export const AIStockPickerPage: React.FC = () => {
         </Space>
       </Modal>
 
-      <Row gutter={[16, 16]} align="stretch">
-        <Col xs={24} lg={8}>
-          <Card
-            title={t('ai_stock_picker.cards.config')}
-            extra={
-              <Space size={8}>
-                <Button
-                  icon={<SyncOutlined spin={baseInfoSyncing} />}
-                  loading={baseInfoSyncing}
-                  onClick={() => setIsDataSyncModalOpen(true)}
-                >
-                  {t('ai_stock_picker.cards.data_sync')}
-                </Button>
-                <Button icon={<ReloadOutlined />} onClick={() => loadRuns()}>{t('warehouse.refresh')}</Button>
-              </Space>
-            }
-            style={{ height: '100%' }}
-          >
+      <Tabs
+        items={[
+          {
+            key: 'automatic',
+            label: t('ai_stock_picker.tabs.automatic'),
+            children: (
+              <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                <Row gutter={[16, 16]} align="stretch">
+                  <Col xs={24} lg={8}>
+                    <Card
+                      title={t('ai_stock_picker.cards.config')}
+                      extra={
+                        <Space size={8}>
+                          <Button
+                            icon={<SyncOutlined spin={baseInfoSyncing} />}
+                            loading={baseInfoSyncing}
+                            onClick={() => setIsDataSyncModalOpen(true)}
+                          >
+                            {t('ai_stock_picker.cards.data_sync')}
+                          </Button>
+                          <Button icon={<ReloadOutlined />} onClick={() => loadRuns()}>{t('warehouse.refresh')}</Button>
+                        </Space>
+                      }
+                      style={{ height: '100%' }}
+                    >
             <Form
               form={form}
               layout="vertical"
@@ -802,11 +811,11 @@ export const AIStockPickerPage: React.FC = () => {
                 </Text>
               )}
             </Form>
-          </Card>
-        </Col>
+                    </Card>
+                  </Col>
 
-        <Col xs={24} lg={16}>
-          <Card title={t('ai_stock_picker.cards.timeline')} style={{ height: '100%' }}>
+                  <Col xs={24} lg={16}>
+                    <Card title={t('ai_stock_picker.cards.timeline')} style={{ height: '100%' }}>
             {events.length === 0 ? (
               <Empty description={t('ai_stock_picker.empty.events')} />
             ) : (
@@ -839,23 +848,23 @@ export const AIStockPickerPage: React.FC = () => {
                 }}
               />
             )}
-          </Card>
-        </Col>
-      </Row>
+                    </Card>
+                  </Col>
+                </Row>
 
-      <Card
-        title={t('ai_stock_picker.cards.history')}
-        extra={
-          <Popconfirm
-            title={t('ai_stock_picker.confirmations.clear_runs')}
-            okText={t('common.confirm')}
-            cancelText={t('common.cancel')}
-            onConfirm={handleClearRuns}
-          >
-            <Button danger icon={<DeleteOutlined />}>{t('ai_stock_picker.actions.clear_history')}</Button>
-          </Popconfirm>
-        }
-      >
+                <Card
+                  title={t('ai_stock_picker.cards.history')}
+                  extra={
+                    <Popconfirm
+                      title={t('ai_stock_picker.confirmations.clear_runs')}
+                      okText={t('common.confirm')}
+                      cancelText={t('common.cancel')}
+                      onConfirm={handleClearRuns}
+                    >
+                      <Button danger icon={<DeleteOutlined />}>{t('ai_stock_picker.actions.clear_history')}</Button>
+                    </Popconfirm>
+                  }
+                >
         <Table
           size="small"
           rowKey="run_id"
@@ -925,10 +934,10 @@ export const AIStockPickerPage: React.FC = () => {
             },
           ]}
         />
-      </Card>
+                </Card>
 
-      {selectedRun && (
-        <Card title={t('ai_stock_picker.cards.run_status')}>
+                {selectedRun && (
+                  <Card title={t('ai_stock_picker.cards.run_status')}>
           <Descriptions size="small" column={4}>
             <Descriptions.Item label={t('ai_stock_picker.run_details.run_id')}>{selectedRun.run_id}</Descriptions.Item>
             <Descriptions.Item label={t('ai_stock_picker.run_details.current_stage')}>{getStageLabel(selectedRun.current_stage)}</Descriptions.Item>
@@ -964,10 +973,10 @@ export const AIStockPickerPage: React.FC = () => {
               {selectedRun.error_message}
             </Paragraph>
           )}
-        </Card>
-      )}
+                  </Card>
+                )}
 
-      <Card title={t('ai_stock_picker.cards.recommendations')}>
+                <Card title={t('ai_stock_picker.cards.recommendations')}>
         {!result ? (
           <Empty description={t('ai_stock_picker.empty.result')} />
         ) : (
@@ -1085,9 +1094,9 @@ export const AIStockPickerPage: React.FC = () => {
             />
           </Space>
         )}
-      </Card>
+                </Card>
 
-      <Card title={t('ai_stock_picker.cards.candidates')}>
+                <Card title={t('ai_stock_picker.cards.candidates')}>
         {candidates.length === 0 ? (
           <Empty description={t('ai_stock_picker.empty.candidates')} />
         ) : (
@@ -1160,7 +1169,17 @@ export const AIStockPickerPage: React.FC = () => {
             />
           </Space>
         )}
-      </Card>
+                </Card>
+              </Space>
+            ),
+          },
+          {
+            key: 'interactive',
+            label: t('ai_stock_picker.tabs.interactive'),
+            children: <InteractiveResearchTab />,
+          },
+        ]}
+      />
     </Space>
   );
 };

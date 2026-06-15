@@ -36,6 +36,7 @@ def register_api_routes(app: FastAPI) -> None:
     )
     from app.ai.experience.api import router as experience_router
     from app.ai.stock_analysis.api import router as stock_analysis_router
+    from app.ai.stock_picker.interactive_research.api import router as interactive_stock_picker_router
     from app.ai.stock_picker.api import router as stock_picker_router
 
     prefix = settings.API_V1_STR
@@ -90,6 +91,12 @@ def register_api_routes(app: FastAPI) -> None:
         stock_picker_router,
         prefix=f"{prefix}/ai-stock-picker",
         tags=["ai-stock-picker"],
+        dependencies=authenticated,
+    )
+    app.include_router(
+        interactive_stock_picker_router,
+        prefix=f"{prefix}/ai-stock-picker/interactive",
+        tags=["ai-stock-picker-interactive"],
         dependencies=authenticated,
     )
     app.include_router(experience_router, prefix=f"{prefix}/experience", tags=["experience"], dependencies=authenticated)

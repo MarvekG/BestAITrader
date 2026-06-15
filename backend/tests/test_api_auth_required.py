@@ -29,6 +29,7 @@ PUBLIC_HTTP_PATHS = {
         ("get", "/api/v1/tasks"),
         ("get", "/api/v1/testing/tools"),
         ("post", "/api/v1/stock-analysis/run"),
+        ("post", "/api/v1/ai-stock-picker/interactive/runs"),
         ("get", "/api/v1/news-plugins"),
         ("get", "/api/v1/skills"),
         ("get", "/api/v1/mcp/servers"),
