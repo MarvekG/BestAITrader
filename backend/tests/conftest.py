@@ -109,6 +109,10 @@ def _sqlite_test_tables():
         StockSelectionEvent,
         StockSelectionRun,
     )
+    from app.ai.stock_picker.interactive_research.models import (
+        InteractiveResearchMessage,
+        InteractiveResearchRun,
+    )
     from app.models.async_task import AsyncTask
     from app.models.data_storage import (
         FinancialIndicator,
@@ -158,6 +162,8 @@ def _sqlite_test_tables():
         StockSelectionRun.__table__,
         StockSelectionEvent.__table__,
         StockSelectionCandidate.__table__,
+        InteractiveResearchRun.__table__,
+        InteractiveResearchMessage.__table__,
     ]
 
 
@@ -196,6 +202,11 @@ def sqlite_test_engine():
                 raise
         try:
             cursor.execute("ATTACH DATABASE ':memory:' AS stock_picker")
+        except sqlite3.OperationalError as exc:
+            if "already in use" not in str(exc):
+                raise
+        try:
+            cursor.execute("ATTACH DATABASE ':memory:' AS stock_picker_interactive")
         except sqlite3.OperationalError as exc:
             if "already in use" not in str(exc):
                 raise

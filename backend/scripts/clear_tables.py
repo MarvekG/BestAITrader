@@ -13,7 +13,7 @@ from app.core.database import engine
 # However, importing them is good practice to ensure metadata is populated if we used it.
 from app.models import data_storage, stock_warehouse, stock_picker
 
-SUPPORTED_SCHEMAS = ["public", "data", "stock_picker"]
+SUPPORTED_SCHEMAS = ["public", "data", "stock_picker", "stock_picker_interactive"]
 
 
 def get_tables():

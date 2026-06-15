@@ -304,7 +304,7 @@ def record_llm_usage(
             )
             from app.core.database import SessionLocal
             with SessionLocal() as db:
-                llm_usage_log.create(
+                db_obj = llm_usage_log.create(
                     db=db,
                     model=model,
                     role=role,
@@ -322,7 +322,7 @@ def record_llm_usage(
                     cache_lane=cache_lane,
                     api_key_alias=api_key_alias,
                 )
-            return
+                return db_obj.to_dict()
 
         # OpenAI 格式: response.usage (object with prompt_tokens, etc.)
         usage_obj = getattr(response, "usage", None)
@@ -332,7 +332,7 @@ def record_llm_usage(
             explicit_miss_tokens = _cache_miss_tokens_from_usage(usage_obj)
             from app.core.database import SessionLocal
             with SessionLocal() as db:
-                llm_usage_log.create(
+                db_obj = llm_usage_log.create(
                     db=db,
                     model=model,
                     role=role,
@@ -350,5 +350,7 @@ def record_llm_usage(
                     cache_lane=cache_lane,
                     api_key_alias=api_key_alias,
                 )
+                return db_obj.to_dict()
     except Exception as e:
         logger.exception(f"Failed to record LLM usage for {role}: {e}")
+    return None

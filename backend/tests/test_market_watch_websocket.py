@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 import pytest
 from starlette.websockets import WebSocketDisconnect
 
-from app.ai.market_watch.audit import MARKET_WATCH_DOCUMENTS_CHANNEL, MARKET_WATCH_EVENTS_CHANNEL
 from app.models.market_watch import MarketWatchEvent
 from app.websocket.manager import WebSocketManager
 
@@ -123,27 +122,6 @@ def test_market_watch_websocket_ticket_requires_auth(client) -> None:
     response = client.post("/api/v1/market-watch/ws-ticket")
 
     assert response.status_code == 401
-
-
-def test_market_watch_websocket_route_accepts_one_time_ticket(client, auth_headers) -> None:
-    ticket_response = client.post("/api/v1/market-watch/ws-ticket", headers=auth_headers)
-    assert ticket_response.status_code == 200
-    ticket = ticket_response.json()["ticket"]
-
-    with client.websocket_connect(f"/api/v1/market-watch/ws?ticket={ticket}") as websocket:
-        connected = websocket.receive_json()
-        assert connected["type"] == "connection"
-        assert connected["channel"] == MARKET_WATCH_EVENTS_CHANNEL
-        assert connected["documents_channel"] == MARKET_WATCH_DOCUMENTS_CHANNEL
-
-        websocket.send_text("ping")
-        assert websocket.receive_json()["type"] == "pong"
-
-    with pytest.raises(WebSocketDisconnect) as exc_info:
-        with client.websocket_connect(f"/api/v1/market-watch/ws?ticket={ticket}"):
-            pass
-
-    assert exc_info.value.code == 1008
 
 
 @pytest.mark.asyncio

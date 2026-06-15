@@ -1,0 +1,74 @@
+.interactive-research-markdown {
+  margin-top: 8px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.interactive-research-markdown > :first-child {
+  margin-top: 0;
+}
+
+.interactive-research-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.interactive-research-markdown h1,
+.interactive-research-markdown h2,
+.interactive-research-markdown h3,
+.interactive-research-markdown h4 {
+  margin: 10px 0 6px;
+  font-size: 15px;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.interactive-research-markdown p,
+.interactive-research-markdown ul,
+.interactive-research-markdown ol,
+.interactive-research-markdown blockquote {
+  margin: 6px 0;
+}
+
+.interactive-research-markdown ul,
+.interactive-research-markdown ol {
+  padding-left: 20px;
+}
+
+.interactive-research-markdown pre {
+  max-width: 100%;
+  margin: 8px 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.interactive-research-markdown code {
+  white-space: pre-wrap;
+}
+
+.interactive-research-markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.interactive-research-markdown th,
+.interactive-research-markdown td {
+  padding: 4px 8px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.interactive-research-json-result {
+  max-height: 320px;
+  margin: 8px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.04);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -28,6 +28,10 @@ from app.ai.stock_picker.models import (
     StockSelectionEvent,
     StockSelectionRun,
 )
+from app.ai.stock_picker.interactive_research.models import (
+    InteractiveResearchMessage,
+    InteractiveResearchRun,
+)
 from app.models.stock_indicators import StockIndicators
 from app.models.experience_review_event import ExperienceReviewEvent
 from app.models.experience_index import ExperienceIndex
@@ -63,4 +67,6 @@ __all__ = [
     "StockSelectionRun",
     "StockSelectionEvent",
     "StockSelectionCandidate",
+    "InteractiveResearchRun",
+    "InteractiveResearchMessage",
 ]

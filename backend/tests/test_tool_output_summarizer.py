@@ -52,7 +52,7 @@ async def test_summarize_tool_output_records_usage(monkeypatch):
     assert "{role_name}" not in system_prompt
     assert "{tool_name}" not in system_prompt
     assert "{tool_args_json}" not in system_prompt
-    assert 'tool_args_json: {"a": "贵州茅台 新闻", "z": 1}' in user_input
+    assert 'tool_args_json: {"a":"贵州茅台 新闻","z":1}' in user_input
     usage_recorder.assert_called_once()
     assert usage_recorder.call_args.args[1] == "test-summary-model"
     assert usage_recorder.call_args.args[2] == "stock_picker_research_tool_summary"

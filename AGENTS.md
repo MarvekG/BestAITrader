@@ -26,9 +26,10 @@
 - 后端定向测试：`pytest backend/tests/test_api_auth_required.py`。
 - MemoFlux 测试：在 `memo/` 下运行 `pytest tests`。
 - 前端质量门禁：`cd frontend && npm run lint && npm run typecheck && npm run build`。
-- 本地镜像部署：`docker compose up -d`。
-- 本地源码调试：`docker compose -f docker-compose.dev.yml up -d --build`。
-- 配置变更后重建容器：`docker compose up -d --force-recreate <service>`，不要只用 `restart`。
+- 默认本地开发启动：`docker compose -f docker-compose.dev.yml up -d`。
+- 开发阶段源码目录已挂载进容器，代码修改通常无需重建容器即可生效；只有依赖、Dockerfile、镜像构建上下文或启动命令变更时才需要 `--build`。
+- 完整镜像部署：`docker compose up -d`。
+- 配置变更后重建开发容器：`docker compose -f docker-compose.dev.yml up -d --force-recreate <service>`，不要只用 `restart`。
 
 ## 修改前先读
 - 部署/环境：`docs/002-deployment.md`，Windows WSL2 读 `docs/004-windows-wsl-docker-engine-deployment.md`。
@@ -173,6 +174,7 @@ def add(a: int, b: int) -> int:
 
 ## 约束
 - 非必要不使用全局变量
+- 禁止非必要的封装；只有存在明确复用、隔离复杂度或稳定边界需求时才新增抽象层、包装函数或中转模块。
 - 禁止硬编码密钥或敏感信息
 - 避免超过 5 层嵌套逻辑
 - 针对记忆系统，禁止直接使用关键词匹配，影响记忆系统的泛化性能。
@@ -207,6 +209,7 @@ def add(a: int, b: int) -> int:
 
 ## 数据库变更
 - 当前项目未上线阶段，数据库结构变更可在 Docker 容器内一次性手动执行。
+- 禁止把 `db` 会话作为参数到处传递；应在实际更新数据库的最小作用域内引入会话，并使用 `with SessionLocal() as db` 管理生命周期。
 - 非必要不要把一次性表结构修补逻辑写入应用启动代码；模型代码保持目标结构，实际数据库由开发者在容器内执行对应 SQL 完成同步。
 - 执行数据库变更前先确认目标容器、数据库名和 schema，避免误改非目标环境。
 

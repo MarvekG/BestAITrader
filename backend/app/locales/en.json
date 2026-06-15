@@ -107,7 +107,9 @@
     "stock_code": "Stock Code",
     "stock_name": "Stock Name",
     "score": "Score",
-    "recommendation": "Recommendation"
+    "recommendation": "Recommendation",
+    "yes": "Yes",
+    "no": "No"
   },
   "institutional_survey": {
     "stock_code": "Stock Code",
@@ -2415,7 +2417,181 @@
   },
   "ai_stock_picker": {
     "title": "AI Stock Picker",
-    "description": "Build a candidate pool from the stock warehouse, core indices, or the full market and generate a structured recommended stock list.",
+    "tabs": {
+      "automatic": "Automatic Picker",
+      "interactive": "AI Deep Research Stock Picker"
+    },
+    "interactive": {
+      "statuses": {
+        "drafting_plan": "Drafting Plan",
+        "awaiting_plan_approval": "Awaiting Plan Approval",
+        "researching": "Researching",
+        "awaiting_user_input": "Awaiting User Input",
+        "reflecting": "Reflecting",
+        "synthesizing": "Synthesizing",
+        "completed": "Completed",
+        "cancelled": "Cancelled",
+        "interrupted": "Interrupted",
+        "failed_retryable": "Failed, Retryable",
+        "failed": "Failed"
+      },
+      "phases": {
+        "planning": "Planning",
+        "research": "Research",
+        "reflection": "Reflection",
+        "synthesis": "Synthesis"
+      },
+      "fields": {
+        "scope": "Stock Source",
+        "style": "Style",
+        "status": "Status",
+        "phase": "Phase",
+        "updated_at": "Updated At",
+        "estimated_duration": "Estimated Duration",
+        "estimated_tokens": "Estimated Tokens",
+        "max_iterations": "Max Iterations",
+        "max_tool_calls": "Max Tool Calls",
+        "objective_summary": "Objective Summary",
+        "selection_mode": "Selection Mode",
+        "tool_scope": "Tool Scope",
+        "open_questions": "Open Questions",
+        "llm_calls": "LLM Calls",
+        "total_tokens": "Actual Tokens",
+        "input_output_tokens": "Input/Output Tokens",
+        "factor_count": "AI Factor Count",
+        "search_required": "Search Required"
+      },
+      "cards": {
+        "chat": "Research Chat"
+      },
+      "actions": {
+        "create_run": "Generate Research Plan",
+        "approve": "Approve and Run",
+        "resume": "Resume",
+        "cancel": "Cancel Research",
+        "open_active_run": "Open Active Run",
+        "send_message": "Send"
+      },
+      "confirmations": {
+        "cancel_run": "Cancel this AI Deep Research stock-picking run?"
+      },
+      "messages": {
+        "load_runs_failed": "Failed to load AI Deep Research stock-picking history",
+        "load_details_failed": "Failed to load AI Deep Research stock-picking detail",
+        "active_run_exists": "An unfinished AI Deep Research stock-picking run already exists ({{run_id}}). Handle it first",
+        "run_created": "Research plan generated and awaiting approval",
+        "approve_success": "Plan approved and execution started",
+        "approve_failed": "Failed to approve plan",
+        "cancel_success": "Research cancelled",
+        "cancel_failed": "Failed to cancel research",
+        "resume_success": "Research resumed",
+        "resume_failed": "Failed to resume research",
+        "cancel_reason": "User cancelled research from frontend",
+        "message_sent": "Message sent",
+        "message_failed": "Failed to send message"
+      },
+      "validations": {
+        "message_required": "Enter message content",
+        "max_iterations_min": "Max iterations cannot be lower than 10"
+      },
+      "placeholders": {
+        "message": "Add constraints, answer a question, or describe a new requirement. Enter sends, Shift+Enter inserts a line break"
+      },
+      "empty": {
+        "select_run": "Create or select a research run",
+        "no_messages": "No messages",
+        "no_recommendations": "No recommendations"
+      },
+      "result": {
+        "recommendations": "Recommendations",
+        "watchlist": "Watchlist",
+        "dropped_candidates": "Dropped Candidates",
+        "search_evidence_count": "Search Evidence Count",
+        "coverage_gaps": "Coverage Gaps",
+        "key_sources": "Key Sources"
+      },
+      "result_table": {
+        "stock": "Stock",
+        "decision": "Decision",
+        "score": "Score",
+        "thesis": "Thesis",
+        "risks": "Risks"
+      },
+      "roles": {
+        "user": "User",
+        "assistant": "Assistant",
+        "system": "System",
+        "tool": "Tool"
+      },
+      "execution_statuses": {
+        "queued": "Queued",
+        "completed": "Completed",
+        "failed": "Failed"
+      },
+      "backend": {
+        "markdown": {
+          "empty": "-",
+          "titles": {
+            "plan": "Research Plan",
+            "tool_start": "Tool Call Started",
+            "tool_result": "Tool Call Result",
+            "progress": "Execution Progress",
+            "system_status": "System Status",
+            "assistant_question": "Additional Information Needed"
+          },
+          "labels": {
+            "tool": "Tool",
+            "description": "Description",
+            "result": "Result",
+            "reason": "Reason",
+            "scope": "Stock Source",
+            "style": "Style",
+            "estimated_duration": "Estimated Duration",
+            "estimated_tokens": "Estimated Tokens",
+            "max_iterations": "Max Iterations",
+            "selection_mode": "Selection Mode",
+            "tool_scope": "Tool Scope",
+            "status": "Status"
+          },
+          "values": {
+            "yes": "Yes",
+            "no": "No",
+            "success": "Succeeded",
+            "failed": "Failed"
+          }
+        },
+        "messages": {
+          "plan_generated": "Research plan generated and awaiting approval.",
+          "plan_approved": "Research plan approved.",
+          "plan_updated": "Research plan updated from the additional input and awaiting approval.",
+          "research_started": "Research plan approved. Starting LLM-driven research loop.",
+          "tool_start": "Calling {tool_name} with LLM-selected arguments.",
+          "tool_completed": "Tool {tool_name} completed and its evidence was added to the next agent turn.",
+          "llm_loop_completed": "LLM-driven research loop completed.",
+          "completed": "Deep Research run completed.",
+          "cancelled": "Interactive research run cancelled.",
+          "queued_input_appended": "New user input was appended after the tool call and added to the next agent turn.",
+          "tool_empty_result": "Tool returned an empty result.",
+          "answer_received": "Answer received. Research will continue from the checkpoint.",
+          "run_deleted": "Deep Research run deleted.",
+          "default_title": "Deep Research Stock Picker",
+          "additional_input": "Additional input"
+        },
+        "errors": {
+          "active_run_exists": "An unfinished Deep Research run already exists: {run_id}",
+          "terminal_cannot_accept_messages": "Terminal runs cannot accept new messages",
+          "unsupported_action": "Unsupported action: {action}",
+          "only_awaiting_plan_approval_can_approve": "Only awaiting_plan_approval runs can approve a plan",
+          "terminal_cannot_cancel": "Terminal runs cannot be cancelled again",
+          "run_not_found": "Deep Research run does not exist",
+          "only_awaiting_plan_approval_can_update": "Only awaiting_plan_approval runs can update a plan",
+          "plan_update_empty": "Plan update instruction cannot be empty",
+          "workflow_failed": "Workflow failed: {error}",
+          "tool_not_allowed": "Error: Tool {tool_name} not found or not allowed.",
+          "service_error": "Deep Research service error"
+        }
+      }
+    },
     "scope_options": {
       "warehouse": "Stock Warehouse",
       "core": "Core Indices",
