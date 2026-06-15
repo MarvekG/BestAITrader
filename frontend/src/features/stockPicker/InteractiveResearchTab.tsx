@@ -464,16 +464,6 @@ export const InteractiveResearchTab: React.FC = () => {
         </Spin>
 
         <Form form={messageForm} layout="vertical" initialValues={{ max_iterations: 60 }}>
-          {!canSendMessage && (
-            <Form.Item
-              name="max_iterations"
-              label={t('ai_stock_picker.interactive.fields.max_iterations')}
-              rules={[{ type: 'number', min: 10, message: t('ai_stock_picker.interactive.validations.max_iterations_min') }]}
-              style={{ marginBottom: 8 }}
-            >
-              <InputNumber min={10} precision={0} style={{ width: 180 }} />
-            </Form.Item>
-          )}
           <Form.Item
             name="content"
             rules={[{ required: true, message: t('ai_stock_picker.interactive.validations.message_required') }]}
@@ -493,11 +483,27 @@ export const InteractiveResearchTab: React.FC = () => {
               }}
             />
           </Form.Item>
-          <Button type="primary" icon={<SendOutlined />} loading={submitting} onClick={handleSubmitInput}>
-            {canSendMessage
-              ? t('ai_stock_picker.interactive.actions.send_message')
-              : t('ai_stock_picker.interactive.actions.create_run')}
-          </Button>
+          <Space align="center" wrap>
+            {!canSendMessage && (
+              <Space size={8} align="center">
+                <Text type="secondary">{t('ai_stock_picker.interactive.fields.max_iterations')}</Text>
+                <Form.Item
+                  noStyle
+                  name="max_iterations"
+                  rules={[
+                    { type: 'number', min: 10, message: t('ai_stock_picker.interactive.validations.max_iterations_min') },
+                  ]}
+                >
+                  <InputNumber min={10} precision={0} style={{ width: 104 }} />
+                </Form.Item>
+              </Space>
+            )}
+            <Button type="primary" icon={<SendOutlined />} loading={submitting} onClick={handleSubmitInput}>
+              {canSendMessage
+                ? t('ai_stock_picker.interactive.actions.send_message')
+                : t('ai_stock_picker.interactive.actions.create_run')}
+            </Button>
+          </Space>
         </Form>
       </Space>
     </Card>
