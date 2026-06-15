@@ -64,6 +64,113 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const asRecord = (value: unknown): Record<string, unknown> => (isRecord(value) ? value : {});
 
+const stringifyJsonValue = (value: unknown): string | null => {
+  if (!Array.isArray(value) && !isRecord(value)) {
+    return null;
+  }
+  return JSON.stringify(value, null, 2);
+};
+
+const parseJsonText = (value: string): string | null => {
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+  try {
+    return stringifyJsonValue(JSON.parse(normalized));
+  } catch {
+    return null;
+  }
+};
+
+const formatJsonLikeText = (value: string): string => {
+  let indent = 0;
+  let inString = false;
+  let escaped = false;
+  const lines: string[] = [];
+  let current = '';
+
+  const pushLine = () => {
+    const line = current.trim();
+    if (line) {
+      lines.push(`${'  '.repeat(Math.max(indent, 0))}${line}`);
+    }
+    current = '';
+  };
+
+  for (const char of value) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === '\\') {
+      current += char;
+      escaped = inString;
+      continue;
+    }
+    if (char === '"') {
+      inString = !inString;
+      current += char;
+      continue;
+    }
+    if (inString) {
+      current += char;
+      continue;
+    }
+    if (char === '{' || char === '[') {
+      current += char;
+      pushLine();
+      indent += 1;
+      continue;
+    }
+    if (char === '}' || char === ']') {
+      pushLine();
+      indent -= 1;
+      current += char;
+      continue;
+    }
+    if (char === ',') {
+      current += char;
+      pushLine();
+      continue;
+    }
+    if (char === ':') {
+      current += ': ';
+      continue;
+    }
+    current += char;
+  }
+  pushLine();
+  return lines.join('\n');
+};
+
+const formatToolResultPreview = (value: unknown): string | null => {
+  if (Array.isArray(value) || isRecord(value)) {
+    return JSON.stringify(value, null, 2);
+  }
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+  const parsed = parseJsonText(normalized);
+  if (parsed) {
+    return parsed;
+  }
+  if (normalized.startsWith('{') || normalized.startsWith('[')) {
+    return formatJsonLikeText(normalized);
+  }
+  return normalized;
+};
+
+const getToolResultPreview = (item: InteractiveResearchMessage): string | null => {
+  const payload = asRecord(item.payload);
+  return formatToolResultPreview(payload.result_preview);
+};
+
 const getStatusColor = (status: string) => {
   if (status === 'completed') return 'green';
   if (status === 'cancelled') return 'default';
@@ -301,6 +408,8 @@ export const InteractiveResearchTab: React.FC = () => {
       const displayType = item.display_type || item.role;
       const markdown = item.markdown || item.content || '-';
       const executionStatus = item.execution_status || item.status;
+      const isToolResult = item.message_type === 'tool_result';
+      const toolResultPreview = isToolResult ? getToolResultPreview(item) : null;
       const isUser = displayType === 'user';
       return (
         <div
@@ -330,9 +439,13 @@ export const InteractiveResearchTab: React.FC = () => {
               )}
               <Text type="secondary">{dayjs(item.created_at).format('MM-DD HH:mm:ss')}</Text>
             </Space>
-            <div className="interactive-research-markdown">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
-            </div>
+            {isToolResult ? (
+              toolResultPreview && <pre className="interactive-research-json-result">{toolResultPreview}</pre>
+            ) : (
+              <div className="interactive-research-markdown">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{markdown}</ReactMarkdown>
+              </div>
+            )}
           </div>
         </div>
       );

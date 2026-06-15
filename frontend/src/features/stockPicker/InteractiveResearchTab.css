@@ -59,3 +59,16 @@
   padding: 4px 8px;
   border: 1px solid rgba(0, 0, 0, 0.12);
 }
+
+.interactive-research-json-result {
+  max-height: 320px;
+  margin: 8px 0 0;
+  padding: 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.04);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

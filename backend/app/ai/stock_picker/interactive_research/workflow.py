@@ -389,7 +389,7 @@ class InteractiveResearchWorkflow:
                     "tool_call_id": tool_call_id,
                     "start_message_id": start_message_id,
                     "success": success,
-                    "result_preview": result_text[:4000],
+                    "result_preview": result_text,
                 },
             )
             await self._notify_change(db, run, result_message, "tool_result")
@@ -921,9 +921,7 @@ def _compact_tool_result(result_text: str) -> str:
         面向聊天流的短摘要。
     """
     normalized = " ".join(str(result_text or "").split())
-    if len(normalized) <= 500:
-        return normalized or _t("messages.tool_empty_result")
-    return f"{normalized[:500]}..."
+    return normalized or _t("messages.tool_empty_result")
 
 
 def _research_continuation_instruction() -> str:
