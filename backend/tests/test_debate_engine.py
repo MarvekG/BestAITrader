@@ -346,7 +346,8 @@ async def test_portfolio_management_returns_current_pm_decision_schema(initial_s
     with patch("app.ai.llm_engine.orchestrator.PortfolioManagerAgent") as mock_pm_agent, \
             patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock) as mock_persist, \
             patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={"decision": "hold"}), \
-            patch("app.ai.llm_engine.orchestrator._get_same_stock_history", return_value={}):
+            patch("app.ai.llm_engine.orchestrator._get_same_stock_history", return_value={}), \
+            patch("app.ai.llm_engine.orchestrator._get_pending_orders_for_pm", return_value=[]):
         agent = mock_pm_agent.return_value
         agent.last_prompt = "pm prompt"
         agent.run = AsyncMock(return_value=pm_decision)
