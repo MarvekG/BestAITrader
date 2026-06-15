@@ -2417,7 +2417,6 @@
   },
   "ai_stock_picker": {
     "title": "AI Stock Picker",
-    "description": "Build a candidate pool from the stock warehouse, core indices, or the full market and generate a structured recommended stock list.",
     "tabs": {
       "automatic": "Automatic Picker",
       "interactive": "AI Deep Research Stock Picker"

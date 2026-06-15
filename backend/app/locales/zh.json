@@ -2417,7 +2417,6 @@
   },
   "ai_stock_picker": {
     "title": "智能选股",
-    "description": "从股票仓库、核心指数或全量股票中构建候选池，生成结构化推荐股票列表。",
     "tabs": {
       "automatic": "自动选股",
       "interactive": "AI深度研究选股"

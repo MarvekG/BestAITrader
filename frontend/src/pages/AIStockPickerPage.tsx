@@ -654,9 +654,6 @@ export const AIStockPickerPage: React.FC = () => {
           <Title level={3} style={{ margin: 0 }}>
             <RobotOutlined /> {t('ai_stock_picker.title')}
           </Title>
-          <Paragraph type="secondary" style={{ margin: 0 }}>
-            {t('ai_stock_picker.description')}
-          </Paragraph>
         </Space>
       </Card>
 
