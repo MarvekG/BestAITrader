@@ -176,6 +176,12 @@ const getToolStartArguments = (item: InteractiveResearchMessage): string | null 
   return formatToolResultPreview(payload.arguments);
 };
 
+const getToolName = (item: InteractiveResearchMessage): string | null => {
+  const payload = asRecord(item.payload);
+  const toolName = payload.tool_name;
+  return typeof toolName === 'string' && toolName.trim() ? toolName.trim() : null;
+};
+
 const getStatusColor = (status: string) => {
   if (status === 'completed') return 'green';
   if (status === 'cancelled') return 'default';
@@ -192,6 +198,13 @@ const getRoleColor = (role: string) => {
   if (role === 'assistant') return 'green';
   if (role === 'tool') return 'purple';
   return 'default';
+};
+
+const getExecutionStatusColor = (status: string) => {
+  if (status === 'completed') return 'green';
+  if (status === 'failed' || status === 'error') return 'red';
+  if (status === 'running' || status === 'started') return 'blue';
+  return 'orange';
 };
 
 export const InteractiveResearchTab: React.FC = () => {
@@ -415,6 +428,8 @@ export const InteractiveResearchTab: React.FC = () => {
       const executionStatus = item.execution_status || item.status;
       const isToolResult = item.message_type === 'tool_result';
       const isToolStart = item.message_type === 'tool_start';
+      const isToolMessage = isToolResult || isToolStart;
+      const toolName = isToolMessage ? getToolName(item) : null;
       let toolJsonPreview: string | null = null;
       if (isToolResult) {
         toolJsonPreview = getToolResultPreview(item);
@@ -441,8 +456,9 @@ export const InteractiveResearchTab: React.FC = () => {
               <Tag color={getRoleColor(displayType)}>
                 {t(`ai_stock_picker.interactive.roles.${displayType}`, { defaultValue: displayType })}
               </Tag>
-              {executionStatus && executionStatus !== 'completed' && (
-                <Tag color="orange">
+              {toolName && <Tag color="blue">{toolName}</Tag>}
+              {executionStatus && (isToolMessage || executionStatus !== 'completed') && (
+                <Tag color={getExecutionStatusColor(executionStatus)}>
                   {t(`ai_stock_picker.interactive.execution_statuses.${executionStatus}`, {
                     defaultValue: executionStatus,
                   })}
@@ -450,7 +466,7 @@ export const InteractiveResearchTab: React.FC = () => {
               )}
               <Text type="secondary">{dayjs(item.created_at).format('MM-DD HH:mm:ss')}</Text>
             </Space>
-            {isToolResult || isToolStart ? (
+            {isToolMessage ? (
               toolJsonPreview && <pre className="interactive-research-json-result">{toolJsonPreview}</pre>
             ) : (
               <div className="interactive-research-markdown">
