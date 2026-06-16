@@ -158,7 +158,7 @@ class InteractiveResearchService:
         message = result["message"]
         run_status = result["run_status"]
         if run_status == "awaiting_user_input":
-            background_tasks.add_task(self.execute_workflow_background, run_id)
+            background_tasks.add_task(self.execute_workflow_background, run_id, self._plan_agent.latest_plan_output(run_id))
             return message
         if run_status not in {"awaiting_plan_approval", "awaiting_user_input"}:
             return message
@@ -221,7 +221,7 @@ class InteractiveResearchService:
         result = approve_plan_record(run_id, user_id)
         run = result["run"]
 
-        background_tasks.add_task(self.execute_workflow_background, run.run_id)
+        background_tasks.add_task(self.execute_workflow_background, run.run_id, self._plan_agent.latest_plan_output(run.run_id))
 
         return run
 
@@ -338,14 +338,15 @@ class InteractiveResearchService:
         normalized = " ".join(requirement.split())
         return normalized[:60] or _t("messages.default_title")
 
-    async def execute_workflow_background(self, run_id: UUID) -> None:
+    async def execute_workflow_background(self, run_id: UUID, approved_plan: str) -> None:
         """后台执行 workflow（用于 FastAPI BackgroundTasks）。
 
         Args:
             run_id: 研究 run ID。
+            approved_plan: 用户确认的计划卡正文。
         """
         try:
-            await self._research_agent.execute(run_id)
+            await self._research_agent.execute(run_id, approved_plan)
         except Exception as exc:
             import logging
             import traceback

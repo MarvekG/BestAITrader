@@ -21,7 +21,6 @@ from app.ai.stock_picker.interactive_research.persistence import (
     append_queued_input_status_record,
     append_tool_result_and_progress_record,
     append_tool_start_record,
-    build_recent_chat_messages_record,
     pause_for_user_question_record,
     process_queued_user_inputs_record,
     start_research_run_record,
@@ -84,11 +83,12 @@ class InteractiveResearchAgent:
         self._notification_callback = notification_callback
         self._llm_provider = get_llm_provider()
 
-    async def execute(self, run_id: UUID) -> None:
+    async def execute(self, run_id: UUID, approved_plan: str) -> None:
         """异步运行 LLM tool-calling 循环。
 
         Args:
             run_id: 当前研究 run ID。
+            approved_plan: 用户确认的研究计划正文。
         """
         tool_trace: List[Dict[str, Any]] = []
         run_snapshot = await self._start_research_run(run_id)
@@ -96,8 +96,8 @@ class InteractiveResearchAgent:
             return
 
         messages = self._build_agent_messages(
-            run_id,
             run_snapshot["raw_requirement"],
+            approved_plan,
             run_snapshot["queued_before"],
         )
         tools = await self._load_tools(run_id, run_snapshot["user_id"])
@@ -403,32 +403,28 @@ class InteractiveResearchAgent:
 
     def _build_agent_messages(
         self,
-        run_id: UUID,
         raw_requirement: str,
+        approved_plan: str,
         queued_messages: List[Dict[str, str]],
     ) -> List[Any]:
         """构造 LLM tool-calling 消息上下文。
 
         Args:
-            run_id: 当前研究 run ID。
             raw_requirement: 原始用户需求。
+            approved_plan: 用户确认的研究计划正文。
             queued_messages: 本轮开始前并入上下文的排队用户输入。
 
         Returns:
             LangChain 消息列表。
         """
-        history = self._build_recent_chat_messages(run_id)
         prompt = (
             f"{research_agent_system_prompt()}\n"
             f"{_tool_policy_instruction()}\n"
             f"{flow_control_protocol_instruction()}\n"
         )
         messages: List[Any] = [SystemMessage(content=prompt)]
-        for item in history:
-            role = item.get("role")
-            content = str(item.get("content") or "")
-            if role == "user":
-                messages.append(HumanMessage(content=content))
+        if approved_plan:
+            messages.append(SystemMessage(content=approved_plan))
         if queued_messages:
             self._append_queued_inputs_to_messages(messages, queued_messages)
         if len(messages) == 1:
@@ -448,17 +444,6 @@ class InteractiveResearchAgent:
         """
         for message in queued_messages:
             messages.append(HumanMessage(content=f"{_additional_user_input_label()}: {message['content']}"))
-
-    def _build_recent_chat_messages(self, run_id: UUID) -> List[Dict[str, Any]]:
-        """构造给 agent 使用的最近消息上下文。
-
-        Args:
-            run_id: 当前研究 run ID。
-
-        Returns:
-            最近消息的轻量结构。
-        """
-        return build_recent_chat_messages_record(run_id)
 
     async def _load_tools(self, run_id: UUID, user_id: int) -> List[Any]:
         """加载绑定给 LLM 的非交易工具。

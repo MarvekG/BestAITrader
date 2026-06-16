@@ -55,6 +55,7 @@ class PlanAgent:
         self._llm_factory = llm_factory
         self._notification_callback = notification_callback
         self._plan_messages: Dict[UUID, List[Any]] = {}
+        self._latest_plan_outputs: Dict[UUID, str] = {}
 
     async def execute(
         self,
@@ -116,6 +117,30 @@ class PlanAgent:
         await self._notify_change(result["notification"])
 
         self._remember_plan_turn(run_id, effective_history_input, plan_message)
+        self._latest_plan_outputs[run_id] = plan_message
+
+    def latest_plan_output(self, run_id: UUID) -> str:
+        """读取当前进程内指定 run 的最新计划输出。
+
+        Args:
+            run_id: 当前研究 run ID。
+
+        Returns:
+            最新计划 Markdown；未生成时返回空字符串。
+        """
+        latest_plan = self._latest_plan_outputs.get(run_id, "")
+        if latest_plan:
+            return latest_plan
+
+        turn_record = load_plan_turn_record(run_id)
+        if turn_record is None:
+            return ""
+        for item in reversed(turn_record["persisted_messages"]):
+            if item.get("role") == "assistant" and item.get("message_type") == "plan_card":
+                latest_plan = str(item.get("content") or "")
+                self._latest_plan_outputs[run_id] = latest_plan
+                return latest_plan
+        return ""
 
     def _build_plan_messages(
         self,
