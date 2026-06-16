@@ -280,66 +280,6 @@ export const marketApi = {
     });
   },
 
-  syncFinancialData: async (stockCode: string, startDate: string, endDate: string) => {
-    return apiClient.post<{
-      task_id: string;
-      task_name: string;
-      status: string;
-      message: string
-    }>('/data/db/sync/financial', null, {
-      params: {
-        stock_code: stockCode,
-        start_date: startDate,
-        end_date: endDate,
-      }
-    });
-  },
-
-  syncIncomeStatementData: async (stockCode: string, startDate: string, endDate: string) => {
-    return apiClient.post<{
-      task_id: string;
-      task_name: string;
-      status: string;
-      message: string
-    }>('/data/db/sync/income-statement', null, {
-      params: {
-        stock_code: stockCode,
-        start_date: startDate,
-        end_date: endDate,
-      }
-    });
-  },
-
-  syncBalanceSheetData: async (stockCode: string, startDate: string, endDate: string) => {
-    return apiClient.post<{
-      task_id: string;
-      task_name: string;
-      status: string;
-      message: string
-    }>('/data/db/sync/balance-sheet', null, {
-      params: {
-        stock_code: stockCode,
-        start_date: startDate,
-        end_date: endDate,
-      }
-    });
-  },
-
-  syncCashflowStatementData: async (stockCode: string, startDate: string, endDate: string) => {
-    return apiClient.post<{
-      task_id: string;
-      task_name: string;
-      status: string;
-      message: string
-    }>('/data/db/sync/cashflow-statement', null, {
-      params: {
-        stock_code: stockCode,
-        start_date: startDate,
-        end_date: endDate,
-      }
-    });
-  },
-
   syncLimitUpPool: async (date?: string) => {
     return apiClient.post<{
       task_id: string;

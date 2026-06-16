@@ -24,7 +24,6 @@ def get_sync_date_range(task_type: str = "normal") -> tuple[str, str]:
     - forecast: 前后 90 天 (Next and previous 90 days, for earnings forecast)
     - margin: 最近 15 天 (Last 15 days, for margin and flow data)
     - survey: 最近 180 天 (Last 180 days, for institutional survey data)
-    - financial: 最近 1 年 (Last 1 year, for financial indicators and income statements)
     """
     now = datetime.now()
     if task_type == "event_long":
@@ -41,9 +40,6 @@ def get_sync_date_range(task_type: str = "normal") -> tuple[str, str]:
         end_date = now.strftime("%Y-%m-%d")
     elif task_type == "survey":
         start_date = (now - timedelta(days=180)).strftime("%Y-%m-%d")
-        end_date = now.strftime("%Y-%m-%d")
-    elif task_type == "financial":
-        start_date = (now - timedelta(days=365)).strftime("%Y-%m-%d")
         end_date = now.strftime("%Y-%m-%d")
     else:  # normal
         start_date = (now - timedelta(days=3)).strftime("%Y-%m-%d")
@@ -94,7 +90,6 @@ async def sync_stock_data_func(
         return start_date or default_start, end_date or default_end
 
     normal_start_date, normal_end_date = resolve_date_range("normal")
-    financial_start_date, financial_end_date = resolve_date_range("financial")
     forecast_start_date, forecast_end_date = resolve_date_range("forecast")
     margin_start_date, margin_end_date = resolve_date_range("margin")
     survey_start_date, survey_end_date = resolve_date_range("survey")
@@ -102,7 +97,6 @@ async def sync_stock_data_func(
     logger.info(
         f"Starting sync task for stock_code: {stock_code}, task_id: {task_id}, "
         f"normal_range=({normal_start_date}, {normal_end_date}), "
-        f"financial_range=({financial_start_date}, {financial_end_date}), "
         f"forecast_range=({forecast_start_date}, {forecast_end_date}), "
         f"margin_range=({margin_start_date}, {margin_end_date}), "
         f"survey_range=({survey_start_date}, {survey_end_date})"
@@ -114,12 +108,8 @@ async def sync_stock_data_func(
         # Phase 1
         {"name": i18n_service.t("market.data_manager.stock_basics"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_info(stock_code)},
         {"name": i18n_service.t("market.data_manager.daily_kline"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_kline(stock_code, start_date=normal_start_date, end_date=normal_end_date, adjust="")},
-        {"name": i18n_service.t("market.data_manager.financial_indicator"), "func": lambda: ingestor_manager.fetch_and_ingest_financial_indicators(stock_code, start_date=financial_start_date, end_date=financial_end_date)},
         {"name": i18n_service.t("common.realtime_quote"), "func": lambda: ingestor_manager.fetch_and_ingest_realtime_market(stock_code)},
         {"name": i18n_service.t("market.valuation_metrics"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_valuation(stock_code, start_date=normal_start_date, end_date=normal_end_date)},  # Note: assuming missing dates
-        {"name": i18n_service.t("market.data_manager.income_statement"), "func": lambda: ingestor_manager.fetch_and_ingest_income_statement(stock_code, start_date=financial_start_date, end_date=financial_end_date)},
-        {"name": i18n_service.t("market.data_manager.balance_sheet"), "func": lambda: ingestor_manager.fetch_and_ingest_balance_sheet(stock_code, start_date=financial_start_date, end_date=financial_end_date)},
-        {"name": i18n_service.t("market.data_manager.cashflow_statement"), "func": lambda: ingestor_manager.fetch_and_ingest_cashflow_statement(stock_code, start_date=financial_start_date, end_date=financial_end_date)},
         {"name": i18n_service.t("market.data_manager.industry"), "func": lambda: ingestor_manager.fetch_and_ingest_board_industry()},
         {"name": i18n_service.t("market.data_manager.northbound"), "func": lambda: ingestor_manager.fetch_and_ingest_northbound(stock_code)},  # Note: missing dates
         {"name": i18n_service.t("market.data_manager.dragon_tiger"), "func": lambda: ingestor_manager.fetch_and_ingest_dragon_tiger(start_date=normal_start_date, end_date=normal_end_date)},  # Assuming incremental
@@ -271,11 +261,7 @@ async def sync_bulk_tables_func(
         'stocks':                  {'method': ingestor_manager.fetch_and_ingest_all_stock_basic,           'mode': 'bulk'},
         'kline':                   {'method': ingestor_manager.fetch_and_ingest_stock_kline,               'mode': 'per_stock', 'needs_scope': True},
         'index_daily':             {'method': ingestor_manager.fetch_and_ingest_index_daily,               'mode': 'index'},
-        # --- Financial ---
-        'financial':               {'method': ingestor_manager.fetch_and_ingest_financial_indicators,      'mode': 'per_stock', 'needs_scope': True},
-        'income_statement':        {'method': ingestor_manager.fetch_and_ingest_income_statement,          'mode': 'per_stock', 'needs_scope': True},
-        'balance_sheet':           {'method': ingestor_manager.fetch_and_ingest_balance_sheet,             'mode': 'per_stock', 'needs_scope': True},
-        'cashflow_statement':      {'method': ingestor_manager.fetch_and_ingest_cashflow_statement,       'mode': 'per_stock', 'needs_scope': True},
+        # --- Financial-adjacent local datasets ---
         'valuation':               {'method': ingestor_manager.fetch_and_ingest_stock_valuation,           'mode': 'per_stock', 'needs_scope': True},
         'stock_earnings_forecast': {'method': ingestor_manager.fetch_and_ingest_stock_earnings_forecast,   'mode': 'per_stock', 'needs_scope': True},
         # --- Realtime / Quotes ---
@@ -456,188 +442,6 @@ async def sync_all_stock_basic_func(
 
     except Exception as e:
         logger.error(f"Stock basic sync task failed: {e}", exc_info=True)
-        return {"status": "failed", "error": str(e)}
-
-
-async def sync_financial_indicator_func(
-    stock_code: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    task_name: str = "Financial Indicator Sync",
-    allow_concurrent: bool = False
-) -> Dict[str, Any]:
-    """
-    同步财务指标任务函数
-    """
-    if not start_date or not end_date:
-        return {"status": "failed", "error": "start_date and end_date are required"}
-
-    logger.info(
-        f"Starting {task_name} (Stock Code: {stock_code}, "
-        f"start_date: {start_date}, end_date: {end_date})"
-    )
-
-    try:
-        from app.data.ingestors.manager import ingestor_manager
-        success = await ingestor_manager.fetch_and_ingest_financial_indicators(
-            stock_code,
-            start_date,
-            end_date,
-        )
-
-        status = "success" if success else "failed"
-        return {
-            "status": status,
-            "message": f"Sync result: {status}",
-            "stock_code": stock_code
-        }
-
-    except Exception as e:
-        logger.error(f"Financial indicator sync task failed: {e}", exc_info=True)
-        return {"status": "failed", "error": str(e)}
-
-
-async def sync_income_statement_func(
-    stock_code: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    task_name: str = "Income Statement Sync",
-    allow_concurrent: bool = False
-) -> Dict[str, Any]:
-    """
-    同步利润表任务函数
-    """
-    if not start_date or not end_date:
-        return {"status": "failed", "error": "start_date and end_date are required"}
-
-    logger.info(
-        f"Starting {task_name} (Stock Code: {stock_code}, "
-        f"start_date: {start_date}, end_date: {end_date})"
-    )
-
-    try:
-        from app.data.ingestors.manager import ingestor_manager
-        from app.core.database import SessionLocal
-        from app.models.stock_warehouse import StockWarehouse
-
-        if stock_code:
-            success = await ingestor_manager.fetch_and_ingest_income_statement(stock_code, start_date, end_date)
-            msg = f"Sync result for {stock_code}: {success}"
-        else:
-            with SessionLocal() as db:
-                stocks = db.query(StockWarehouse).all()
-                count = 0
-                for stock in stocks:
-                    if await ingestor_manager.fetch_and_ingest_income_statement(stock.stock_code, start_date, end_date):
-                        count += 1
-                success = True
-                msg = f"Synced income statements for {count} stocks"
-
-        status = "success" if success else "failed"
-        return {
-            "status": status,
-            "message": msg,
-            "stock_code": stock_code
-        }
-
-    except Exception as e:
-        logger.error(f"Income statement sync task failed: {e}", exc_info=True)
-        return {"status": "failed", "error": str(e)}
-
-
-async def sync_balance_sheet_func(
-    stock_code: Optional[str] = None,
-    start_date: str = "",
-    end_date: str = "",
-    task_name: str = "Balance Sheet Sync",
-    allow_concurrent: bool = False
-) -> Dict[str, Any]:
-    """
-    同步资产负债表任务函数
-    """
-    if not start_date or not end_date:
-        return {"status": "failed", "error": "start_date and end_date are required"}
-
-    logger.info(
-        f"Starting {task_name} (Stock Code: {stock_code}, "
-        f"start_date: {start_date}, end_date: {end_date})"
-    )
-
-    try:
-        from app.data.ingestors.manager import ingestor_manager
-        from app.core.database import SessionLocal
-        from app.models.stock_warehouse import StockWarehouse
-
-        if stock_code:
-            success = await ingestor_manager.fetch_and_ingest_balance_sheet(stock_code, start_date, end_date)
-            msg = f"Sync result for {stock_code}: {success}"
-        else:
-            with SessionLocal() as db:
-                stocks = db.query(StockWarehouse).all()
-                count = 0
-                for stock in stocks:
-                    if await ingestor_manager.fetch_and_ingest_balance_sheet(stock.stock_code, start_date, end_date):
-                        count += 1
-                success = True
-                msg = f"Synced balance sheets for {count} stocks"
-
-        status = "success" if success else "failed"
-        return {
-            "status": status,
-            "message": msg,
-            "stock_code": stock_code
-        }
-
-    except Exception as e:
-        logger.error(f"Balance sheet sync task failed: {e}", exc_info=True)
-        return {"status": "failed", "error": str(e)}
-
-
-async def sync_cashflow_statement_func(
-    stock_code: Optional[str] = None,
-    start_date: str = "",
-    end_date: str = "",
-    task_name: str = "Cashflow Statement Sync",
-    allow_concurrent: bool = False
-) -> Dict[str, Any]:
-    """
-    同步现金流量表任务函数
-    """
-    if not start_date or not end_date:
-        return {"status": "failed", "error": "start_date and end_date are required"}
-
-    logger.info(
-        f"Starting {task_name} (Stock Code: {stock_code}, "
-        f"start_date: {start_date}, end_date: {end_date})"
-    )
-
-    try:
-        from app.data.ingestors.manager import ingestor_manager
-        from app.core.database import SessionLocal
-        from app.models.stock_warehouse import StockWarehouse
-
-        if stock_code:
-            success = await ingestor_manager.fetch_and_ingest_cashflow_statement(stock_code, start_date, end_date)
-            msg = f"Sync result for {stock_code}: {success}"
-        else:
-            with SessionLocal() as db:
-                stocks = db.query(StockWarehouse).all()
-                count = 0
-                for stock in stocks:
-                    if await ingestor_manager.fetch_and_ingest_cashflow_statement(stock.stock_code, start_date, end_date):
-                        count += 1
-                success = True
-                msg = f"Synced cashflow statements for {count} stocks"
-
-        status = "success" if success else "failed"
-        return {
-            "status": status,
-            "message": msg,
-            "stock_code": stock_code
-        }
-
-    except Exception as e:
-        logger.error(f"Cashflow statement sync task failed: {e}", exc_info=True)
         return {"status": "failed", "error": str(e)}
 
 
@@ -1350,7 +1154,6 @@ async def _process_single_stock(single_code: str, current_task_id: str) -> Dict[
     from app.core.i18n import i18n_service
     single_code = StockCodeStandardizer.standardize(single_code)
     kline_start_date, kline_end_date = get_sync_date_range("kline_base_info")
-    financial_start_date, financial_end_date = get_sync_date_range("financial")
 
     # 定义同步步骤 (Define sync steps)
     steps = [
@@ -1363,16 +1166,8 @@ async def _process_single_stock(single_code: str, current_task_id: str) -> Dict[
              end_date=kline_end_date,
              adjust=""
          )},
-        {"name": i18n_service.t("market.data_manager.financial_indicator"), "key": "financial_indicator",
-         "func": lambda: ingestor_manager.fetch_and_ingest_financial_indicators(single_code, start_date=financial_start_date, end_date=financial_end_date)},
         {"name": i18n_service.t("market.valuation_metrics"), "key": "valuation",
          "func": lambda: ingestor_manager.fetch_and_ingest_stock_valuation(single_code)},
-        {"name": i18n_service.t("market.data_manager.income_statement"), "key": "income_statement",
-         "func": lambda: ingestor_manager.fetch_and_ingest_income_statement(single_code, start_date=financial_start_date, end_date=financial_end_date)},
-        {"name": i18n_service.t("market.data_manager.balance_sheet"), "key": "balance_sheet",
-         "func": lambda: ingestor_manager.fetch_and_ingest_balance_sheet(single_code, start_date=financial_start_date, end_date=financial_end_date)},
-        {"name": i18n_service.t("market.data_manager.cashflow_statement"), "key": "cashflow_statement",
-         "func": lambda: ingestor_manager.fetch_and_ingest_cashflow_statement(single_code, start_date=financial_start_date, end_date=financial_end_date)},
         {"name": i18n_service.t("market.data_manager.stock_top_holders"), "key": "top_holders",
          "func": lambda: ingestor_manager.fetch_and_ingest_stock_top_holders(single_code)},
         {"name": i18n_service.t("market.data_manager.stock_realtime_market"), "key": "realtime_market",

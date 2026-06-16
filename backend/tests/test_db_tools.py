@@ -38,11 +38,6 @@ async def test_get_database_schema_returns_model_columns():
     industry_schema = {column["name"]: column for column in result["schemas"]["IndustryData"]}
     assert industry_schema["total_market_cap"]["unit"] == "万元"
 
-    assert result["field_units"]["FinancialIndicator"]["roe"]["unit"] == "%"
-
-    balance_default_unit = result["field_units"]["StockBalanceSheet"]["$default"]
-    assert balance_default_unit["unit"] == "元"
-
     sector_schema = {column["name"]: column for column in result["schemas"]["SectorMoneyFlow"]}
     assert sector_schema["net_inflow"]["unit"] == "元"
 

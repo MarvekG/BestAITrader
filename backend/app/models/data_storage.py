@@ -30,10 +30,6 @@ class  StockBasic(Base):
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
 
 
-# 财务数据表已废弃，改为按需实时拉取
-# FinancialIndicator, StockIncomeStatement, StockBalanceSheet, StockCashflowStatement 已移除
-
-
 class KlineData(Base):
   """Kline  data  for  stocks"""
   __tablename__  =  "kline_data"

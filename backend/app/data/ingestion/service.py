@@ -9,8 +9,7 @@ from app.core.database import engine
 from app.models.data_registry import ApiRegistry
 from app.core.utils.formatters import StockCodeStandardizer
 from app.models.data_storage import (
-    Base, CommonData, KlineData, StockBasic, FinancialIndicator, StockIncomeStatement, StockBalanceSheet, StockCashflowStatement,
-    NorthboundData, DragonTigerData, StockValuationHistory,
+    Base, CommonData, KlineData, StockBasic, NorthboundData, DragonTigerData, StockValuationHistory,
     IndustryData, StockRealtimeMarket,
     StockLimitUpPool, StockLimitDownPool, StockZhabanPool, StockMoneyFlow, StockShareholder, StockPledge, StockPledgeSummary,
     StockInsider, StockRelease, StockForecast, StockMargin, IndexDaily,
@@ -34,10 +33,6 @@ class DataIngestionService:
             'common_data': CommonData,
             'kline_data': KlineData,
             'stock_basic': StockBasic,
-            'financial_indicator': FinancialIndicator,
-            'stock_income_statement': StockIncomeStatement,
-            'stock_balance_sheet': StockBalanceSheet,
-            'stock_cashflow_statement': StockCashflowStatement,
             'northbound_data': NorthboundData,
             'dragon_tiger_data': DragonTigerData,
             'stock_valuation_history': StockValuationHistory,
@@ -63,10 +58,6 @@ class DataIngestionService:
             'data.common_data': CommonData,
             'data.kline_data': KlineData,
             'data.stock_basic': StockBasic,
-            'data.financial_indicator': FinancialIndicator,
-            'data.stock_income_statement': StockIncomeStatement,
-            'data.stock_balance_sheet': StockBalanceSheet,
-            'data.stock_cashflow_statement': StockCashflowStatement,
             'data.northbound_data': NorthboundData,
             'data.dragon_tiger_data': DragonTigerData,
             'data.stock_valuation_history': StockValuationHistory,
@@ -105,7 +96,7 @@ class DataIngestionService:
         :param api_name: API名称 (用于 CommonData 的 api_name 字段)
         :param df: Pandas DataFrame 数据
         :param source: 数据来源
-        :param force_sync: (已废弃，保留兼容性)
+        :param force_sync: 保留参数，当前写入逻辑不使用。
         :param target_table: 目标表名 (如 'kline_data' 或 'common_data')。如果为 None，默认写入 CommonData
         """
         if df.empty:

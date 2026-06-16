@@ -302,10 +302,6 @@ class TestDataAPI:
         assert response.status_code == 200
         assert response.json()["stock_code"] == "000001.SZ"
 
-    def test_get_financial_data(self, client, auth_headers, db_session):
-        """财务数据不再持久化，此测试已废弃"""
-        pass
-
     def test_get_stock_name(self, client, auth_headers):
         with patch(
             "app.api.endpoints.data.data_storage_service.get_stock_basic",

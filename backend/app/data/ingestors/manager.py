@@ -442,16 +442,14 @@ class IngestorManager(BaseIngestor):
         return True
 
     async def sync_all_financial_data(self) -> bool:
-        """全量同步所有股票的财务相关数据"""
-        logger.info("Starting Sync All: Financial Data")
+        """全量同步仍本地维护的业绩预告。"""
+        logger.info("Starting Sync All: Financial-adjacent Data")
         stock_codes = self._get_all_stock_codes()
 
         for i, code in enumerate(stock_codes):
-            await self.fetch_and_ingest_financial_indicators(code)
-            await self.fetch_and_ingest_income_statement(code)
             await self.fetch_and_ingest_stock_earnings_forecast(code)
             if (i + 1) % 50 == 0:
-                logger.info(f"Financial data progress: {i + 1}/{len(stock_codes)} stocks")
+                logger.info(f"Financial-adjacent data progress: {i + 1}/{len(stock_codes)} stocks")
         return True
 
     async def sync_all_valuation(self) -> bool:

@@ -1577,7 +1577,7 @@ async def delete_stock_data(
     Warning: This includes trading history, orders, positions, and analysis data.
     """
     from app.models.data_storage import (
-        StockBasic, KlineData, FinancialIndicator, NorthboundData,
+        StockBasic, KlineData, NorthboundData,
         DragonTigerData, StockValuationHistory, StockRealtimeMarket,
         CommonData, StockInteractiveQA
     )
@@ -1596,7 +1596,7 @@ async def delete_stock_data(
         # Comprehensive list of models to delete from
         models = [
             # Data Storage
-            StockBasic, KlineData, FinancialIndicator, NorthboundData,
+            StockBasic, KlineData, NorthboundData,
             DragonTigerData, StockValuationHistory, StockRealtimeMarket,
             CommonData, StockInteractiveQA,
 

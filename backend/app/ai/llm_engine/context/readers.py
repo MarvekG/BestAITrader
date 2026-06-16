@@ -56,9 +56,6 @@ class FundamentalReader(_WrapDictMixin):
     def basic_info(self, db: Session, stock_code: str) -> dict[str, Any]:
         return self.source._get_basic_info(db, stock_code)
 
-    def financials(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_financials(db, stock_code)
-
     def industry_rank(self, db: Session, stock_code: str) -> dict[str, Any]:
         return self.source._get_industry_rank(db, stock_code)
 
@@ -79,9 +76,6 @@ class FundamentalReader(_WrapDictMixin):
 
     def fund_holding(self, db: Session, stock_code: str) -> dict[str, Any]:
         return self.source._get_fund_holding(db, stock_code)
-
-    def financial_trend(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_financial_trend(db, stock_code)
 
     def insider_activity(self, db: Session, stock_code: str, *, months: int = 6) -> dict[str, Any]:
         return self.source._get_insider_activity(db, stock_code, months=months)
