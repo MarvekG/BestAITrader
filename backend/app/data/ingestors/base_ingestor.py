@@ -11,6 +11,7 @@ import urllib3
 from app.core.config import settings
 from app.core.logger import get_logger
 from app.core.utils.backoff import backoff
+from app.data.ingestors.rate_limiter import LeakyBucketRateLimiter
 
 logger = get_logger(__name__)
 
@@ -164,6 +165,8 @@ class BaseIngestor(ABC):
         """
         Helper to run blocking API calls in a thread pool with optional Redis caching.
         在线程池中运行阻塞式 API 调用，支持可选的 Redis 缓存。
+
+        子类可以通过重写此方法来添加限流逻辑。
 
         Args:
             func: The blocking function to execute (阻塞函数)
