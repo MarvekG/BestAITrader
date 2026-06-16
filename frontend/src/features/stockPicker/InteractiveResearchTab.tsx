@@ -19,8 +19,11 @@ import {
   theme,
 } from 'antd';
 import {
+  ArrowsAltOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
+  CopyOutlined,
+  DeleteOutlined,
   FullscreenOutlined,
   MessageOutlined,
   ReloadOutlined,
@@ -184,6 +187,17 @@ const getToolName = (item: InteractiveResearchMessage): string | null => {
   return typeof toolName === 'string' && toolName.trim() ? toolName.trim() : null;
 };
 
+const getMessageDisplayContent = (item: InteractiveResearchMessage): { content: string; isToolMessage: boolean } => {
+  const isToolMessage = item.message_type === 'tool_result' || item.message_type === 'tool_start';
+  if (item.message_type === 'tool_result') {
+    return { content: getToolResultPreview(item) || item.content || '-', isToolMessage };
+  }
+  if (item.message_type === 'tool_start') {
+    return { content: getToolStartArguments(item) || item.content || '-', isToolMessage };
+  }
+  return { content: item.markdown || item.content || '-', isToolMessage };
+};
+
 const getNumberValue = (value: unknown): number => {
   const numberValue = Number(value || 0);
   return Number.isFinite(numberValue) ? numberValue : 0;
@@ -227,7 +241,9 @@ export const InteractiveResearchTab: React.FC = () => {
   const [loadingDetails, setLoadingDetails] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [actionLoading, setActionLoading] = React.useState<InteractiveResearchAction | null>(null);
+  const [deletingRun, setDeletingRun] = React.useState(false);
   const [chatFullscreenOpen, setChatFullscreenOpen] = React.useState(false);
+  const [expandedMessage, setExpandedMessage] = React.useState<InteractiveResearchMessage | null>(null);
   const selectedRunIdRef = React.useRef<string | null>(null);
   const messagesEndRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -429,6 +445,37 @@ export const InteractiveResearchTab: React.FC = () => {
     [loadRuns, message, selectedRun, t, updateDetailsFromResponse],
   );
 
+  const handleDeleteRun = React.useCallback(async () => {
+    if (!selectedRun) {
+      return;
+    }
+    setDeletingRun(true);
+    try {
+      await interactiveStockPickerApi.deleteRun(selectedRun.run_id);
+      selectedRunIdRef.current = null;
+      setSelectedRunId(null);
+      setSelectedRun(null);
+      setMessages([]);
+      await loadRuns();
+      message.success(t('ai_stock_picker.interactive.messages.delete_success'));
+    } catch (error) {
+      const detail = getApiErrorDetail(error);
+      message.error(formatErrorMessage(detail) || t('ai_stock_picker.interactive.messages.delete_failed'));
+    } finally {
+      setDeletingRun(false);
+    }
+  }, [loadRuns, message, selectedRun, t]);
+
+  const handleCopyMessage = React.useCallback(async (item: InteractiveResearchMessage) => {
+    const { content } = getMessageDisplayContent(item);
+    try {
+      await navigator.clipboard.writeText(content);
+      message.success(t('common.copy_success'));
+    } catch (error) {
+      message.error(formatErrorMessage(error) || t('common.copy'));
+    }
+  }, [message, t]);
+
   const renderMessageItem = React.useCallback(
     (item: InteractiveResearchMessage) => {
       const displayType = item.display_type || item.role;
@@ -460,20 +507,38 @@ export const InteractiveResearchTab: React.FC = () => {
               padding: 12,
             }}
           >
-            <Space size={6} wrap>
-              <Tag color={getRoleColor(displayType)}>
-                {t(`ai_stock_picker.interactive.roles.${displayType}`, { defaultValue: displayType })}
-              </Tag>
-              {toolName && <Tag color="blue">{toolName}</Tag>}
-              {executionStatus && (isToolMessage || executionStatus !== 'completed') && (
-                <Tag color={getExecutionStatusColor(executionStatus)}>
-                  {t(`ai_stock_picker.interactive.execution_statuses.${executionStatus}`, {
-                    defaultValue: executionStatus,
-                  })}
+            <div className="interactive-research-message-header">
+              <Space size={6} wrap>
+                <Tag color={getRoleColor(displayType)}>
+                  {t(`ai_stock_picker.interactive.roles.${displayType}`, { defaultValue: displayType })}
                 </Tag>
-              )}
-              <Text type="secondary">{dayjs(item.created_at).format('MM-DD HH:mm:ss')}</Text>
-            </Space>
+                {toolName && <Tag color="blue">{toolName}</Tag>}
+                {executionStatus && (isToolMessage || executionStatus !== 'completed') && (
+                  <Tag color={getExecutionStatusColor(executionStatus)}>
+                    {t(`ai_stock_picker.interactive.execution_statuses.${executionStatus}`, {
+                      defaultValue: executionStatus,
+                    })}
+                  </Tag>
+                )}
+                <Text type="secondary">{dayjs(item.created_at).format('MM-DD HH:mm:ss')}</Text>
+              </Space>
+              <Space size={2}>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CopyOutlined />}
+                  title={t('common.copy')}
+                  onClick={() => handleCopyMessage(item)}
+                />
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<ArrowsAltOutlined />}
+                  title={t('ai_stock_picker.interactive.actions.expand_message')}
+                  onClick={() => setExpandedMessage(item)}
+                />
+              </Space>
+            </div>
             {isToolMessage ? (
               toolJsonPreview && <pre className="interactive-research-json-result">{toolJsonPreview}</pre>
             ) : (
@@ -483,6 +548,15 @@ export const InteractiveResearchTab: React.FC = () => {
                 </div>
               </>
             )}
+            <div className="interactive-research-message-footer-actions">
+              <Button
+                type="text"
+                size="small"
+                icon={<ArrowsAltOutlined />}
+                title={t('ai_stock_picker.interactive.actions.expand_message')}
+                onClick={() => setExpandedMessage(item)}
+              />
+            </div>
           </div>
         </div>
       );
@@ -492,8 +566,14 @@ export const InteractiveResearchTab: React.FC = () => {
       token.colorBorderSecondary,
       token.colorFillAlter,
       token.colorPrimaryBg,
+      handleCopyMessage,
       t,
     ],
+  );
+
+  const expandedMessageContent = React.useMemo(
+    () => (expandedMessage ? getMessageDisplayContent(expandedMessage) : null),
+    [expandedMessage],
   );
 
   const renderRunActions = React.useCallback(() => {
@@ -524,9 +604,19 @@ export const InteractiveResearchTab: React.FC = () => {
             </Button>
           </Popconfirm>
         )}
+        <Popconfirm
+          title={t('ai_stock_picker.interactive.confirmations.delete_run')}
+          okText={t('common.confirm')}
+          cancelText={t('common.cancel')}
+          onConfirm={() => handleDeleteRun()}
+        >
+          <Button danger icon={<DeleteOutlined />} loading={deletingRun}>
+            {t('ai_stock_picker.interactive.actions.delete')}
+          </Button>
+        </Popconfirm>
       </Space>
     );
-  }, [actionLoading, canApprovePlan, canCancelRun, handleRunAction, selectedRun, t]);
+  }, [actionLoading, canApprovePlan, canCancelRun, deletingRun, handleDeleteRun, handleRunAction, selectedRun, t]);
 
   const renderMessagesPanel = React.useCallback(
     (className?: string) => (
@@ -682,6 +772,25 @@ export const InteractiveResearchTab: React.FC = () => {
         onCancel={() => setChatFullscreenOpen(false)}
       >
         {renderMessagesPanel('interactive-research-message-panel-fullscreen')}
+      </Modal>
+      <Modal
+        className="interactive-research-message-expanded-modal"
+        footer={null}
+        open={expandedMessage !== null}
+        title={t('ai_stock_picker.interactive.actions.expand_message')}
+        width="74vw"
+        style={{ top: '6vh', maxWidth: '74vw' }}
+        onCancel={() => setExpandedMessage(null)}
+      >
+        {expandedMessageContent && (
+          expandedMessageContent.isToolMessage ? (
+            <pre className="interactive-research-expanded-json-result">{expandedMessageContent.content}</pre>
+          ) : (
+            <div className="interactive-research-markdown interactive-research-expanded-markdown">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{expandedMessageContent.content}</ReactMarkdown>
+            </div>
+          )
+        )}
       </Modal>
     </Card>
   );

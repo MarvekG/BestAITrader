@@ -245,4 +245,8 @@ export const interactiveStockPickerApi = {
     );
   },
 
+  deleteRun: async (runId: string) => {
+    return apiClient.delete<{ message: string }>(`/ai-stock-picker/interactive/runs/${runId}`);
+  },
+
 };
