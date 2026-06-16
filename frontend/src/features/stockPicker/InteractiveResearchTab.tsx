@@ -199,8 +199,7 @@ const getMessageDisplayContent = (item: InteractiveResearchMessage): { content: 
 };
 
 const shouldShowFooterExpandAction = (content: string, isToolMessage: boolean): boolean => {
-  const lineCount = content.split('\n').length;
-  return isToolMessage || content.length > 700 || lineCount > 12;
+  return !isToolMessage && content.length > 700;
 };
 
 const getNumberValue = (value: unknown): number => {
