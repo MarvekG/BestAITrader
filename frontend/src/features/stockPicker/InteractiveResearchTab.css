@@ -60,8 +60,21 @@
   border: 1px solid rgba(0, 0, 0, 0.12);
 }
 
+.interactive-research-message-header {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.interactive-research-message-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
 .interactive-research-json-result {
-  max-height: 320px;
+  max-height: 256px;
   margin: 8px 0 0;
   padding: 8px;
   overflow: auto;
@@ -71,6 +84,31 @@
   line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.interactive-research-expanded-json-result {
+  height: 76vh;
+  max-height: 76vh;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.04);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.interactive-research-expanded-markdown {
+  height: 76vh;
+  max-height: 76vh;
+  overflow: auto;
+}
+
+.interactive-research-message-expanded-modal .ant-modal-body {
+  max-height: 80vh;
+  overflow: hidden;
 }
 
 .interactive-research-message-panel {
