@@ -76,6 +76,7 @@ class FakeInteractiveResearchLLM:
         self.invalid_final_returned = False
         self.multiple_final_control_calls = False
         self.mixed_tool_and_flow_control = False
+        self.never_uses_tools = False
 
     def bind_tools(self, tools):
         """记录绑定工具并返回自身。
@@ -105,6 +106,8 @@ class FakeInteractiveResearchLLM:
             return AIMessage(content="Plan updated: exclude banks and favor AI hardware.")
 
         self.research_calls += 1
+        if self.never_uses_tools and self.research_calls <= 10:
+            return AIMessage(content="Still thinking without tool calls.")
         if self.ask_on_first_research and not self.asked:
             self.asked = True
             return AIMessage(
@@ -304,6 +307,7 @@ def _request_data(**overrides):
         "excluded_industries": [],
         "exclude_recent_ipos": False,
         "min_listing_days": None,
+        "max_iterations": 10,
     }
     data.update(overrides)
     return data
@@ -377,7 +381,7 @@ def _interactive_research_session(db_session, monkeypatch):
     monkeypatch.setattr(persistence_module, "SessionLocal", lambda: nullcontext(db_session))
 
 
-async def _execute_background(monkeypatch, service, db_session, run_id, plan_payload=None):
+async def _execute_background(monkeypatch, service, db_session, run_id):
     """通过真实后台入口驱动交互式研究 workflow。
 
     Args:
@@ -385,9 +389,8 @@ async def _execute_background(monkeypatch, service, db_session, run_id, plan_pay
         service: 交互式研究服务。
         db_session: SQLite 测试数据库会话。
         run_id: 研究 run ID。
-        plan_payload: 可选计划 payload。
     """
-    await service.execute_workflow_background(run_id, plan_payload)
+    await service.execute_workflow_background(run_id)
 
 
 async def _create_run_with_plan(service, user_id, request_data):
@@ -427,9 +430,8 @@ async def test_create_run_writes_user_message_plan_card_and_checkpoint(db_sessio
     assert "当前完整 PLAN" not in serialized_plan_message["markdown"]
     assert "objective_summary" not in serialized_plan_message["markdown"]
     assert "open_questions" not in serialized_plan_message["markdown"]
-    assert serialized_plan_message["payload"]["preview"]["scope"] == "all"
-    assert run.checkpoint_payload["plan_payload"]["research_budget"]["max_tool_calls"] == 60
-    assert "tool_policy" not in run.checkpoint_payload["plan_payload"]
+    assert serialized_plan_message["payload"] == {"actions": ["approve", "cancel"]}
+    assert "plan_payload" not in run.checkpoint_payload
     run.checkpoint_payload = {**run.checkpoint_payload, "llm_usage": None}
     assert service.serialize_run_summary(run)["llm_usage"] == {}
     assert set(service.serialize_run_summary(run)) == {
@@ -469,7 +471,7 @@ async def test_plan_agent_runs_in_background_after_create_and_user_input(db_sess
     await background_tasks.run_all()
     messages = service.get_messages(run.run_id, user_id)
     assert [message.message_type for message in messages] == ["user_input", "plan_card"]
-    assert fake_llm.plan_calls == 1
+    assert fake_llm.plan_calls == 10
 
     revise_tasks = FakeBackgroundTasks()
     message = await service.append_user_message(
@@ -481,13 +483,13 @@ async def test_plan_agent_runs_in_background_after_create_and_user_input(db_sess
     messages = service.get_messages(run.run_id, user_id)
     assert message.status == "completed"
     assert [item.message_type for item in messages] == ["user_input", "plan_card", "user_input"]
-    assert fake_llm.plan_calls == 1
+    assert fake_llm.plan_calls == 10
 
     await revise_tasks.run_all()
     messages = service.get_messages(run.run_id, user_id)
     plan_cards = [item for item in messages if item.message_type == "plan_card"]
     assert len(plan_cards) == 2
-    assert fake_llm.plan_calls == 2
+    assert fake_llm.plan_calls == 20
 
 
 @pytest.mark.asyncio
@@ -563,7 +565,7 @@ async def test_plan_stage_user_input_iterates_plan_card(db_session):
     assert "Plan updated" in plan_cards[-1].content
     assert "当前完整 PLAN" not in plan_cards[-1].content
     assert "user_inputs" not in plan_cards[-1].content
-    assert "user_inputs" not in run.checkpoint_payload["plan_payload"]
+    assert "plan_payload" not in run.checkpoint_payload
 
 
 @pytest.mark.asyncio
@@ -698,7 +700,6 @@ async def test_running_user_input_is_queued_and_processed_after_tool_step(db_ses
     service, _, _ = _service_with_fake_runner()
     run = await _create_run_with_plan(service, user_id, _request_data())
     run_id = run.run_id
-    plan_payload = run.checkpoint_payload["plan_payload"]
     run.status = "researching"
     run.current_stage = "researching"
     db_session.commit()
@@ -712,13 +713,36 @@ async def test_running_user_input_is_queued_and_processed_after_tool_step(db_ses
     message_id = message.message_id
     assert message.status == "queued"
 
-    await _execute_background(monkeypatch, service, db_session, run_id, plan_payload=plan_payload)
+    await _execute_background(monkeypatch, service, db_session, run_id)
     completed = service.get_run(run_id, user_id)
     message = db_session.query(InteractiveResearchMessage).filter_by(message_id=message_id).one()
 
     assert message.status == "completed"
     assert completed.status == "completed"
     assert "system_status" in _message_types(db_session, run_id)
+
+
+@pytest.mark.asyncio
+async def test_research_iteration_budget_uses_frontend_max_iterations(db_session, monkeypatch):
+    """研究阶段最大迭代次数应使用创建 run 时前端传入的 max_iterations。"""
+    user_id = _create_user_id(db_session)
+    service, fake_llm, _ = _service_with_fake_runner()
+    fake_llm.never_uses_tools = True
+    run = await _create_run_with_plan(service, user_id, {**_request_data(), "max_iterations": 10})
+    run_id = run.run_id
+
+    assert run.checkpoint_payload["run_config"]["max_iterations"] == 10
+
+    await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
+    await _execute_background(monkeypatch, service, db_session, run_id)
+    final_message = (
+        db_session.query(InteractiveResearchMessage)
+        .filter_by(run_id=run_id, message_type="final_result")
+        .one()
+    )
+
+    assert fake_llm.research_calls == 11
+    assert final_message.payload["iteration_budget"] == 10
 
 
 @pytest.mark.asyncio

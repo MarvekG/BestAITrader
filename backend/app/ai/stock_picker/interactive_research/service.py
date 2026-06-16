@@ -14,10 +14,8 @@ from app.ai.stock_picker.interactive_research.persistence import (
     get_run_record,
     list_message_records,
     list_run_records,
-    load_plan_payload_record,
 )
 from app.ai.stock_picker.interactive_research.plan_agent import PlanAgent
-from app.ai.stock_picker.interactive_research.planning import build_plan_payload
 from app.ai.stock_picker.interactive_research.serializers import serialize_message, serialize_run_summary
 from app.ai.stock_picker.interactive_research.tool_registry import ToolLoaderFactory
 from app.ai.stock_picker.interactive_research.research_agent import (
@@ -81,11 +79,10 @@ class InteractiveResearchService:
         Raises:
             ValueError: 当前用户已有未完成 Deep Research run 时抛出。
         """
-        plan_payload = build_plan_payload(request_data)
         created = create_run_record(
             user_id,
             request_data,
-            title=self._build_title(str(plan_payload.get("objective") or "")),
+            title=self._build_title(str(request_data["requirement"])),
         )
         run_id = created["run_id"]
         raw_requirement = created["raw_requirement"]
@@ -161,7 +158,7 @@ class InteractiveResearchService:
         message = result["message"]
         run_status = result["run_status"]
         if run_status == "awaiting_user_input":
-            background_tasks.add_task(self.execute_workflow_background, run_id, result["plan_payload"])
+            background_tasks.add_task(self.execute_workflow_background, run_id)
             return message
         if run_status not in {"awaiting_plan_approval", "awaiting_user_input"}:
             return message
@@ -223,9 +220,8 @@ class InteractiveResearchService:
         """
         result = approve_plan_record(run_id, user_id)
         run = result["run"]
-        plan_payload = result["plan_payload"]
 
-        background_tasks.add_task(self.execute_workflow_background, run.run_id, plan_payload)
+        background_tasks.add_task(self.execute_workflow_background, run.run_id)
 
         return run
 
@@ -342,25 +338,14 @@ class InteractiveResearchService:
         normalized = " ".join(requirement.split())
         return normalized[:60] or _t("messages.default_title")
 
-    async def execute_workflow_background(
-        self,
-        run_id: UUID,
-        plan_payload: Optional[Dict[str, Any]] = None,
-    ) -> None:
+    async def execute_workflow_background(self, run_id: UUID) -> None:
         """后台执行 workflow（用于 FastAPI BackgroundTasks）。
 
         Args:
             run_id: 研究 run ID。
-            plan_payload: 已确认计划 payload。
         """
-        effective_plan_payload = plan_payload
-        if effective_plan_payload is None:
-            effective_plan_payload = load_plan_payload_record(run_id)
-            if effective_plan_payload is None:
-                return
-
         try:
-            await self._research_agent.execute(run_id, effective_plan_payload)
+            await self._research_agent.execute(run_id)
         except Exception as exc:
             import logging
             import traceback

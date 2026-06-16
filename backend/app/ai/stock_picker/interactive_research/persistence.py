@@ -16,7 +16,6 @@ from app.ai.stock_picker.interactive_research.models import (
     InteractiveResearchMessage,
     InteractiveResearchRun,
 )
-from app.ai.stock_picker.interactive_research.planning import build_plan_payload
 from app.ai.stock_picker.interactive_research.serializers import serialize_message, serialize_run_summary
 from app.core.database import SessionLocal
 from app.core.i18n import i18n_service
@@ -67,18 +66,19 @@ def create_run_record(
         if active_run:
             raise ValueError(_t("errors.active_run_exists", run_id=active_run.run_id))
 
-        plan_payload = build_plan_payload(request_data)
+        requirement = str(request_data["requirement"]).strip()
+        run_config = {"max_iterations": int(request_data["max_iterations"])}
         run = InteractiveResearchRun(
             user_id=user_id,
             status="awaiting_plan_approval",
             current_stage="awaiting_plan_approval",
             current_phase="planning",
             title=title,
-            raw_requirement=str(plan_payload.get("objective") or ""),
+            raw_requirement=requirement,
             checkpoint_payload={
                 "status": "awaiting_plan_approval",
                 "current_phase": "planning",
-                "plan_payload": plan_payload,
+                "run_config": run_config,
             },
         )
         db.add(run)
@@ -88,7 +88,7 @@ def create_run_record(
             run,
             role="user",
             message_type="user_input",
-            content=str(plan_payload.get("objective") or ""),
+            content=requirement,
             payload={"request": request_data},
         )
         db.commit()
@@ -200,9 +200,7 @@ def append_user_message_record(
             parent_message_id=parent_message_id,
             status=message_status,
         )
-        plan_payload = None
         if run_status == "awaiting_user_input":
-            plan_payload = _plan_payload_from_checkpoint(run)
             transition_run(
                 db,
                 run,
@@ -211,7 +209,7 @@ def append_user_message_record(
                 system_content=_t("messages.answer_received"),
                 system_payload={"answer_message_id": str(message.message_id)},
                 checkpoint_reason="user_answer_received",
-                checkpoint_extra={"answer_message_id": str(message.message_id), "plan_payload": plan_payload},
+                checkpoint_extra={"answer_message_id": str(message.message_id)},
                 clear_pending=True,
             )
         elif run_status not in {"awaiting_plan_approval", "awaiting_user_input"}:
@@ -223,7 +221,7 @@ def append_user_message_record(
             )
         db.commit()
         db.refresh(message)
-        return {"message": message, "run_status": run_status, "plan_payload": plan_payload}
+        return {"message": message, "run_status": run_status}
 
 
 def approve_plan_record(run_id: UUID, user_id: int) -> Dict[str, Any]:
@@ -246,7 +244,6 @@ def approve_plan_record(run_id: UUID, user_id: int) -> Dict[str, Any]:
             raise LookupError(_t("errors.run_not_found"))
         if run.status != "awaiting_plan_approval":
             raise ValueError(_t("errors.only_awaiting_plan_approval_can_approve"))
-        plan_payload = _plan_payload_from_checkpoint(run)
         transition_run(
             db,
             run,
@@ -254,11 +251,10 @@ def approve_plan_record(run_id: UUID, user_id: int) -> Dict[str, Any]:
             current_phase="research",
             system_content=_t("messages.plan_approved"),
             checkpoint_reason="plan_approved",
-            checkpoint_extra={"plan_payload": plan_payload},
         )
         db.commit()
         db.refresh(run)
-        return {"run": run, "plan_payload": plan_payload}
+        return {"run": run}
 
 
 def cancel_run_record(run_id: UUID, user_id: int, reason: Optional[str] = None) -> InteractiveResearchRun:
@@ -318,22 +314,6 @@ def list_message_records(run_id: UUID, user_id: int, *, visible_only: bool = Tru
         return query.order_by(InteractiveResearchMessage.sequence_no.asc()).all()
 
 
-def load_plan_payload_record(run_id: UUID) -> Optional[Dict[str, Any]]:
-    """读取 run checkpoint 中的计划 payload。
-
-    Args:
-        run_id: 研究 run ID。
-
-    Returns:
-        找到 run 时返回计划 payload，否则返回 None。
-    """
-    with SessionLocal() as db:
-        run = _get_run(db, run_id)
-        if run is None:
-            return None
-        return _plan_payload_from_checkpoint(run)
-
-
 def fail_run_record(run_id: UUID, error_text: str, exception_type: str, exception_message: str) -> None:
     """把 run 标记为失败并写入系统消息。
 
@@ -366,7 +346,7 @@ def load_plan_turn_record(run_id: UUID) -> Optional[Dict[str, Any]]:
         run_id: 研究 run ID。
 
     Returns:
-        run 存在时返回状态、计划 payload 和历史消息；否则返回 None。
+        run 存在时返回状态、运行配置和历史消息；否则返回 None。
     """
     with SessionLocal() as db:
         run = _get_run(db, run_id)
@@ -376,7 +356,7 @@ def load_plan_turn_record(run_id: UUID) -> Optional[Dict[str, Any]]:
         return {
             "run_id": run.run_id,
             "status": run.status,
-            "plan_payload": _plan_payload_from_checkpoint(run),
+            "max_iterations": _max_iterations_from_checkpoint(run),
             "persisted_messages": persisted,
         }
 
@@ -385,8 +365,6 @@ def persist_plan_card_record(
     run_id: UUID,
     *,
     plan_message: str,
-    plan_preview_payload: Dict[str, Any],
-    plan_payload: Dict[str, Any],
     usage_record: Optional[Dict[str, Any]],
     reason: str,
     bump_version: bool,
@@ -396,42 +374,34 @@ def persist_plan_card_record(
     Args:
         run_id: 研究 run ID。
         plan_message: 计划 Agent Markdown 输出。
-        plan_preview_payload: 计划预览 payload。
-        plan_payload: 完整计划 payload。
         usage_record: 本轮 LLM usage。
         reason: checkpoint 原因。
         bump_version: 是否递增 run 版本。
 
     Returns:
-        写入结果、最新计划 payload 和可推送通知 payload。
+        写入结果和可推送通知 payload。
     """
     with SessionLocal() as db:
         run = _get_run(db, run_id)
         if run is None:
             raise LookupError(_t("errors.run_not_found"))
         if run.status != "awaiting_plan_approval":
-            return {"persisted": False, "plan_payload": plan_payload, "notification": None}
+            return {"persisted": False, "notification": None}
         message = persist_plan_card(
             db,
             run,
             plan_message=plan_message,
-            plan_preview_payload=plan_preview_payload,
-            plan_payload=plan_payload,
             usage_record=usage_record,
             reason=reason,
             bump_version=bump_version,
         )
         payload = _notification_payload(run, message, "plan_card")
         db.commit()
-        return {"persisted": True, "plan_payload": plan_payload, "notification": payload}
+        return {"persisted": True, "notification": payload}
 
 
-def start_research_run_record(run_id: UUID, plan_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def start_research_run_record(run_id: UUID) -> Optional[Dict[str, Any]]:
     """启动研究 loop 并返回运行快照和通知 payload。
-
-    Args:
-        run_id: 研究 run ID。
-        plan_payload: 已确认计划 payload。
 
     Returns:
         run 存在时返回快照和通知 payload；否则返回 None。
@@ -451,7 +421,6 @@ def start_research_run_record(run_id: UUID, plan_payload: Dict[str, Any]) -> Opt
             run,
             reason="agent_loop_started",
             extra_payload={
-                "plan_payload": plan_payload,
                 "answer_message_id": current_checkpoint.get("answer_message_id"),
                 "queued_message_ids": [message["message_id"] for message in queued_messages],
             },
@@ -465,7 +434,12 @@ def start_research_run_record(run_id: UUID, plan_payload: Dict[str, Any]) -> Opt
             payload={"phase_instruction": phase_instructions()["research"]},
         )
         payload = _notification_payload(run, message, "research_started")
-        snapshot = {"user_id": run.user_id, "raw_requirement": run.raw_requirement, "queued_before": queued_messages}
+        snapshot = {
+            "user_id": run.user_id,
+            "raw_requirement": run.raw_requirement,
+            "max_iterations": _max_iterations_from_checkpoint(run),
+            "queued_before": queued_messages,
+        }
         db.commit()
         return {"snapshot": snapshot, "notification": payload}
 
@@ -559,7 +533,6 @@ def append_tool_result_and_progress_record(
             run,
             reason="tool_step_completed",
             extra_payload={
-                "plan_payload": _plan_payload_from_checkpoint(run),
                 "answer_message_id": current_checkpoint.get("answer_message_id"),
                 "last_tool_name": tool_name,
                 "last_tool_success": success,
@@ -576,7 +549,6 @@ def append_tool_result_and_progress_record(
 def synthesize_final_message_record(
     run_id: UUID,
     *,
-    plan_payload: Dict[str, Any],
     tool_trace: List[Dict[str, Any]],
     final_content: str,
     stopped_by_iteration_limit: bool,
@@ -586,7 +558,6 @@ def synthesize_final_message_record(
 
     Args:
         run_id: 研究 run ID。
-        plan_payload: 已确认计划 payload。
         tool_trace: 工具调用轨迹。
         final_content: LLM 最终回答。
         stopped_by_iteration_limit: 是否因预算耗尽停止。
@@ -605,7 +576,7 @@ def synthesize_final_message_record(
         run.version += 1
         final_payload = {
             "phase_instruction": phase_instructions()["synthesis"],
-            "requirement_summary": plan_payload.get("objective") or run.raw_requirement,
+            "requirement_summary": run.raw_requirement,
             "answer_markdown": final_content,
             "stopped_by_iteration_limit": stopped_by_iteration_limit,
             "iteration_budget": iteration_budget,
@@ -628,7 +599,7 @@ def synthesize_final_message_record(
         run.current_stage = "completed"
         run.finished_at = datetime.now()
         run.version += 1
-        write_checkpoint(db, run, reason="final_message_created", extra_payload={"plan_payload": plan_payload})
+        write_checkpoint(db, run, reason="final_message_created")
         status_message = append_message(
             db,
             run,
@@ -642,12 +613,11 @@ def synthesize_final_message_record(
         return [final_notification, completed_notification]
 
 
-def pause_for_user_question_record(run_id: UUID, plan_payload: Dict[str, Any], question_content: str) -> Optional[Dict[str, Any]]:
+def pause_for_user_question_record(run_id: UUID, question_content: str) -> Optional[Dict[str, Any]]:
     """暂停研究并写入追问消息。
 
     Args:
         run_id: 研究 run ID。
-        plan_payload: 已确认计划 payload。
         question_content: LLM 生成的追问。
 
     Returns:
@@ -669,7 +639,7 @@ def pause_for_user_question_record(run_id: UUID, plan_payload: Dict[str, Any], q
             payload={"reason": "agent_asked_user"},
         )
         run.pending_message_id = question.message_id
-        write_checkpoint(db, run, reason="agent_asked_user", extra_payload={"plan_payload": plan_payload})
+        write_checkpoint(db, run, reason="agent_asked_user")
         payload = _notification_payload(run, question, "assistant_question")
         db.commit()
         return payload
@@ -819,22 +789,6 @@ def _get_user_run(db: Session, run_id: UUID, user_id: int) -> Optional[Interacti
     )
 
 
-def _plan_payload_from_checkpoint(run: InteractiveResearchRun) -> Dict[str, Any]:
-    """从 run checkpoint 中恢复当前计划。
-
-    Args:
-        run: 当前研究 run。
-
-    Returns:
-        计划 payload；缺失时返回最小计划。
-    """
-    checkpoint = run.checkpoint_payload or {}
-    plan_payload = checkpoint.get("plan_payload")
-    if isinstance(plan_payload, dict):
-        return plan_payload
-    return build_plan_payload({"requirement": run.raw_requirement})
-
-
 def _load_plan_messages(db: Session, run: InteractiveResearchRun) -> List[Dict[str, str]]:
     """读取计划阶段可见消息快照。
 
@@ -982,6 +936,7 @@ def write_checkpoint(
         "version": run.version,
         "reason": reason,
         "created_at": datetime.now().isoformat(timespec="seconds"),
+        "run_config": existing_payload.get("run_config") or {},
         "llm_usage": existing_payload.get("llm_usage") or {},
         **(extra_payload or {}),
     }
@@ -1030,13 +985,25 @@ def accumulate_llm_usage(
     return current_usage
 
 
+def _max_iterations_from_checkpoint(run: InteractiveResearchRun) -> int:
+    """从 run checkpoint 读取前端传入的研究迭代上限。
+
+    Args:
+        run: 当前研究 run。
+
+    Returns:
+        前端创建 run 时传入的最大迭代次数。
+    """
+    checkpoint_payload = run.checkpoint_payload if isinstance(run.checkpoint_payload, dict) else {}
+    run_config = checkpoint_payload["run_config"]
+    return int(run_config["max_iterations"])
+
+
 def persist_plan_card(
     db: Session,
     run: InteractiveResearchRun,
     *,
     plan_message: str,
-    plan_preview_payload: Dict[str, Any],
-    plan_payload: Dict[str, Any],
     usage_record: Optional[Dict[str, Any]],
     reason: str,
     bump_version: bool,
@@ -1050,8 +1017,6 @@ def persist_plan_card(
         db: 数据库会话。
         run: 当前研究 run。
         plan_message: 计划 Agent 本轮 Markdown 输出。
-        plan_preview_payload: 计划卡轻量预览 payload。
-        plan_payload: 当前完整计划 payload，写入 checkpoint。
         usage_record: 本轮计划 LLM 调用的 usage 记录。
         reason: checkpoint 生成原因。
         bump_version: 是否递增 run 版本号。
@@ -1068,9 +1033,9 @@ def persist_plan_card(
         role="assistant",
         message_type="plan_card",
         content=plan_message,
-        payload={"preview": plan_preview_payload, "actions": ["approve", "cancel"]},
+        payload={"actions": ["approve", "cancel"]},
     )
-    write_checkpoint(db, run, reason=reason, extra_payload={"plan_payload": plan_payload})
+    write_checkpoint(db, run, reason=reason)
     accumulate_llm_usage(db, run, usage_record)
     return message
 

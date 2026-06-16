@@ -84,22 +84,20 @@ class InteractiveResearchAgent:
         self._notification_callback = notification_callback
         self._llm_provider = get_llm_provider()
 
-    async def execute(self, run_id: UUID, plan_payload: Dict[str, Any]) -> None:
+    async def execute(self, run_id: UUID) -> None:
         """异步运行 LLM tool-calling 循环。
 
         Args:
             run_id: 当前研究 run ID。
-            plan_payload: 已确认计划 payload。
         """
         tool_trace: List[Dict[str, Any]] = []
-        run_snapshot = await self._start_research_run(run_id, plan_payload)
+        run_snapshot = await self._start_research_run(run_id)
         if run_snapshot is None:
             return
 
         messages = self._build_agent_messages(
             run_id,
             run_snapshot["raw_requirement"],
-            plan_payload,
             run_snapshot["queued_before"],
         )
         tools = await self._load_tools(run_id, run_snapshot["user_id"])
@@ -111,7 +109,7 @@ class InteractiveResearchAgent:
         llm = self._build_llm()
         llm_with_tools = llm.bind_tools(tools)
         final_content = ""
-        iteration_budget = self._iteration_budget(plan_payload)
+        iteration_budget = self._iteration_budget(run_snapshot["max_iterations"])
         stopped_by_iteration_limit = False
 
         for iteration_index in range(1, iteration_budget + 1):
@@ -150,7 +148,7 @@ class InteractiveResearchAgent:
                 if decision is None:
                     continue
                 if decision.status == "ask":
-                    await self._pause_for_user_question(run_id, plan_payload, decision.message)
+                    await self._pause_for_user_question(run_id, decision.message)
                     return
                 if decision.status == "done":
                     final_content = decision.message
@@ -195,28 +193,22 @@ class InteractiveResearchAgent:
 
         await self._synthesize_final_message(
             run_id,
-            plan_payload,
             tool_trace,
             final_content,
             stopped_by_iteration_limit=stopped_by_iteration_limit,
             iteration_budget=iteration_budget,
         )
 
-    async def _start_research_run(
-        self,
-        run_id: UUID,
-        plan_payload: Dict[str, Any],
-    ) -> Optional[Dict[str, Any]]:
+    async def _start_research_run(self, run_id: UUID) -> Optional[Dict[str, Any]]:
         """把 run 切到研究阶段并记录输入上下文。
 
         Args:
             run_id: 当前研究 run ID。
-            plan_payload: 已确认计划 payload。
 
         Returns:
             run 快照；run 不存在时返回 None。
         """
-        result = start_research_run_record(run_id, plan_payload)
+        result = start_research_run_record(run_id)
         if result is None:
             return None
         await self._notify_change(result["notification"])
@@ -340,7 +332,6 @@ class InteractiveResearchAgent:
     async def _synthesize_final_message(
         self,
         run_id: UUID,
-        plan_payload: Dict[str, Any],
         tool_trace: List[Dict[str, Any]],
         final_content: str,
         *,
@@ -351,7 +342,6 @@ class InteractiveResearchAgent:
 
         Args:
             run_id: 当前研究 run ID。
-            plan_payload: 已确认计划 payload。
             tool_trace: 工具调用轨迹。
             final_content: LLM 最终回答。
             stopped_by_iteration_limit: 是否因迭代预算耗尽提前终止。
@@ -359,7 +349,6 @@ class InteractiveResearchAgent:
         """
         payloads = synthesize_final_message_record(
             run_id,
-            plan_payload=plan_payload,
             tool_trace=tool_trace,
             final_content=final_content,
             stopped_by_iteration_limit=stopped_by_iteration_limit,
@@ -371,17 +360,15 @@ class InteractiveResearchAgent:
     async def _pause_for_user_question(
         self,
         run_id: UUID,
-        plan_payload: Dict[str, Any],
         question_content: str,
     ) -> None:
         """在 agent 输出 ask 时停止循环并写入问题。
 
         Args:
             run_id: 当前研究 run ID。
-            plan_payload: 已确认计划 payload。
             question_content: LLM 生成的用户问题。
         """
-        await self._notify_change(pause_for_user_question_record(run_id, plan_payload, question_content))
+        await self._notify_change(pause_for_user_question_record(run_id, question_content))
 
     async def _append_assistant_text(self, run_id: UUID, content: str) -> None:
         """追加研究过程中的普通 assistant 文本。
@@ -418,7 +405,6 @@ class InteractiveResearchAgent:
         self,
         run_id: UUID,
         raw_requirement: str,
-        plan_payload: Dict[str, Any],
         queued_messages: List[Dict[str, str]],
     ) -> List[Any]:
         """构造 LLM tool-calling 消息上下文。
@@ -426,7 +412,6 @@ class InteractiveResearchAgent:
         Args:
             run_id: 当前研究 run ID。
             raw_requirement: 原始用户需求。
-            plan_payload: 已确认计划 payload。
             queued_messages: 本轮开始前并入上下文的排队用户输入。
 
         Returns:
@@ -437,7 +422,6 @@ class InteractiveResearchAgent:
             f"{research_agent_system_prompt()}\n"
             f"{_tool_policy_instruction()}\n"
             f"{flow_control_protocol_instruction()}\n"
-            f"{_build_approved_plan_context(plan_payload)}"
         )
         messages: List[Any] = [SystemMessage(content=prompt)]
         for item in history:
@@ -564,18 +548,16 @@ class InteractiveResearchAgent:
             messages.append(HumanMessage(content=_build_flow_control_retry_message(exc, final_only=final_only)))
             return None
 
-    def _iteration_budget(self, plan_payload: Dict[str, Any]) -> int:
+    def _iteration_budget(self, max_iterations: int) -> int:
         """读取并限制工具循环预算。
 
         Args:
-            plan_payload: 已确认计划 payload。
+            max_iterations: 前端创建 run 时传入的最大迭代次数。
 
         Returns:
             工具循环上限。
         """
-        budget = plan_payload.get("research_budget") if isinstance(plan_payload.get("research_budget"), dict) else {}
-        max_tool_calls = int(budget.get("max_tool_calls") or DEFAULT_INTERACTIVE_RESEARCH_ITERATIONS)
-        return max(MIN_INTERACTIVE_RESEARCH_ITERATIONS, max_tool_calls)
+        return max(MIN_INTERACTIVE_RESEARCH_ITERATIONS, int(max_iterations))
 
     async def _notify_change(
         self,
@@ -723,27 +705,6 @@ def _tool_policy_instruction() -> str:
         当前提示词语言下的工具边界提示词。
     """
     return prompt_constants.tool_policy_instruction()
-
-
-def _approved_plan_label() -> str:
-    """返回已确认计划标签。
-
-    Returns:
-        当前提示词语言下的已确认计划标签。
-    """
-    return prompt_constants.approved_plan_label()
-
-
-def _build_approved_plan_context(plan_payload: Dict[str, Any]) -> str:
-    """构造本轮研究使用的已确认计划上下文。
-
-    Args:
-        plan_payload: 已确认计划 payload。
-
-    Returns:
-        放在 HumanMessage 中的计划上下文。
-    """
-    return f"{_approved_plan_label()}:\n{stable_json_dumps(plan_payload)}"
 
 
 def _additional_user_input_label() -> str:

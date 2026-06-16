@@ -5,14 +5,12 @@ from uuid import UUID
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_providers.factory import build_chat_model
 from app.ai.stock_picker.interactive_research.constants import (
     planning_initial_user_message,
     planning_stage_prompt,
 )
 from app.ai.stock_picker.interactive_research.persistence import load_plan_turn_record, persist_plan_card_record
-from app.ai.stock_picker.interactive_research.planning import build_plan_preview_payload
 from app.core.config import settings
 from app.core.i18n import i18n_service
 from app.crud.llm_usage_log import record_llm_usage
@@ -20,7 +18,6 @@ from app.crud.llm_usage_log import record_llm_usage
 
 LLMFactory = Callable[[], Any]
 PlanAgentNotificationCallback = Callable[[Dict[str, Any]], Awaitable[None]]
-PLAN_AGENT_ITERATIONS = 1
 
 
 def _t(key: str, **kwargs: Any) -> str:
@@ -69,8 +66,8 @@ class PlanAgent:
     ) -> None:
         """执行一轮计划 Agent，完成后停下来等待用户确认或补充。
 
-        计划阶段与研究 Agent 一样用显式循环承载一次 Agent 执行，但预算固定为 1。循环跑完一轮
-        后只写入 plan_card 和 checkpoint，不继续自动推进。
+        计划阶段与研究 Agent 一样用显式循环承载 Agent 执行，循环预算来自创建 run 时前端传入的
+        max_iterations。循环只生成计划卡，不调用工具，也不自动推进到研究阶段。
 
         Args:
             run_id: 当前研究 run ID。
@@ -86,50 +83,47 @@ class PlanAgent:
         if not normalized_input:
             raise ValueError(_t("errors.plan_update_empty"))
 
-        persisted = False
-        plan_message = ""
         effective_history_input = (history_input or normalized_input).strip()
         llm_input = planning_initial_user_message(normalized_input) if initial else normalized_input
-        for iteration_index in range(1, PLAN_AGENT_ITERATIONS + 1):
-            turn_record = load_plan_turn_record(run_id)
-            if turn_record is None:
-                raise LookupError(_t("errors.run_not_found"))
-            if turn_record["status"] != "awaiting_plan_approval":
-                return
+        turn_record = load_plan_turn_record(run_id)
+        if turn_record is None:
+            raise LookupError(_t("errors.run_not_found"))
+        if turn_record["status"] != "awaiting_plan_approval":
+            return
 
-            plan_payload = turn_record["plan_payload"]
-            llm_messages = self._build_plan_messages(
-                run_id,
-                llm_input,
-                plan_payload,
-                persisted_messages=turn_record["persisted_messages"],
-            )
+        messages = self._build_plan_messages(
+            run_id,
+            llm_input,
+            persisted_messages=turn_record["persisted_messages"],
+        )
+        plan_message = ""
+        persisted = False
+        iteration_budget = self._iteration_budget(turn_record["max_iterations"])
+        for iteration_index in range(1, iteration_budget + 1):
             plan_message, usage_record = await self._invoke_plan_markdown(
                 run_id,
-                llm_messages,
+                messages,
                 iteration_index=iteration_index,
             )
+            messages.append(AIMessage(content=plan_message))
 
-            latest_turn_record = load_plan_turn_record(run_id)
-            if latest_turn_record is None:
-                raise LookupError(_t("errors.run_not_found"))
-            if latest_turn_record["status"] != "awaiting_plan_approval":
-                return
+        latest_turn_record = load_plan_turn_record(run_id)
+        if latest_turn_record is None:
+            raise LookupError(_t("errors.run_not_found"))
+        if latest_turn_record["status"] != "awaiting_plan_approval":
+            return
 
-            plan_payload = latest_turn_record["plan_payload"]
-            result = persist_plan_card_record(
-                run_id,
-                plan_message=plan_message,
-                plan_preview_payload=build_plan_preview_payload(plan_payload),
-                plan_payload=plan_payload,
-                usage_record=usage_record,
-                reason="plan_drafted" if initial else "plan_updated",
-                bump_version=not initial,
-            )
-            persisted = bool(result.get("persisted"))
-            if not persisted:
-                return
-            await self._notify_change(result.get("notification"))
+        result = persist_plan_card_record(
+            run_id,
+            plan_message=plan_message,
+            usage_record=usage_record,
+            reason="plan_drafted" if initial else "plan_updated",
+            bump_version=not initial,
+        )
+        persisted = result["persisted"]
+        if not persisted:
+            return
+        await self._notify_change(result["notification"])
 
         if persisted:
             self._remember_plan_turn(run_id, effective_history_input, plan_message)
@@ -138,7 +132,6 @@ class PlanAgent:
         self,
         run_id: UUID,
         content: str,
-        plan_payload: Dict[str, Any],
         *,
         persisted_messages: List[Dict[str, str]],
     ) -> List[Any]:
@@ -150,13 +143,12 @@ class PlanAgent:
         Args:
             run_id: 当前研究 run ID。
             content: 用户本轮输入。
-            plan_payload: 当前计划 payload。
             persisted_messages: 已持久化的计划阶段消息快照。
 
         Returns:
             本轮调用 LLM 的消息列表。
         """
-        system_message = SystemMessage(content=_build_planning_stage_prompt(plan_payload))
+        system_message = SystemMessage(content=planning_stage_prompt())
         history = self._plan_messages.get(run_id)
         if history is None:
             history = self._restore_plan_messages(persisted_messages)
@@ -213,6 +205,17 @@ class PlanAgent:
             return self._llm_factory()
         return build_chat_model(model=settings.LLM_MODEL, temperature=0.2)
 
+    def _iteration_budget(self, max_iterations: int) -> int:
+        """读取计划 Agent 的最大循环次数。
+
+        Args:
+            max_iterations: 前端创建 run 时传入的最大迭代次数。
+
+        Returns:
+            计划 Agent 循环上限。
+        """
+        return int(max_iterations)
+
     async def _invoke_plan_markdown(
         self, run_id: UUID, messages: List[Any], *, iteration_index: int
     ) -> Tuple[str, Optional[Dict[str, Any]]]:
@@ -248,15 +251,3 @@ class PlanAgent:
         """
         if self._notification_callback is not None and payload is not None:
             await self._notification_callback(payload)
-
-
-def _build_planning_stage_prompt(plan_payload: Dict[str, Any]) -> str:
-    """构造包含固定计划上下文的计划阶段提示词。
-
-    Args:
-        plan_payload: 当前 run 固定的计划 payload。
-
-    Returns:
-        当前系统语言下的计划阶段提示词。
-    """
-    return f"{planning_stage_prompt()}\n\nCurrent plan JSON (private context, do not copy fields):\n{stable_json_dumps(plan_payload)}"
