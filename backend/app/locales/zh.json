@@ -628,6 +628,7 @@
       "sync_valuation": "同步估值",
       "stock_top_holders": "十大股东",
       "sync_top_holders": "同步十大股东",
+      "financial_data": "财务数据",
       "financial_indicator": "财务指标",
       "income_statement": "利润表",
       "balance_sheet": "资产负债表",
@@ -2469,12 +2470,14 @@
         "approve": "确认并执行",
         "resume": "继续",
         "cancel": "取消研究",
+        "delete": "删除",
         "open_active_run": "打开运行中任务",
         "send_message": "发送",
         "fullscreen": "全屏查看"
       },
       "confirmations": {
-        "cancel_run": "确认取消这次AI深度研究选股？"
+        "cancel_run": "确认取消这次AI深度研究选股？",
+        "delete_run": "确认删除这次AI深度研究选股？"
       },
       "messages": {
         "load_runs_failed": "加载AI深度研究选股历史失败",
@@ -2485,6 +2488,8 @@
         "approve_failed": "确认计划失败",
         "cancel_success": "已取消研究",
         "cancel_failed": "取消研究失败",
+        "delete_success": "已删除研究任务",
+        "delete_failed": "删除研究任务失败",
         "resume_success": "已继续研究",
         "resume_failed": "继续研究失败",
         "cancel_reason": "用户在前端取消研究",

@@ -10,7 +10,7 @@ import asyncio
 import time
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Any, Optional
 
 from app.data.ingestors.base_ingestor import BaseIngestor
 from app.data.ingestion.service import DataIngestionService
@@ -104,6 +104,125 @@ class AkshareIngestor(BaseIngestor):
 
         # 调用基类方法执行实际 API 请求
         return await super()._run_in_executor(func, *args, use_cache=use_cache, cache_ttl=cache_ttl, **kwargs)
+
+    def _normalize_ths_statement_records(
+        self,
+        df: pd.DataFrame,
+        stock_code: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        *,
+        report_type: str,
+    ) -> list[dict[str, Any]]:
+        """将 AKShare 同花顺财报宽表转换为上下文使用的标准记录。
+
+        Args:
+            df: AKShare 同花顺财报接口返回的宽表。
+            stock_code: 股票代码。
+            start_date: 开始日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时不过滤下界。
+            end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时不过滤上界。
+            report_type: 写入上下文 meta 的报表类型。
+
+        Returns:
+            按报告期聚合后的标准财务记录列表。
+        """
+        if df is None or df.empty or "报告期" not in df.columns:
+            return []
+
+        start_dt = pd.to_datetime(start_date.replace("-", ""), format="%Y%m%d", errors="coerce") if start_date else None
+        end_dt = pd.to_datetime(end_date.replace("-", ""), format="%Y%m%d", errors="coerce") if end_date else None
+        code = StockCodeStandardizer.standardize(stock_code)
+        normalized_df = df.copy()
+        normalized_df["report_date"] = pd.to_datetime(normalized_df["报告期"], errors="coerce")
+        if start_dt is not None and not pd.isna(start_dt):
+            normalized_df = normalized_df[normalized_df["report_date"] >= start_dt]
+        if end_dt is not None and not pd.isna(end_dt):
+            normalized_df = normalized_df[normalized_df["report_date"] <= end_dt]
+
+        metadata_columns = {"报告期", "report_date", "报表核心指标", "报表全部指标", "补充资料："}
+        records: list[dict[str, Any]] = []
+
+        for _, row in normalized_df.iterrows():
+            report_dt = row.get("report_date")
+            if pd.isna(report_dt):
+                continue
+
+            data: dict[str, Any] = {}
+            for field_name, value in row.items():
+                if field_name in metadata_columns:
+                    continue
+                if value is None or value is False or pd.isna(value) or value == "":
+                    continue
+                data[str(field_name)] = value
+
+            if not data:
+                continue
+            records.append({
+                "stock_code": code,
+                "report_date": report_dt.date(),
+                "announcement_date": None,
+                "report_type": report_type,
+                "data": data,
+                "data_source": self.source,
+            })
+
+        return sorted(records, key=lambda item: str(item.get("report_date") or ""), reverse=True)
+
+    def _normalize_financial_indicator_records(
+        self,
+        df: pd.DataFrame,
+        stock_code: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """将 AKShare 财务指标宽表转换为上下文使用的标准记录。
+
+        Args:
+            df: ``stock_financial_analysis_indicator`` 返回的财务指标宽表。
+            stock_code: 股票代码。
+            start_date: 开始日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时不过滤下界。
+            end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时不过滤上界。
+
+        Returns:
+            按报告期倒序排列的标准财务指标记录列表。
+        """
+        if df is None or df.empty or "日期" not in df.columns:
+            return []
+
+        start_dt = pd.to_datetime(start_date.replace("-", ""), format="%Y%m%d", errors="coerce") if start_date else None
+        end_dt = pd.to_datetime(end_date.replace("-", ""), format="%Y%m%d", errors="coerce") if end_date else None
+        code = StockCodeStandardizer.standardize(stock_code)
+        normalized_df = df.copy()
+        normalized_df["report_date"] = pd.to_datetime(normalized_df["日期"], errors="coerce")
+        if start_dt is not None and not pd.isna(start_dt):
+            normalized_df = normalized_df[normalized_df["report_date"] >= start_dt]
+        if end_dt is not None and not pd.isna(end_dt):
+            normalized_df = normalized_df[normalized_df["report_date"] <= end_dt]
+
+        records: list[dict[str, Any]] = []
+        for _, row in normalized_df.iterrows():
+            report_dt = row.get("report_date")
+            if pd.isna(report_dt):
+                continue
+            data: dict[str, Any] = {}
+            for field_name, value in row.items():
+                if field_name in {"日期", "report_date"}:
+                    continue
+                if value is None or pd.isna(value) or value == "":
+                    continue
+                data[str(field_name)] = value
+            if not data:
+                continue
+            records.append({
+                "stock_code": code,
+                "report_date": report_dt.date(),
+                "announcement_date": None,
+                "report_type": "akshare_financial_analysis_indicator",
+                "data": data,
+                "data_source": self.source,
+            })
+
+        return sorted(records, key=lambda item: str(item.get("report_date") or ""), reverse=True)
 
     async def fetch_and_ingest_stock_kline(
             self,
@@ -489,7 +608,7 @@ class AkshareIngestor(BaseIngestor):
             start_date: Optional[str] = None,
             end_date: Optional[str] = None) -> Optional[dict]:
         """
-        采集单只股票财务指标并写入标准财务指标表。
+        获取单只股票财务指标。
 
         官方文档:
             - stock_financial_analysis_indicator: https://akshare.akfamily.xyz/data/stock/stock.html#id118
@@ -507,41 +626,37 @@ class AkshareIngestor(BaseIngestor):
 
             logger.info(f"Fetching AKShare financial indicators for {symbol}")
 
+            # 使用传入的 start_date，如果没有则默认最近 1 年
+            if start_date:
+                try:
+                    parsed_start = datetime.strptime(start_date.replace("-", ""), "%Y%m%d")
+                    start_year = str(parsed_start.year)
+                except (ValueError, AttributeError):
+                    start_year = str((datetime.now().date() - timedelta(days=365)).year)
+            else:
+                start_year = str((datetime.now().date() - timedelta(days=365)).year)
+
             # 调用 AKShare 接口
             df = await self._run_in_executor(
                 ak.stock_financial_analysis_indicator,
-                symbol=symbol
+                symbol=symbol,
+                start_year=start_year,
             )
 
             if df is None or df.empty:
                 logger.warning(f"No financial indicators returned from AKShare for {stock_code}")
                 return {"success": False, "data": [], "count": 0}
 
-            # AKShare 返回的列包括报告期、基本每股收益、净资产收益率等
-            # 需要根据实际返回结构进行映射
-            df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
-            df['data_source'] = self.source
-
-            # 日期过滤（如果提供了日期范围）
-            if start_date and end_date and '报告期' in df.columns:
-                df['报告期'] = pd.to_datetime(df['报告期'], errors='coerce')
-                start_dt = pd.to_datetime(start_date.replace('-', ''))
-                end_dt = pd.to_datetime(end_date.replace('-', ''))
-                df = df[(df['报告期'] >= start_dt) & (df['报告期'] <= end_dt)]
-
-            if df.empty:
-                return None
-
-            # 写入数据库（实际项目中需要完整的列映射）
-            # 这里简化处理，实际使用时需要根据 AKShare 返回结构完善
-            logger.info(f"AKShare financial indicators data structure: {df.columns.tolist()}")
-
-            
-            # 返回字典格式
+            records = self._normalize_financial_indicator_records(
+                df,
+                stock_code,
+                start_date,
+                end_date,
+            )
             return {
-                "success": True,
-                "data": df.to_dict('records'),
-                "count": len(df)
+                "success": bool(records),
+                "data": records,
+                "count": len(records)
             }
 
         except Exception as e:
@@ -1061,23 +1176,21 @@ class AkshareIngestor(BaseIngestor):
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare income statement for {symbol}")
-            # 使用 stock_financial_abstract (个股接口)
-            df = await self._run_in_executor(ak.stock_financial_abstract, symbol=symbol)
+            df = await self._run_in_executor(ak.stock_financial_benefit_ths, symbol=symbol, indicator="按报告期")
             if df is None or df.empty:
                 logger.warning(f"No income statement found for {stock_code}")
                 return {"success": False, "data": [], "count": 0}
-            df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
-            df['data_source'] = self.source
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
-                'income_statement', df, source=self.source, target_table='stock_income_statement'
+            records = self._normalize_ths_statement_records(
+                df,
+                stock_code,
+                start_date,
+                end_date,
+                report_type="akshare_ths_income_statement",
             )
-            
-            # 返回字典格式
             return {
-                "success": True,
-                "data": df.to_dict('records'),
-                "count": len(df)
+                "success": bool(records),
+                "data": records,
+                "count": len(records)
             }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare income statement for {stock_code}: {e}")
@@ -1092,23 +1205,21 @@ class AkshareIngestor(BaseIngestor):
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare balance sheet for {symbol}")
-            # 使用 stock_financial_abstract (已验证可用的综合财务数据接口)
-            df = await self._run_in_executor(ak.stock_financial_abstract, symbol=symbol)
+            df = await self._run_in_executor(ak.stock_financial_debt_ths, symbol=symbol, indicator="按报告期")
             if df is None or df.empty:
                 logger.warning(f"No balance sheet found for {stock_code}")
                 return {"success": False, "data": [], "count": 0}
-            df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
-            df['data_source'] = self.source
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
-                'balance_sheet', df, source=self.source, target_table='stock_balance_sheet'
+            records = self._normalize_ths_statement_records(
+                df,
+                stock_code,
+                start_date,
+                end_date,
+                report_type="akshare_ths_balance_sheet",
             )
-            
-            # 返回字典格式
             return {
-                "success": True,
-                "data": df.to_dict('records'),
-                "count": len(df)
+                "success": bool(records),
+                "data": records,
+                "count": len(records)
             }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare balance sheet for {stock_code}: {e}")
@@ -1123,23 +1234,21 @@ class AkshareIngestor(BaseIngestor):
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare cashflow statement for {symbol}")
-            # 使用 stock_financial_abstract (已验证可用的综合财务数据接口)
-            df = await self._run_in_executor(ak.stock_financial_abstract, symbol=symbol)
+            df = await self._run_in_executor(ak.stock_financial_cash_ths, symbol=symbol, indicator="按报告期")
             if df is None or df.empty:
                 logger.warning(f"No cashflow statement found for {stock_code}")
                 return {"success": False, "data": [], "count": 0}
-            df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
-            df['data_source'] = self.source
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
-                'cashflow_statement', df, source=self.source, target_table='stock_cashflow_statement'
+            records = self._normalize_ths_statement_records(
+                df,
+                stock_code,
+                start_date,
+                end_date,
+                report_type="akshare_ths_cashflow_statement",
             )
-            
-            # 返回字典格式
             return {
-                "success": True,
-                "data": df.to_dict('records'),
-                "count": len(df)
+                "success": bool(records),
+                "data": records,
+                "count": len(records)
             }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare cashflow statement for {stock_code}: {e}")

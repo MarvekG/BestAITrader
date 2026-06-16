@@ -3,7 +3,7 @@ import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -12,6 +12,7 @@ os.environ.setdefault("TUSHARE_API", "http://test.invalid")
 
 from app.core.config import settings
 from app.data.metadata.field_units import format_payload_values
+from app.ai.llm_engine.context.providers import SnapshotProvider
 from app.ai.llm_engine.context.readers import FinancialReader, FundamentalReader
 from app.ai.llm_engine.context.capital_flow import CapitalFlowSource
 from app.models.data_storage import (
@@ -72,6 +73,115 @@ class ModelMapSession:
 
     def query(self, model):
         return FakeQuery(self.records_by_model.get(model, []))
+
+
+@pytest.mark.asyncio
+async def test_snapshot_provider_fetches_financial_reports_during_context_build(monkeypatch):
+    """组装快照上下文时实时拉取财务报表数据。
+
+    Args:
+        monkeypatch: pytest 提供的运行期替换工具。
+    """
+    from app.data.ingestors.manager import ingestor_manager
+
+    async def _fetch_financial(*_args):
+        return {
+            "success": True,
+            "data": [{
+                "stock_code": "600519.SH",
+                "report_date": date(2025, 12, 31),
+                "announcement_date": date(2026, 1, 10),
+                "data_source": "fake",
+                "data": {"eps": "1.2345元"},
+            }],
+            "count": 1,
+        }
+
+    async def _fetch_income(*_args):
+        return {
+            "success": True,
+            "data": [{
+                "stock_code": "600519.SH",
+                "report_date": date(2025, 12, 31),
+                "announcement_date": date(2026, 1, 10),
+                "report_type": "合并报表",
+                "data_source": "fake",
+                "data": {"total_revenue": "100亿元", "basic_eps": "1.2346元"},
+            }],
+            "count": 1,
+        }
+
+    async def _fetch_balance(*_args):
+        return {
+            "success": True,
+            "data": [{
+                "stock_code": "600519.SH",
+                "report_date": date(2025, 12, 31),
+                "announcement_date": date(2026, 1, 10),
+                "report_type": "合并报表",
+                "data_source": "fake",
+                "data": {"total_assets": "678.9亿元"},
+            }],
+            "count": 1,
+        }
+
+    async def _fetch_cashflow(*_args):
+        return {
+            "success": True,
+            "data": [{
+                "stock_code": "600519.SH",
+                "report_date": date(2025, 12, 31),
+                "announcement_date": date(2026, 1, 10),
+                "report_type": "合并报表",
+                "data_source": "fake",
+                "data": {"n_cashflow_act": "321亿元"},
+            }],
+            "count": 1,
+        }
+
+    financial_mock = AsyncMock(side_effect=_fetch_financial)
+    income_mock = AsyncMock(side_effect=_fetch_income)
+    balance_mock = AsyncMock(side_effect=_fetch_balance)
+    cashflow_mock = AsyncMock(side_effect=_fetch_cashflow)
+    monkeypatch.setattr(ingestor_manager, "fetch_and_ingest_financial_indicators", financial_mock)
+    monkeypatch.setattr(ingestor_manager, "fetch_and_ingest_income_statement", income_mock)
+    monkeypatch.setattr(ingestor_manager, "fetch_and_ingest_balance_sheet", balance_mock)
+    monkeypatch.setattr(ingestor_manager, "fetch_and_ingest_cashflow_statement", cashflow_mock)
+    monkeypatch.setattr(settings, "SYSTEM_LANGUAGE", "zh")
+
+    class EmptyReader:
+        def __getattr__(self, _name):
+            return lambda *_args, **_kwargs: {}
+
+    class Runtime:
+        stock_code = "600519.SH"
+        readers = SimpleNamespace(
+            financial=FinancialReader(),
+            fundamental=EmptyReader(),
+            capital_flow=EmptyReader(),
+        )
+
+        def db_session(self):
+            class SessionContext:
+                def __enter__(self):
+                    return FakeSession([])
+
+                def __exit__(self, *_args):
+                    return False
+
+            return SessionContext()
+
+    layer = await SnapshotProvider().build(Runtime(), {})
+    statements = layer.payload["financial_statements"]
+
+    assert statements["financial_indicator_latest"]["data"]["每股收益"] == "1.2345元"
+    assert statements["income_statement_latest"]["data"]["营业总收入"] == "100亿元"
+    assert statements["balance_sheet_latest"]["data"]["资产总计"] == "678.9亿元"
+    assert statements["cashflow_statement_latest"]["data"]["经营活动产生的现金流量净额"] == "321亿元"
+    financial_mock.assert_awaited()
+    income_mock.assert_awaited()
+    balance_mock.assert_awaited()
+    cashflow_mock.assert_awaited()
 
 
 def test_format_payload_values_uses_i18n_unit_suffix(monkeypatch):

@@ -628,6 +628,7 @@
       "sync_valuation": "Sync Valuation",
       "stock_top_holders": "Top 10 Holders",
       "sync_top_holders": "Sync Top 10 Holders",
+      "financial_data": "Financial Data",
       "financial_indicator": "Financial Indicator",
       "income_statement": "Income Statement",
       "balance_sheet": "Balance Sheet",
@@ -2469,12 +2470,14 @@
         "approve": "Approve and Run",
         "resume": "Resume",
         "cancel": "Cancel Research",
+        "delete": "Delete",
         "open_active_run": "Open Active Run",
         "send_message": "Send",
         "fullscreen": "Fullscreen"
       },
       "confirmations": {
-        "cancel_run": "Cancel this AI Deep Research stock-picking run?"
+        "cancel_run": "Cancel this AI Deep Research stock-picking run?",
+        "delete_run": "Delete this AI Deep Research stock-picking run?"
       },
       "messages": {
         "load_runs_failed": "Failed to load AI Deep Research stock-picking history",
@@ -2485,6 +2488,8 @@
         "approve_failed": "Failed to approve plan",
         "cancel_success": "Research cancelled",
         "cancel_failed": "Failed to cancel research",
+        "delete_success": "Research run deleted",
+        "delete_failed": "Failed to delete research run",
         "resume_success": "Research resumed",
         "resume_failed": "Failed to resume research",
         "cancel_reason": "User cancelled research from frontend",

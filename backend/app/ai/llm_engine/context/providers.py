@@ -235,16 +235,15 @@ class SnapshotProvider:
                 "industry_rank": _wrap_dict(fundamental, industry_rank),
             }
 
-            latest_financials = financial.latest_financials(db, runtime.stock_code)
-            latest_financials_for_context = financial.source._format_latest_financials_for_context(latest_financials)
-            latest_income = financial.latest_income_statement(db, runtime.stock_code)
-            latest_balance = financial.latest_balance_sheet(db, runtime.stock_code)
-            latest_cashflow = financial.latest_cashflow_statement(db, runtime.stock_code)
+            latest_financials = await financial.latest_financials(db, runtime.stock_code)
+            latest_income = await financial.latest_income_statement(db, runtime.stock_code)
+            latest_balance = await financial.latest_balance_sheet(db, runtime.stock_code)
+            latest_cashflow = await financial.latest_cashflow_statement(db, runtime.stock_code)
             financial_statements = {
                 "status": merge_status(latest_financials, latest_income, latest_balance, latest_cashflow),
                 "financial_indicator_latest": _wrap_snapshot(
                     financial,
-                    financial.localize_raw_data(latest_financials_for_context, "data.financial_indicator")
+                    financial.localize_raw_data(latest_financials, "data.financial_indicator")
                 ),
                 "income_statement_latest": _wrap_snapshot(financial, latest_income),
                 "balance_sheet_latest": _wrap_snapshot(financial, latest_balance),
@@ -368,9 +367,9 @@ class SignalsProvider:
         financial = runtime.readers.financial
         fundamental = runtime.readers.fundamental
         with runtime.db_session() as db:
-            latest_financials = financial.latest_financials(db, runtime.stock_code)
-            latest_balance = financial.latest_balance_sheet(db, runtime.stock_code, format_for_context=False)
-            latest_cashflow = financial.latest_cashflow_statement(db, runtime.stock_code, format_for_context=False)
+            latest_financials = await financial.latest_financials(db, runtime.stock_code)
+            latest_balance = await financial.latest_balance_sheet(db, runtime.stock_code, format_for_context=False)
+            latest_cashflow = await financial.latest_cashflow_statement(db, runtime.stock_code, format_for_context=False)
             financial_ctx = {
                 "financial_indicator_latest": _wrap_snapshot(
                     financial,
