@@ -1,13 +1,14 @@
 import tushare as ts
-import pandas as pd
 import asyncio
+import time
+import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Any, List
 from app.data.ingestion.service import DataIngestionService
 from app.core.config import settings
 from app.data.ingestors.base_ingestor import BaseIngestor
 from app.data.ingestors.plugins.column_mapping import ColumnMapper
-from app.data.ingestors.rate_limiter import get_tushare_rate_limiter
+from app.data.ingestors.rate_limiter import LeakyBucketRateLimiter
 from app.core.utils.formatters import StockCodeStandardizer
 from app.core.utils.date_utils import normalize_compact_date
 from app.core.logger import get_logger
@@ -15,17 +16,134 @@ from app.core.logger import get_logger
 logger = get_logger(__name__)
 
 
+class TushareRateLimiter(LeakyBucketRateLimiter):
+    """
+    Tushare Pro API 限流器，基于令牌桶算法。
+
+    继承自 LeakyBucketRateLimiter，扩展支持根据积分等级自动配置限流速率。
+
+    根据用户积分等级控制每分钟 API 调用频率：
+    - 120分：50次/分钟
+    - 2000分：200次/分钟
+    - 5000分及以上：500次/分钟
+
+    官方文档：https://tushare.pro/document/1?doc_id=290
+    """
+
+    # 积分等级对应的每分钟调用次数限制
+    RATE_LIMITS: Dict[int, int] = {
+        120: 50,
+        2000: 200,
+        5000: 500,
+        10000: 500,
+        15000: 500,
+    }
+
+    def __init__(self, credits: int = 5000):
+        """
+        初始化限流器。
+
+        Args:
+            credits: Tushare 用户积分等级，默认 5000。
+        """
+        self.credits = credits
+        max_calls_per_minute = self._get_rate_limit(credits)
+
+        # 调用基类初始化
+        super().__init__(max_calls_per_minute=max_calls_per_minute)
+
+        # 令牌桶算法：初始满令牌（与漏桶不同）
+        self.tokens = float(self.max_calls_per_minute)
+
+        logger.info(
+            "Tushare rate limiter initialized (Token Bucket)",
+            extra={
+                "credits": credits,
+                "max_calls_per_minute": self.max_calls_per_minute,
+            }
+        )
+
+    def _get_rate_limit(self, credits: int) -> int:
+        """
+        根据积分等级获取每分钟调用次数限制。
+
+        Args:
+            credits: 用户积分。
+
+        Returns:
+            每分钟最大调用次数。
+        """
+        # 从高到低查找匹配的积分等级
+        for threshold in sorted(self.RATE_LIMITS.keys(), reverse=True):
+            if credits >= threshold:
+                return self.RATE_LIMITS[threshold]
+        # 低于最低等级，返回最低限制
+        return self.RATE_LIMITS[120]
+
+    async def acquire(self, timeout: Optional[float] = None) -> bool:
+        """
+        获取一个令牌（异步阻塞直到有令牌可用）。
+
+        令牌桶算法：令牌上限为 max_calls_per_minute（允许突发）。
+
+        Args:
+            timeout: 超时时间（秒），None 表示无限等待。
+
+        Returns:
+            获取成功返回 True；超时返回 False。
+        """
+        start_time = time.monotonic()
+
+        while True:
+            async with self.lock:
+                now = time.monotonic()
+                elapsed = now - self.last_update
+
+                # 补充令牌（按每分钟补充速率）
+                tokens_to_add = elapsed * (self.max_calls_per_minute / 60.0)
+                # 令牌桶算法：令牌上限为 max_calls_per_minute（允许突发）
+                self.tokens = min(self.max_calls_per_minute, self.tokens + tokens_to_add)
+                self.last_update = now
+
+                # 如果有令牌，立即消耗并返回
+                if self.tokens >= 1.0:
+                    self.tokens -= 1.0
+                    return True
+
+                # 计算需要等待的时间
+                tokens_needed = 1.0 - self.tokens
+                wait_time = tokens_needed / (self.max_calls_per_minute / 60.0)
+
+            # 检查超时
+            if timeout is not None:
+                elapsed_total = time.monotonic() - start_time
+                if elapsed_total + wait_time > timeout:
+                    return False
+
+            # 等待令牌补充
+            await asyncio.sleep(wait_time)
+
+
 class TushareIngestor(BaseIngestor):
     source_name = "tushare"
     display_name = "Tushare"
     required_settings = ("TUSHARE_TOKEN",)
+
+    # 类级别的限流器实例（所有 Tushare 实例共享）
+    _shared_rate_limiter: Optional[TushareRateLimiter] = None
 
     def __init__(self):
         self.ingestion_service = DataIngestionService()
         self.source = self.get_source_name()
         self.pro = self.get_pro_client() if settings.TUSHARE_TOKEN else None
         self._stock_info_cache = {}  # Cache for shares and financial data
-        self.rate_limiter = get_tushare_rate_limiter()  # 全局限流器
+
+        # 初始化限流器（单例模式）
+        if TushareIngestor._shared_rate_limiter is None:
+            TushareIngestor._shared_rate_limiter = TushareRateLimiter(credits=settings.TUSHARE_CREDITS)
+
+        # 实例级别的限流器引用（Tushare 独立使用）
+        self.rate_limiter = TushareIngestor._shared_rate_limiter
         logger.info(
             "TushareIngestor initialized",
             extra={
@@ -33,6 +151,32 @@ class TushareIngestor(BaseIngestor):
                 "rate_limit": f"{self.rate_limiter.max_calls_per_minute} calls/min"
             }
         )
+
+    async def _run_in_executor(self, func, *args, use_cache: bool = True, cache_ttl: int = 60, **kwargs):
+        """
+        重写基类方法，在调用 Tushare API 前先获取限流令牌。
+
+        Args:
+            func: 阻塞函数。
+            *args: 位置参数。
+            use_cache: 是否使用 Redis 缓存。
+            cache_ttl: 缓存过期时间（秒）。
+            **kwargs: 关键字参数。
+
+        Returns:
+            函数执行结果。
+        """
+        # 在调用 API 前先获取 Tushare 限流令牌
+        acquired = await self.rate_limiter.acquire(timeout=30.0)
+        if not acquired:
+            logger.warning(
+                "Tushare rate limiter timeout after 30s",
+                extra={"func": self._get_func_name(func)}
+            )
+            # 超时后仍尝试调用（让 Tushare 自己返回限流错误）
+
+        # 调用基类方法执行实际 API 请求
+        return await super()._run_in_executor(func, *args, use_cache=use_cache, cache_ttl=cache_ttl, **kwargs)
 
     @staticmethod
     def get_pro_client():
@@ -84,32 +228,6 @@ class TushareIngestor(BaseIngestor):
                 "http://api.waditu.com/dataapi"),
             "token": f"...{settings.TUSHARE_TOKEN[-3:]}" if settings.TUSHARE_TOKEN else None
         }
-
-    async def _run_in_executor(self, func, *args, use_cache: bool = True, cache_ttl: int = 60, **kwargs):
-        """
-        重写基类方法，在调用 Tushare API 前先获取限流令牌。
-
-        Args:
-            func: 阻塞函数。
-            *args: 位置参数。
-            use_cache: 是否使用 Redis 缓存。
-            cache_ttl: 缓存过期时间（秒）。
-            **kwargs: 关键字参数。
-
-        Returns:
-            函数执行结果。
-        """
-        # 在调用 API 前先获取限流令牌
-        acquired = await self.rate_limiter.acquire(timeout=30.0)
-        if not acquired:
-            logger.warning(
-                "Tushare rate limiter timeout after 30s",
-                extra={"func": self._get_func_name(func)}
-            )
-            # 超时后仍尝试调用（让 Tushare 自己返回限流错误）
-
-        # 调用基类方法执行实际 API 请求
-        return await super()._run_in_executor(func, *args, use_cache=use_cache, cache_ttl=cache_ttl, **kwargs)
 
     async def fetch_and_ingest_stock_kline(
             self,
