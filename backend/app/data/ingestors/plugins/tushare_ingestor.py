@@ -108,7 +108,17 @@ class TushareRateLimiter(LeakyBucketRateLimiter):
                 # 如果有令牌，立即消耗并返回
                 if self.tokens >= 1.0:
                     self.tokens -= 1.0
-                    return True
+                    # 返回字典格式
+
+                    return {
+
+                        "success": True,
+
+                        "data": df.to_dict("records"),
+
+                        "count": len(df)
+
+                    }
 
                 # 计算需要等待的时间
                 tokens_needed = 1.0 - self.tokens
@@ -118,7 +128,7 @@ class TushareRateLimiter(LeakyBucketRateLimiter):
             if timeout is not None:
                 elapsed_total = time.monotonic() - start_time
                 if elapsed_total + wait_time > timeout:
-                    return False
+                    return {"success": False, "data": [], "count": 0}
 
             # 等待令牌补充
             await asyncio.sleep(wait_time)
@@ -235,7 +245,7 @@ class TushareIngestor(BaseIngestor):
             start_date: str,
             end_date: str,
             period: str = "daily",
-            adjust: str = "qfq") -> bool:
+            adjust: str = "qfq") -> Optional[dict]:
         """
         采集单只股票 K 线行情并写入标准行情表。
 
@@ -256,7 +266,7 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
                 
             # Map period to Tushare API and frequency
             period_map = {
@@ -280,7 +290,7 @@ class TushareIngestor(BaseIngestor):
 
             df = await self._run_in_executor(api_func, **params)
             if df is None or df.empty:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # Align columns with KlineData model using ColumnMapper
             df = ColumnMapper.map_columns(df, 'data.kline_data', source='tushare')
@@ -308,12 +318,22 @@ class TushareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 api_name, df, source=self.source, target_table='kline_data'
             )
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
         except Exception as e:
             logger.error(f"Failed to ingest tushare {period} kline for {stock_code}: {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_stock_info(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_info(self, stock_code: str) -> Optional[dict]:
         """
         采集单只股票基础信息并写入股票基础表。
 
@@ -328,11 +348,11 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
             api_name = 'stock_basic'
             df = await self._run_in_executor(self.pro.stock_basic, ts_code=stock_code)
             if df is None or df.empty:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             df['trade_date'] = pd.Timestamp.now().strftime('%Y%m%d')
             df.rename(columns={'ts_code': 'stock_code'}, inplace=True)
@@ -346,16 +366,26 @@ class TushareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 api_name, df, source=self.source, target_table='stock_basic'
             )
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
         except Exception as e:
             logger.error(f"Failed to ingest tushare stock_basic for {stock_code}: {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
     async def fetch_and_ingest_stock_valuation(
             self,
             stock_code: str,
             start_date: Optional[str] = None,
-            end_date: Optional[str] = None) -> bool:
+            end_date: Optional[str] = None) -> Optional[dict]:
         """
         采集单只股票每日估值与基础行情指标并写入估值历史表。
 
@@ -372,7 +402,7 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
             api_name = 'daily_basic'
             ts_code = StockCodeStandardizer.standardize(stock_code)
 
@@ -396,7 +426,7 @@ class TushareIngestor(BaseIngestor):
                 df = await self._run_in_executor(self.pro.daily_basic, ts_code=ts_code, limit=1)
 
             if df is None or df.empty:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             df = ColumnMapper.map_columns(
                 df, 'data.stock_valuation_history', source='tushare'
@@ -422,16 +452,26 @@ class TushareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 api_name, df, source=self.source, target_table='stock_valuation_history'
             )
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
         except Exception as e:
             logger.error(f"Failed to ingest tushare daily_basic for {stock_code}: {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
     async def fetch_and_ingest_financial_indicators(
             self,
             stock_code: str,
             start_date: Optional[str] = None,
-            end_date: Optional[str] = None) -> bool:
+            end_date: Optional[str] = None) -> Optional[dict]:
         """
         采集单只股票财务指标并写入标准财务指标表。
 
@@ -449,7 +489,7 @@ class TushareIngestor(BaseIngestor):
         try:
             if not self.pro:
                 logger.error("Tushare API client (pro) not initialized")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             def _parse_tushare_date(value):
                 if value is None or pd.isna(value):
@@ -464,10 +504,10 @@ class TushareIngestor(BaseIngestor):
             parsed_end_date = pd.to_datetime(end_date, errors='coerce') if end_date else pd.Timestamp(today)
             if pd.isna(parsed_start_date):
                 logger.error(f"Invalid start_date for financial indicators sync: {start_date}")
-                return False
+                return {"success": False, "data": [], "count": 0}
             if pd.isna(parsed_end_date):
                 logger.error(f"Invalid end_date for financial indicators sync: {end_date}")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             fina_indicator_params = {'ts_code': code}
             fina_indicator_params['start_date'] = parsed_start_date.strftime('%Y%m%d')
@@ -479,7 +519,7 @@ class TushareIngestor(BaseIngestor):
 
             if df is None or df.empty:
                 logger.warning(f"No financial indicators found for {code}")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             logger.debug(
                 "tushare fina_indicator raw fields fetched",
@@ -526,7 +566,7 @@ class TushareIngestor(BaseIngestor):
                 records.append(record)
 
             if not records:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             final_df = pd.DataFrame(records)
 
@@ -561,14 +601,24 @@ class TushareIngestor(BaseIngestor):
             )
             if not write_success:
                 logger.error("Failed to write financial indicators for %s via Tushare", code)
-                return False
+                return {"success": False, "data": [], "count": 0}
             logger.info(f"Successfully synced financial indicators for {code}")
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
         except Exception as e:
             logger.error(f"Failed to ingest tushare financial indicators: {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_northbound(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_northbound(self, stock_code: str) -> Optional[dict]:
         """
         采集单只股票沪深港股通持股明细，并补充日线价格用于派生指标。
 
@@ -584,12 +634,12 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
             api_name = 'hk_hold'
             # Fetch base northbound data
             df = await self._run_in_executor(self.pro.hk_hold, ts_code=stock_code)
             if df is None or df.empty:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # Supplement with Kline data to fill missing metrics (price, market value)
             # Detect actual range from northbound data to ensure full coverage
@@ -674,12 +724,22 @@ class TushareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 api_name, df, source=self.source, target_table='northbound_data'
             )
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
         except Exception as e:
             logger.error(f"Failed to ingest tushare hk_hold for {stock_code}: {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_company_profile(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_company_profile(self, stock_code: str) -> Optional[dict]:
         """
         采集上市公司基础资料并写入数据表。
 
@@ -694,11 +754,11 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
             api_name = 'stock_company'
             df = await self._run_in_executor(self.pro.stock_company, ts_code=stock_code)
             if df is None or df.empty:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             df.rename(columns={'ts_code': 'stock_code'}, inplace=True)
             df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
@@ -707,12 +767,22 @@ class TushareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 api_name, df, source=self.source
             )
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
         except Exception as e:
             logger.error(f"Failed to ingest company profile {stock_code}: {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_all_stock_basic(self) -> bool:
+    async def fetch_and_ingest_all_stock_basic(self) -> Optional[dict]:
         """
         全量采集 A 股基础信息并写入股票基础表。
 
@@ -724,7 +794,7 @@ class TushareIngestor(BaseIngestor):
         """
         import time
         if not self.pro:
-            return False
+            return {"success": False, "data": [], "count": 0}
         api_name = 'stock_basic'
 
         # Fetch all listing stocks
@@ -746,11 +816,11 @@ class TushareIngestor(BaseIngestor):
 
         if not dfs:
             logger.warning("No data retrieved from Tushare stock_basic")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
         df = pd.concat(dfs, ignore_index=True)
         if df.empty:
-            return False
+            return {"success": False, "data": [], "count": 0}
 
         df['trade_date'] = pd.Timestamp.now().strftime('%Y%m%d')
         df = ColumnMapper.map_columns(
@@ -773,14 +843,24 @@ class TushareIngestor(BaseIngestor):
             api_name, df, source=self.source, target_table='stock_basic'
         )
         logger.info(f"Successfully synced {len(df)} stocks basic info from Tushare")
-        return True
+        # 返回字典格式
+
+        return {
+
+            "success": True,
+
+            "data": df.to_dict("records"),
+
+            "count": len(df)
+
+        }
 
     async def fetch_and_ingest_index_daily(
         self,
         index_code: str,
         start_date: str,
         end_date: str
-    ) -> bool:
+    ) -> Optional[dict]:
         """
         采集大盘指数日线行情并写入指数日线表。
 
@@ -796,7 +876,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         if not self.pro:
-            return False
+            return {"success": False, "data": [], "count": 0}
         try:
             # Map frontend "none" strings
             if start_date and str(start_date).lower() == "none":
@@ -829,14 +909,24 @@ class TushareIngestor(BaseIngestor):
                     self.ingestion_service.write_dataframe,
                     'index_daily', df, source=self.source, target_table='data.index_daily'
                 )
-                return True
+                # 返回字典格式
+
+                return {
+
+                    "success": True,
+
+                    "data": df.to_dict("records"),
+
+                    "count": len(df)
+
+                }
             logger.warning(f"No data returned for index {index_code} ({ts_code}) [{start_date}~{end_date}]")
-            return False
+            return {"success": False, "data": [], "count": 0}
         except Exception as e:
             logger.error(f"Failed to ingest index daily for {index_code}: {e}", exc_info=True)
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_realtime_market(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_realtime_market(self, stock_code: str) -> Optional[dict]:
         """
         采集单只股票有效实时行情并写入实时行情表。
 
@@ -860,7 +950,7 @@ class TushareIngestor(BaseIngestor):
 
             if df is None or df.empty:
                 logger.warning(f"No realtime data returned from Tushare for {stock_code}")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # [ADDITION] Calculate change percent and amount based on previous close
             # 在A股市场，涨跌幅的有效基准是“昨收 (pre_close)”，而非“今开 (open)”
@@ -894,7 +984,7 @@ class TushareIngestor(BaseIngestor):
                 df['current_price'] = pd.to_numeric(df['current_price'], errors='coerce')
                 df = df[df['current_price'] > 0].copy()
                 if df.empty:
-                    return False
+                    return {"success": False, "data": [], "count": 0}
 
             df['data_source'] = self.source
             df['timestamp'] = pd.Timestamp.now()
@@ -908,14 +998,24 @@ class TushareIngestor(BaseIngestor):
 
             if success:
                 logger.info(f"Successfully ingested Tushare realtime market for {stock_code}")
-                return True
-            return False
+                # 返回字典格式
+
+                return {
+
+                    "success": True,
+
+                    "data": df.to_dict("records"),
+
+                    "count": len(df)
+
+                }
+            return {"success": False, "data": [], "count": 0}
 
         except Exception as e:
             logger.error(f"Failed to ingest Tushare realtime market for {stock_code}: {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_dragon_tiger(self, start_date: str, end_date: str = None) -> bool:
+    async def fetch_and_ingest_dragon_tiger(self, start_date: str, end_date: str = None) -> Optional[dict]:
         """
         按日期范围采集龙虎榜每日统计数据并写入龙虎榜表。
 
@@ -932,7 +1032,7 @@ class TushareIngestor(BaseIngestor):
         try:
             if not self.pro:
                 logger.error("Tushare API client (pro) not initialized")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             api_name = 'top_list'
 
@@ -945,7 +1045,7 @@ class TushareIngestor(BaseIngestor):
                     end_dt = start_dt
             except Exception as e:
                 logger.error(f"Invalid date format: {start_date} / {end_date}: {e}")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             current_dt = start_dt
             success_count = 0
@@ -994,9 +1094,9 @@ class TushareIngestor(BaseIngestor):
             return success_count > 0
         except Exception as e:
             logger.error(f"Failed to ingest tushare dragon tiger: {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_board_industry(self) -> bool:
+    async def fetch_and_ingest_board_industry(self) -> Optional[dict]:
         """
         采集外部行业板块数据，并合并行情数据补充价格指标。
 
@@ -1009,7 +1109,7 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # 1. 获取最新交易日数据
             trade_date = datetime.now().strftime('%Y%m%d')
@@ -1036,7 +1136,7 @@ class TushareIngestor(BaseIngestor):
 
             if df_index is None or df_index.empty:
                 logger.warning("No industry data found in recent 7 days via Tushare dc_index")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # 2. 合并数据 (dc_index 缺少价格和涨跌额，dc_daily 有价格但缺少领涨和家数统计)
             if df_daily is not None and not df_daily.empty:
@@ -1072,12 +1172,22 @@ class TushareIngestor(BaseIngestor):
                 'industry_sync', df, source=self.source, force_sync=True,
                 target_table='industry_data'
             )
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
         except Exception as e:
             logger.error(f"Failed to ingest industry data (Tushare): {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_stock_money_flow(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_money_flow(self, stock_code: str) -> Optional[dict]:
         """
         采集单只股票资金流向并写入个股资金流表。
 
@@ -1092,7 +1202,7 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # 获取最近 30 天数据
             df = await self._run_in_executor(
@@ -1145,13 +1255,23 @@ class TushareIngestor(BaseIngestor):
                     self.ingestion_service.write_dataframe,
                     'moneyflow', df, source=self.source, target_table='stock_money_flow'
                 )
-                return True
-            return False
+                # 返回字典格式
+
+                return {
+
+                    "success": True,
+
+                    "data": df.to_dict("records"),
+
+                    "count": len(df)
+
+                }
+            return {"success": False, "data": [], "count": 0}
         except Exception as e:
             logger.error(f"Failed to ingest money flow for {stock_code} (Tushare): {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_stock_shareholder_count(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_shareholder_count(self, stock_code: str) -> Optional[dict]:
         """
         采集单只股票股东人数变动，并补充每日指标用于派生持股数据。
 
@@ -1167,7 +1287,7 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             df = await self._run_in_executor(
                 self.pro.stk_holdernumber, ts_code=stock_code
@@ -1288,13 +1408,23 @@ class TushareIngestor(BaseIngestor):
                     self.ingestion_service.write_dataframe,
                     'shareholder_count', df, source=self.source, target_table='stock_shareholder_count'
                 )
-                return True
-            return False
+                # 返回字典格式
+
+                return {
+
+                    "success": True,
+
+                    "data": df.to_dict("records"),
+
+                    "count": len(df)
+
+                }
+            return {"success": False, "data": [], "count": 0}
         except Exception as e:
             logger.error(f"Failed to ingest shareholder count for {stock_code} (Tushare): {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_stock_pledge_risk(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_pledge_risk(self, stock_code: str) -> Optional[dict]:
         """
         采集单只股票股权质押明细数据并写入质押风险表。
 
@@ -1309,7 +1439,7 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             ts_code = StockCodeStandardizer.standardize(stock_code)
 
@@ -1319,7 +1449,17 @@ class TushareIngestor(BaseIngestor):
 
             if df is None or df.empty:
                 logger.warning(f"No stock pledge data found for {ts_code}")
-                return True
+                # 返回字典格式
+
+                return {
+
+                    "success": True,
+
+                    "data": df.to_dict("records"),
+
+                    "count": len(df)
+
+                }
 
             df = ColumnMapper.map_columns(df, 'data.stock_pledge_risk', source=self.source)
 
@@ -1359,12 +1499,22 @@ class TushareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 'pledge_detail', df, source=self.source, target_table='stock_pledge_risk'
             )
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
         except Exception as e:
             logger.error(f"Failed to ingest pledge risk for {stock_code} (Tushare): {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_all_pledge_summary(self, stock_code: str = None) -> bool:
+    async def fetch_and_ingest_all_pledge_summary(self, stock_code: str = None) -> Optional[dict]:
         """
         采集单只或全市场股权质押汇总数据并写入质押汇总表。
 
@@ -1380,7 +1530,7 @@ class TushareIngestor(BaseIngestor):
         try:
             if not self.pro:
                 logger.error("Tushare API client (pro) not initialized")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             api_name = 'pledge_stat'
 
@@ -1401,7 +1551,7 @@ class TushareIngestor(BaseIngestor):
 
             if df is None or df.empty:
                 logger.warning(f"No pledge summary data returned from Tushare pledge_stat for {ts_code or 'All'}")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             logger.info(f"TuShare pledge_stat returned {len(df)} records for {ts_code or 'All'}")
 
@@ -1443,14 +1593,24 @@ class TushareIngestor(BaseIngestor):
 
             logger.info(
                 f"Successfully ingested {len(df)} records into stock_pledge_summary from TuShare ({ts_code or 'All'})")
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
 
         except Exception as e:
             logger.error(f"Failed to ingest pledge summary (Tushare) for {stock_code or 'All'}: {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
 
-    async def fetch_and_ingest_stock_lockup_release(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_lockup_release(self, stock_code: str) -> Optional[dict]:
         """
         采集单只股票未来限售股解禁数据并写入解禁表。
 
@@ -1465,7 +1625,7 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # Determine date range: [Today, Today + 30 days]
             import pandas as pd
@@ -1497,15 +1657,25 @@ class TushareIngestor(BaseIngestor):
                     self.ingestion_service.write_dataframe,
                     'share_float', df, source=self.source, target_table='stock_lockup_release'
                 )
-                return True
+                # 返回字典格式
+
+                return {
+
+                    "success": True,
+
+                    "data": df.to_dict("records"),
+
+                    "count": len(df)
+
+                }
             else:
                 logger.info(f"No lockup release data found for {stock_code} in range {start_date_str}-{end_date_str}")
                 return True  # Not an error, just no data
         except Exception as e:
             logger.error(f"Failed to ingest lockup release for {stock_code} (Tushare): {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_stock_earnings_forecast(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_earnings_forecast(self, stock_code: str) -> Optional[dict]:
         """
         采集单只股票业绩预告数据并写入标准表。
 
@@ -1520,7 +1690,7 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             df = await self._run_in_executor(
                 self.pro.forecast, ts_code=stock_code
@@ -1543,13 +1713,23 @@ class TushareIngestor(BaseIngestor):
                     self.ingestion_service.write_dataframe,
                     'forecast', df, source=self.source, target_table='stock_earnings_forecast'
                 )
-                return True
-            return False
+                # 返回字典格式
+
+                return {
+
+                    "success": True,
+
+                    "data": df.to_dict("records"),
+
+                    "count": len(df)
+
+                }
+            return {"success": False, "data": [], "count": 0}
         except Exception as e:
             logger.error(f"Failed to ingest earnings forecast for {stock_code} (Tushare): {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_stock_margin_data(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_margin_data(self, stock_code: str) -> Optional[dict]:
         """
         采集单只股票融资融券明细数据并写入两融表。
 
@@ -1564,7 +1744,7 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             df = await self._run_in_executor(
                 self.pro.margin_detail, ts_code=stock_code
@@ -1583,13 +1763,23 @@ class TushareIngestor(BaseIngestor):
                     self.ingestion_service.write_dataframe,
                     'margin_detail', df, source=self.source, target_table='stock_margin_data'
                 )
-                return True
-            return False
+                # 返回字典格式
+
+                return {
+
+                    "success": True,
+
+                    "data": df.to_dict("records"),
+
+                    "count": len(df)
+
+                }
+            return {"success": False, "data": [], "count": 0}
         except Exception as e:
             logger.error(f"Failed to ingest margin data for {stock_code} (Tushare): {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_stock_limit_up_pool(self, trade_date: str = None) -> bool:
+    async def fetch_and_ingest_stock_limit_up_pool(self, trade_date: str = None) -> Optional[dict]:
         """
         采集每日涨停池数据并写入涨停池表。
 
@@ -1604,7 +1794,7 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # 如果没有指定日期，尝试今天。
             target_dates = []
@@ -1666,14 +1856,24 @@ class TushareIngestor(BaseIngestor):
                     self.ingestion_service.write_dataframe,
                     'limit_list_d', df, source=self.source, target_table='stock_limit_up_pool'
                 )
-                return True
-            return False
+                # 返回字典格式
+
+                return {
+
+                    "success": True,
+
+                    "data": df.to_dict("records"),
+
+                    "count": len(df)
+
+                }
+            return {"success": False, "data": [], "count": 0}
 
         except Exception as e:
             logger.error(f"Failed to ingest stock_limit_up_pool: {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_stock_limit_down_pool(self, trade_date: str = None) -> bool:
+    async def fetch_and_ingest_stock_limit_down_pool(self, trade_date: str = None) -> Optional[dict]:
         """
         采集每日跌停池数据并写入跌停池表。
 
@@ -1688,7 +1888,7 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # Wenn kein Datum angegeben ist, versuche heute, gestern, vorgestern
             target_dates = []
@@ -1749,14 +1949,24 @@ class TushareIngestor(BaseIngestor):
                     self.ingestion_service.write_dataframe,
                     'limit_list_d', df, source=self.source, target_table='stock_limit_down_pool'
                 )
-                return True
-            return False
+                # 返回字典格式
+
+                return {
+
+                    "success": True,
+
+                    "data": df.to_dict("records"),
+
+                    "count": len(df)
+
+                }
+            return {"success": False, "data": [], "count": 0}
 
         except Exception as e:
             logger.error(f"Failed to ingest stock_limit_down_pool: {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_stock_zhaban_pool(self, trade_date: str = None) -> bool:
+    async def fetch_and_ingest_stock_zhaban_pool(self, trade_date: str = None) -> Optional[dict]:
         """
         采集每日炸板池数据并写入炸板池表。
 
@@ -1771,7 +1981,7 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # Normalize date
             target_dates = []
@@ -1832,13 +2042,23 @@ class TushareIngestor(BaseIngestor):
                     self.ingestion_service.write_dataframe,
                     'limit_list_d', df, source=self.source, target_table='stock_zhaban_pool'
                 )
-                return True
-            return False
+                # 返回字典格式
+
+                return {
+
+                    "success": True,
+
+                    "data": df.to_dict("records"),
+
+                    "count": len(df)
+
+                }
+            return {"success": False, "data": [], "count": 0}
 
         except Exception as e:
             logger.error(f"Failed to ingest stock_zhaban_pool: {e}")
-            return False
-    async def fetch_and_ingest_stock_insider_trading(self, stock_code: str) -> bool:
+            return {"success": False, "data": [], "count": 0}
+    async def fetch_and_ingest_stock_insider_trading(self, stock_code: str) -> Optional[dict]:
         """
         采集高管及相关人员持股变动数据并写入内部人交易表。
 
@@ -1853,7 +2073,7 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             api_name = 'stock_insider_trading'
             # Ensure stock code standard
@@ -1869,7 +2089,7 @@ class TushareIngestor(BaseIngestor):
 
             if df is None or df.empty:
                 logger.warning(f"No insider trading data found for {stock_code} (Tushare)")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # Mapping
             # 'in_de' -> 'change_type'
@@ -1894,14 +2114,24 @@ class TushareIngestor(BaseIngestor):
                 source=self.source,
                 target_table='stock_insider_trading'
             )
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
         except Exception as e:
             logger.error(f"Failed to ingest insider trading (Tushare) for {stock_code}: {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
     async def fetch_and_ingest_stock_block_trade(
         self, stock_code: str, start_date: str = None, end_date: str = None
-    ) -> bool:
+    ) -> Optional[dict]:
         """
         采集个股或全市场大宗交易数据并写入大宗交易表。
 
@@ -1918,7 +2148,7 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             api_name = 'block_trade'
             # Fix: handle empty stock_code properly for global sync
@@ -1977,13 +2207,23 @@ class TushareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 api_name, df, source=self.source, target_table='stock_block_trade'
             )
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
 
         except Exception as e:
             logger.error(f"Failed to ingest block trade for {stock_code} (Tushare): {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_sector_money_flow(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_sector_money_flow(self, stock_code: str) -> Optional[dict]:
         """
         采集股票所属行业的板块资金流并写入行业资金流表。
 
@@ -1999,7 +2239,7 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # 1. 获取个股所属行业 (同花顺行业/申万行业)
             # Tushare moneyflow_ind_ths 对应的是同花顺行业
@@ -2017,7 +2257,7 @@ class TushareIngestor(BaseIngestor):
 
             if not industry:
                 logger.warning(f"Could not determine industry for {stock_code}, skipping sector flow.")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             api_name = 'moneyflow_ind_dc'
             start_date = (datetime.now() - timedelta(days=10)).strftime('%Y%m%d')
@@ -2032,7 +2272,7 @@ class TushareIngestor(BaseIngestor):
             )
 
             if df is None or df.empty:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # Rename columns to match filter if necessary (ColumnMapper will do it later for DB, but we need it now for filter)
             # TuShare moneyflow_ind_dc returns 'name'
@@ -2041,7 +2281,17 @@ class TushareIngestor(BaseIngestor):
 
             if df.empty:
                 logger.info(f"No specific money flow data for industry {industry}")
-                return True
+                # 返回字典格式
+
+                return {
+
+                    "success": True,
+
+                    "data": df.to_dict("records"),
+
+                    "count": len(df)
+
+                }
 
             # Column Mapping (using what we added to column_mapping.json)
             df = ColumnMapper.map_columns(df, 'data.sector_money_flow', source=self.source, strict=False)
@@ -2061,13 +2311,23 @@ class TushareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 api_name, df, source=self.source, target_table='sector_money_flow'
             )
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
 
         except Exception as e:
             logger.error(f"Failed to ingest sector money flow for {stock_code} (Tushare): {e}")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_stock_top_holders(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_top_holders(self, stock_code: str) -> Optional[dict]:
         """
         采集股票前十大股东数据并写入十大股东表。
 
@@ -2091,11 +2351,11 @@ class TushareIngestor(BaseIngestor):
             )
             if df is None or not isinstance(df, pd.DataFrame):
                 logger.warning(f"No valid top 10 shareholders data found for {stock_code} (Tushare)")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             if df.empty:
                 logger.warning(f"Empty top 10 shareholders returned for {stock_code} (Tushare)")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # 1. 字段映射
             df = ColumnMapper.map_columns(
@@ -2120,11 +2380,21 @@ class TushareIngestor(BaseIngestor):
             )
 
             logger.info(f"Successfully ingested {len(df)} top 10 shareholder records for {stock_code} (Tushare)")
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
 
         except Exception:
             logger.exception(f"Failed to ingest top 10 shareholders for {stock_code} (Tushare)")
-            return False
+            return {"success": False, "data": [], "count": 0}
 
 
     async def fetch_and_ingest_stock_interactive_qa(
@@ -2132,7 +2402,7 @@ class TushareIngestor(BaseIngestor):
         stock_code: str,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None
-    ) -> bool:
+    ) -> Optional[dict]:
         """
         采集上证或深证互动问答数据并写入互动问答表。
 
@@ -2150,7 +2420,7 @@ class TushareIngestor(BaseIngestor):
         """
         try:
             if not self.pro:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             std_code = StockCodeStandardizer.standardize(stock_code)
             market = StockCodeStandardizer.get_market(std_code)
@@ -2183,11 +2453,11 @@ class TushareIngestor(BaseIngestor):
                 mapping_source = 'tushare_sz'
             else:
                 logger.warning("Tushare interactive QA is not supported for %s (%s)", stock_code, market)
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             if df is None or df.empty:
                 logger.warning("No Tushare interactive QA found for %s", stock_code)
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             df = ColumnMapper.map_columns(
                 df,
@@ -2208,7 +2478,7 @@ class TushareIngestor(BaseIngestor):
 
             if df is None or df.empty:
                 logger.warning("No interactive QA rows left before write for %s", stock_code)
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
@@ -2219,17 +2489,27 @@ class TushareIngestor(BaseIngestor):
             )
 
             logger.info("Successfully ingested %s interactive QA rows for %s (Tushare)", len(df), stock_code)
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
 
         except Exception as e:
             logger.error(f"Failed to ingest interactive QA for {stock_code} (Tushare): {e}", exc_info=True)
-            return False
+            return {"success": False, "data": [], "count": 0}
 
     async def fetch_and_ingest_income_statement(
             self,
             stock_code: str,
             start_date: Optional[str] = None,
-            end_date: Optional[str] = None) -> bool:
+            end_date: Optional[str] = None) -> Optional[dict]:
         """
         采集单只股票利润表并写入标准利润表。
 
@@ -2247,11 +2527,11 @@ class TushareIngestor(BaseIngestor):
         try:
             if not self.pro:
                 logger.error("Tushare API client (pro) not initialized")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             if not stock_code:
                 logger.error("Stock code is required for income statement sync (Tushare).")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             code = StockCodeStandardizer.standardize(stock_code)
             today = datetime.now().date()
@@ -2274,7 +2554,7 @@ class TushareIngestor(BaseIngestor):
 
             if df is None or df.empty:
                 logger.warning(f"No income statement data found for {code} (Tushare)")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             df = ColumnMapper.map_columns(
                 df.copy(),
@@ -2332,7 +2612,7 @@ class TushareIngestor(BaseIngestor):
                 })
 
             if not records:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             final_df = pd.DataFrame(records)
             final_df = final_df.sort_values(
@@ -2351,20 +2631,30 @@ class TushareIngestor(BaseIngestor):
             )
             if not write_success:
                 logger.error("Failed to write income statement records for %s via Tushare", code)
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             logger.info("Successfully synced income statement for %s via Tushare", code)
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
 
         except Exception as e:
             logger.error(f"Failed to ingest income statement for {stock_code} (Tushare): {e}", exc_info=True)
-            return False
+            return {"success": False, "data": [], "count": 0}
 
     async def fetch_and_ingest_balance_sheet(
             self,
             stock_code: str,
             start_date: str,
-            end_date: str) -> bool:
+            end_date: str) -> Optional[dict]:
         """
         采集单只股票资产负债表并写入标准资产负债表。
 
@@ -2382,14 +2672,14 @@ class TushareIngestor(BaseIngestor):
         try:
             if not self.pro:
                 logger.error("Tushare API client (pro) not initialized")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             if not stock_code:
                 logger.error("Stock code is required for balance sheet sync (Tushare).")
-                return False
+                return {"success": False, "data": [], "count": 0}
             if not start_date or not end_date:
                 logger.error("start_date and end_date are required for balance sheet sync (Tushare).")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             code = StockCodeStandardizer.standardize(stock_code)
             today = datetime.now().date()
@@ -2416,7 +2706,7 @@ class TushareIngestor(BaseIngestor):
 
             if df is None or df.empty:
                 logger.warning(f"No balance sheet data found for {code} (Tushare)")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             df = ColumnMapper.map_columns(
                 df.copy(),
@@ -2474,7 +2764,7 @@ class TushareIngestor(BaseIngestor):
                 })
 
             if not records:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             final_df = pd.DataFrame(records)
             final_df = final_df.sort_values(
@@ -2493,20 +2783,30 @@ class TushareIngestor(BaseIngestor):
             )
             if not write_success:
                 logger.error("Failed to write balance sheet records for %s via Tushare", code)
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             logger.info("Successfully synced balance sheet for %s via Tushare", code)
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
 
         except Exception as e:
             logger.error(f"Failed to ingest balance sheet for {stock_code} (Tushare): {e}", exc_info=True)
-            return False
+            return {"success": False, "data": [], "count": 0}
 
     async def fetch_and_ingest_cashflow_statement(
             self,
             stock_code: str,
             start_date: str,
-            end_date: str) -> bool:
+            end_date: str) -> Optional[dict]:
         """
         采集单只股票现金流量表并写入标准现金流量表。
 
@@ -2524,14 +2824,14 @@ class TushareIngestor(BaseIngestor):
         try:
             if not self.pro:
                 logger.error("Tushare API client (pro) not initialized")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             if not stock_code:
                 logger.error("Stock code is required for cashflow statement sync (Tushare).")
-                return False
+                return {"success": False, "data": [], "count": 0}
             if not start_date or not end_date:
                 logger.error("start_date and end_date are required for cashflow statement sync (Tushare).")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             code = StockCodeStandardizer.standardize(stock_code)
             today = datetime.now().date()
@@ -2558,7 +2858,7 @@ class TushareIngestor(BaseIngestor):
 
             if df is None or df.empty:
                 logger.warning(f"No cashflow statement data found for {code} (Tushare)")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             df = ColumnMapper.map_columns(
                 df.copy(),
@@ -2616,7 +2916,7 @@ class TushareIngestor(BaseIngestor):
                 })
 
             if not records:
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             final_df = pd.DataFrame(records)
             final_df = final_df.sort_values(
@@ -2635,11 +2935,21 @@ class TushareIngestor(BaseIngestor):
             )
             if not write_success:
                 logger.error("Failed to write cashflow statement records for %s via Tushare", code)
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             logger.info("Successfully synced cashflow statement for %s via Tushare", code)
-            return True
+            # 返回字典格式
+
+            return {
+
+                "success": True,
+
+                "data": df.to_dict("records"),
+
+                "count": len(df)
+
+            }
 
         except Exception as e:
             logger.error(f"Failed to ingest cashflow statement for {stock_code} (Tushare): {e}", exc_info=True)
-            return False
+            return {"success": False, "data": [], "count": 0}

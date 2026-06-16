@@ -111,7 +111,7 @@ class AkshareIngestor(BaseIngestor):
             start_date: str,
             end_date: str,
             period: str = "daily",
-            adjust: str = "qfq") -> bool:
+            adjust: str = "qfq") -> Optional[dict]:
         """
         采集单只股票 K 线行情并写入标准行情表。
 
@@ -128,7 +128,7 @@ class AkshareIngestor(BaseIngestor):
             adjust: 复权参数，支持 qfq(前复权)、hfq(后复权)、空字符串(不复权)。
 
         Returns:
-            采集并写入成功返回 True；无数据或异常返回 False。
+            返回字典 {"success": bool, "data": 数据列表, "count": 数据行数}；异常返回 None。
         """
         try:
             # 格式化股票代码
@@ -153,7 +153,7 @@ class AkshareIngestor(BaseIngestor):
 
             if df is None or df.empty:
                 logger.warning(f"No kline data returned from AKShare for {stock_code}")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # stock_zh_a_daily 返回列名：date, open, high, low, close, volume, amount等
             # 过滤日期范围
@@ -164,7 +164,7 @@ class AkshareIngestor(BaseIngestor):
 
             if df.empty:
                 logger.warning(f"No data in date range for {stock_code}")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # 补充必要字段
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
@@ -183,13 +183,19 @@ class AkshareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 'stock_zh_a_daily', df, source=self.source, target_table='kline_data'
             )
-            return True
+
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
 
         except Exception as e:
             logger.error(f"Failed to ingest AKShare kline for {stock_code}: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_stock_info(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_info(self, stock_code: str) -> Optional[dict]:
         """
         采集单只股票基础信息并写入股票基础表。
 
@@ -200,7 +206,7 @@ class AkshareIngestor(BaseIngestor):
             stock_code: 股票代码。
 
         Returns:
-            采集并写入成功返回 True；无数据或异常返回 False。
+            返回字典 {"success": bool, "data": 数据列表, "count": 数据行数}；异常返回 None。
         """
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
@@ -215,7 +221,7 @@ class AkshareIngestor(BaseIngestor):
 
             if df is None or df.empty:
                 logger.warning(f"No stock info returned from AKShare for {stock_code}")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # AKShare 返回的是 key-value 格式，需要转换
             info_dict = dict(zip(df['item'], df['value']))
@@ -235,13 +241,19 @@ class AkshareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 'stock_individual_info', result_df, source=self.source, target_table='stock_basic'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
 
         except Exception as e:
             logger.error(f"Failed to ingest AKShare stock info for {stock_code}: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_all_stock_basic(self) -> bool:
+    async def fetch_and_ingest_all_stock_basic(self) -> Optional[dict]:
         """
         全量采集 A 股基础信息并写入股票基础表。
 
@@ -249,7 +261,7 @@ class AkshareIngestor(BaseIngestor):
             - stock_info_a_code_name: https://akshare.akfamily.xyz/data/stock/stock.html#id2
 
         Returns:
-            采集并写入成功返回 True；无数据或异常返回 False。
+            返回字典 {"success": bool, "data": 数据列表, "count": 数据行数}；异常返回 None。
         """
         try:
             logger.info("Fetching all A-share basic info from AKShare")
@@ -259,7 +271,7 @@ class AkshareIngestor(BaseIngestor):
 
             if df is None or df.empty:
                 logger.warning("No stock basic data returned from AKShare")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # AKShare 返回列：code, name
             df.rename(columns={'code': 'stock_code', 'name': 'name'}, inplace=True)
@@ -275,13 +287,19 @@ class AkshareIngestor(BaseIngestor):
             )
 
             logger.info(f"Successfully synced {len(df)} stocks basic info from AKShare")
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
 
         except Exception as e:
             logger.error(f"Failed to ingest all stock basic from AKShare: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_realtime_market(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_realtime_market(self, stock_code: str) -> Optional[dict]:
         """
         采集单只股票实时行情并写入实时行情表。
 
@@ -305,7 +323,7 @@ class AkshareIngestor(BaseIngestor):
 
             if df is None or df.empty:
                 logger.warning("No realtime data returned from AKShare")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # 筛选目标股票（通过股票名称或代码匹配）
             # 尝试通过代码匹配
@@ -313,7 +331,7 @@ class AkshareIngestor(BaseIngestor):
 
             if target_df.empty:
                 logger.warning(f"No realtime data found for {stock_code} ({symbol}) in AKShare spot data")
-                return False
+                return None
 
             # 只取第一条匹配记录
             target_df = target_df.head(1)
@@ -356,7 +374,7 @@ class AkshareIngestor(BaseIngestor):
                 target_df = target_df[target_df['current_price'] > 0].copy()
                 if target_df.empty:
                     logger.warning(f"Invalid price for {stock_code} in AKShare realtime data")
-                    return False
+                return {"success": False, "data": [], "count": 0}
 
             # 使用 ColumnMapper 映射到标准表（与 Tushare 对齐）
             target_df = ColumnMapper.map_columns(
@@ -373,17 +391,23 @@ class AkshareIngestor(BaseIngestor):
             )
 
             logger.info(f"Successfully ingested AKShare realtime market for {stock_code}")
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
 
         except Exception as e:
             logger.error(f"Failed to ingest AKShare realtime market for {stock_code}: {e}")
-            return False
+            return None
 
     async def fetch_and_ingest_index_daily(
             self,
             index_code: str,
             start_date: str,
-            end_date: str) -> bool:
+            end_date: str) -> Optional[dict]:
         """
         采集大盘指数日线行情并写入指数日线表。
 
@@ -396,7 +420,7 @@ class AkshareIngestor(BaseIngestor):
             end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD。
 
         Returns:
-            采集并写入成功返回 True；无数据或异常返回 False。
+            返回字典 {"success": bool, "data": 数据列表, "count": 数据行数}；异常返回 None。
         """
         try:
             # AKShare 的指数接口使用指数代码（如 sh000001）
@@ -413,7 +437,7 @@ class AkshareIngestor(BaseIngestor):
 
             if df is None or df.empty:
                 logger.warning(f"No index daily data returned from AKShare for {index_code}")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # 日期过滤
             start_dt = pd.to_datetime(start_date.replace('-', ''))
@@ -423,7 +447,7 @@ class AkshareIngestor(BaseIngestor):
 
             if df.empty:
                 logger.warning(f"No index data in date range for {index_code}")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # 列名映射
             df.rename(columns={
@@ -447,17 +471,23 @@ class AkshareIngestor(BaseIngestor):
                 'stock_zh_index_daily', df, source=self.source, target_table='index_daily'
             )
 
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
 
         except Exception as e:
             logger.error(f"Failed to ingest AKShare index daily for {index_code}: {e}")
-            return False
+            return None
 
     async def fetch_and_ingest_financial_indicators(
             self,
             stock_code: str,
             start_date: Optional[str] = None,
-            end_date: Optional[str] = None) -> bool:
+            end_date: Optional[str] = None) -> Optional[dict]:
         """
         采集单只股票财务指标并写入标准财务指标表。
 
@@ -470,7 +500,7 @@ class AkshareIngestor(BaseIngestor):
             end_date: 结束日期（可选）。
 
         Returns:
-            采集并写入成功返回 True；无数据或异常返回 False。
+            返回字典 {"success": bool, "data": 数据列表, "count": 数据行数}；异常返回 None。
         """
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
@@ -485,7 +515,7 @@ class AkshareIngestor(BaseIngestor):
 
             if df is None or df.empty:
                 logger.warning(f"No financial indicators returned from AKShare for {stock_code}")
-                return False
+                return {"success": False, "data": [], "count": 0}
 
             # AKShare 返回的列包括报告期、基本每股收益、净资产收益率等
             # 需要根据实际返回结构进行映射
@@ -500,35 +530,41 @@ class AkshareIngestor(BaseIngestor):
                 df = df[(df['报告期'] >= start_dt) & (df['报告期'] <= end_dt)]
 
             if df.empty:
-                return False
+                return None
 
             # 写入数据库（实际项目中需要完整的列映射）
             # 这里简化处理，实际使用时需要根据 AKShare 返回结构完善
             logger.info(f"AKShare financial indicators data structure: {df.columns.tolist()}")
 
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
 
         except Exception as e:
             logger.error(f"Failed to ingest AKShare financial indicators for {stock_code}: {e}")
-            return False
+            return None
 
     async def fetch_and_ingest_stock_valuation(
             self,
             stock_code: str,
             start_date: Optional[str] = None,
-            end_date: Optional[str] = None) -> bool:
+            end_date: Optional[str] = None) -> Optional[dict]:
         """采集单只股票每日估值与基础行情指标并写入估值历史表。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare stock valuation for {symbol}")
             # AKShare 没有直接对应的每日估值接口，返回 False
             logger.warning("AKShare does not have direct stock valuation API")
-            return False
+            return {"success": False, "data": [], "count": 0}
         except Exception as e:
             logger.error(f"Failed to ingest AKShare stock valuation for {stock_code}: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_northbound(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_northbound(self, stock_code: str) -> Optional[dict]:
         """采集单只股票沪深港股通持股明细。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
@@ -536,19 +572,25 @@ class AkshareIngestor(BaseIngestor):
             # 使用 stock_hsgt_individual_em (个股接口)
             df = await self._run_in_executor(ak.stock_hsgt_individual_em, symbol=symbol)
             if df is None or df.empty:
-                return False
+                return None
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'northbound', df, source=self.source, target_table='northbound_data'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare northbound for {stock_code}: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_company_profile(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_company_profile(self, stock_code: str) -> Optional[dict]:
         """采集上市公司基础资料。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
@@ -556,93 +598,123 @@ class AkshareIngestor(BaseIngestor):
             # AKShare 使用 stock_individual_info_em
             df = await self._run_in_executor(ak.stock_individual_info_em, symbol=symbol)
             if df is None or df.empty:
-                return False
+                return None
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'stock_individual_info', df, source=self.source
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare company profile for {stock_code}: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_dragon_tiger(self, start_date: str, end_date: str = None) -> bool:
+    async def fetch_and_ingest_dragon_tiger(self, start_date: str, end_date: str = None) -> Optional[dict]:
         """按日期范围采集龙虎榜每日统计数据。"""
         try:
             logger.info(f"Fetching AKShare dragon tiger for {start_date} to {end_date}")
             date_str = start_date.replace('-', '')
             df = await self._run_in_executor(ak.stock_lhb_detail_daily_sina, date=date_str)
             if df is None or df.empty:
-                return False
+                return None
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'dragon_tiger', df, source=self.source, target_table='dragon_tiger_data'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare dragon tiger: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_board_industry(self) -> bool:
+    async def fetch_and_ingest_board_industry(self) -> Optional[dict]:
         """采集外部行业板块数据。"""
         try:
             logger.info("Fetching AKShare board industry")
             df = await self._run_in_executor(ak.stock_board_industry_name_em)
             if df is None or df.empty:
-                return False
+                return None
             df['data_source'] = self.source
             df['timestamp'] = pd.Timestamp.now()
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'board_industry', df, source=self.source, target_table='industry_data'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare board industry: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_stock_money_flow(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_money_flow(self, stock_code: str) -> Optional[dict]:
         """采集单只股票资金流向。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare stock money flow for {symbol}")
             df = await self._run_in_executor(ak.stock_individual_fund_flow, stock=symbol, market="sh" if symbol.startswith('6') else "sz")
             if df is None or df.empty:
-                return False
+                return None
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'money_flow', df, source=self.source, target_table='stock_money_flow'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare stock money flow for {stock_code}: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_stock_shareholder_count(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_shareholder_count(self, stock_code: str) -> Optional[dict]:
         """采集单只股票股东人数变动。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare stock shareholder count for {symbol}")
             df = await self._run_in_executor(ak.stock_zh_a_gdhs, symbol=symbol)
             if df is None or df.empty:
-                return False
+                return None
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'shareholder_count', df, source=self.source, target_table='stock_shareholder_count'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare stock shareholder count for {stock_code}: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_stock_pledge_risk(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_pledge_risk(self, stock_code: str) -> Optional[dict]:
         """采集单只股票股权质押明细数据。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
@@ -651,19 +723,25 @@ class AkshareIngestor(BaseIngestor):
             df = await self._run_in_executor(ak.stock_gpzy_pledge_ratio_detail_em, symbol=symbol)
             if df is None or df.empty:
                 logger.warning(f"No pledge data found for {stock_code}")
-                return False
+                return {"success": False, "data": [], "count": 0}
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'pledge_risk', df, source=self.source, target_table='stock_pledge_risk'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare stock pledge risk for {stock_code}: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_all_pledge_summary(self, stock_code: str = None) -> bool:
+    async def fetch_and_ingest_all_pledge_summary(self, stock_code: str = None) -> Optional[dict]:
         """采集全市场股权质押汇总数据。注意：此接口返回全市场数据，不支持单股查询。"""
         try:
             if stock_code:
@@ -672,18 +750,24 @@ class AkshareIngestor(BaseIngestor):
             # 使用 stock_gpzy_profile_em (仅全市场)
             df = await self._run_in_executor(ak.stock_gpzy_profile_em)
             if df is None or df.empty:
-                return False
+                return None
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'pledge_summary', df, source=self.source, target_table='stock_pledge_summary'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare pledge summary: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_stock_lockup_release(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_lockup_release(self, stock_code: str) -> Optional[dict]:
         """采集单只股票未来限售股解禁数据。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
@@ -692,114 +776,150 @@ class AkshareIngestor(BaseIngestor):
             df = await self._run_in_executor(ak.stock_restricted_release_queue_em, symbol=symbol)
             if df is None or df.empty:
                 logger.warning(f"No lockup release data found for {stock_code}")
-                return False
+                return {"success": False, "data": [], "count": 0}
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'lockup_release', df, source=self.source, target_table='stock_lockup_release'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare stock lockup release for {stock_code}: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_stock_earnings_forecast(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_earnings_forecast(self, stock_code: str) -> Optional[dict]:
         """采集单只股票业绩预告数据。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare stock earnings forecast for {symbol}")
             df = await self._run_in_executor(ak.stock_yysj_em, symbol=symbol)
             if df is None or df.empty:
-                return False
+                return None
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'earnings_forecast', df, source=self.source, target_table='stock_earnings_forecast'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare stock earnings forecast for {stock_code}: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_stock_margin_data(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_margin_data(self, stock_code: str) -> Optional[dict]:
         """采集单只股票融资融券明细数据。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare stock margin data for {symbol}")
             df = await self._run_in_executor(ak.stock_margin_detail_em, symbol=symbol)
             if df is None or df.empty:
-                return False
+                return None
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'margin_data', df, source=self.source, target_table='stock_margin_data'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare stock margin data for {stock_code}: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_stock_limit_up_pool(self, trade_date: str = None) -> bool:
+    async def fetch_and_ingest_stock_limit_up_pool(self, trade_date: str = None) -> Optional[dict]:
         """采集每日涨停池数据。"""
         try:
             date_str = trade_date.replace('-', '') if trade_date else datetime.now().strftime('%Y%m%d')
             logger.info(f"Fetching AKShare limit up pool for {date_str}")
             df = await self._run_in_executor(ak.stock_zt_pool_em, date=date_str)
             if df is None or df.empty:
-                return False
+                return None
             df['data_source'] = self.source
             df['update_date'] = pd.to_datetime(date_str).date()
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'limit_up_pool', df, source=self.source, target_table='stock_limit_up_pool'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare limit up pool: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_stock_limit_down_pool(self, trade_date: str = None) -> bool:
+    async def fetch_and_ingest_stock_limit_down_pool(self, trade_date: str = None) -> Optional[dict]:
         """采集每日跌停池数据。"""
         try:
             date_str = trade_date.replace('-', '') if trade_date else datetime.now().strftime('%Y%m%d')
             logger.info(f"Fetching AKShare limit down pool for {date_str}")
             df = await self._run_in_executor(ak.stock_zt_pool_dtgc_em, date=date_str)
             if df is None or df.empty:
-                return False
+                return None
             df['data_source'] = self.source
             df['update_date'] = pd.to_datetime(date_str).date()
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'limit_down_pool', df, source=self.source, target_table='stock_limit_down_pool'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare limit down pool: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_stock_zhaban_pool(self, trade_date: str = None) -> bool:
+    async def fetch_and_ingest_stock_zhaban_pool(self, trade_date: str = None) -> Optional[dict]:
         """采集每日炸板池数据。"""
         try:
             date_str = trade_date.replace('-', '') if trade_date else datetime.now().strftime('%Y%m%d')
             logger.info(f"Fetching AKShare zhaban pool for {date_str}")
             df = await self._run_in_executor(ak.stock_zt_pool_zbgc_em, date=date_str)
             if df is None or df.empty:
-                return False
+                return None
             df['data_source'] = self.source
             df['update_date'] = pd.to_datetime(date_str).date()
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'zhaban_pool', df, source=self.source, target_table='stock_zhaban_pool'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare zhaban pool: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_stock_insider_trading(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_insider_trading(self, stock_code: str) -> Optional[dict]:
         """采集高管及相关人员持股变动数据。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
@@ -807,28 +927,34 @@ class AkshareIngestor(BaseIngestor):
             # 使用 stock_shareholder_change_ths (同花顺股东变动)
             df = await self._run_in_executor(ak.stock_shareholder_change_ths, symbol=symbol)
             if df is None or df.empty:
-                return False
+                return None
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'insider_trading', df, source=self.source, target_table='stock_insider_trading'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare insider trading for {stock_code}: {e}")
-            return False
+            return None
 
     async def fetch_and_ingest_stock_block_trade(
         self, stock_code: str, start_date: str = None, end_date: str = None
-    ) -> bool:
+    ) -> Optional[dict]:
         """采集个股或全市场大宗交易数据。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code) if stock_code else None
             logger.info(f"Fetching AKShare block trade for {symbol or 'all'}")
             df = await self._run_in_executor(ak.stock_dzjy_mrmx, symbol=symbol or "全部")
             if df is None or df.empty:
-                return False
+                return None
             if stock_code:
                 df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
@@ -836,53 +962,71 @@ class AkshareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 'block_trade', df, source=self.source, target_table='stock_block_trade'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare block trade: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_sector_money_flow(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_sector_money_flow(self, stock_code: str) -> Optional[dict]:
         """采集股票所属行业的板块资金流。"""
         try:
             logger.info(f"Fetching AKShare sector money flow for {stock_code}")
             df = await self._run_in_executor(ak.stock_sector_fund_flow_rank, indicator="今日")
             if df is None or df.empty:
-                return False
+                return None
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'sector_money_flow', df, source=self.source, target_table='sector_money_flow'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare sector money flow: {e}")
-            return False
+            return None
 
-    async def fetch_and_ingest_stock_top_holders(self, stock_code: str) -> bool:
+    async def fetch_and_ingest_stock_top_holders(self, stock_code: str) -> Optional[dict]:
         """采集股票前十大股东数据。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare top holders for {symbol}")
             df = await self._run_in_executor(ak.stock_gdfx_holding_analyse, symbol=symbol)
             if df is None or df.empty:
-                return False
+                return None
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'top_holders', df, source=self.source, target_table='stock_top_holders'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare top holders for {stock_code}: {e}")
-            return False
+            return None
 
     async def fetch_and_ingest_stock_interactive_qa(
         self,
         stock_code: str,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None
-    ) -> bool:
+    ) -> Optional[dict]:
         """采集上证或深证互动问答数据。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
@@ -890,23 +1034,29 @@ class AkshareIngestor(BaseIngestor):
             # 使用 stock_irm_cninfo (互动易)
             df = await self._run_in_executor(ak.stock_irm_cninfo, symbol=symbol)
             if df is None or df.empty:
-                return False
+                return None
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'interactive_qa', df, source=self.source, target_table='stock_interactive_qa'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare interactive QA for {stock_code}: {e}")
-            return False
+            return None
 
     async def fetch_and_ingest_income_statement(
             self,
             stock_code: str,
             start_date: Optional[str] = None,
-            end_date: Optional[str] = None) -> bool:
+            end_date: Optional[str] = None) -> Optional[dict]:
         """采集单只股票利润表。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
@@ -915,23 +1065,29 @@ class AkshareIngestor(BaseIngestor):
             df = await self._run_in_executor(ak.stock_financial_abstract, symbol=symbol)
             if df is None or df.empty:
                 logger.warning(f"No income statement found for {stock_code}")
-                return False
+                return {"success": False, "data": [], "count": 0}
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'income_statement', df, source=self.source, target_table='stock_income_statement'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare income statement for {stock_code}: {e}")
-            return False
+            return None
 
     async def fetch_and_ingest_balance_sheet(
             self,
             stock_code: str,
             start_date: str,
-            end_date: str) -> bool:
+            end_date: str) -> Optional[dict]:
         """采集单只股票资产负债表。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
@@ -940,23 +1096,29 @@ class AkshareIngestor(BaseIngestor):
             df = await self._run_in_executor(ak.stock_financial_abstract, symbol=symbol)
             if df is None or df.empty:
                 logger.warning(f"No balance sheet found for {stock_code}")
-                return False
+                return {"success": False, "data": [], "count": 0}
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'balance_sheet', df, source=self.source, target_table='stock_balance_sheet'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare balance sheet for {stock_code}: {e}")
-            return False
+            return None
 
     async def fetch_and_ingest_cashflow_statement(
             self,
             stock_code: str,
             start_date: str,
-            end_date: str) -> bool:
+            end_date: str) -> Optional[dict]:
         """采集单只股票现金流量表。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
@@ -965,14 +1127,20 @@ class AkshareIngestor(BaseIngestor):
             df = await self._run_in_executor(ak.stock_financial_abstract, symbol=symbol)
             if df is None or df.empty:
                 logger.warning(f"No cashflow statement found for {stock_code}")
-                return False
+                return {"success": False, "data": [], "count": 0}
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'cashflow_statement', df, source=self.source, target_table='stock_cashflow_statement'
             )
-            return True
+            
+            # 返回字典格式
+            return {
+                "success": True,
+                "data": df.to_dict('records'),
+                "count": len(df)
+            }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare cashflow statement for {stock_code}: {e}")
-            return False
+            return None
