@@ -16,7 +16,6 @@ from app.models.async_task import AsyncTask
 from app.models.data_storage import (
     StockBasic,
     KlineData,
-    FinancialIndicator,
     IndustryData,
     NorthboundData,
     DragonTigerData,
@@ -53,7 +52,6 @@ __all__ = [
     "LLMUsageLog",
     "StockBasic",
     "KlineData",
-    "FinancialIndicator",
     "IndustryData",
     "NorthboundData",
     "DragonTigerData",

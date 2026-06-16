@@ -2469,15 +2469,12 @@
         "approve": "Approve and Run",
         "resume": "Resume",
         "cancel": "Cancel Research",
-        "delete": "Delete Run",
         "open_active_run": "Open Active Run",
         "send_message": "Send",
-        "fullscreen": "Fullscreen",
-        "expand_message": "Expand Message"
+        "fullscreen": "Fullscreen"
       },
       "confirmations": {
-        "cancel_run": "Cancel this AI Deep Research stock-picking run?",
-        "delete_run": "Delete this AI Deep Research stock-picking run?"
+        "cancel_run": "Cancel this AI Deep Research stock-picking run?"
       },
       "messages": {
         "load_runs_failed": "Failed to load AI Deep Research stock-picking history",
@@ -2488,8 +2485,6 @@
         "approve_failed": "Failed to approve plan",
         "cancel_success": "Research cancelled",
         "cancel_failed": "Failed to cancel research",
-        "delete_success": "AI Deep Research run deleted",
-        "delete_failed": "Failed to delete AI Deep Research run",
         "resume_success": "Research resumed",
         "resume_failed": "Failed to resume research",
         "cancel_reason": "User cancelled research from frontend",
@@ -2539,7 +2534,6 @@
           "empty": "-",
           "titles": {
             "plan": "Research Plan",
-            "current_full_plan": "Current Full PLAN",
             "tool_start": "Tool Call Started",
             "tool_result": "Tool Call Result",
             "progress": "Execution Progress",
@@ -2574,9 +2568,6 @@
           "research_started": "Research plan approved. Starting LLM-driven research loop.",
           "tool_start": "Calling {tool_name} with LLM-selected arguments.",
           "tool_completed": "Tool {tool_name} completed and its evidence was added to the next agent turn.",
-          "tool_failed": "Tool {tool_name} failed and the failure details were added to the next agent turn.",
-          "tool_call_success": "Call succeeded",
-          "tool_call_failed": "Call failed",
           "llm_loop_completed": "LLM-driven research loop completed.",
           "completed": "Deep Research run completed.",
           "cancelled": "Interactive research run cancelled.",

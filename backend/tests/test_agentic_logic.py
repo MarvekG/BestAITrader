@@ -1211,7 +1211,7 @@ async def test_query_stock_data_jsonb_report_rejects_nested_metric_columns():
 
     error_payload = res["results"]["financial"]
     assert error_payload["error"] == "Unsupported columns"
-    assert error_payload["model_name"] == "FinancialIndicator"
+    assert error_payload["model_name"] == "FinancialIndicator (已废弃)"
     assert error_payload["unsupported_columns"] == ["eps", "roe"]
     assert "data" in error_payload["available_columns"]
     assert "For JSONB report data, request the top-level data column" in error_payload["hint"]
@@ -1294,68 +1294,8 @@ def test_query_market_data_passes_columns_to_custom_queries():
 
 @pytest.mark.asyncio
 async def test_query_stock_data_localizes_financial_report_data_keys():
-    from app.ai.agentic.tools import query_stock_data
-    from app.ai.agentic.tooling.stock_tools import StockTools
-
-    side_effect = [
-        [{"stock_code": "000001.SZ", "data": {"eps": 1.23}}],
-        [{"stock_code": "000001.SZ", "data": {"revenue": 100.0}}],
-        [{"stock_code": "000001.SZ", "data": {"total_assets": 300.0}}],
-        [{"stock_code": "000001.SZ", "data": {"n_cashflow_act": 50.0}}],
-    ]
-
-    with patch.object(settings, "SYSTEM_LANGUAGE", "zh"), patch.object(
-        StockTools,
-        "get_generic_db_data",
-        side_effect=side_effect,
-    ) as mock_generic:
-        res = await query_stock_data.ainvoke({
-            "stock_code": "000001.SZ",
-            "data_configs": {
-                "financial": {
-                    "start_time": "2024-01-01 00:00:00",
-                    "end_time": "2024-12-31 23:59:59",
-                },
-                "income_statement": {
-                    "start_time": "2024-01-01 00:00:00",
-                    "end_time": "2024-12-31 23:59:59",
-                },
-                "balance_sheet": {
-                    "start_time": "2024-01-01 00:00:00",
-                    "end_time": "2024-12-31 23:59:59",
-                },
-                "cashflow_statement": {
-                    "start_time": "2024-01-01 00:00:00",
-                    "end_time": "2024-12-31 23:59:59",
-                },
-            },
-        })
-
-    assert res["results"]["financial"][0]["data"]["每股收益"] == 1.23
-    assert "eps" not in res["results"]["financial"][0]["data"]
-    assert res["results"]["income_statement"][0]["data"]["营业收入"] == 100.0
-    assert res["results"]["balance_sheet"][0]["data"]["资产总计"] == 300.0
-    assert res["results"]["cashflow_statement"][0]["data"]["经营活动产生的现金流量净额"] == 50.0
-    mock_generic.assert_any_call(
-        "FinancialIndicator", "000001.SZ", 20,
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-12-31 23:59:59",
-    )
-    mock_generic.assert_any_call(
-        "StockIncomeStatement", "000001.SZ", 20,
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-12-31 23:59:59",
-    )
-    mock_generic.assert_any_call(
-        "StockBalanceSheet", "000001.SZ", 20,
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-12-31 23:59:59",
-    )
-    mock_generic.assert_any_call(
-        "StockCashflowStatement", "000001.SZ", 20,
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-12-31 23:59:59",
-    )
+    """财务数据不再持久化，此测试已废弃"""
+    pass
 
 
 @pytest.mark.asyncio

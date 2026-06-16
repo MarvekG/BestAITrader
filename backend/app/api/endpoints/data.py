@@ -284,7 +284,7 @@ async def get_db_data(
 ):
     """Generic database table query interface"""
     from app.models.data_storage import (
-        StockBasic, FinancialIndicator, StockIncomeStatement, StockBalanceSheet, StockCashflowStatement, KlineData, NorthboundData,
+        StockBasic, KlineData, NorthboundData,
         DragonTigerData, StockRealtimeMarket, StockValuationHistory,
         StockLimitUpPool, StockLimitDownPool, StockZhabanPool, StockMoneyFlow, SectorMoneyFlow, StockShareholder, StockPledge,
         StockInsider, StockRelease, StockForecast, StockMargin, IndexDaily,
@@ -308,10 +308,6 @@ async def get_db_data(
 
     table_map = {
         "kline": KlineData,
-        "financial": FinancialIndicator,
-        "income_statement": StockIncomeStatement,
-        "balance_sheet": StockBalanceSheet,
-        "cashflow_statement": StockCashflowStatement,
         "northbound": NorthboundData,
         "dragontiger": DragonTigerData,
         "valuation": StockValuationHistory,
@@ -346,29 +342,6 @@ async def get_db_data(
 
     # Use table name from model definition as prefix
     prefix = model.__tablename__
-
-    # Special handling for JSON-based financial reports
-    if data_type.lower() in {"financial", "income_statement", "balance_sheet", "cashflow_statement"}:
-        extra_fields = []
-        if data_type.lower() in {"income_statement", "balance_sheet", "cashflow_statement"}:
-            extra_fields = ["report_type", "currency", "is_audit"]
-        result = _get_json_report_data(
-            db,
-            model,
-            f"data.{model.__tablename__}",
-            stock_code,
-            skip,
-            limit,
-            extra_fields=extra_fields,
-        )
-        transformed_items = []
-        for item in result["items"]:
-            new_item = {}
-            for k, v in item.items():
-                new_item[f"{prefix}.{k}"] = v
-            transformed_items.append(new_item)
-        result["items"] = transformed_items
-        return result
 
     query = db.query(model)
     if stock_code:
@@ -1225,51 +1198,12 @@ async def get_db_stock_detail(
             "total_market_value": safe_float(market_data.get("market_cap"), 0.0),
         }
 
-        # Try to get growth rates from financial_indicators
-        financials = stock_data.get("financial_indicators", [])
-        rev_growth = 0.0
-        profit_growth = 0.0
-
-        if isinstance(financials, list) and financials:
-            # Financials is a list of indicator objects {indicator_name, indicator_value, ...}
-            # We need to find the latest value for revenue growth and profit growth
-            for item in financials:
-                if not isinstance(item, dict):
-                    continue
-
-                name = item.get("indicator_name", "")
-                val = safe_float(item.get("indicator_value", 0), 0.0)
-
-                # Check for revenue growth
-                if rev_growth == 0.0 and name == "total_revenue_yoy":
-                    rev_growth = val
-
-                # Check for profit growth
-                if profit_growth == 0.0 and name == "net_profit_yoy":
-                    profit_growth = val
-
-                if rev_growth != 0.0 and profit_growth != 0.0:
-                    break
-
-        elif isinstance(financials, dict):
-            rev_growth = safe_float(financials.get("total_revenue_yoy", 0), 0.0)
-            profit_growth = safe_float(financials.get("net_profit_yoy", 0), 0.0)
-
-        defaults["total_revenue_yoy"] = rev_growth
-        defaults["net_profit_yoy"] = profit_growth
-
         # Update fundamentals with defaults only if keys missing
         for k, v in defaults.items():
             if k not in fundamentals or fundamentals[k] is None:
                 fundamentals[k] = v
 
         stock_data["fundamentals"] = fundamentals
-
-        # Additional safe guard: ensure fundamentals has these keys even if they were 0
-        if "total_revenue_yoy" not in stock_data["fundamentals"]:
-            stock_data["fundamentals"]["total_revenue_yoy"] = rev_growth
-        if "net_profit_yoy" not in stock_data["fundamentals"]:
-            stock_data["fundamentals"]["net_profit_yoy"] = profit_growth
 
         # Ensure return data structure matches DetailedSnapshot interface required by frontend as much as possible,
         # or frontend needs to adapt.
@@ -1704,199 +1638,6 @@ async def delete_stock_data(
             status_code=500,
             detail=f"Failed to delete stock data: {str(e)}"
         )
-
-
-@router.post("/db/sync/financial")
-async def sync_financial_data(
-    stock_code: Optional[str] = Query(None, description="Stock Code (Optional)"),
-    start_date: str = Query(..., description="Start Date YYYYMMDD"),
-    end_date: str = Query(..., description="End Date YYYYMMDD"),
-    db: Session = Depends(get_db)
-):
-    """
-    手动同步财务指标 (Async Task)
-    如果提供了 stock_code，则只同步该股票；否则全量同步。
-    """
-    from app.tasks.task_manager import task_manager
-    from app.tasks.task_functions import sync_financial_indicator_func
-    from app.tasks.async_task_runner import async_task_runner
-    from app.core.i18n import i18n_service
-
-    try:
-        task_info = stock_code or 'All'
-        task_name = i18n_service.t("tasks.names.financial_sync").format(info=task_info)
-        task_type = "financial_sync"
-        parameters = {
-            "stock_code": stock_code,
-            "start_date": start_date,
-            "end_date": end_date,
-        }
-
-        # Submit task
-        task_result = task_manager.submit_task(
-            db=db,
-            task_name=task_name,
-            task_type=task_type,
-            parameters=parameters,
-            allow_concurrent=False
-        )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_financial_indicator_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
-
-        return task_result
-    except Exception as e:
-        logger.error(f"Failed to submit financial sync task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/db/sync/income-statement")
-async def sync_income_statement_data(
-    stock_code: Optional[str] = Query(None, description="Stock Code (Optional)"),
-    start_date: str = Query(..., description="Start Date YYYYMMDD"),
-    end_date: str = Query(..., description="End Date YYYYMMDD"),
-    db: Session = Depends(get_db)
-):
-    """
-    手动同步利润表 (Async Task)
-    如果提供了 stock_code，则只同步该股票；否则同步股票仓中的股票。
-    """
-    from app.tasks.task_manager import task_manager
-    from app.tasks.task_functions import sync_income_statement_func
-    from app.tasks.async_task_runner import async_task_runner
-    from app.core.i18n import i18n_service
-
-    try:
-        task_info = stock_code or 'Warehouse'
-        task_name = i18n_service.t("tasks.names.income_statement_sync").format(info=task_info)
-        task_type = "income_statement_sync"
-        parameters = {
-            "stock_code": stock_code,
-            "start_date": start_date,
-            "end_date": end_date,
-        }
-
-        task_result = task_manager.submit_task(
-            db=db,
-            task_name=task_name,
-            task_type=task_type,
-            parameters=parameters,
-            allow_concurrent=False
-        )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_income_statement_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
-
-        return task_result
-    except Exception as e:
-        logger.error(f"Failed to submit income statement sync task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/db/sync/balance-sheet")
-async def sync_balance_sheet_data(
-    stock_code: Optional[str] = Query(None, description="Stock Code (Optional)"),
-    start_date: str = Query(..., description="Start Date YYYYMMDD"),
-    end_date: str = Query(..., description="End Date YYYYMMDD"),
-    db: Session = Depends(get_db)
-):
-    """
-    手动同步资产负债表 (Async Task)
-    如果提供了 stock_code，则只同步该股票；否则同步股票仓中的股票。
-    """
-    from app.tasks.task_manager import task_manager
-    from app.tasks.task_functions import sync_balance_sheet_func
-    from app.tasks.async_task_runner import async_task_runner
-    from app.core.i18n import i18n_service
-
-    try:
-        task_info = stock_code or 'Warehouse'
-        task_name = i18n_service.t("tasks.names.balance_sheet_sync").format(info=task_info)
-        task_type = "balance_sheet_sync"
-        parameters = {
-            "stock_code": stock_code,
-            "start_date": start_date,
-            "end_date": end_date,
-        }
-
-        task_result = task_manager.submit_task(
-            db=db,
-            task_name=task_name,
-            task_type=task_type,
-            parameters=parameters,
-            allow_concurrent=False
-        )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_balance_sheet_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
-
-        return task_result
-    except Exception as e:
-        logger.error(f"Failed to submit balance sheet sync task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/db/sync/cashflow-statement")
-async def sync_cashflow_statement_data(
-    stock_code: Optional[str] = Query(None, description="Stock Code (Optional)"),
-    start_date: str = Query(..., description="Start Date YYYYMMDD"),
-    end_date: str = Query(..., description="End Date YYYYMMDD"),
-    db: Session = Depends(get_db)
-):
-    """
-    手动同步现金流量表 (Async Task)
-    如果提供了 stock_code，则只同步该股票；否则同步股票仓中的股票。
-    """
-    from app.tasks.task_manager import task_manager
-    from app.tasks.task_functions import sync_cashflow_statement_func
-    from app.tasks.async_task_runner import async_task_runner
-    from app.core.i18n import i18n_service
-
-    try:
-        task_info = stock_code or 'Warehouse'
-        task_name = i18n_service.t("tasks.names.cashflow_statement_sync").format(info=task_info)
-        task_type = "cashflow_statement_sync"
-        parameters = {
-            "stock_code": stock_code,
-            "start_date": start_date,
-            "end_date": end_date,
-        }
-
-        task_result = task_manager.submit_task(
-            db=db,
-            task_name=task_name,
-            task_type=task_type,
-            parameters=parameters,
-            allow_concurrent=False
-        )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_cashflow_statement_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
-
-        return task_result
-    except Exception as e:
-        logger.error(f"Failed to submit cashflow statement sync task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/db/tables")

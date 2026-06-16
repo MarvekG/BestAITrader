@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 from app.crud.user import create_user
 from app.models.async_task import AsyncTask
 from app.models.account import Account
-from app.models.data_storage import FinancialIndicator, StockBasic, StockRealtimeMarket
+from app.models.data_storage import StockBasic, StockRealtimeMarket
 from app.models.position import Position
 from app.models.user import User
 from app.schemas.user import UserCreate
@@ -303,30 +303,8 @@ class TestDataAPI:
         assert response.json()["stock_code"] == "000001.SZ"
 
     def test_get_financial_data(self, client, auth_headers, db_session):
-        _seed_stock_basic(db_session, stock_code="600519.SH", name="Kweichow Moutai", industry="Liquor", market="SSE")
-        db_session.add(
-            FinancialIndicator(
-                stock_code="600519.SH",
-                report_date=date(2023, 12, 31),
-                data={"roe": 0.25, "net_profit": 50000000000.0},
-                data_source="test",
-            )
-        )
-        db_session.commit()
-
-        response = client.get(
-            "/api/v1/data/db/data/financial",
-            params={"stock_code": "600519.SH"},
-            headers=auth_headers,
-        )
-
-        assert response.status_code == 200
-        payload = response.json()
-        assert payload["total"] == 1
-        item = payload["items"][0]
-        assert item["financial_indicator.stock_code"] == "600519.SH"
-        assert item["financial_indicator.report_date"] == "2023-12-31"
-        assert item["financial_indicator.data_source"] == "test"
+        """财务数据不再持久化，此测试已废弃"""
+        pass
 
     def test_get_stock_name(self, client, auth_headers):
         with patch(

@@ -67,8 +67,6 @@ export interface DetailedSnapshot {
     pe_ttm: number;
     pb: number;
     total_market_value: number;
-    revenue_growth: number;
-    profit_growth: number;
   };
   policy_news: Array<{
     title: string;
