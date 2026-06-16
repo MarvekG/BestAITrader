@@ -17,7 +17,7 @@ from app.ai.stock_picker.interactive_research.persistence import (
     load_plan_payload_record,
 )
 from app.ai.stock_picker.interactive_research.plan_agent import PlanAgent
-from app.ai.stock_picker.interactive_research.planning import parse_requirement
+from app.ai.stock_picker.interactive_research.planning import build_plan_payload
 from app.ai.stock_picker.interactive_research.serializers import serialize_message, serialize_run_summary
 from app.ai.stock_picker.interactive_research.tool_registry import ToolLoaderFactory
 from app.ai.stock_picker.interactive_research.research_agent import (
@@ -55,19 +55,25 @@ class InteractiveResearchService:
             llm_factory: 可选 LLM 工厂；测试可注入 fake LLM。
         """
         self._llm_factory = llm_factory
-        self._plan_agent = PlanAgent(llm_factory=llm_factory)
+        self._plan_agent = PlanAgent(llm_factory=llm_factory, notification_callback=self._push_realtime_update)
         self._research_agent = InteractiveResearchAgent(
             tool_loader_factory=tool_loader_factory,
             llm_factory=llm_factory,
             notification_callback=self._push_realtime_update,
         )
 
-    async def create_run(self, user_id: int, request_data: Dict[str, Any]) -> InteractiveResearchRun:
-        """创建聊天式研究 run，并写入首条用户消息和计划消息。
+    async def create_run(
+        self,
+        user_id: int,
+        request_data: Dict[str, Any],
+        background_tasks: Any,
+    ) -> InteractiveResearchRun:
+        """创建聊天式研究 run，并异步生成首条计划消息。
 
         Args:
             user_id: 当前用户 ID。
             request_data: 已通过 API schema 校验的自然语言需求和约束。
+            background_tasks: FastAPI BackgroundTasks 实例。
 
         Returns:
             已持久化的研究 run。
@@ -75,17 +81,16 @@ class InteractiveResearchService:
         Raises:
             ValueError: 当前用户已有未完成 Deep Research run 时抛出。
         """
-        parsed_requirement = parse_requirement(request_data)
+        plan_payload = build_plan_payload(request_data)
         created = create_run_record(
             user_id,
             request_data,
-            parsed_requirement=parsed_requirement,
-            title=self._build_title(parsed_requirement["raw_requirement"]),
+            title=self._build_title(str(plan_payload.get("objective") or "")),
         )
         run_id = created["run_id"]
         raw_requirement = created["raw_requirement"]
 
-        await self._plan_agent.draft_initial_plan(run_id, raw_requirement)
+        background_tasks.add_task(self.execute_plan_agent_background, run_id, raw_requirement, None, True)
         created_run = self.get_run(run_id, user_id)
         if created_run is None:
             raise LookupError(_t("errors.run_not_found"))
@@ -125,8 +130,6 @@ class InteractiveResearchService:
             删除成功返回 True；run 不存在或不属于当前用户时返回 False。
         """
         deleted = delete_run_record(run_id, user_id)
-        if deleted:
-            self._plan_agent.forget(run_id)
         return deleted
 
     async def append_user_message(
@@ -135,7 +138,8 @@ class InteractiveResearchService:
         user_id: int,
         content: str,
         payload: Optional[Dict[str, Any]] = None,
-        background_tasks: Optional[Any] = None,
+        *,
+        background_tasks: Any,
     ) -> InteractiveResearchMessage:
         """向聊天流追加用户输入，并按当前状态处理动态输入。
 
@@ -144,7 +148,7 @@ class InteractiveResearchService:
             user_id: 当前用户 ID。
             content: 用户输入文本。
             payload: 可选小型结构化 payload。
-            background_tasks: FastAPI BackgroundTasks 实例（可选）。
+            background_tasks: FastAPI BackgroundTasks 实例。
 
         Returns:
             已创建的用户消息。
@@ -157,14 +161,13 @@ class InteractiveResearchService:
         message = result["message"]
         run_status = result["run_status"]
         if run_status == "awaiting_user_input":
-            if background_tasks is not None:
-                background_tasks.add_task(self.execute_workflow_background, run_id, result["plan_payload"])
+            background_tasks.add_task(self.execute_workflow_background, run_id, result["plan_payload"])
             return message
         if run_status not in {"awaiting_plan_approval", "awaiting_user_input"}:
             return message
 
         if run_status == "awaiting_plan_approval":
-            await self._plan_agent.revise_plan(run_id, content)
+            background_tasks.add_task(self.execute_plan_agent_background, run_id, content, content, False)
         return message
 
     async def process_action(
@@ -173,9 +176,9 @@ class InteractiveResearchService:
         user_id: int,
         action: str,
         *,
+        background_tasks: Any,
         content: Optional[str] = None,
         payload: Optional[Dict[str, Any]] = None,
-        background_tasks: Optional[Any] = None,
     ) -> InteractiveResearchRun:
         """执行 run 级动作。
 
@@ -185,7 +188,7 @@ class InteractiveResearchService:
             action: approve 或 cancel。
             content: 动作说明文本。
             payload: 动作结构化 payload。
-            background_tasks: FastAPI BackgroundTasks 实例（可选）。
+            background_tasks: FastAPI BackgroundTasks 实例。
 
         Returns:
             更新后的 run。
@@ -202,14 +205,14 @@ class InteractiveResearchService:
         raise ValueError(_t("errors.unsupported_action", action=action))
 
     async def approve_plan(
-        self, run_id: UUID, user_id: int, background_tasks: Optional[Any] = None
+        self, run_id: UUID, user_id: int, background_tasks: Any
     ) -> InteractiveResearchRun:
         """确认计划并启动单 Agent loop。
 
         Args:
             run_id: 研究 run ID。
             user_id: 当前用户 ID。
-            background_tasks: FastAPI BackgroundTasks 实例（可选）。
+            background_tasks: FastAPI BackgroundTasks 实例。
 
         Returns:
             更新后的 run。
@@ -222,10 +225,8 @@ class InteractiveResearchService:
         run = result["run"]
         plan_payload = result["plan_payload"]
 
-        if background_tasks is not None:
-            background_tasks.add_task(self.execute_workflow_background, run.run_id, plan_payload)
+        background_tasks.add_task(self.execute_workflow_background, run.run_id, plan_payload)
 
-        self._plan_agent.forget(run.run_id)
         return run
 
     def cancel_run(
@@ -249,7 +250,6 @@ class InteractiveResearchService:
             ValueError: 终态 run 不能重复取消时抛出。
         """
         run = cancel_run_record(run_id, user_id, reason)
-        self._plan_agent.forget(run.run_id)
         return run
 
     def get_messages(
@@ -368,6 +368,39 @@ class InteractiveResearchService:
             logger = logging.getLogger(__name__)
             logger.error(
                 "interactive research workflow failed",
+                extra={"run_id": str(run_id), "exception": str(exc), "traceback": traceback.format_exc()},
+            )
+            fail_run_record(run_id, _t("errors.workflow_failed", error=exc), type(exc).__name__, str(exc))
+
+    async def execute_plan_agent_background(
+        self,
+        run_id: UUID,
+        user_input: str,
+        history_input: Optional[str] = None,
+        initial: bool = False,
+    ) -> None:
+        """后台执行计划 Agent，生成或修订计划卡。
+
+        Args:
+            run_id: 研究 run ID。
+            user_input: 本轮发送给计划 Agent 的输入。
+            history_input: 写入计划历史的用户原文。
+            initial: 是否为首轮计划生成。
+        """
+        try:
+            await self._plan_agent.execute(
+                run_id,
+                user_input,
+                history_input=history_input,
+                initial=initial,
+            )
+        except Exception as exc:
+            import logging
+            import traceback
+
+            logger = logging.getLogger(__name__)
+            logger.error(
+                "interactive research plan agent failed",
                 extra={"run_id": str(run_id), "exception": str(exc), "traceback": traceback.format_exc()},
             )
             fail_run_record(run_id, _t("errors.workflow_failed", error=exc), type(exc).__name__, str(exc))

@@ -437,7 +437,7 @@ class InteractiveResearchAgent:
             f"{research_agent_system_prompt()}\n"
             f"{_tool_policy_instruction()}\n"
             f"{flow_control_protocol_instruction()}\n"
-            f"{_approved_plan_label()}:\n{stable_json_dumps(plan_payload)}"
+            f"{_build_approved_plan_context(plan_payload)}"
         )
         messages: List[Any] = [SystemMessage(content=prompt)]
         for item in history:
@@ -732,6 +732,18 @@ def _approved_plan_label() -> str:
         当前提示词语言下的已确认计划标签。
     """
     return prompt_constants.approved_plan_label()
+
+
+def _build_approved_plan_context(plan_payload: Dict[str, Any]) -> str:
+    """构造本轮研究使用的已确认计划上下文。
+
+    Args:
+        plan_payload: 已确认计划 payload。
+
+    Returns:
+        放在 HumanMessage 中的计划上下文。
+    """
+    return f"{_approved_plan_label()}:\n{stable_json_dumps(plan_payload)}"
 
 
 def _additional_user_input_label() -> str:

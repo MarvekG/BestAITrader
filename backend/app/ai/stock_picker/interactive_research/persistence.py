@@ -16,7 +16,7 @@ from app.ai.stock_picker.interactive_research.models import (
     InteractiveResearchMessage,
     InteractiveResearchRun,
 )
-from app.ai.stock_picker.interactive_research.planning import build_plan_payload, parse_requirement
+from app.ai.stock_picker.interactive_research.planning import build_plan_payload
 from app.ai.stock_picker.interactive_research.serializers import serialize_message, serialize_run_summary
 from app.core.database import SessionLocal
 from app.core.i18n import i18n_service
@@ -39,7 +39,6 @@ def create_run_record(
     user_id: int,
     request_data: Dict[str, Any],
     *,
-    parsed_requirement: Dict[str, Any],
     title: str,
 ) -> Dict[str, Any]:
     """创建研究 run 并写入首条用户消息。
@@ -47,7 +46,6 @@ def create_run_record(
     Args:
         user_id: 当前用户 ID。
         request_data: 已校验的用户研究请求。
-        parsed_requirement: 已解析的用户需求。
         title: 调用方生成的聊天标题。
 
     Returns:
@@ -69,18 +67,17 @@ def create_run_record(
         if active_run:
             raise ValueError(_t("errors.active_run_exists", run_id=active_run.run_id))
 
-        plan_payload = build_plan_payload(parsed_requirement)
+        plan_payload = build_plan_payload(request_data)
         run = InteractiveResearchRun(
             user_id=user_id,
             status="awaiting_plan_approval",
             current_stage="awaiting_plan_approval",
             current_phase="planning",
             title=title,
-            raw_requirement=parsed_requirement["raw_requirement"],
+            raw_requirement=str(plan_payload.get("objective") or ""),
             checkpoint_payload={
                 "status": "awaiting_plan_approval",
                 "current_phase": "planning",
-                "parsed_requirement": parsed_requirement,
                 "plan_payload": plan_payload,
             },
         )
@@ -91,7 +88,7 @@ def create_run_record(
             run,
             role="user",
             message_type="user_input",
-            content=parsed_requirement["raw_requirement"],
+            content=str(plan_payload.get("objective") or ""),
             payload={"request": request_data},
         )
         db.commit()
@@ -393,7 +390,7 @@ def persist_plan_card_record(
     usage_record: Optional[Dict[str, Any]],
     reason: str,
     bump_version: bool,
-) -> bool:
+) -> Dict[str, Any]:
     """打开事务写入计划卡。
 
     Args:
@@ -406,15 +403,15 @@ def persist_plan_card_record(
         bump_version: 是否递增 run 版本。
 
     Returns:
-        写入成功返回 True；run 不存在或状态不允许时返回 False。
+        写入结果、最新计划 payload 和可推送通知 payload。
     """
     with SessionLocal() as db:
         run = _get_run(db, run_id)
         if run is None:
             raise LookupError(_t("errors.run_not_found"))
         if run.status != "awaiting_plan_approval":
-            return False
-        persist_plan_card(
+            return {"persisted": False, "plan_payload": plan_payload, "notification": None}
+        message = persist_plan_card(
             db,
             run,
             plan_message=plan_message,
@@ -424,8 +421,9 @@ def persist_plan_card_record(
             reason=reason,
             bump_version=bump_version,
         )
+        payload = _notification_payload(run, message, "plan_card")
         db.commit()
-        return True
+        return {"persisted": True, "plan_payload": plan_payload, "notification": payload}
 
 
 def start_research_run_record(run_id: UUID, plan_payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -607,8 +605,7 @@ def synthesize_final_message_record(
         run.version += 1
         final_payload = {
             "phase_instruction": phase_instructions()["synthesis"],
-            "requirement_summary": plan_payload.get("objective_summary") or run.raw_requirement,
-            "selection_mode": "llm_driven",
+            "requirement_summary": plan_payload.get("objective") or run.raw_requirement,
             "answer_markdown": final_content,
             "stopped_by_iteration_limit": stopped_by_iteration_limit,
             "iteration_budget": iteration_budget,
@@ -638,7 +635,7 @@ def synthesize_final_message_record(
             role="system",
             message_type="system_status",
             content=_t("messages.completed"),
-            payload={"selection_mode": "llm_driven"},
+            payload={},
         )
         completed_notification = _notification_payload(run, status_message, "completed")
         db.commit()
@@ -835,8 +832,7 @@ def _plan_payload_from_checkpoint(run: InteractiveResearchRun) -> Dict[str, Any]
     plan_payload = checkpoint.get("plan_payload")
     if isinstance(plan_payload, dict):
         return plan_payload
-    parsed_requirement = parse_requirement({"requirement": run.raw_requirement})
-    return build_plan_payload(parsed_requirement)
+    return build_plan_payload({"requirement": run.raw_requirement})
 
 
 def _load_plan_messages(db: Session, run: InteractiveResearchRun) -> List[Dict[str, str]]:

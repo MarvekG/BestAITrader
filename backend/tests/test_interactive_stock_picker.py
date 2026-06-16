@@ -182,6 +182,31 @@ class FakeInteractiveResearchLLM:
         )
 
 
+class FakeBackgroundTasks:
+    """记录 FastAPI BackgroundTasks 风格的后台任务。"""
+
+    def __init__(self):
+        """初始化空任务列表。"""
+        self.tasks = []
+
+    def add_task(self, func, *args, **kwargs):
+        """记录待执行的后台任务。
+
+        Args:
+            func: 后台函数。
+            *args: 位置参数。
+            **kwargs: 关键字参数。
+        """
+        self.tasks.append((func, args, kwargs))
+
+    async def run_all(self):
+        """按加入顺序执行全部后台任务。"""
+        for func, args, kwargs in self.tasks:
+            result = func(*args, **kwargs)
+            if hasattr(result, "__await__"):
+                await result
+
+
 @pytest.mark.asyncio
 async def test_interactive_tool_registry_reuses_agentic_tool_layers_and_filters_trading(monkeypatch):
     """工具 registry 应加载普通工具、Skill、MCP，并过滤交易工具。
@@ -365,13 +390,31 @@ async def _execute_background(monkeypatch, service, db_session, run_id, plan_pay
     await service.execute_workflow_background(run_id, plan_payload)
 
 
+async def _create_run_with_plan(service, user_id, request_data):
+    """创建 run 并执行初始计划后台任务。
+
+    Args:
+        service: 交互式研究服务。
+        user_id: 当前用户 ID。
+        request_data: 创建 run 请求数据。
+
+    Returns:
+        已生成首轮 plan_card 的 run。
+    """
+    background_tasks = FakeBackgroundTasks()
+    run = await service.create_run(user_id, request_data, background_tasks)
+    await background_tasks.run_all()
+    refreshed = service.get_run(run.run_id, user_id)
+    return refreshed or run
+
+
 @pytest.mark.asyncio
 async def test_create_run_writes_user_message_plan_card_and_checkpoint(db_session):
     """创建 run 只写聊天消息和 checkpoint，不依赖 artifact。"""
     user_id = _create_user_id(db_session)
     service, fake_llm, _ = _service_with_fake_runner()
 
-    run = await service.create_run(user_id, _request_data())
+    run = await _create_run_with_plan(service, user_id, _request_data())
     messages = service.get_messages(run.run_id, user_id)
 
     assert run.status == "awaiting_plan_approval"
@@ -385,10 +428,8 @@ async def test_create_run_writes_user_message_plan_card_and_checkpoint(db_sessio
     assert "objective_summary" not in serialized_plan_message["markdown"]
     assert "open_questions" not in serialized_plan_message["markdown"]
     assert serialized_plan_message["payload"]["preview"]["scope"] == "all"
-    assert run.checkpoint_payload["plan_payload"]["selection_mode"] == "llm_driven"
     assert run.checkpoint_payload["plan_payload"]["research_budget"]["max_tool_calls"] == 60
-    assert run.checkpoint_payload["plan_payload"]["tool_policy"]["allowed_tools"] == "all_non_trading_agentic_tools"
-    assert "trading" in run.checkpoint_payload["plan_payload"]["tool_policy"]["blocked_tools"]
+    assert "tool_policy" not in run.checkpoint_payload["plan_payload"]
     run.checkpoint_payload = {**run.checkpoint_payload, "llm_usage": None}
     assert service.serialize_run_summary(run)["llm_usage"] == {}
     assert set(service.serialize_run_summary(run)) == {
@@ -412,6 +453,44 @@ async def test_create_run_writes_user_message_plan_card_and_checkpoint(db_sessio
 
 
 @pytest.mark.asyncio
+async def test_plan_agent_runs_in_background_after_create_and_user_input(db_session):
+    """提交需求或补充要求时不等待计划 Agent，后台完成后再写入 plan_card。"""
+    user_id = _create_user_id(db_session)
+    service, fake_llm, _ = _service_with_fake_runner()
+    background_tasks = FakeBackgroundTasks()
+
+    run = await service.create_run(user_id, _request_data(), background_tasks)
+    messages = service.get_messages(run.run_id, user_id)
+
+    assert [message.message_type for message in messages] == ["user_input"]
+    assert fake_llm.plan_calls == 0
+    assert len(background_tasks.tasks) == 1
+
+    await background_tasks.run_all()
+    messages = service.get_messages(run.run_id, user_id)
+    assert [message.message_type for message in messages] == ["user_input", "plan_card"]
+    assert fake_llm.plan_calls == 1
+
+    revise_tasks = FakeBackgroundTasks()
+    message = await service.append_user_message(
+        run.run_id,
+        user_id,
+        "Exclude banks and favor AI hardware",
+        background_tasks=revise_tasks,
+    )
+    messages = service.get_messages(run.run_id, user_id)
+    assert message.status == "completed"
+    assert [item.message_type for item in messages] == ["user_input", "plan_card", "user_input"]
+    assert fake_llm.plan_calls == 1
+
+    await revise_tasks.run_all()
+    messages = service.get_messages(run.run_id, user_id)
+    plan_cards = [item for item in messages if item.message_type == "plan_card"]
+    assert len(plan_cards) == 2
+    assert fake_llm.plan_calls == 2
+
+
+@pytest.mark.asyncio
 async def test_realtime_update_pushes_markdown_display_message(db_session, monkeypatch):
     """实时推送应携带三字段展示消息，顶层 message 使用 Markdown 正文。
 
@@ -423,7 +502,7 @@ async def test_realtime_update_pushes_markdown_display_message(db_session, monke
 
     user_id = _create_user_id(db_session)
     service, fake_llm, _ = _service_with_fake_runner()
-    run = await service.create_run(user_id, _request_data())
+    run = await _create_run_with_plan(service, user_id, _request_data())
     plan_message = service.get_messages(run.run_id, user_id)[1]
     pushed_payload = {}
 
@@ -464,9 +543,16 @@ async def test_plan_stage_user_input_iterates_plan_card(db_session):
     """计划确认阶段的普通聊天输入应迭代 plan，而不是走 revise action。"""
     user_id = _create_user_id(db_session)
     service, fake_llm, _ = _service_with_fake_runner()
-    run = await service.create_run(user_id, _request_data())
+    run = await _create_run_with_plan(service, user_id, _request_data())
 
-    message = await service.append_user_message(run.run_id, user_id, "Exclude banks and favor AI hardware")
+    revise_tasks = FakeBackgroundTasks()
+    message = await service.append_user_message(
+        run.run_id,
+        user_id,
+        "Exclude banks and favor AI hardware",
+        background_tasks=revise_tasks,
+    )
+    await revise_tasks.run_all()
     messages = service.get_messages(run.run_id, user_id)
     plan_cards = [item for item in messages if item.message_type == "plan_card"]
 
@@ -477,7 +563,7 @@ async def test_plan_stage_user_input_iterates_plan_card(db_session):
     assert "Plan updated" in plan_cards[-1].content
     assert "当前完整 PLAN" not in plan_cards[-1].content
     assert "user_inputs" not in plan_cards[-1].content
-    assert run.checkpoint_payload["plan_payload"]["user_inputs"][-1]["content"] == "Exclude banks and favor AI hardware"
+    assert "user_inputs" not in run.checkpoint_payload["plan_payload"]
 
 
 @pytest.mark.asyncio
@@ -485,10 +571,10 @@ async def test_approve_plan_runs_single_chat_workflow_and_writes_final_result(db
     """确认计划后执行单 Agent 工具循环并把结果写入消息流。"""
     user_id = _create_user_id(db_session)
     service, fake_llm, fake_tool = _service_with_fake_runner()
-    run = await service.create_run(user_id, _request_data())
+    run = await _create_run_with_plan(service, user_id, _request_data())
     run_id = run.run_id
 
-    approved = await service.process_action(run_id, user_id, "approve")
+    approved = await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
     assert approved.status == "researching"
     assert fake_tool.calls == []
 
@@ -505,7 +591,6 @@ async def test_approve_plan_runs_single_chat_workflow_and_writes_final_result(db
     assert fake_tool.calls[0]["keyword"] == "semiconductor policy catalyst"
     assert "tool_start" in _message_types(db_session, run_id)
     assert "tool_result" in _message_types(db_session, run_id)
-    assert final_message.payload["selection_mode"] == "llm_driven"
     assert "Semiconductor equipment" in final_message.payload["answer_markdown"]
 
 
@@ -515,10 +600,10 @@ async def test_invalid_flow_control_output_retries_before_completing(db_session,
     user_id = _create_user_id(db_session)
     service, fake_llm, _ = _service_with_fake_runner()
     fake_llm.invalid_final_response_once = True
-    run = await service.create_run(user_id, _request_data())
+    run = await _create_run_with_plan(service, user_id, _request_data())
     run_id = run.run_id
 
-    await service.process_action(run_id, user_id, "approve")
+    await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
     await _execute_background(monkeypatch, service, db_session, run_id)
     completed = service.get_run(run_id, user_id)
     final_message = (
@@ -538,10 +623,10 @@ async def test_multiple_flow_control_calls_use_last_decision(db_session, monkeyp
     user_id = _create_user_id(db_session)
     service, fake_llm, _ = _service_with_fake_runner()
     fake_llm.multiple_final_control_calls = True
-    run = await service.create_run(user_id, _request_data())
+    run = await _create_run_with_plan(service, user_id, _request_data())
     run_id = run.run_id
 
-    await service.process_action(run_id, user_id, "approve")
+    await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
     await _execute_background(monkeypatch, service, db_session, run_id)
     final_message = (
         db_session.query(InteractiveResearchMessage)
@@ -558,10 +643,10 @@ async def test_mixed_evidence_and_flow_control_executes_tool_before_decision(db_
     user_id = _create_user_id(db_session)
     service, fake_llm, fake_tool = _service_with_fake_runner()
     fake_llm.mixed_tool_and_flow_control = True
-    run = await service.create_run(user_id, _request_data())
+    run = await _create_run_with_plan(service, user_id, _request_data())
     run_id = run.run_id
 
-    await service.process_action(run_id, user_id, "approve")
+    await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
     await _execute_background(monkeypatch, service, db_session, run_id)
     completed = service.get_run(run_id, user_id)
     final_message = (
@@ -580,7 +665,7 @@ async def test_search_news_result_reuses_tool_output_summarizer(db_session, monk
     """新闻搜索结果进入 agent 上下文前应复用现有工具输出压缩链路。"""
     user_id = _create_user_id(db_session)
     service, _, _ = _service_with_fake_runner()
-    run = await service.create_run(user_id, _request_data())
+    run = await _create_run_with_plan(service, user_id, _request_data())
     run_id = run.run_id
 
     def fake_should_summarize(tool_name, content):
@@ -594,7 +679,7 @@ async def test_search_news_result_reuses_tool_output_summarizer(db_session, monk
     monkeypatch.setattr(research_agent_module, "should_summarize_tool_output", fake_should_summarize)
     monkeypatch.setattr(research_agent_module, "summarize_tool_output", fake_summarize_tool_output)
 
-    await service.process_action(run_id, user_id, "approve")
+    await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
     await _execute_background(monkeypatch, service, db_session, run_id)
     tool_result = (
         db_session.query(InteractiveResearchMessage)
@@ -611,14 +696,19 @@ async def test_running_user_input_is_queued_and_processed_after_tool_step(db_ses
     """运行中插入的用户输入先排队，下一轮工具安全点后并入上下文。"""
     user_id = _create_user_id(db_session)
     service, _, _ = _service_with_fake_runner()
-    run = await service.create_run(user_id, _request_data())
+    run = await _create_run_with_plan(service, user_id, _request_data())
     run_id = run.run_id
     plan_payload = run.checkpoint_payload["plan_payload"]
     run.status = "researching"
     run.current_stage = "researching"
     db_session.commit()
 
-    message = await service.append_user_message(run_id, user_id, "Also avoid crowded momentum names")
+    message = await service.append_user_message(
+        run_id,
+        user_id,
+        "Also avoid crowded momentum names",
+        background_tasks=FakeBackgroundTasks(),
+    )
     message_id = message.message_id
     assert message.status == "queued"
 
@@ -636,11 +726,11 @@ async def test_answer_pending_question_writes_parented_user_message_and_continue
     """awaiting_user_input 的回答应关联问题并继续执行 workflow。"""
     user_id = _create_user_id(db_session)
     service, fake_llm, _ = _service_with_fake_runner()
-    run = await service.create_run(user_id, _request_data())
+    run = await _create_run_with_plan(service, user_id, _request_data())
     run_id = run.run_id
     fake_llm.ask_on_first_research = True
 
-    approved = await service.process_action(run_id, user_id, "approve")
+    approved = await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
     assert approved.status == "researching"
 
     await _execute_background(monkeypatch, service, db_session, run_id)
@@ -648,7 +738,12 @@ async def test_answer_pending_question_writes_parented_user_message_and_continue
     assert paused.status == "awaiting_user_input"
     pending_message_id = paused.pending_message_id
 
-    answer = await service.append_user_message(run_id, user_id, "Focus on semiconductor equipment only")
+    answer = await service.append_user_message(
+        run_id,
+        user_id,
+        "Focus on semiconductor equipment only",
+        background_tasks=FakeBackgroundTasks(),
+    )
     paused = service.get_run(run_id, user_id)
     assert answer.parent_message_id == pending_message_id
     assert paused.status == "researching"
@@ -665,9 +760,15 @@ async def test_cancel_run_marks_terminal_without_artifacts(db_session):
     """cancel 立即终止 run 且只写系统消息。"""
     user_id = _create_user_id(db_session)
     service, _, _ = _service_with_fake_runner()
-    run = await service.create_run(user_id, _request_data())
+    run = await _create_run_with_plan(service, user_id, _request_data())
 
-    cancelled = await service.process_action(run.run_id, user_id, "cancel", content="User stopped")
+    cancelled = await service.process_action(
+        run.run_id,
+        user_id,
+        "cancel",
+        content="User stopped",
+        background_tasks=FakeBackgroundTasks(),
+    )
 
     assert cancelled.status == "cancelled"
     assert cancelled.finished_at is not None

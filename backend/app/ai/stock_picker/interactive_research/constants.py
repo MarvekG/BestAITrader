@@ -151,15 +151,11 @@ def flow_control_protocol_instruction(flow_control_tool_name: str) -> str:
     )
 
 
-def planning_stage_prompt(plan_payload_text: str, flow_control_tool_name: str) -> str:
+def planning_stage_prompt() -> str:
     """构造计划阶段系统提示词。
 
-    Args:
-        plan_payload_text: 已序列化的当前计划 payload。
-        flow_control_tool_name: 流程控制工具名称。
-
     Returns:
-        当前系统语言下的计划阶段提示词。
+        当前系统语言下的静态计划阶段提示词。
     """
     if prompt_language() == "en":
         return (
@@ -174,9 +170,8 @@ def planning_stage_prompt(plan_payload_text: str, flow_control_tool_name: str) -
             "- Write concise but substantive Markdown. Do not paste the full JSON plan.\n"
             "- The message itself must be the complete user-facing research plan. Do not say the plan is available "
             "elsewhere or ask the user to view it above/below.\n"
-            "- Never output internal payload fields or key-value dumps such as objective_summary, expected_count, "
-            "selection_mode, assumptions, chat_context, llm_selection_policy, tool_policy, phase_plan, "
-            "evidence_sources, research_budget, open_questions, or user_inputs.\n"
+            "- Never output internal payload fields or key-value dumps such as objective, expected_count, "
+            "research_budget, or other JSON keys.\n"
             "- Treat Current plan as private context only. Rewrite it into user-facing language instead of copying it.\n"
             "- Include sections: Research Objective, Interpreted Constraints, Working Assumptions, Candidate Funnel, "
             "Evidence and Tool Strategy, Data Freshness Checks, Counterevidence and Risk Checks, Budget and Stop Rules, "
@@ -188,8 +183,7 @@ def planning_stage_prompt(plan_payload_text: str, flow_control_tool_name: str) -
             "- Budget and Stop Rules must mention max iterations/tool budget and that the Research Agent may recommend fewer "
             "than expected_count or none if standards are not met.\n"
             "- Do not output stock recommendations, trading advice, order instructions, portfolio weights, or claims that "
-            "monitoring/stop-loss/take-profit is already active.\n\n"
-            f"Current plan:\n{plan_payload_text}"
+            "monitoring/stop-loss/take-profit is already active."
         )
     return (
         "你负责交互式 A 股深度研究聊天的规划阶段。你是 PlanAgent，是研究方案架构师，"
@@ -201,9 +195,7 @@ def planning_stage_prompt(plan_payload_text: str, flow_control_tool_name: str) -
         "计划卡要求：\n"
         "- 输出简洁但有内容密度的 Markdown，不要粘贴完整 JSON 计划。\n"
         "- message 本身必须就是完整的用户可读研究计划，不要说“在上方查看”“已生成计划卡”等引用其他位置的话。\n"
-        "- 禁止输出内部 payload 字段名或 key-value 转储，例如 objective_summary、expected_count、"
-        "selection_mode、assumptions、chat_context、llm_selection_policy、tool_policy、phase_plan、"
-        "evidence_sources、research_budget、open_questions、user_inputs。\n"
+        "- 禁止输出内部 payload 字段名或 key-value 转储，例如 objective、expected_count、research_budget 等 JSON key。\n"
         "- 当前计划只作为私有上下文使用，必须改写成面向用户的自然语言计划，不要复制原文结构。\n"
         "- 必须包含这些小节：研究目标、已解析约束、当前假设、候选漏斗、证据与工具策略、"
         "数据时效性检查、反证与风险检查、预算与停止规则、用户确认项。\n"
@@ -211,8 +203,7 @@ def planning_stage_prompt(plan_payload_text: str, flow_control_tool_name: str) -
         "- 数据时效性检查必须说明：行情、财务、资金流、新闻、公告证据在使用前都要检查日期或数据口径；"
         "如数据过旧，先调用可用工具拉取或刷新。\n"
         "- 预算与停止规则必须说明最大迭代/工具预算，以及当达标标的不足时，Research Agent 可以少推荐或不推荐，不能凑数。\n"
-        "- 不要输出股票推荐、交易建议、下单指令、组合权重，或声称监控/止损/止盈已经生效。\n\n"
-        f"当前计划:\n{plan_payload_text}"
+        "- 不要输出股票推荐、交易建议、下单指令、组合权重，或声称监控/止损/止盈已经生效。"
     )
 
 
