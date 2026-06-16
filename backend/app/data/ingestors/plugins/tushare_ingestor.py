@@ -7,6 +7,7 @@ from app.data.ingestion.service import DataIngestionService
 from app.core.config import settings
 from app.data.ingestors.base_ingestor import BaseIngestor
 from app.data.ingestors.plugins.column_mapping import ColumnMapper
+from app.data.ingestors.rate_limiter import get_tushare_rate_limiter
 from app.core.utils.formatters import StockCodeStandardizer
 from app.core.utils.date_utils import normalize_compact_date
 from app.core.logger import get_logger
@@ -24,7 +25,14 @@ class TushareIngestor(BaseIngestor):
         self.source = self.get_source_name()
         self.pro = self.get_pro_client() if settings.TUSHARE_TOKEN else None
         self._stock_info_cache = {}  # Cache for shares and financial data
-        logger.info(f"TushareIngestor initialized ${self.get_tushare_config()}")
+        self.rate_limiter = get_tushare_rate_limiter()  # 全局限流器
+        logger.info(
+            "TushareIngestor initialized",
+            extra={
+                "config": self.get_tushare_config(),
+                "rate_limit": f"{self.rate_limiter.max_calls_per_minute} calls/min"
+            }
+        )
 
     @staticmethod
     def get_pro_client():
@@ -76,6 +84,32 @@ class TushareIngestor(BaseIngestor):
                 "http://api.waditu.com/dataapi"),
             "token": f"...{settings.TUSHARE_TOKEN[-3:]}" if settings.TUSHARE_TOKEN else None
         }
+
+    async def _run_in_executor(self, func, *args, use_cache: bool = True, cache_ttl: int = 60, **kwargs):
+        """
+        重写基类方法，在调用 Tushare API 前先获取限流令牌。
+
+        Args:
+            func: 阻塞函数。
+            *args: 位置参数。
+            use_cache: 是否使用 Redis 缓存。
+            cache_ttl: 缓存过期时间（秒）。
+            **kwargs: 关键字参数。
+
+        Returns:
+            函数执行结果。
+        """
+        # 在调用 API 前先获取限流令牌
+        acquired = await self.rate_limiter.acquire(timeout=30.0)
+        if not acquired:
+            logger.warning(
+                "Tushare rate limiter timeout after 30s",
+                extra={"func": self._get_func_name(func)}
+            )
+            # 超时后仍尝试调用（让 Tushare 自己返回限流错误）
+
+        # 调用基类方法执行实际 API 请求
+        return await super()._run_in_executor(func, *args, use_cache=use_cache, cache_ttl=cache_ttl, **kwargs)
 
     async def fetch_and_ingest_stock_kline(
             self,

@@ -89,6 +89,7 @@ class Settings(BaseSettings):
     # Data Source Config
     TUSHARE_TOKEN: str = ""
     TUSHARE_API: str = ""
+    TUSHARE_CREDITS: int = 5000
     TAVILY_API_KEY: str = ""
     NEWS_API_KEY: str = ""
     DEFAULT_DATA_SOURCE: str = "tushare"
