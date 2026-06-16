@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import UUID
 
@@ -260,7 +261,7 @@ class InteractiveResearchAgent:
                         stage="tool_summary",
                         iteration_index=iteration_index,
                     )
-                trace_item["success"] = True
+                trace_item["success"] = _is_successful_tool_result(raw_result, result_text)
             except Exception as exc:
                 result_text = f"Error: {exc}"
                 trace_item["error"] = str(exc)
@@ -569,6 +570,36 @@ def _json_tool_result(value: Any) -> str:
     if isinstance(value, (dict, list)):
         return stable_json_dumps(value)
     return str(value)
+
+
+def _is_successful_tool_result(raw_result: Any, result_text: str) -> bool:
+    """根据工具返回内容判断业务层是否成功。
+
+    Args:
+        raw_result: 工具原始返回值。
+        result_text: 已序列化后的工具结果文本。
+
+    Returns:
+        存在 success=false 或 error 字段时返回 False，否则返回 True。
+    """
+    payload = raw_result
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            payload = None
+    elif not isinstance(payload, (dict, list)):
+        try:
+            payload = json.loads(result_text)
+        except (json.JSONDecodeError, TypeError):
+            payload = None
+
+    if isinstance(payload, dict):
+        if payload.get("success") is False:
+            return False
+        if payload.get("error"):
+            return False
+    return True
 
 
 def _build_flow_control_retry_message(exc: ValueError, *, final_only: bool = False) -> str:

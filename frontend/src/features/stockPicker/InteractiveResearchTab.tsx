@@ -198,6 +198,10 @@ const getMessageDisplayContent = (item: InteractiveResearchMessage): { content: 
   return { content: item.markdown || item.content || '-', isToolMessage };
 };
 
+const shouldShowFooterExpandAction = (content: string, isToolMessage: boolean): boolean => {
+  return !isToolMessage && content.length > 700;
+};
+
 const getNumberValue = (value: unknown): number => {
   const numberValue = Number(value || 0);
   return Number.isFinite(numberValue) ? numberValue : 0;
@@ -491,6 +495,8 @@ export const InteractiveResearchTab: React.FC = () => {
       } else if (isToolStart) {
         toolJsonPreview = getToolStartArguments(item);
       }
+      const displayContent = getMessageDisplayContent(item);
+      const showFooterExpandAction = shouldShowFooterExpandAction(displayContent.content, isToolMessage);
       const isUser = displayType === 'user';
       return (
         <div
@@ -548,15 +554,17 @@ export const InteractiveResearchTab: React.FC = () => {
                 </div>
               </>
             )}
-            <div className="interactive-research-message-footer-actions">
-              <Button
-                type="text"
-                size="small"
-                icon={<ArrowsAltOutlined />}
-                title={t('ai_stock_picker.interactive.actions.expand_message')}
-                onClick={() => setExpandedMessage(item)}
-              />
-            </div>
+            {showFooterExpandAction && (
+              <div className="interactive-research-message-footer-actions">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<ArrowsAltOutlined />}
+                  title={t('ai_stock_picker.interactive.actions.expand_message')}
+                  onClick={() => setExpandedMessage(item)}
+                />
+              </div>
+            )}
           </div>
         </div>
       );

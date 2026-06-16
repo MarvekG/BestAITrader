@@ -510,6 +510,7 @@ def append_tool_result_and_progress_record(
             role="tool",
             message_type="tool_result",
             content=result_content,
+            status="completed" if success else "failed",
             payload={
                 "tool_name": tool_name,
                 "arguments": tool_args,
@@ -524,8 +525,11 @@ def append_tool_result_and_progress_record(
             run,
             role="assistant",
             message_type="progress_update",
-            content=_t("messages.tool_completed", tool_name=tool_name),
-            payload={"tool_name": tool_name, "success": success},
+            content=_t("messages.tool_completed" if success else "messages.tool_failed", tool_name=tool_name),
+            payload={
+                "tool_name": tool_name,
+                "status": _t("messages.tool_call_success" if success else "messages.tool_call_failed"),
+            },
         )
         current_checkpoint = run.checkpoint_payload or {}
         write_checkpoint(
