@@ -471,7 +471,7 @@ async def test_plan_agent_runs_in_background_after_create_and_user_input(db_sess
     await background_tasks.run_all()
     messages = service.get_messages(run.run_id, user_id)
     assert [message.message_type for message in messages] == ["user_input", "plan_card"]
-    assert fake_llm.plan_calls == 10
+    assert fake_llm.plan_calls == 1
 
     revise_tasks = FakeBackgroundTasks()
     message = await service.append_user_message(
@@ -483,13 +483,13 @@ async def test_plan_agent_runs_in_background_after_create_and_user_input(db_sess
     messages = service.get_messages(run.run_id, user_id)
     assert message.status == "completed"
     assert [item.message_type for item in messages] == ["user_input", "plan_card", "user_input"]
-    assert fake_llm.plan_calls == 10
+    assert fake_llm.plan_calls == 1
 
     await revise_tasks.run_all()
     messages = service.get_messages(run.run_id, user_id)
     plan_cards = [item for item in messages if item.message_type == "plan_card"]
     assert len(plan_cards) == 2
-    assert fake_llm.plan_calls == 20
+    assert fake_llm.plan_calls == 2
 
 
 @pytest.mark.asyncio

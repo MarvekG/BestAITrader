@@ -66,8 +66,7 @@ class PlanAgent:
     ) -> None:
         """执行一轮计划 Agent，完成后停下来等待用户确认或补充。
 
-        计划阶段与研究 Agent 一样用显式循环承载 Agent 执行，循环预算来自创建 run 时前端传入的
-        max_iterations。循环只生成计划卡，不调用工具，也不自动推进到研究阶段。
+        计划阶段每次后台任务只执行一轮：生成一张 plan_card 后退出，等待用户补充要求或确认计划。
 
         Args:
             run_id: 当前研究 run ID。
@@ -96,16 +95,7 @@ class PlanAgent:
             llm_input,
             persisted_messages=turn_record["persisted_messages"],
         )
-        plan_message = ""
-        persisted = False
-        iteration_budget = self._iteration_budget(turn_record["max_iterations"])
-        for iteration_index in range(1, iteration_budget + 1):
-            plan_message, usage_record = await self._invoke_plan_markdown(
-                run_id,
-                messages,
-                iteration_index=iteration_index,
-            )
-            messages.append(AIMessage(content=plan_message))
+        plan_message, usage_record = await self._invoke_plan_markdown(run_id, messages)
 
         latest_turn_record = load_plan_turn_record(run_id)
         if latest_turn_record is None:
@@ -125,8 +115,7 @@ class PlanAgent:
             return
         await self._notify_change(result["notification"])
 
-        if persisted:
-            self._remember_plan_turn(run_id, effective_history_input, plan_message)
+        self._remember_plan_turn(run_id, effective_history_input, plan_message)
 
     def _build_plan_messages(
         self,
@@ -205,26 +194,14 @@ class PlanAgent:
             return self._llm_factory()
         return build_chat_model(model=settings.LLM_MODEL, temperature=0.2)
 
-    def _iteration_budget(self, max_iterations: int) -> int:
-        """读取计划 Agent 的最大循环次数。
-
-        Args:
-            max_iterations: 前端创建 run 时传入的最大迭代次数。
-
-        Returns:
-            计划 Agent 循环上限。
-        """
-        return int(max_iterations)
-
     async def _invoke_plan_markdown(
-        self, run_id: UUID, messages: List[Any], *, iteration_index: int
+        self, run_id: UUID, messages: List[Any]
     ) -> Tuple[str, Optional[Dict[str, Any]]]:
         """调用计划阶段 LLM 生成 Markdown 研究计划。
 
         Args:
             run_id: 当前研究 run ID。
             messages: 计划阶段 LLM 消息上下文。
-            iteration_index: 当前计划 Agent 迭代序号。
 
         Returns:
             计划 Agent 输出的 Markdown 正文和 usage 记录。
@@ -239,7 +216,7 @@ class PlanAgent:
             workflow="interactive_stock_research",
             stage="planning",
             call_kind="plan_markdown",
-            iteration_index=iteration_index,
+            iteration_index=1,
         )
         return str(getattr(response, "content", "") or "").strip(), usage_record
 
