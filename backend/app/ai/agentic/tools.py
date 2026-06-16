@@ -798,6 +798,8 @@ async def sync_market_data(
     - task_type: 本次执行的任务类型
     - target: 传入目标
     - resolved_method: 最终调用的 ingestor_manager 方法名
+    - data: 同步的数据列表
+    - count: 数据行数
     - message / error: 执行结果说明
     """
     config = SYNC_TASK_CONFIG.get(task_type)
@@ -823,15 +825,41 @@ async def sync_market_data(
             res1 = await ingestor_manager.fetch_and_ingest_stock_limit_up_pool(trade_date)
             res2 = await ingestor_manager.fetch_and_ingest_stock_limit_down_pool(trade_date)
             res3 = await ingestor_manager.fetch_and_ingest_stock_zhaban_pool(trade_date)
+
+            # 合并三个池子的数据
+            all_data = []
+            total_count = 0
+            if res1 and res1.get("success"):
+                all_data.extend(res1.get("data", []))
+                total_count += res1.get("count", 0)
+            if res2 and res2.get("success"):
+                all_data.extend(res2.get("data", []))
+                total_count += res2.get("count", 0)
+            if res3 and res3.get("success"):
+                all_data.extend(res3.get("data", []))
+                total_count += res3.get("count", 0)
+
             success = any([res1, res2, res3])
             resolved_method = "fetch_and_ingest_stock_limit_*_pool"
+            result_data = all_data
+            result_count = total_count
         else:
             target_param = config.get("target_param")
             if target_param and not target:
                 if config.get("allow_empty_target") and config.get("all_method_name"):
                     method = getattr(ingestor_manager, config["all_method_name"])
-                    success = await method()
+                    result = await method()
                     resolved_method = config["all_method_name"]
+
+                    # 处理返回值
+                    if isinstance(result, dict):
+                        success = result.get("success", False)
+                        result_data = result.get("data", [])
+                        result_count = result.get("count", 0)
+                    else:
+                        success = bool(result)
+                        result_data = []
+                        result_count = 0
                 else:
                     return {
                         "success": False,
@@ -864,14 +892,26 @@ async def sync_market_data(
                     if name in params and params[name] is not None:
                         call_kwargs[name] = params[name]
 
-                success = await method(**call_kwargs)
+                result = await method(**call_kwargs)
                 resolved_method = config["method_name"]
+
+                # 处理返回值
+                if isinstance(result, dict):
+                    success = result.get("success", False)
+                    result_data = result.get("data", [])
+                    result_count = result.get("count", 0)
+                else:
+                    success = bool(result)
+                    result_data = []
+                    result_count = 0
 
         return make_json_serializable({
             "success": bool(success),
             "task_type": task_type,
             "target": target,
             "resolved_method": resolved_method,
+            "data": result_data,
+            "count": result_count,
             "message": "sync completed" if success else "sync completed but returned False or None",
         })
     except Exception as exc:
