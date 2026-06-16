@@ -2534,6 +2534,7 @@
           "empty": "-",
           "titles": {
             "plan": "研究计划",
+            "current_full_plan": "当前完整 PLAN",
             "tool_start": "工具调用开始",
             "tool_result": "工具调用结果",
             "progress": "执行进展",

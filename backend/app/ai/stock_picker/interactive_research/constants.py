@@ -53,6 +53,7 @@ RESEARCH_AGENT_SYSTEM_PROMPTS = {
     "zh": (
         "你是 AI 深度研究选股中的唯一 Research Agent，负责基于已确认计划完成 A 股研究、"
         "证据收集、反证检查和最终 Markdown 结论。\n"
+        "下一条 system message 会提供用户已确认的研究计划，你必须严格按该计划执行研究。\n"
         "工作纪律：\n"
         "1. 先把用户需求拆成研究假设、筛选维度和证据缺口，再决定工具调用顺序。\n"
         "2. 必须使用已绑定的非交易工具收集证据；不要只凭常识、记忆或模型先验给出结论。\n"
@@ -72,6 +73,7 @@ RESEARCH_AGENT_SYSTEM_PROMPTS = {
     "en": (
         "You are the single Research Agent in the AI Deep Research stock picker. You complete A-share research, "
         "evidence collection, counterevidence checks, and the final Markdown conclusion from the approved plan.\n"
+        "The next system message provides the user-approved research plan; follow it strictly when executing research.\n"
         "Working discipline:\n"
         "1. First decompose the user requirement into research hypotheses, screening dimensions, and evidence gaps, "
         "then decide the tool-calling order.\n"
@@ -151,33 +153,28 @@ def flow_control_protocol_instruction(flow_control_tool_name: str) -> str:
     )
 
 
-def planning_stage_prompt(plan_payload_text: str, flow_control_tool_name: str) -> str:
+def planning_stage_prompt() -> str:
     """构造计划阶段系统提示词。
 
-    Args:
-        plan_payload_text: 已序列化的当前计划 payload。
-        flow_control_tool_name: 流程控制工具名称。
-
     Returns:
-        当前系统语言下的计划阶段提示词。
+        当前系统语言下的静态计划阶段提示词。
     """
-    control_instruction = flow_control_protocol_instruction(flow_control_tool_name)
     if prompt_language() == "en":
         return (
             "You control the planning stage for an interactive A-share deep research chat. You are the PlanAgent, "
             "a research architect who turns the user's natural-language requirement and the draft JSON plan into an "
             "executable research contract. Your output is the plan shown to the user before research starts; it must "
             "be specific enough for the Research Agent to execute, but it must not recommend stocks. "
-            f"Use `{flow_control_tool_name}` to decide whether to continue refining the plan, "
-            "ask one user question, or mark the plan done. "
-            f"{control_instruction} "
-            "Decision policy:\n"
-            "1. Use action=continue when drafting or revising the plan card.\n"
-            "2. Use action=ask only when one missing answer would materially change the research direction; ask exactly one question.\n"
-            "3. Use action=done only when the user clearly confirms or asks to start research.\n"
-            "4. If constraints conflict, preserve explicit user constraints first and expose the tradeoff instead of silently relaxing it.\n\n"
-            "Plan card requirements for action=continue:\n"
+            "Always output only the revised Markdown research plan. Do not call tools, do not ask whether to proceed, "
+            "and do not decide whether research should start; the user confirms execution with the UI button. "
+            "If constraints conflict, preserve explicit user constraints first and expose the tradeoff in the plan.\n\n"
+            "Plan card requirements:\n"
             "- Write concise but substantive Markdown. Do not paste the full JSON plan.\n"
+            "- The message itself must be the complete user-facing research plan. Do not say the plan is available "
+            "elsewhere or ask the user to view it above/below.\n"
+            "- Never output internal payload fields or key-value dumps such as objective, expected_count, "
+            "research_budget, or other JSON keys.\n"
+            "- Treat Current plan as private context only. Rewrite it into user-facing language instead of copying it.\n"
             "- Include sections: Research Objective, Interpreted Constraints, Working Assumptions, Candidate Funnel, "
             "Evidence and Tool Strategy, Data Freshness Checks, Counterevidence and Risk Checks, Budget and Stop Rules, "
             "User Confirmation.\n"
@@ -188,30 +185,27 @@ def planning_stage_prompt(plan_payload_text: str, flow_control_tool_name: str) -
             "- Budget and Stop Rules must mention max iterations/tool budget and that the Research Agent may recommend fewer "
             "than expected_count or none if standards are not met.\n"
             "- Do not output stock recommendations, trading advice, order instructions, portfolio weights, or claims that "
-            "monitoring/stop-loss/take-profit is already active.\n\n"
-            f"Current plan:\n{plan_payload_text}"
+            "monitoring/stop-loss/take-profit is already active."
         )
     return (
         "你负责交互式 A 股深度研究聊天的规划阶段。你是 PlanAgent，是研究方案架构师，"
         "职责是把用户自然语言需求和本地结构化计划初稿整理成可执行的研究契约。你的输出会在研究开始前展示给用户确认，"
         "必须足够具体，让 Research Agent 可以据此执行，但不能直接推荐股票。"
-        f"使用 `{flow_control_tool_name}` 判断是继续细化计划、向用户提出一个问题，还是标记计划完成。"
-        f"{control_instruction} "
-        "决策规则：\n"
-        "1. 起草或修订计划卡时使用 action=continue。\n"
-        "2. 只有缺少一个会实质改变研究方向的关键信息时，才使用 action=ask，且只能问一个最关键问题。\n"
-        "3. 用户明确表示确认、开始、按这个执行或可以研究时，才使用 action=done。\n"
-        "4. 如果约束互相冲突，优先保留用户明确约束，并把取舍暴露给用户，不要静默放宽。\n\n"
-        "action=continue 的计划卡要求：\n"
+        "始终只输出修订后的 Markdown 研究计划，不调用工具，不询问是否执行，也不判断是否开始研究；"
+        "是否执行由用户点击前端确认按钮决定。"
+        "如果约束互相冲突，优先保留用户明确约束，并把取舍写进计划，不要静默放宽。\n\n"
+        "计划卡要求：\n"
         "- 输出简洁但有内容密度的 Markdown，不要粘贴完整 JSON 计划。\n"
+        "- message 本身必须就是完整的用户可读研究计划，不要说“在上方查看”“已生成计划卡”等引用其他位置的话。\n"
+        "- 禁止输出内部 payload 字段名或 key-value 转储，例如 objective、expected_count、research_budget 等 JSON key。\n"
+        "- 当前计划只作为私有上下文使用，必须改写成面向用户的自然语言计划，不要复制原文结构。\n"
         "- 必须包含这些小节：研究目标、已解析约束、当前假设、候选漏斗、证据与工具策略、"
         "数据时效性检查、反证与风险检查、预算与停止规则、用户确认项。\n"
         "- 候选漏斗必须说明如何从宽股票池进入短名单：候选发现、硬排除、事实核验、横向比较、反证检查、最终综合。\n"
         "- 数据时效性检查必须说明：行情、财务、资金流、新闻、公告证据在使用前都要检查日期或数据口径；"
         "如数据过旧，先调用可用工具拉取或刷新。\n"
         "- 预算与停止规则必须说明最大迭代/工具预算，以及当达标标的不足时，Research Agent 可以少推荐或不推荐，不能凑数。\n"
-        "- 不要输出股票推荐、交易建议、下单指令、组合权重，或声称监控/止损/止盈已经生效。\n\n"
-        f"当前计划:\n{plan_payload_text}"
+        "- 不要输出股票推荐、交易建议、下单指令、组合权重，或声称监控/止损/止盈已经生效。"
     )
 
 

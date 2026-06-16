@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import UUID
 
@@ -10,24 +9,31 @@ from app.ai.agentic.tool_output_summarizer import should_summarize_tool_output, 
 from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_providers.factory import build_chat_model, get_llm_provider
 from app.ai.stock_picker.interactive_research import constants as prompt_constants
-from app.ai.stock_picker.interactive_research.constants import phase_instructions, research_agent_system_prompt
+from app.ai.stock_picker.interactive_research.constants import research_agent_system_prompt
 from app.ai.stock_picker.interactive_research.flow_control import (
     FLOW_CONTROL_TOOL_NAME,
     FlowControlDecision,
     flow_control_decision_from_tool_args,
 )
-from app.ai.stock_picker.interactive_research.models import InteractiveResearchMessage, InteractiveResearchRun
-from app.ai.stock_picker.interactive_research.persistence import accumulate_llm_usage, append_message, write_checkpoint
-from app.ai.stock_picker.interactive_research.serializers import serialize_message, serialize_run_summary
+from app.ai.stock_picker.interactive_research.persistence import (
+    accumulate_llm_usage_record,
+    append_assistant_text_record,
+    append_queued_input_status_record,
+    append_tool_result_and_progress_record,
+    append_tool_start_record,
+    pause_for_user_question_record,
+    process_queued_user_inputs_record,
+    start_research_run_record,
+    synthesize_final_message_record,
+)
 from app.ai.stock_picker.interactive_research.tool_registry import InteractiveResearchToolRegistry, ToolLoaderFactory
 from app.core.config import settings
-from app.core.database import SessionLocal
 from app.core.i18n import i18n_service
 from app.crud.llm_usage_log import record_llm_usage
 
 
 LLMFactory = Callable[[], Any]
-WorkflowNotificationCallback = Callable[[Dict[str, Any]], Awaitable[None]]
+ResearchAgentNotificationCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 DEFAULT_INTERACTIVE_RESEARCH_ITERATIONS = 60
 MIN_INTERACTIVE_RESEARCH_ITERATIONS = 10
 MAX_FLOW_CONTROL_RETRIES = 2
@@ -44,7 +50,7 @@ def flow_control_protocol_instruction() -> str:
 
 
 def _t(key: str, **kwargs: Any) -> str:
-    """读取交互式研究 workflow 翻译文案。
+    """读取交互式研究 Agent 翻译文案。
 
     Args:
         key: backend 命名空间下的翻译 key。
@@ -56,14 +62,14 @@ def _t(key: str, **kwargs: Any) -> str:
     return i18n_service.t(f"ai_stock_picker.interactive.backend.{key}", **kwargs)
 
 
-class InteractiveResearchWorkflow:
+class InteractiveResearchAgent:
     """聊天式 Deep Research 单 Agent tool-calling loop。"""
 
     def __init__(
         self,
         tool_loader_factory: Optional[ToolLoaderFactory] = None,
         llm_factory: Optional[LLMFactory] = None,
-        notification_callback: Optional[WorkflowNotificationCallback] = None,
+        notification_callback: Optional[ResearchAgentNotificationCallback] = None,
     ) -> None:
         """初始化研究工作流。
 
@@ -77,22 +83,21 @@ class InteractiveResearchWorkflow:
         self._notification_callback = notification_callback
         self._llm_provider = get_llm_provider()
 
-    async def execute(self, run_id: UUID, plan_payload: Dict[str, Any]) -> None:
+    async def execute(self, run_id: UUID, approved_plan: str) -> None:
         """异步运行 LLM tool-calling 循环。
 
         Args:
             run_id: 当前研究 run ID。
-            plan_payload: 已确认计划 payload。
+            approved_plan: 用户确认的研究计划正文。
         """
         tool_trace: List[Dict[str, Any]] = []
-        run_snapshot = await self._start_research_run(run_id, plan_payload)
+        run_snapshot = await self._start_research_run(run_id)
         if run_snapshot is None:
             return
 
         messages = self._build_agent_messages(
-            run_id,
             run_snapshot["raw_requirement"],
-            plan_payload,
+            approved_plan,
             run_snapshot["queued_before"],
         )
         tools = await self._load_tools(run_id, run_snapshot["user_id"])
@@ -104,7 +109,7 @@ class InteractiveResearchWorkflow:
         llm = self._build_llm()
         llm_with_tools = llm.bind_tools(tools)
         final_content = ""
-        iteration_budget = self._iteration_budget(plan_payload)
+        iteration_budget = self._iteration_budget(run_snapshot["max_iterations"])
         stopped_by_iteration_limit = False
 
         for iteration_index in range(1, iteration_budget + 1):
@@ -143,7 +148,7 @@ class InteractiveResearchWorkflow:
                 if decision is None:
                     continue
                 if decision.status == "ask":
-                    await self._pause_for_user_question(run_id, plan_payload, decision.message)
+                    await self._pause_for_user_question(run_id, decision.message)
                     return
                 if decision.status == "done":
                     final_content = decision.message
@@ -188,62 +193,26 @@ class InteractiveResearchWorkflow:
 
         await self._synthesize_final_message(
             run_id,
-            plan_payload,
             tool_trace,
             final_content,
             stopped_by_iteration_limit=stopped_by_iteration_limit,
             iteration_budget=iteration_budget,
         )
 
-    async def _start_research_run(
-        self,
-        run_id: UUID,
-        plan_payload: Dict[str, Any],
-    ) -> Optional[Dict[str, Any]]:
+    async def _start_research_run(self, run_id: UUID) -> Optional[Dict[str, Any]]:
         """把 run 切到研究阶段并记录输入上下文。
 
         Args:
             run_id: 当前研究 run ID。
-            plan_payload: 已确认计划 payload。
 
         Returns:
             run 快照；run 不存在时返回 None。
         """
-        with SessionLocal() as db:
-            run = db.query(InteractiveResearchRun).filter(InteractiveResearchRun.run_id == run_id).first()
-            if run is None:
-                return None
-            queued_messages = self._process_queued_user_inputs_in_db(db, run)
-            run.status = "researching"
-            run.current_stage = "researching"
-            run.current_phase = "research"
-            run.version += 1
-            current_checkpoint = run.checkpoint_payload or {}
-            write_checkpoint(
-                db,
-                run,
-                reason="agent_loop_started",
-                extra_payload={
-                    "plan_payload": plan_payload,
-                    "answer_message_id": current_checkpoint.get("answer_message_id"),
-                    "queued_message_ids": [message["message_id"] for message in queued_messages],
-                },
-            )
-            message = append_message(
-                db,
-                run,
-                role="system",
-                message_type="system_status",
-                content=_t("messages.research_started"),
-                payload={"phase_instruction": phase_instructions()["research"]},
-            )
-            snapshot = {
-                "user_id": run.user_id,
-                "raw_requirement": run.raw_requirement,
-                "queued_before": queued_messages,
-            }
-            await self._notify_change(db, run, message, "research_started")
-            return snapshot
+        result = start_research_run_record(run_id)
+        if result is None:
+            return None
+        await self._notify_change(result["notification"])
+        return result["snapshot"]
 
     async def _execute_tool_call(
         self,
@@ -322,20 +291,9 @@ class InteractiveResearchWorkflow:
         Returns:
             新建 tool_start 消息 ID。
         """
-        with SessionLocal() as db:
-            run = db.query(InteractiveResearchRun).filter(InteractiveResearchRun.run_id == run_id).first()
-            if run is None:
-                return ""
-            start_message = append_message(
-                db,
-                run,
-                role="tool",
-                message_type="tool_start",
-                content=_t("messages.tool_start", tool_name=tool_name),
-                payload={"tool_name": tool_name, "arguments": tool_args, "tool_call_id": tool_call_id},
-            )
-            await self._notify_change(db, run, start_message, "tool_start")
-            return str(start_message.message_id)
+        result = append_tool_start_record(run_id, tool_name, tool_args, tool_call_id)
+        await self._notify_change(result.get("notification"))
+        return str(result.get("message_id") or "")
 
     async def _append_tool_result_and_progress(
         self,
@@ -358,52 +316,22 @@ class InteractiveResearchWorkflow:
             success: 工具是否调用成功。
             result_text: 工具结果文本。
         """
-        with SessionLocal() as db:
-            run = db.query(InteractiveResearchRun).filter(InteractiveResearchRun.run_id == run_id).first()
-            if run is None:
-                return
-            result_message = append_message(
-                db,
-                run,
-                role="tool",
-                message_type="tool_result",
-                content=_compact_tool_result(result_text),
-                payload={
-                    "tool_name": tool_name,
-                    "arguments": tool_args,
-                    "tool_call_id": tool_call_id,
-                    "start_message_id": start_message_id,
-                    "success": success,
-                    "result_preview": result_text,
-                },
-            )
-            await self._notify_change(db, run, result_message, "tool_result")
-            progress_message = append_message(
-                db,
-                run,
-                role="assistant",
-                message_type="progress_update",
-                content=_t("messages.tool_completed", tool_name=tool_name),
-                payload={"tool_name": tool_name, "success": success},
-            )
-            current_checkpoint = run.checkpoint_payload or {}
-            write_checkpoint(
-                db,
-                run,
-                reason="tool_step_completed",
-                extra_payload={
-                    "plan_payload": self._plan_payload_from_checkpoint(run),
-                    "answer_message_id": current_checkpoint.get("answer_message_id"),
-                    "last_tool_name": tool_name,
-                    "last_tool_success": success,
-                },
-            )
-            await self._notify_change(db, run, progress_message, "progress_update")
+        payloads = append_tool_result_and_progress_record(
+            run_id,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            tool_call_id=tool_call_id,
+            start_message_id=start_message_id,
+            success=success,
+            result_text=result_text,
+            result_content=_compact_tool_result(result_text),
+        )
+        for payload in payloads:
+            await self._notify_change(payload)
 
     async def _synthesize_final_message(
         self,
         run_id: UUID,
-        plan_payload: Dict[str, Any],
         tool_trace: List[Dict[str, Any]],
         final_content: str,
         *,
@@ -414,88 +342,33 @@ class InteractiveResearchWorkflow:
 
         Args:
             run_id: 当前研究 run ID。
-            plan_payload: 已确认计划 payload。
             tool_trace: 工具调用轨迹。
             final_content: LLM 最终回答。
             stopped_by_iteration_limit: 是否因迭代预算耗尽提前终止。
             iteration_budget: 本轮研究允许的最大迭代次数。
         """
-        with SessionLocal() as db:
-            run = db.query(InteractiveResearchRun).filter(InteractiveResearchRun.run_id == run_id).first()
-            if run is None:
-                return
-            run.status = "synthesizing"
-            run.current_stage = "synthesizing"
-            run.current_phase = "synthesis"
-            run.version += 1
-            final_payload = {
-                "phase_instruction": phase_instructions()["synthesis"],
-                "requirement_summary": plan_payload.get("objective_summary") or run.raw_requirement,
-                "selection_mode": "llm_driven",
-                "answer_markdown": final_content,
-                "stopped_by_iteration_limit": stopped_by_iteration_limit,
-                "iteration_budget": iteration_budget,
-                "evidence_summary": {
-                    "tool_call_count": len(tool_trace),
-                    "tool_names": [item.get("name") for item in tool_trace],
-                },
-                "tool_trace": tool_trace,
-            }
-            final_message = append_message(
-                db,
-                run,
-                role="assistant",
-                message_type="final_result",
-                content=final_content or _t("messages.llm_loop_completed"),
-                payload=final_payload,
-            )
-            await self._notify_change(db, run, final_message, "final_result")
-            run.status = "completed"
-            run.current_stage = "completed"
-            run.finished_at = datetime.now()
-            run.version += 1
-            write_checkpoint(db, run, reason="final_message_created", extra_payload={"plan_payload": plan_payload})
-            status_message = append_message(
-                db,
-                run,
-                role="system",
-                message_type="system_status",
-                content=_t("messages.completed"),
-                payload={"selection_mode": "llm_driven"},
-            )
-            await self._notify_change(db, run, status_message, "completed")
+        payloads = synthesize_final_message_record(
+            run_id,
+            tool_trace=tool_trace,
+            final_content=final_content,
+            stopped_by_iteration_limit=stopped_by_iteration_limit,
+            iteration_budget=iteration_budget,
+        )
+        for payload in payloads:
+            await self._notify_change(payload)
 
     async def _pause_for_user_question(
         self,
         run_id: UUID,
-        plan_payload: Dict[str, Any],
         question_content: str,
     ) -> None:
         """在 agent 输出 ask 时停止循环并写入问题。
 
         Args:
             run_id: 当前研究 run ID。
-            plan_payload: 已确认计划 payload。
             question_content: LLM 生成的用户问题。
         """
-        with SessionLocal() as db:
-            run = db.query(InteractiveResearchRun).filter(InteractiveResearchRun.run_id == run_id).first()
-            if run is None:
-                return
-            run.status = "awaiting_user_input"
-            run.current_stage = "awaiting_user_input"
-            run.version += 1
-            question = append_message(
-                db,
-                run,
-                role="assistant",
-                message_type="assistant_question",
-                content=question_content,
-                payload={"reason": "agent_asked_user"},
-            )
-            run.pending_message_id = question.message_id
-            write_checkpoint(db, run, reason="agent_asked_user", extra_payload={"plan_payload": plan_payload})
-            await self._notify_change(db, run, question, "assistant_question")
+        await self._notify_change(pause_for_user_question_record(run_id, question_content))
 
     async def _append_assistant_text(self, run_id: UUID, content: str) -> None:
         """追加研究过程中的普通 assistant 文本。
@@ -504,20 +377,7 @@ class InteractiveResearchWorkflow:
             run_id: 当前研究 run ID。
             content: LLM 输出的过程说明。
         """
-        with SessionLocal() as db:
-            run = db.query(InteractiveResearchRun).filter(InteractiveResearchRun.run_id == run_id).first()
-            if run is None:
-                return
-            message = append_message(
-                db,
-                run,
-                role="assistant",
-                message_type="assistant_text",
-                content=content,
-                payload={},
-            )
-            write_checkpoint(db, run, reason="assistant_text")
-            await self._notify_change(db, run, message, "assistant_text")
+        await self._notify_change(append_assistant_text_record(run_id, content))
 
     def _process_queued_user_inputs(self, run_id: UUID) -> List[Dict[str, str]]:
         """处理运行中排队的用户输入消息。
@@ -528,39 +388,7 @@ class InteractiveResearchWorkflow:
         Returns:
             已处理的排队消息列表。
         """
-        with SessionLocal() as db:
-            run = db.query(InteractiveResearchRun).filter(InteractiveResearchRun.run_id == run_id).first()
-            if run is None:
-                return []
-            queued_messages = self._process_queued_user_inputs_in_db(db, run)
-            db.commit()
-            return queued_messages
-
-    def _process_queued_user_inputs_in_db(self, db: Any, run: InteractiveResearchRun) -> List[Dict[str, str]]:
-        """在当前数据库作用域内处理排队用户输入。
-
-        Args:
-            db: 当前数据库会话。
-            run: 当前研究 run。
-
-        Returns:
-            已处理的排队消息列表。
-        """
-        queued_messages = (
-            db.query(InteractiveResearchMessage)
-            .filter(
-                InteractiveResearchMessage.run_id == run.run_id,
-                InteractiveResearchMessage.role == "user",
-                InteractiveResearchMessage.status == "queued",
-            )
-            .order_by(InteractiveResearchMessage.sequence_no.asc())
-            .all()
-        )
-        message_snapshots = []
-        for message in queued_messages:
-            message_snapshots.append({"message_id": str(message.message_id), "content": message.content or ""})
-            message.status = "completed"
-        return message_snapshots
+        return process_queued_user_inputs_record(run_id)
 
     async def _append_queued_input_status(
         self, run_id: UUID, queued_messages: List[Dict[str, str]]
@@ -571,51 +399,32 @@ class InteractiveResearchWorkflow:
             run_id: 当前研究 run ID。
             queued_messages: 已处理的排队用户消息。
         """
-        with SessionLocal() as db:
-            run = db.query(InteractiveResearchRun).filter(InteractiveResearchRun.run_id == run_id).first()
-            if run is None:
-                return
-            message = append_message(
-                db,
-                run,
-                role="system",
-                message_type="system_status",
-                content=_t("messages.queued_input_appended"),
-                payload={"queued_message_ids": [message["message_id"] for message in queued_messages]},
-            )
-            await self._notify_change(db, run, message, "queued_input_appended")
+        await self._notify_change(append_queued_input_status_record(run_id, queued_messages))
 
     def _build_agent_messages(
         self,
-        run_id: UUID,
         raw_requirement: str,
-        plan_payload: Dict[str, Any],
+        approved_plan: str,
         queued_messages: List[Dict[str, str]],
     ) -> List[Any]:
         """构造 LLM tool-calling 消息上下文。
 
         Args:
-            run_id: 当前研究 run ID。
             raw_requirement: 原始用户需求。
-            plan_payload: 已确认计划 payload。
+            approved_plan: 用户确认的研究计划正文。
             queued_messages: 本轮开始前并入上下文的排队用户输入。
 
         Returns:
             LangChain 消息列表。
         """
-        history = self._build_recent_chat_messages(run_id)
         prompt = (
             f"{research_agent_system_prompt()}\n"
             f"{_tool_policy_instruction()}\n"
             f"{flow_control_protocol_instruction()}\n"
-            f"{_approved_plan_label()}:\n{stable_json_dumps(plan_payload)}"
         )
         messages: List[Any] = [SystemMessage(content=prompt)]
-        for item in history:
-            role = item.get("role")
-            content = str(item.get("content") or "")
-            if role == "user":
-                messages.append(HumanMessage(content=content))
+        if approved_plan:
+            messages.append(SystemMessage(content=approved_plan))
         if queued_messages:
             self._append_queued_inputs_to_messages(messages, queued_messages)
         if len(messages) == 1:
@@ -635,43 +444,6 @@ class InteractiveResearchWorkflow:
         """
         for message in queued_messages:
             messages.append(HumanMessage(content=f"{_additional_user_input_label()}: {message['content']}"))
-
-    def _build_recent_chat_messages(self, run_id: UUID) -> List[Dict[str, Any]]:
-        """构造给 agent 使用的最近消息上下文。
-
-        Args:
-            run_id: 当前研究 run ID。
-
-        Returns:
-            最近消息的轻量结构。
-        """
-        with SessionLocal() as db:
-            run = db.query(InteractiveResearchRun).filter(InteractiveResearchRun.run_id == run_id).first()
-            if run is None:
-                return []
-            return self._build_recent_chat_messages_in_db(db, run)
-
-    def _build_recent_chat_messages_in_db(self, db: Any, run: InteractiveResearchRun) -> List[Dict[str, Any]]:
-        """在当前数据库作用域内构造最近消息上下文。
-
-        Args:
-            db: 当前数据库会话。
-            run: 当前研究 run。
-
-        Returns:
-            最近消息的轻量结构。
-        """
-        messages = (
-            db.query(InteractiveResearchMessage)
-            .filter(InteractiveResearchMessage.run_id == run.run_id)
-            .order_by(InteractiveResearchMessage.sequence_no.desc())
-            .limit(20)
-            .all()
-        )
-        return [
-            {"role": message.role, "message_type": message.message_type, "content": message.content}
-            for message in reversed(messages)
-        ]
 
     async def _load_tools(self, run_id: UUID, user_id: int) -> List[Any]:
         """加载绑定给 LLM 的非交易工具。
@@ -729,11 +501,7 @@ class InteractiveResearchWorkflow:
             call_kind=call_kind,
             iteration_index=iteration_index,
         )
-        with SessionLocal() as db:
-            run = db.query(InteractiveResearchRun).filter(InteractiveResearchRun.run_id == run_id).first()
-            if run is not None:
-                accumulate_llm_usage(db, run, usage_record)
-                db.commit()
+        accumulate_llm_usage_record(run_id, usage_record)
 
     def _parse_flow_control_tool_or_retry(
         self,
@@ -765,56 +533,27 @@ class InteractiveResearchWorkflow:
             messages.append(HumanMessage(content=_build_flow_control_retry_message(exc, final_only=final_only)))
             return None
 
-    def _iteration_budget(self, plan_payload: Dict[str, Any]) -> int:
+    def _iteration_budget(self, max_iterations: int) -> int:
         """读取并限制工具循环预算。
 
         Args:
-            plan_payload: 已确认计划 payload。
+            max_iterations: 前端创建 run 时传入的最大迭代次数。
 
         Returns:
             工具循环上限。
         """
-        budget = plan_payload.get("research_budget") if isinstance(plan_payload.get("research_budget"), dict) else {}
-        max_tool_calls = int(budget.get("max_tool_calls") or DEFAULT_INTERACTIVE_RESEARCH_ITERATIONS)
-        return max(MIN_INTERACTIVE_RESEARCH_ITERATIONS, max_tool_calls)
-
-    def _plan_payload_from_checkpoint(self, run: InteractiveResearchRun) -> Dict[str, Any]:
-        """从 run checkpoint 中读取计划。
-
-        Args:
-            run: 当前研究 run。
-
-        Returns:
-            计划 payload。
-        """
-        checkpoint = run.checkpoint_payload or {}
-        plan_payload = checkpoint.get("plan_payload")
-        return plan_payload if isinstance(plan_payload, dict) else {}
+        return max(MIN_INTERACTIVE_RESEARCH_ITERATIONS, int(max_iterations))
 
     async def _notify_change(
         self,
-        db: Any,
-        run: InteractiveResearchRun,
-        message: Optional[InteractiveResearchMessage],
-        event: str,
+        payload: Optional[Dict[str, Any]],
     ) -> None:
-        """提交当前后台变更并推送实时通知。
+        """推送已持久化变更的实时通知。
 
         Args:
-            db: 数据库会话。
-            run: 当前研究 run。
-            message: 本次新增消息。
-            event: 通知事件名。
+            payload: 持久化层生成的通知 payload。
         """
-        db.flush()
-        payload = {
-            "event": event,
-            "run": serialize_run_summary(run),
-            "message": serialize_message(message) if message is not None else None,
-            "message_text": message.content if message is not None else event,
-        }
-        db.commit()
-        if self._notification_callback is not None:
+        if self._notification_callback is not None and payload is not None:
             await self._notification_callback(payload)
 
 
@@ -951,15 +690,6 @@ def _tool_policy_instruction() -> str:
         当前提示词语言下的工具边界提示词。
     """
     return prompt_constants.tool_policy_instruction()
-
-
-def _approved_plan_label() -> str:
-    """返回已确认计划标签。
-
-    Returns:
-        当前提示词语言下的已确认计划标签。
-    """
-    return prompt_constants.approved_plan_label()
 
 
 def _additional_user_input_label() -> str:

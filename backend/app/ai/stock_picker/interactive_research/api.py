@@ -75,12 +75,14 @@ def _require_run(run_id: UUID, current_user: User):
 @router.post("/runs", response_model=InteractiveResearchRunResponse, status_code=status.HTTP_201_CREATED)
 async def create_interactive_research_run(
     payload: InteractiveResearchRunCreate,
+    background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
 ):
     """提交自然语言需求并生成等待确认的研究计划。
 
     Args:
         payload: 自然语言需求和初始研究约束。
+        background_tasks: FastAPI 后台任务。
         current_user: 当前认证用户依赖。
 
     Returns:
@@ -90,7 +92,11 @@ async def create_interactive_research_run(
         HTTPException: 当前用户已有活跃 run 或写入失败时抛出。
     """
     try:
-        run = await interactive_research_service.create_run(current_user.id, payload.model_dump())
+        run = await interactive_research_service.create_run(
+            current_user.id,
+            payload.model_dump(),
+            background_tasks=background_tasks,
+        )
     except Exception as exc:
         _raise_service_error(exc)
     return InteractiveResearchRunResponse(
@@ -210,7 +216,8 @@ async def append_interactive_research_message(
 
     注意:
         回答问题（awaiting_user_input 状态）会在后台执行 workflow，立即返回。
-        其他状态（计划修改、排队输入）立即完成。
+        计划修改会在后台执行计划 Agent，完成后通过 WebSocket 推送 plan_card。
+        排队输入立即完成。
     """
     try:
         message = await interactive_research_service.append_user_message(

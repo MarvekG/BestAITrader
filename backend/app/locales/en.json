@@ -2534,6 +2534,7 @@
           "empty": "-",
           "titles": {
             "plan": "Research Plan",
+            "current_full_plan": "Current Full PLAN",
             "tool_start": "Tool Call Started",
             "tool_result": "Tool Call Result",
             "progress": "Execution Progress",

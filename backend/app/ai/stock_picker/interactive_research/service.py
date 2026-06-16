@@ -1,46 +1,28 @@
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from sqlalchemy.orm import Session, object_session
-
-from app.ai.json_utils import stable_json_dumps
-from app.ai.llm_providers.factory import build_chat_model
-from app.ai.stock_picker.interactive_research.constants import (
-    ACTIVE_RESEARCH_STATUSES,
-    TERMINAL_RESEARCH_STATUSES,
-    planning_initial_user_message,
-    planning_retry_message,
-    planning_stage_prompt,
-    planning_user_message,
-)
-from app.ai.stock_picker.interactive_research.flow_control import (
-    FLOW_CONTROL_TOOL_NAME,
-    FlowControlDecision,
-    control_research_flow,
-    flow_control_decision_from_tool_args,
-)
 from app.ai.stock_picker.interactive_research.models import InteractiveResearchMessage, InteractiveResearchRun
-from app.ai.stock_picker.interactive_research.persistence import accumulate_llm_usage, append_message, write_checkpoint
-from app.ai.stock_picker.interactive_research.planning import (
-    build_plan_payload,
-    build_plan_preview_payload,
-    parse_requirement,
+from app.ai.stock_picker.interactive_research.persistence import (
+    append_user_message_record,
+    approve_plan_record,
+    cancel_run_record,
+    create_run_record,
+    delete_run_record,
+    fail_run_record,
+    get_run_record,
+    list_message_records,
+    list_run_records,
 )
+from app.ai.stock_picker.interactive_research.plan_agent import PlanAgent
 from app.ai.stock_picker.interactive_research.serializers import serialize_message, serialize_run_summary
 from app.ai.stock_picker.interactive_research.tool_registry import ToolLoaderFactory
-from app.ai.stock_picker.interactive_research.workflow import (
-    MAX_FLOW_CONTROL_RETRIES,
-    InteractiveResearchWorkflow,
+from app.ai.stock_picker.interactive_research.research_agent import (
+    InteractiveResearchAgent,
     LLMFactory,
 )
-from app.core.config import settings
-from app.core.database import SessionLocal
 from app.core.i18n import i18n_service
-from app.crud.llm_usage_log import record_llm_usage
 
 
 def _t(key: str, **kwargs: Any) -> str:
@@ -71,18 +53,25 @@ class InteractiveResearchService:
             llm_factory: 可选 LLM 工厂；测试可注入 fake LLM。
         """
         self._llm_factory = llm_factory
-        self._workflow = InteractiveResearchWorkflow(
+        self._plan_agent = PlanAgent(llm_factory=llm_factory, notification_callback=self._push_realtime_update)
+        self._research_agent = InteractiveResearchAgent(
             tool_loader_factory=tool_loader_factory,
             llm_factory=llm_factory,
             notification_callback=self._push_realtime_update,
         )
 
-    async def create_run(self, user_id: int, request_data: Dict[str, Any]) -> InteractiveResearchRun:
-        """创建聊天式研究 run，并写入首条用户消息和计划消息。
+    async def create_run(
+        self,
+        user_id: int,
+        request_data: Dict[str, Any],
+        background_tasks: Any,
+    ) -> InteractiveResearchRun:
+        """创建聊天式研究 run，并异步生成首条计划消息。
 
         Args:
             user_id: 当前用户 ID。
             request_data: 已通过 API schema 校验的自然语言需求和约束。
+            background_tasks: FastAPI BackgroundTasks 实例。
 
         Returns:
             已持久化的研究 run。
@@ -90,86 +79,19 @@ class InteractiveResearchService:
         Raises:
             ValueError: 当前用户已有未完成 Deep Research run 时抛出。
         """
-        with SessionLocal() as db:
-            active_run = (
-                db.query(InteractiveResearchRun)
-                .filter(
-                    InteractiveResearchRun.user_id == user_id,
-                    InteractiveResearchRun.status.in_(ACTIVE_RESEARCH_STATUSES),
-                )
-                .order_by(InteractiveResearchRun.created_at.desc())
-                .first()
-            )
-            if active_run:
-                raise ValueError(_t("errors.active_run_exists", run_id=active_run.run_id))
+        created = create_run_record(
+            user_id,
+            request_data,
+            title=self._build_title(str(request_data["requirement"])),
+        )
+        run_id = created["run_id"]
+        raw_requirement = created["raw_requirement"]
 
-            parsed_requirement = parse_requirement(request_data)
-            plan_payload = build_plan_payload(parsed_requirement)
-            plan_preview_payload = build_plan_preview_payload(plan_payload)
-            run = InteractiveResearchRun(
-                user_id=user_id,
-                status="awaiting_plan_approval",
-                current_stage="awaiting_plan_approval",
-                current_phase="planning",
-                title=self._build_title(parsed_requirement["raw_requirement"]),
-                raw_requirement=parsed_requirement["raw_requirement"],
-                checkpoint_payload={
-                    "status": "awaiting_plan_approval",
-                    "current_phase": "planning",
-                    "parsed_requirement": parsed_requirement,
-                    "plan_payload": plan_payload,
-                },
-            )
-            db.add(run)
-            db.flush()
-
-            append_message(
-                db,
-                run,
-                role="user",
-                message_type="user_input",
-                content=parsed_requirement["raw_requirement"],
-                payload={"request": request_data},
-            )
-            initial_plan_decision = await self._generate_initial_plan_decision(run, plan_payload)
-            append_message(
-                db,
-                run,
-                role="assistant",
-                message_type="plan_card",
-                content=initial_plan_decision.message,
-                payload={"preview": plan_preview_payload, "actions": ["approve", "cancel"]},
-            )
-            write_checkpoint(db, run, reason="plan_drafted", extra_payload={"plan_payload": plan_payload})
-            db.commit()
-            db.refresh(run)
-            return run
-
-    async def _generate_initial_plan_decision(
-        self,
-        run: InteractiveResearchRun,
-        plan_payload: Dict[str, Any],
-    ) -> FlowControlDecision:
-        """使用 PlanAgent 生成首轮计划卡正文。
-
-        Args:
-            run: 当前研究 run。
-            plan_payload: 本地结构化计划初稿。
-
-        Returns:
-            PlanAgent 生成的首轮计划展示内容。
-
-        Raises:
-            ValueError: PlanAgent 未按首轮计划协议返回 continue 时抛出。
-        """
-        messages = [
-            SystemMessage(content=_build_planning_stage_prompt(plan_payload)),
-            HumanMessage(content=planning_initial_user_message(run.raw_requirement)),
-        ]
-        decision = await self._invoke_plan_flow_control(run, messages)
-        if decision.status != "continue":
-            raise ValueError(f"Initial PlanAgent response must use action=continue, got {decision.status}")
-        return decision
+        background_tasks.add_task(self.execute_plan_agent_background, run_id, raw_requirement, None, True)
+        created_run = self.get_run(run_id, user_id)
+        if created_run is None:
+            raise LookupError(_t("errors.run_not_found"))
+        return created_run
 
     def list_runs(self, user_id: int) -> List[InteractiveResearchRun]:
         """查询当前用户的研究 run 列表。
@@ -180,13 +102,7 @@ class InteractiveResearchService:
         Returns:
             按创建时间倒序排列的 run 列表。
         """
-        with SessionLocal() as db:
-            return (
-                db.query(InteractiveResearchRun)
-                .filter(InteractiveResearchRun.user_id == user_id)
-                .order_by(InteractiveResearchRun.created_at.desc())
-                .all()
-            )
+        return list_run_records(user_id)
 
     def get_run(self, run_id: UUID, user_id: int) -> Optional[InteractiveResearchRun]:
         """查询当前用户拥有的单个研究 run。
@@ -198,12 +114,7 @@ class InteractiveResearchService:
         Returns:
             找到时返回 run，否则返回 None。
         """
-        with SessionLocal() as db:
-            return (
-                db.query(InteractiveResearchRun)
-                .filter(InteractiveResearchRun.run_id == run_id, InteractiveResearchRun.user_id == user_id)
-                .first()
-            )
+        return get_run_record(run_id, user_id)
 
     def delete_run(self, run_id: UUID, user_id: int) -> bool:
         """删除当前用户拥有的聊天式研究 run。
@@ -215,20 +126,8 @@ class InteractiveResearchService:
         Returns:
             删除成功返回 True；run 不存在或不属于当前用户时返回 False。
         """
-        with SessionLocal() as db:
-            run = (
-                db.query(InteractiveResearchRun)
-                .filter(InteractiveResearchRun.run_id == run_id, InteractiveResearchRun.user_id == user_id)
-                .first()
-            )
-            if run is None:
-                return False
-            db.query(InteractiveResearchMessage).filter(InteractiveResearchMessage.run_id == run_id).delete(
-                synchronize_session=False
-            )
-            db.delete(run)
-            db.commit()
-            return True
+        deleted = delete_run_record(run_id, user_id)
+        return deleted
 
     async def append_user_message(
         self,
@@ -236,7 +135,8 @@ class InteractiveResearchService:
         user_id: int,
         content: str,
         payload: Optional[Dict[str, Any]] = None,
-        background_tasks: Optional[Any] = None,
+        *,
+        background_tasks: Any,
     ) -> InteractiveResearchMessage:
         """向聊天流追加用户输入，并按当前状态处理动态输入。
 
@@ -245,7 +145,7 @@ class InteractiveResearchService:
             user_id: 当前用户 ID。
             content: 用户输入文本。
             payload: 可选小型结构化 payload。
-            background_tasks: FastAPI BackgroundTasks 实例（可选）。
+            background_tasks: FastAPI BackgroundTasks 实例。
 
         Returns:
             已创建的用户消息。
@@ -254,50 +154,18 @@ class InteractiveResearchService:
             LookupError: run 不存在或不属于当前用户时抛出。
             ValueError: 终态 run 不允许继续追加时抛出。
         """
-        with SessionLocal() as db:
-            run = (
-                db.query(InteractiveResearchRun)
-                .filter(InteractiveResearchRun.run_id == run_id, InteractiveResearchRun.user_id == user_id)
-                .first()
-            )
-            if run is None:
-                raise LookupError(_t("errors.run_not_found"))
-            if run.status in TERMINAL_RESEARCH_STATUSES:
-                raise ValueError(_t("errors.terminal_cannot_accept_messages"))
-
-            message_status = "queued" if run.status in {"researching", "reflecting", "synthesizing"} else "completed"
-            parent_message_id = (
-                run.pending_message_id if run.status in {"awaiting_plan_approval", "awaiting_user_input"} else None
-            )
-            message_payload = dict(payload or {})
-            if message_status == "queued":
-                message_payload["queued_user_input"] = True
-            message = append_message(
-                db,
-                run,
-                role="user",
-                message_type="user_input",
-                content=content.strip(),
-                payload=message_payload,
-                parent_message_id=parent_message_id,
-                status=message_status,
-            )
-
-            if run.status == "awaiting_plan_approval":
-                await self._handle_plan_llm_decision(run, content.strip(), background_tasks=background_tasks)
-            elif run.status == "awaiting_user_input":
-                await self._handle_user_answer(run, message, background_tasks=background_tasks)
-            else:
-                write_checkpoint(
-                    db,
-                    run,
-                    reason="queued_user_input",
-                    extra_payload={"queued_message_id": str(message.message_id)},
-                )
-
-            db.commit()
-            db.refresh(message)
+        result = append_user_message_record(run_id, user_id, content, payload)
+        message = result["message"]
+        run_status = result["run_status"]
+        if run_status == "awaiting_user_input":
+            background_tasks.add_task(self.execute_workflow_background, run_id, self._plan_agent.latest_plan_output(run_id))
             return message
+        if run_status not in {"awaiting_plan_approval", "awaiting_user_input"}:
+            return message
+
+        if run_status == "awaiting_plan_approval":
+            background_tasks.add_task(self.execute_plan_agent_background, run_id, content, content, False)
+        return message
 
     async def process_action(
         self,
@@ -305,9 +173,9 @@ class InteractiveResearchService:
         user_id: int,
         action: str,
         *,
+        background_tasks: Any,
         content: Optional[str] = None,
         payload: Optional[Dict[str, Any]] = None,
-        background_tasks: Optional[Any] = None,
     ) -> InteractiveResearchRun:
         """执行 run 级动作。
 
@@ -317,7 +185,7 @@ class InteractiveResearchService:
             action: approve 或 cancel。
             content: 动作说明文本。
             payload: 动作结构化 payload。
-            background_tasks: FastAPI BackgroundTasks 实例（可选）。
+            background_tasks: FastAPI BackgroundTasks 实例。
 
         Returns:
             更新后的 run。
@@ -326,30 +194,22 @@ class InteractiveResearchService:
             LookupError: run 不存在或不属于当前用户时抛出。
             ValueError: action 或状态不允许时抛出。
         """
-        with SessionLocal() as db:
-            run = (
-                db.query(InteractiveResearchRun)
-                .filter(InteractiveResearchRun.run_id == run_id, InteractiveResearchRun.user_id == user_id)
-                .first()
-            )
-            if run is None:
-                raise LookupError(_t("errors.run_not_found"))
-            if action == "approve":
-                return await self._approve_plan_run(run, background_tasks=background_tasks)
-            if action == "cancel":
-                reason = content or str((payload or {}).get("reason") or "")
-                return self._cancel_run(run, reason=reason)
-            raise ValueError(_t("errors.unsupported_action", action=action))
+        if action == "approve":
+            return await self.approve_plan(run_id, user_id, background_tasks=background_tasks)
+        if action == "cancel":
+            reason = content or str((payload or {}).get("reason") or "")
+            return self.cancel_run(run_id, user_id, reason=reason)
+        raise ValueError(_t("errors.unsupported_action", action=action))
 
     async def approve_plan(
-        self, run_id: UUID, user_id: int, background_tasks: Optional[Any] = None
+        self, run_id: UUID, user_id: int, background_tasks: Any
     ) -> InteractiveResearchRun:
         """确认计划并启动单 Agent loop。
 
         Args:
             run_id: 研究 run ID。
             user_id: 当前用户 ID。
-            background_tasks: FastAPI BackgroundTasks 实例（可选）。
+            background_tasks: FastAPI BackgroundTasks 实例。
 
         Returns:
             更新后的 run。
@@ -358,52 +218,11 @@ class InteractiveResearchService:
             LookupError: run 不存在或不属于当前用户时抛出。
             ValueError: run 不处于等待计划确认状态时抛出。
         """
-        with SessionLocal() as db:
-            run = (
-                db.query(InteractiveResearchRun)
-                .filter(InteractiveResearchRun.run_id == run_id, InteractiveResearchRun.user_id == user_id)
-                .first()
-            )
-            if run is None:
-                raise LookupError(_t("errors.run_not_found"))
-            return await self._approve_plan_run(run, background_tasks=background_tasks)
+        result = approve_plan_record(run_id, user_id)
+        run = result["run"]
 
-    async def _approve_plan_run(
-        self, run: InteractiveResearchRun, background_tasks: Optional[Any] = None
-    ) -> InteractiveResearchRun:
-        """在既有会话内确认计划并启动研究。
+        background_tasks.add_task(self.execute_workflow_background, run.run_id, self._plan_agent.latest_plan_output(run.run_id))
 
-        Args:
-            run: 当前研究 run。
-            background_tasks: FastAPI BackgroundTasks 实例（可选）。
-
-        Returns:
-            更新后的 run。
-        """
-        db = self._session_for_run(run)
-        if run.status != "awaiting_plan_approval":
-            raise ValueError(_t("errors.only_awaiting_plan_approval_can_approve"))
-        plan_payload = self._plan_payload_from_checkpoint(run)
-
-        append_message(
-            db,
-            run,
-            role="system",
-            message_type="system_status",
-            content=_t("messages.plan_approved"),
-            payload={},
-        )
-        run.status = "researching"
-        run.current_stage = "researching"
-        run.current_phase = "research"
-        run.version += 1
-        write_checkpoint(db, run, reason="plan_approved", extra_payload={"plan_payload": plan_payload})
-        db.commit()
-
-        if background_tasks is not None:
-            background_tasks.add_task(self.execute_workflow_background, run.run_id, plan_payload)
-
-        db.refresh(run)
         return run
 
     def cancel_run(
@@ -426,50 +245,7 @@ class InteractiveResearchService:
             LookupError: run 不存在或不属于当前用户时抛出。
             ValueError: 终态 run 不能重复取消时抛出。
         """
-        with SessionLocal() as db:
-            run = (
-                db.query(InteractiveResearchRun)
-                .filter(InteractiveResearchRun.run_id == run_id, InteractiveResearchRun.user_id == user_id)
-                .first()
-            )
-            if run is None:
-                raise LookupError(_t("errors.run_not_found"))
-            return self._cancel_run(run, reason=reason)
-
-    def _cancel_run(
-        self,
-        run: InteractiveResearchRun,
-        reason: Optional[str] = None,
-    ) -> InteractiveResearchRun:
-        """在既有会话内取消当前用户的研究 run。
-
-        Args:
-            run: 当前研究 run。
-            reason: 可选取消原因。
-
-        Returns:
-            已取消的 run。
-        """
-        db = self._session_for_run(run)
-        if run.status in TERMINAL_RESEARCH_STATUSES:
-            raise ValueError(_t("errors.terminal_cannot_cancel"))
-
-        run.status = "cancelled"
-        run.current_stage = "cancelled"
-        run.pending_message_id = None
-        run.finished_at = datetime.now()
-        run.version += 1
-        append_message(
-            db,
-            run,
-            role="system",
-            message_type="system_status",
-            content=_t("messages.cancelled"),
-            payload={"reason": reason or ""},
-        )
-        write_checkpoint(db, run, reason="cancelled")
-        db.commit()
-        db.refresh(run)
+        run = cancel_run_record(run_id, user_id, reason)
         return run
 
     def get_messages(
@@ -489,18 +265,7 @@ class InteractiveResearchService:
         Returns:
             按 sequence_no 升序排列的消息列表。
         """
-        with SessionLocal() as db:
-            run = (
-                db.query(InteractiveResearchRun)
-                .filter(InteractiveResearchRun.run_id == run_id, InteractiveResearchRun.user_id == user_id)
-                .first()
-            )
-            if run is None:
-                return []
-            query = db.query(InteractiveResearchMessage).filter(InteractiveResearchMessage.run_id == run_id)
-            if visible_only:
-                query = query.filter(InteractiveResearchMessage.visible_to_user.is_(True))
-            return query.order_by(InteractiveResearchMessage.sequence_no.asc()).all()
+        return list_message_records(run_id, user_id, visible_only=visible_only)
 
     def serialize_run_summary(self, run: InteractiveResearchRun) -> Dict[str, Any]:
         """序列化 run 摘要。
@@ -561,270 +326,6 @@ class InteractiveResearchService:
             },
         )
 
-    def _session_for_run(self, run: InteractiveResearchRun) -> Session:
-        """读取 ORM 对象当前绑定的数据库会话。
-
-        Args:
-            run: 当前研究 run。
-
-        Returns:
-            run 绑定的 SQLAlchemy 会话。
-
-        Raises:
-            RuntimeError: run 未绑定数据库会话时抛出。
-        """
-        db = object_session(run)
-        if db is None:
-            raise RuntimeError("interactive research run is not bound to a database session")
-        return db
-
-    async def _handle_plan_llm_decision(
-        self,
-        run: InteractiveResearchRun,
-        content: str,
-        background_tasks: Optional[Any] = None,
-    ) -> None:
-        """用 LLM 决定计划阶段是继续迭代、提问还是开始研究。
-
-        Args:
-            run: 当前研究 run。
-            content: 用户本轮输入。
-            background_tasks: FastAPI BackgroundTasks 实例（可选）。
-        """
-        db = self._session_for_run(run)
-        plan_payload = self._plan_payload_from_checkpoint(run)
-        messages = self._build_plan_turn_messages(run, content, plan_payload)
-        decision = await self._invoke_plan_flow_control(run, messages)
-        if decision.status == "ask":
-            message = append_message(
-                db,
-                run,
-                role="assistant",
-                message_type="assistant_question",
-                content=decision.message,
-                payload={"phase": "planning"},
-            )
-            run.pending_message_id = message.message_id
-            write_checkpoint(db, run, reason="plan_question", extra_payload={"plan_payload": plan_payload})
-            return
-        if decision.status == "done":
-            plan_payload = self._update_plan_payload_from_message(plan_payload, content, decision.message)
-            write_checkpoint(db, run, reason="plan_llm_done", extra_payload={"plan_payload": plan_payload})
-            await self._approve_plan_run(run, background_tasks=background_tasks)
-            return
-        self._patch_plan_from_user_input(run, content, plan_message=decision.message)
-
-    def _patch_plan_from_user_input(
-        self,
-        run: InteractiveResearchRun,
-        content: str,
-        plan_message: Optional[str] = None,
-    ) -> None:
-        """把计划确认阶段的新输入追加到计划上下文。
-
-        Args:
-            run: 当前研究 run。
-            content: 用户补充要求。
-            plan_message: LLM 生成的计划说明；为空时使用默认说明。
-        """
-        db = self._session_for_run(run)
-        if run.status != "awaiting_plan_approval":
-            raise ValueError(_t("errors.only_awaiting_plan_approval_can_update"))
-        if not content.strip():
-            raise ValueError(_t("errors.plan_update_empty"))
-
-        plan_payload = self._update_plan_payload_from_message(
-            self._plan_payload_from_checkpoint(run),
-            content,
-            plan_message,
-        )
-        plan_preview_payload = build_plan_preview_payload(plan_payload)
-        run.pending_message_id = None
-        run.version += 1
-        append_message(
-            db,
-            run,
-            role="assistant",
-            message_type="plan_card",
-            content=plan_message or _t("messages.plan_updated"),
-            payload={"preview": plan_preview_payload, "actions": ["approve", "cancel"]},
-        )
-        write_checkpoint(db, run, reason="plan_updated", extra_payload={"plan_payload": plan_payload})
-
-    def _update_plan_payload_from_message(
-        self,
-        plan_payload: Dict[str, Any],
-        user_content: str,
-        plan_message: Optional[str],
-    ) -> Dict[str, Any]:
-        """根据用户输入和 LLM 计划说明更新计划 payload。
-
-        Args:
-            plan_payload: 当前计划 payload。
-            user_content: 用户本轮输入。
-            plan_message: LLM 生成的计划说明。
-
-        Returns:
-            更新后的计划 payload。
-        """
-        updated_plan = dict(plan_payload)
-        user_inputs = list(updated_plan.get("user_inputs") or [])
-        user_inputs.append(
-            {"content": user_content.strip(), "created_at": datetime.now().isoformat(timespec="seconds")}
-        )
-        updated_plan["user_inputs"] = user_inputs
-        updated_plan["objective_summary"] = self._plan_objective(updated_plan)
-        return updated_plan
-
-    def _build_plan_turn_messages(
-        self,
-        run: InteractiveResearchRun,
-        content: str,
-        plan_payload: Dict[str, Any],
-    ) -> List[Any]:
-        """构造计划阶段 LLM 流程控制消息。
-
-        Args:
-            run: 当前研究 run。
-            content: 用户本轮输入。
-            plan_payload: 当前计划 payload。
-
-        Returns:
-            LangChain 消息列表。
-        """
-        prompt = _build_planning_stage_prompt(plan_payload)
-        return [
-            SystemMessage(content=prompt),
-            HumanMessage(content=_build_planning_user_message(run.raw_requirement, content)),
-        ]
-
-    def _build_llm(self) -> Any:
-        """构造计划阶段使用的 LLM。
-
-        Returns:
-            LangChain chat model。
-        """
-        if self._llm_factory:
-            return self._llm_factory()
-        return build_chat_model(model=settings.LLM_MODEL, temperature=0.2)
-
-    async def _invoke_plan_flow_control(self, run: InteractiveResearchRun, messages: List[Any]) -> FlowControlDecision:
-        """调用计划阶段 LLM，并在协议错误时要求重输。
-
-        Args:
-            run: 当前研究 run。
-            messages: 计划阶段 LLM 消息上下文。
-
-        Returns:
-            解析后的流程控制决策。
-
-        Raises:
-            ValueError: 多次重试后仍无法解析协议时抛出。
-        """
-        llm = self._build_llm()
-        llm_with_tools = llm.bind_tools([control_research_flow])
-        retry_count = 0
-        while True:
-            response = await llm_with_tools.ainvoke(messages)
-            usage_record = record_llm_usage(
-                response,
-                settings.LLM_MODEL,
-                "interactive_stock_research",
-                session_id=run.run_id,
-                workflow="interactive_stock_research",
-                stage="planning",
-                call_kind="plan_control",
-                iteration_index=retry_count + 1,
-            )
-            db = object_session(run)
-            if db is not None:
-                accumulate_llm_usage(db, run, usage_record)
-            messages.append(response)
-            try:
-                tool_calls = [
-                    call
-                    for call in list(getattr(response, "tool_calls", []) or [])
-                    if str(call.get("name") or "") == FLOW_CONTROL_TOOL_NAME
-                ]
-                if not tool_calls:
-                    raise ValueError(f"Expected at least one {FLOW_CONTROL_TOOL_NAME} call")
-                return flow_control_decision_from_tool_args(tool_calls[-1].get("args"))
-            except ValueError as exc:
-                if retry_count >= MAX_FLOW_CONTROL_RETRIES:
-                    raise ValueError(f"Plan LLM flow-control tool call invalid after retry: {exc}") from exc
-                retry_count += 1
-                messages.append(
-                    HumanMessage(
-                        content=_build_planning_retry_message(exc)
-                    )
-                )
-
-    def _plan_objective(self, plan_payload: Dict[str, Any]) -> str:
-        """读取计划目标摘要。
-
-        Args:
-            plan_payload: 当前计划 payload。
-
-        Returns:
-            计划目标摘要。
-        """
-        return str(plan_payload.get("objective_summary") or "").strip()
-
-    async def _handle_user_answer(
-        self,
-        run: InteractiveResearchRun,
-        message: InteractiveResearchMessage,
-        background_tasks: Optional[Any] = None,
-    ) -> None:
-        """处理 awaiting_user_input 状态下的用户回答。
-
-        Args:
-            run: 当前研究 run。
-            message: 用户回答消息。
-            background_tasks: FastAPI BackgroundTasks 实例（可选）。
-        """
-        db = self._session_for_run(run)
-        plan_payload = self._plan_payload_from_checkpoint(run)
-        run.pending_message_id = None
-        run.status = "researching"
-        run.current_stage = "researching"
-        run.current_phase = "research"
-        run.version += 1
-        append_message(
-            db,
-            run,
-            role="system",
-            message_type="system_status",
-            content=_t("messages.answer_received"),
-            payload={"answer_message_id": str(message.message_id)},
-        )
-        write_checkpoint(
-            db,
-            run,
-            reason="user_answer_received",
-            extra_payload={"answer_message_id": str(message.message_id), "plan_payload": plan_payload},
-        )
-        db.commit()
-
-        if background_tasks is not None:
-            background_tasks.add_task(self.execute_workflow_background, run.run_id, plan_payload)
-
-    def _plan_payload_from_checkpoint(self, run: InteractiveResearchRun) -> Dict[str, Any]:
-        """从 run checkpoint 中恢复已确认计划。
-
-        Args:
-            run: 当前研究 run。
-
-        Returns:
-            计划 payload；缺失时返回最小计划。
-        """
-        checkpoint = run.checkpoint_payload or {}
-        plan_payload = checkpoint.get("plan_payload")
-        if isinstance(plan_payload, dict):
-            return plan_payload
-        parsed_requirement = parse_requirement({"requirement": run.raw_requirement})
-        return build_plan_payload(parsed_requirement)
-
     def _build_title(self, requirement: str) -> str:
         """根据原始需求生成聊天标题。
 
@@ -837,106 +338,58 @@ class InteractiveResearchService:
         normalized = " ".join(requirement.split())
         return normalized[:60] or _t("messages.default_title")
 
-    def _handle_workflow_exception(
-        self,
-        run: InteractiveResearchRun,
-        exc: Exception,
-    ) -> None:
-        """处理 workflow 执行异常，写入失败状态。
-
-        Args:
-            run: 当前研究 run。
-            exc: 捕获的异常。
-        """
-        db = self._session_for_run(run)
-        import logging
-        import traceback
-
-        logger = logging.getLogger(__name__)
-        logger.error(
-            "interactive research workflow failed",
-            extra={"run_id": str(run.run_id), "exception": str(exc), "traceback": traceback.format_exc()},
-        )
-
-        run.status = "failed"
-        run.current_stage = "failed"
-        run.error_message = _t("errors.workflow_failed", error=exc)
-        run.version += 1
-        append_message(
-            db,
-            run,
-            role="system",
-            message_type="system_status",
-            content=run.error_message,
-            payload={"exception_type": type(exc).__name__, "exception_message": str(exc)},
-        )
-        write_checkpoint(db, run, reason="workflow_exception")
-
-    async def execute_workflow_background(
-        self,
-        run_id: UUID,
-        plan_payload: Optional[Dict[str, Any]] = None,
-    ) -> None:
+    async def execute_workflow_background(self, run_id: UUID, approved_plan: str) -> None:
         """后台执行 workflow（用于 FastAPI BackgroundTasks）。
 
         Args:
             run_id: 研究 run ID。
-            plan_payload: 已确认计划 payload。
+            approved_plan: 用户确认的计划卡正文。
         """
-        effective_plan_payload = plan_payload
-        if effective_plan_payload is None:
-            with SessionLocal() as db:
-                run = db.query(InteractiveResearchRun).filter(InteractiveResearchRun.run_id == run_id).first()
-                if run is None:
-                    return
-                effective_plan_payload = self._plan_payload_from_checkpoint(run)
-
         try:
-            await self._workflow.execute(run_id, effective_plan_payload)
+            await self._research_agent.execute(run_id, approved_plan)
         except Exception as exc:
-            with SessionLocal() as db:
-                run = db.query(InteractiveResearchRun).filter(InteractiveResearchRun.run_id == run_id).first()
-                if run is None:
-                    return
-                self._handle_workflow_exception(run, exc)
-                db.commit()
+            import logging
+            import traceback
+
+            logger = logging.getLogger(__name__)
+            logger.error(
+                "interactive research workflow failed",
+                extra={"run_id": str(run_id), "exception": str(exc), "traceback": traceback.format_exc()},
+            )
+            fail_run_record(run_id, _t("errors.workflow_failed", error=exc), type(exc).__name__, str(exc))
+
+    async def execute_plan_agent_background(
+        self,
+        run_id: UUID,
+        user_input: str,
+        history_input: Optional[str] = None,
+        initial: bool = False,
+    ) -> None:
+        """后台执行计划 Agent，生成或修订计划卡。
+
+        Args:
+            run_id: 研究 run ID。
+            user_input: 本轮发送给计划 Agent 的输入。
+            history_input: 写入计划历史的用户原文。
+            initial: 是否为首轮计划生成。
+        """
+        try:
+            await self._plan_agent.execute(
+                run_id,
+                user_input,
+                history_input=history_input,
+                initial=initial,
+            )
+        except Exception as exc:
+            import logging
+            import traceback
+
+            logger = logging.getLogger(__name__)
+            logger.error(
+                "interactive research plan agent failed",
+                extra={"run_id": str(run_id), "exception": str(exc), "traceback": traceback.format_exc()},
+            )
+            fail_run_record(run_id, _t("errors.workflow_failed", error=exc), type(exc).__name__, str(exc))
 
 
 interactive_research_service = InteractiveResearchService()
-
-
-def _build_planning_stage_prompt(plan_payload: Dict[str, Any]) -> str:
-    """构造计划阶段流程控制提示词。
-
-    Args:
-        plan_payload: 当前计划 payload。
-
-    Returns:
-        当前系统语言下的计划阶段提示词。
-    """
-    return planning_stage_prompt(stable_json_dumps(plan_payload), FLOW_CONTROL_TOOL_NAME)
-
-
-def _build_planning_user_message(requirement: str, content: str) -> str:
-    """构造计划阶段用户消息。
-
-    Args:
-        requirement: run 原始需求。
-        content: 用户本轮输入。
-
-    Returns:
-        当前系统语言下的用户消息。
-    """
-    return planning_user_message(requirement, content)
-
-
-def _build_planning_retry_message(exc: ValueError) -> str:
-    """构造计划阶段协议纠错提示词。
-
-    Args:
-        exc: 协议解析错误。
-
-    Returns:
-        当前系统语言下的纠错提示词。
-    """
-    return planning_retry_message(FLOW_CONTROL_TOOL_NAME, str(exc))
