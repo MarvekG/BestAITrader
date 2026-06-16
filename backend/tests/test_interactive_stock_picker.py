@@ -4,8 +4,9 @@ from contextlib import nullcontext
 import pytest
 from langchain_core.messages import AIMessage
 
+from app.ai.stock_picker.interactive_research import persistence as persistence_module
 from app.ai.stock_picker.interactive_research import service as service_module
-from app.ai.stock_picker.interactive_research import workflow as workflow_module
+from app.ai.stock_picker.interactive_research import research_agent as research_agent_module
 from app.ai.stock_picker.interactive_research.flow_control import FLOW_CONTROL_TOOL_NAME, control_research_flow
 from app.ai.stock_picker.interactive_research.models import InteractiveResearchMessage
 from app.ai.stock_picker.interactive_research.service import InteractiveResearchService
@@ -348,7 +349,7 @@ def _interactive_research_session(db_session, monkeypatch):
         db_session: SQLite 测试数据库会话。
         monkeypatch: pytest monkeypatch fixture。
     """
-    monkeypatch.setattr(service_module, "SessionLocal", lambda: nullcontext(db_session))
+    monkeypatch.setattr(persistence_module, "SessionLocal", lambda: nullcontext(db_session))
 
 
 async def _execute_background(monkeypatch, service, db_session, run_id, plan_payload=None):
@@ -361,7 +362,6 @@ async def _execute_background(monkeypatch, service, db_session, run_id, plan_pay
         run_id: 研究 run ID。
         plan_payload: 可选计划 payload。
     """
-    monkeypatch.setattr(workflow_module, "SessionLocal", lambda: nullcontext(db_session))
     await service.execute_workflow_background(run_id, plan_payload)
 
 
@@ -591,8 +591,8 @@ async def test_search_news_result_reuses_tool_output_summarizer(db_session, monk
         """返回可断言的压缩结果。"""
         return "[Structured Summary of search_news]:\ncompressed policy catalyst facts"
 
-    monkeypatch.setattr(workflow_module, "should_summarize_tool_output", fake_should_summarize)
-    monkeypatch.setattr(workflow_module, "summarize_tool_output", fake_summarize_tool_output)
+    monkeypatch.setattr(research_agent_module, "should_summarize_tool_output", fake_should_summarize)
+    monkeypatch.setattr(research_agent_module, "summarize_tool_output", fake_summarize_tool_output)
 
     await service.process_action(run_id, user_id, "approve")
     await _execute_background(monkeypatch, service, db_session, run_id)
@@ -678,6 +678,9 @@ def test_interactive_http_contract_is_chat_only(client, auth_headers, monkeypatc
     """HTTP 契约只暴露 run、messages 和 actions，不再暴露 result/artifacts。"""
     fake_llm = FakeInteractiveResearchLLM()
     monkeypatch.setattr(service_module.interactive_research_service, "_llm_factory", lambda: fake_llm)
+    monkeypatch.setattr(
+        service_module.interactive_research_service._plan_agent, "_llm_factory", lambda: fake_llm
+    )
 
     create_response = client.post(
         "/api/v1/ai-stock-picker/interactive/runs",
@@ -718,6 +721,9 @@ def test_delete_interactive_research_run_removes_messages_and_is_user_scoped(
     """删除 Deep Research run 时应按用户隔离，并级联删除消息。"""
     fake_llm = FakeInteractiveResearchLLM()
     monkeypatch.setattr(service_module.interactive_research_service, "_llm_factory", lambda: fake_llm)
+    monkeypatch.setattr(
+        service_module.interactive_research_service._plan_agent, "_llm_factory", lambda: fake_llm
+    )
 
     create_response = client.post(
         "/api/v1/ai-stock-picker/interactive/runs",
