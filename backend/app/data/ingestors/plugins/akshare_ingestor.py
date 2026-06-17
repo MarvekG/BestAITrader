@@ -824,30 +824,41 @@ class AkshareIngestor(BaseIngestor):
     async def fetch_and_ingest_board_industry(self) -> Optional[dict]:
         """采集外部行业板块数据。"""
         try:
-            logger.info("Fetching AKShare board industry")
-            df = await self._run_in_executor(ak.stock_board_industry_name_em)
+            logger.info("Fetching AKShare board industry from THS")
+            df = await self._run_in_executor(ak.stock_board_industry_summary_ths)
             if df is None or df.empty:
                 return None
 
+            code_df = await self._run_in_executor(ak.stock_board_industry_name_ths)
+            if code_df is not None and not code_df.empty:
+                code_df = code_df.rename(columns={'name': '板块', 'code': 'board_code'})
+                df = df.merge(code_df[['板块', 'board_code']], on='板块', how='left')
+
             # 列名映射：AKShare 中文列名 -> 数据库英文字段
             column_rename = {
-                '排名': 'rank',
-                '板块名称': 'board_name',
-                '板块代码': 'board_code',
-                '最新价': 'latest_price',
-                '涨跌额': 'change_amount',
+                '序号': 'rank',
+                '板块': 'board_name',
                 '涨跌幅': 'change_percent',
-                '总市值': 'total_market_cap',
-                '换手率': 'turnover_rate',
                 '上涨家数': 'rising_stocks_count',
                 '下跌家数': 'falling_stocks_count',
-                '领涨股票': 'leading_stock_name',
-                '领涨股票-涨跌幅': 'leading_stock_change_percent'
+                '领涨股': 'leading_stock_name',
+                '领涨股-涨跌幅': 'leading_stock_change_percent',
             }
             df.rename(columns=column_rename, inplace=True)
+            df = df[df['board_code'].notna()].copy()
+            for unavailable_col in ['latest_price', 'change_amount', 'total_market_cap', 'turnover_rate']:
+                df[unavailable_col] = None
 
-            if 'total_market_cap' in df.columns:
-                df['total_market_cap'] = pd.to_numeric(df['total_market_cap'], errors='coerce') / 10000
+            numeric_cols = [
+                'rank',
+                'change_percent',
+                'rising_stocks_count',
+                'falling_stocks_count',
+                'leading_stock_change_percent',
+            ]
+            for col in numeric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
 
             df['data_source'] = self.source
             df['timestamp'] = pd.Timestamp.now()
