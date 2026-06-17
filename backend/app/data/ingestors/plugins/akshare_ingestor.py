@@ -273,12 +273,9 @@ class AkshareIngestor(BaseIngestor):
                 logger.warning(f"No kline data returned from AKShare for {stock_code}")
                 return {"success": False, "data": [], "count": 0}
 
-            # stock_zh_a_daily 返回列名：date, open, high, low, close, volume, amount等
-            # 列名映射：AKShare 列名 -> 数据库字段
-            column_rename = {
-                'amount': 'turnover'  # 成交额
-            }
-            df.rename(columns=column_rename, inplace=True)
+            # stock_zh_a_daily 的 volume 为股，amount 为元；原始 turnover 为换手率，不写入成交额字段。
+            df['turnover'] = pd.to_numeric(df.get('amount'), errors='coerce')
+            df.drop(columns=['amount', 'outstanding_share'], inplace=True, errors='ignore')
 
             # 过滤日期范围
             start_date_obj = pd.to_datetime(start_date.replace('-', ''), format='%Y%m%d')
@@ -301,6 +298,8 @@ class AkshareIngestor(BaseIngestor):
             for col in numeric_cols:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
+            if 'volume' in df.columns:
+                df['volume'] = df['volume'] / 100
 
             # 写入数据库
             await self._run_in_executor(
@@ -472,7 +471,7 @@ class AkshareIngestor(BaseIngestor):
                 '最高': 'high',
                 '最低': 'low',
                 '今开': 'open',
-                '昨收': 'pre_close',
+                '昨收': 'prev_close',
                 '买入': 'bid',
                 '卖出': 'ask'
             }
@@ -487,10 +486,12 @@ class AkshareIngestor(BaseIngestor):
 
             # 数值转换
             numeric_cols = ['current_price', 'change_percent', 'change_amount', 'volume',
-                          'turnover', 'high', 'low', 'open', 'pre_close', 'bid', 'ask']
+                          'turnover', 'high', 'low', 'open', 'prev_close', 'bid', 'ask']
             for col in numeric_cols:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
+            if 'volume' in df.columns:
+                df['volume'] = df['volume'] / 100
 
             # 过滤无效价格（保留有效数据）
             original_count = len(df)
@@ -577,13 +578,15 @@ class AkshareIngestor(BaseIngestor):
                 'high': 'high',
                 'low': 'low',
                 'volume': 'volume',
-                'amount': 'turnover'
+                'amount': 'amount'
             }, inplace=True)
 
             # 补充字段
             df['index_code'] = symbol
             df['data_source'] = self.source
             df['trade_date'] = df['trade_date'].dt.date
+            if 'volume' in df.columns:
+                df['volume'] = pd.to_numeric(df['volume'], errors='coerce') / 100
 
             # 写入数据库
             await self._run_in_executor(
@@ -777,6 +780,8 @@ class AkshareIngestor(BaseIngestor):
 
             # 补充必需字段
             df['trade_date'] = pd.to_datetime(date_str, format='%Y%m%d').date()
+            if 'stock_code' in df.columns:
+                df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
             df['data_source'] = self.source
 
             await self._run_in_executor(
@@ -849,28 +854,19 @@ class AkshareIngestor(BaseIngestor):
             column_rename = {
                 '日期': 'trade_date',
                 '收盘价': 'close_price',
-                '涨跌幅': 'pct_change',
+                '涨跌幅': 'change_pct',
                 '主力净流入-净额': 'net_inflow_main',
-                '主力净流入-净占比': 'net_inflow_main_pct',
+                '主力净流入-净占比': 'net_inflow_ratio_main',
                 '超大单净流入-净额': 'net_inflow_huge',
-                '超大单净流入-净占比': 'net_inflow_huge_pct',
+                '超大单净流入-净占比': 'net_inflow_ratio_huge',
                 '大单净流入-净额': 'net_inflow_large',
-                '大单净流入-净占比': 'net_inflow_large_pct',
+                '大单净流入-净占比': 'net_inflow_ratio_large',
                 '中单净流入-净额': 'net_inflow_medium',
-                '中单净流入-净占比': 'net_inflow_medium_pct',
+                '中单净流入-净占比': 'net_inflow_ratio_medium',
                 '小单净流入-净额': 'net_inflow_small',
-                '小单净流入-净占比': 'net_inflow_small_pct'
+                '小单净流入-净占比': 'net_inflow_ratio_small'
             }
             df.rename(columns=column_rename, inplace=True)
-
-            # 单位转换：AKShare 返回的是元，数据库存储单位是万元
-            amount_columns = [
-                'net_inflow_main', 'net_inflow_huge', 'net_inflow_large',
-                'net_inflow_medium', 'net_inflow_small'
-            ]
-            for col in amount_columns:
-                if col in df.columns:
-                    df[col] = df[col] / 10000
 
             # 补充必需字段
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
@@ -945,23 +941,15 @@ class AkshareIngestor(BaseIngestor):
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare stock pledge risk for {symbol}")
-            # 使用 stock_gpzy_pledge_ratio_detail_em (个股接口)
-            df = await self._run_in_executor(ak.stock_gpzy_pledge_ratio_detail_em, symbol=symbol)
-            if df is None or df.empty:
-                logger.warning(f"No pledge data found for {stock_code}")
-                return {"success": False, "data": [], "count": 0}
-            df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
-            df['data_source'] = self.source
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
-                'pledge_risk', df, source=self.source, target_table='stock_pledge_risk'
+            logger.warning(
+                "AKShare stock pledge detail API is not compatible with stock_pledge_risk; "
+                "use stock_pledge_summary instead"
             )
-            
-            # 返回字典格式
             return {
-                "success": True,
-                "data": df.to_dict('records'),
-                "count": len(df)
+                "success": False,
+                "data": [],
+                "count": 0,
+                "message": "AKShare only provides compatible pledge summary data; use stock_pledge_summary."
             }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare stock pledge risk for {stock_code}: {e}")
@@ -985,14 +973,14 @@ class AkshareIngestor(BaseIngestor):
                 '股票代码': 'stock_code',
                 '股票简称': 'stock_name',
                 '交易日期': 'trade_date',
-                '所属行业': 'industry_name',
+                '所属行业': 'industry',
                 '质押比例': 'pledge_ratio',
-                '质押股数': 'pledged_shares',
+                '质押股数': 'pledge_shares',
                 '质押市值': 'pledge_market_value',
                 '质押笔数': 'pledge_count',
-                '无限售股质押数': 'unrestricted_pledged_shares',
-                '限售股质押数': 'restricted_pledged_shares',
-                '近一年涨跌幅': 'yearly_return',
+                '无限售股质押数': 'unrestricted_pledge_shares',
+                '限售股质押数': 'restricted_pledge_shares',
+                '近一年涨跌幅': 'price_change_1y',
                 '所属行业代码': 'industry_code'
             }
             df.rename(columns=column_rename, inplace=True)
@@ -1000,6 +988,11 @@ class AkshareIngestor(BaseIngestor):
             # 标准化股票代码
             if 'stock_code' in df.columns:
                 df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
+            if stock_code:
+                standardized_code = StockCodeStandardizer.standardize(stock_code)
+                df = df[df['stock_code'] == standardized_code]
+                if df.empty:
+                    return {"success": False, "data": [], "count": 0}
 
             df['data_source'] = self.source
             await self._run_in_executor(
@@ -1043,6 +1036,11 @@ class AkshareIngestor(BaseIngestor):
 
             # 补充必需字段
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
+            if 'release_market_value' in df.columns:
+                df['release_market_value'] = pd.to_numeric(df['release_market_value'], errors='coerce') / 10000
+            for col in ['ratio_to_total', 'ratio_to_float']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce') * 100
             df['data_source'] = self.source
 
             await self._run_in_executor(
@@ -1063,60 +1061,18 @@ class AkshareIngestor(BaseIngestor):
     async def fetch_and_ingest_stock_earnings_forecast(self, stock_code: str = None) -> Optional[dict]:
         """采集业绩预告数据。
 
-        注意：使用 stock_yjyg_em 接口获取全市场业绩预告数据。
-        如果提供 stock_code，则筛选该股票的数据。
+        AKShare ``stock_yjyg_em`` 不提供目标表必填的明确报告期字段，因此不写入专用表。
         """
         try:
-            logger.info(f"Fetching AKShare earnings forecast")
-            # 使用新接口 stock_yjyg_em 获取业绩预告数据
-            df = await self._run_in_executor(ak.stock_yjyg_em)
-            if df is None or df.empty:
-                return None
-
-            # 列名映射：AKShare 中文列名 -> 数据库英文字段
-            column_rename = {
-                '序号': 'sequence_number',
-                '股票代码': 'stock_code',
-                '股票简称': 'stock_name',
-                '预测指标': 'forecast_indicator',
-                '业绩变动': 'forecast_description',
-                '预测数值': 'forecast_value',
-                '业绩变动幅度': 'change_percent',
-                '业绩变动原因': 'forecast_content',
-                '预告类型': 'forecast_type',
-                '上年同期值': 'prev_year_value',
-                '公告日期': 'ann_date'
-            }
-            df.rename(columns=column_rename, inplace=True)
-
-            # 标准化股票代码
-            if 'stock_code' in df.columns:
-                df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
-
-            # 单位转换：元 → 万元
-            amount_columns = ['forecast_value', 'prev_year_value']
-            for col in amount_columns:
-                if col in df.columns:
-                    df[col] = df[col] / 10000
-
-            # 如果提供了股票代码，筛选该股票数据
-            if stock_code:
-                standardized_code = StockCodeStandardizer.standardize(stock_code)
-                df = df[df['stock_code'] == standardized_code]
-                if df.empty:
-                    return None
-
-            df['data_source'] = self.source
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
-                'earnings_forecast', df, source=self.source, target_table='stock_earnings_forecast'
+            logger.warning(
+                "AKShare stock_yjyg_em has no explicit report_date/end_date column; "
+                "skip stock_earnings_forecast ingestion"
             )
-            
-            # 返回字典格式
             return {
-                "success": True,
-                "data": df.to_dict('records'),
-                "count": len(df)
+                "success": False,
+                "data": [],
+                "count": 0,
+                "message": "AKShare stock_yjyg_em lacks explicit report_date/end_date required by stock_earnings_forecast."
             }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare stock earnings forecast for {stock_code}: {e}")
@@ -1358,22 +1314,15 @@ class AkshareIngestor(BaseIngestor):
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare insider trading for {symbol}")
-            # 使用 stock_shareholder_change_ths (同花顺股东变动)
-            df = await self._run_in_executor(ak.stock_shareholder_change_ths, symbol=symbol)
-            if df is None or df.empty:
-                return None
-            df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
-            df['data_source'] = self.source
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
-                'insider_trading', df, source=self.source, target_table='stock_insider_trading'
+            logger.warning(
+                "AKShare stock_shareholder_change_ths returns descriptive share-change strings; "
+                "skip stock_insider_trading ingestion to avoid non-explicit unit parsing"
             )
-            
-            # 返回字典格式
             return {
-                "success": True,
-                "data": df.to_dict('records'),
-                "count": len(df)
+                "success": False,
+                "data": [],
+                "count": 0,
+                "message": "AKShare stock_shareholder_change_ths does not provide explicit numeric columns required by stock_insider_trading."
             }
         except Exception as e:
             logger.error(f"Failed to ingest AKShare insider trading for {stock_code}: {e}")
@@ -1386,11 +1335,38 @@ class AkshareIngestor(BaseIngestor):
         try:
             symbol = StockCodeStandardizer.to_number(stock_code) if stock_code else None
             logger.info(f"Fetching AKShare block trade for {symbol or 'all'}")
-            df = await self._run_in_executor(ak.stock_dzjy_mrmx, symbol=symbol or "全部")
+            start = start_date.replace('-', '') if start_date else datetime.now().strftime('%Y%m%d')
+            end = end_date.replace('-', '') if end_date else start
+            df = await self._run_in_executor(ak.stock_dzjy_mrmx, symbol="A股", start_date=start, end_date=end)
             if df is None or df.empty:
-                return None
+                return {"success": False, "data": [], "count": 0}
+
+            df.rename(columns={
+                '交易日期': 'trade_date',
+                '证券代码': 'stock_code',
+                '成交价': 'price',
+                '折溢率': 'premium_rate',
+                '成交量': 'volume',
+                '成交额': 'amount',
+                '买方营业部': 'buyer',
+                '卖方营业部': 'seller',
+            }, inplace=True)
+            df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
             if stock_code:
-                df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
+                standardized_code = StockCodeStandardizer.standardize(stock_code)
+                df = df[df['stock_code'] == standardized_code].copy()
+                if df.empty:
+                    return {"success": False, "data": [], "count": 0}
+            df['trade_date'] = pd.to_datetime(df['trade_date'], errors='coerce').dt.date
+            for col in ['price', 'premium_rate', 'volume', 'amount']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            if 'volume' in df.columns:
+                df['volume'] = df['volume'] / 10000
+            if 'amount' in df.columns:
+                df['amount'] = df['amount'] / 10000
+            if 'premium_rate' in df.columns:
+                df['premium_rate'] = df['premium_rate'] * 100
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
@@ -1413,7 +1389,24 @@ class AkshareIngestor(BaseIngestor):
             logger.info(f"Fetching AKShare sector money flow for {stock_code}")
             df = await self._run_in_executor(ak.stock_sector_fund_flow_rank, indicator="今日")
             if df is None or df.empty:
-                return None
+                return {"success": False, "data": [], "count": 0}
+            df.rename(columns={
+                '名称': 'sector_name',
+                '今日涨跌幅': 'change_percent',
+                '今日主力净流入-净额': 'main_net_inflow',
+                '今日主力净流入-净占比': 'net_inflow_rate',
+                '今日超大单净流入-净额': 'huge_net_inflow',
+                '今日超大单净流入-净占比': 'huge_net_inflow_rate',
+                '今日大单净流入-净额': 'large_net_inflow',
+                '今日大单净流入-净占比': 'large_net_inflow_rate',
+                '今日中单净流入-净额': 'medium_net_inflow',
+                '今日中单净流入-净占比': 'medium_net_inflow_rate',
+                '今日小单净流入-净额': 'small_net_inflow',
+                '今日小单净流入-净占比': 'small_net_inflow_rate',
+            }, inplace=True)
+            if 'main_net_inflow' in df.columns:
+                df['net_inflow'] = df['main_net_inflow']
+            df['trade_date'] = datetime.now().date()
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
@@ -1435,10 +1428,39 @@ class AkshareIngestor(BaseIngestor):
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare top holders for {symbol}")
-            df = await self._run_in_executor(ak.stock_gdfx_holding_analyse, symbol=symbol)
+            market_symbol = f"sh{symbol}" if symbol.startswith('6') else f"sz{symbol}"
+            quarter_dates = [
+                datetime.now().strftime('%Y1231'),
+                datetime.now().strftime('%Y0930'),
+                datetime.now().strftime('%Y0630'),
+                datetime.now().strftime('%Y0331'),
+                f"{datetime.now().year - 1}1231",
+            ]
+            df = None
+            report_date = None
+            for quarter_date in quarter_dates:
+                temp_df = await self._run_in_executor(
+                    ak.stock_gdfx_top_10_em,
+                    symbol=market_symbol,
+                    date=quarter_date,
+                )
+                if temp_df is not None and not temp_df.empty:
+                    df = temp_df
+                    report_date = quarter_date
+                    break
             if df is None or df.empty:
-                return None
+                return {"success": False, "data": [], "count": 0}
+            df.rename(columns={
+                '名次': 'holder_rank',
+                '股东名称': 'holder_name',
+                '股份类型': 'holder_type',
+                '持股数': 'hold_amount',
+                '占总股本持股比例': 'hold_ratio',
+                '增减': 'change',
+                '变动比率': 'change_ratio',
+            }, inplace=True)
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
+            df['report_date'] = pd.to_datetime(report_date, format='%Y%m%d').date()
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
@@ -1468,8 +1490,29 @@ class AkshareIngestor(BaseIngestor):
             # 使用 stock_irm_cninfo (互动易)
             df = await self._run_in_executor(ak.stock_irm_cninfo, symbol=symbol)
             if df is None or df.empty:
-                return None
-            df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
+                return {"success": False, "data": [], "count": 0}
+            df.rename(columns={
+                '股票代码': 'stock_code',
+                '问题': 'question',
+                '提问时间': 'question_time',
+                '更新时间': 'answer_time',
+                '问题编号': 'question_id',
+                '回答ID': 'answer_id',
+                '回答内容': 'answer',
+                '回答者': 'answerer',
+            }, inplace=True)
+            df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
+            if start_date:
+                start_dt = pd.to_datetime(start_date, errors='coerce')
+                df = df[pd.to_datetime(df['question_time'], errors='coerce') >= start_dt]
+            if end_date:
+                end_dt = pd.to_datetime(end_date, errors='coerce')
+                df = df[pd.to_datetime(df['question_time'], errors='coerce') <= end_dt]
+            if df.empty:
+                return {"success": False, "data": [], "count": 0}
+            df['question_time'] = pd.to_datetime(df['question_time'], errors='coerce')
+            df['answer_time'] = pd.to_datetime(df['answer_time'], errors='coerce')
+            df['trade_date'] = df['question_time'].dt.date
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
