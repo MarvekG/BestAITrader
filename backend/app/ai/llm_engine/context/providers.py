@@ -235,19 +235,28 @@ class SnapshotProvider:
                 "industry_rank": _wrap_dict(fundamental, industry_rank),
             }
 
-            latest_financials = await financial.latest_financials(db, runtime.stock_code)
-            latest_income = await financial.latest_income_statement(db, runtime.stock_code)
-            latest_balance = await financial.latest_balance_sheet(db, runtime.stock_code)
-            latest_cashflow = await financial.latest_cashflow_statement(db, runtime.stock_code)
+            financial_records = await financial.financial_records(db, runtime.stock_code)
+            income_records = await financial.income_statement_records(db, runtime.stock_code)
+            balance_records = await financial.balance_sheet_records(db, runtime.stock_code)
+            cashflow_records = await financial.cashflow_statement_records(db, runtime.stock_code)
             financial_statements = {
-                "status": merge_status(latest_financials, latest_income, latest_balance, latest_cashflow),
-                "financial_indicator_latest": _wrap_snapshot(
-                    financial,
-                    financial.localize_raw_data(latest_financials, "data.financial_indicator")
+                "status": merge_status(financial_records, income_records, balance_records, cashflow_records),
+                "financial_indicator": _items_payload(
+                    financial_records,
+                    item_count=len(financial_records),
                 ),
-                "income_statement_latest": _wrap_snapshot(financial, latest_income),
-                "balance_sheet_latest": _wrap_snapshot(financial, latest_balance),
-                "cashflow_statement_latest": _wrap_snapshot(financial, latest_cashflow),
+                "income_statement": _items_payload(
+                    income_records,
+                    item_count=len(income_records),
+                ),
+                "balance_sheet": _items_payload(
+                    balance_records,
+                    item_count=len(balance_records),
+                ),
+                "cashflow_statement": _items_payload(
+                    cashflow_records,
+                    item_count=len(cashflow_records),
+                ),
             }
             valuation = _wrap_dict(fundamental, fundamental.valuation(db, runtime.stock_code))
             forecast = _wrap_dict(fundamental, fundamental.forecast(db, runtime.stock_code))
@@ -367,16 +376,17 @@ class SignalsProvider:
         financial = runtime.readers.financial
         fundamental = runtime.readers.fundamental
         with runtime.db_session() as db:
-            latest_financials = await financial.latest_financials(db, runtime.stock_code)
-            latest_balance = await financial.latest_balance_sheet(db, runtime.stock_code, format_for_context=False)
-            latest_cashflow = await financial.latest_cashflow_statement(db, runtime.stock_code, format_for_context=False)
+            financial_records = await financial.financial_records(db, runtime.stock_code)
+            balance_records = await financial.balance_sheet_records(db, runtime.stock_code)
+            cashflow_records = await financial.cashflow_statement_records(
+                db,
+                runtime.stock_code,
+                format_for_context=False,
+            )
             financial_ctx = {
-                "financial_indicator_latest": _wrap_snapshot(
-                    financial,
-                    financial.localize_raw_data(latest_financials, "data.financial_indicator")
-                ),
-                "balance_sheet_latest": _wrap_snapshot(financial, latest_balance),
-                "cashflow_statement_latest": _wrap_snapshot(financial, latest_cashflow),
+                "financial_indicator": financial_records,
+                "balance_sheet": balance_records,
+                "cashflow_statement": cashflow_records,
             }
 
             hot_rank = sentiment.hot_rank(db, runtime.stock_code)

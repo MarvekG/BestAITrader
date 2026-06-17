@@ -186,11 +186,81 @@ class FinancialReader(_WrapSnapshotMixin):
     def localize_raw_data(self, raw_data: dict[str, Any] | None, table: str) -> dict[str, Any] | None:
         return self.source._localize_raw_data(raw_data, table)
 
-    async def latest_financials(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return await self.source._get_latest_financials(db, stock_code)
+    async def financial_records(self, db: Session, stock_code: str) -> list[dict[str, Any]]:
+        """读取最近多期财务指标。
 
-    async def historical_summary(self, db: Session, stock_code: str) -> list[dict[str, Any]]:
-        return await self.source._get_historical_summary(db, stock_code)
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+
+        Returns:
+            最近多期财务指标列表。
+        """
+        return await self.source._get_financial_records(
+            db,
+            stock_code,
+            "financial_indicator",
+            table="data.financial_indicator",
+        )
+
+    async def income_statement_records(self, db: Session, stock_code: str) -> list[dict[str, Any]]:
+        """读取最近多期利润表。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+
+        Returns:
+            最近多期利润表列表。
+        """
+        return await self.source._get_financial_records(
+            db,
+            stock_code,
+            "income_statement",
+            table="data.stock_income_statement",
+        )
+
+    async def balance_sheet_records(self, db: Session, stock_code: str) -> list[dict[str, Any]]:
+        """读取最近多期资产负债表。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+
+        Returns:
+            最近多期资产负债表列表。
+        """
+        return await self.source._get_financial_records(
+            db,
+            stock_code,
+            "balance_sheet",
+            table="data.stock_balance_sheet",
+        )
+
+    async def cashflow_statement_records(
+        self,
+        db: Session,
+        stock_code: str,
+        *,
+        format_for_context: bool = True,
+    ) -> list[dict[str, Any]]:
+        """读取最近多期现金流量表。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+            format_for_context: 是否输出面向 AI 上下文的翻译展示值。
+
+        Returns:
+            最近多期现金流量表列表。
+        """
+        table = "data.stock_cashflow_statement" if format_for_context else None
+        return await self.source._get_financial_records(
+            db,
+            stock_code,
+            "cashflow_statement",
+            table=table,
+        )
 
     async def latest_income_statement(
         self,

@@ -627,11 +627,12 @@ class AkshareIngestor(BaseIngestor):
             else:
                 start_year = str((datetime.now().date() - timedelta(days=365)).year)
 
-            # 调用 AKShare 接口
+            # 调用 AKShare 接口（财务数据缓存 1 小时）
             df = await self._run_in_executor(
                 ak.stock_financial_analysis_indicator,
                 symbol=symbol,
                 start_year=start_year,
+                cache_ttl=3600,
             )
 
             if df is None or df.empty:
@@ -1167,7 +1168,12 @@ class AkshareIngestor(BaseIngestor):
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare income statement for {symbol}")
-            df = await self._run_in_executor(ak.stock_financial_benefit_ths, symbol=symbol, indicator="按报告期")
+            df = await self._run_in_executor(
+                ak.stock_financial_benefit_ths,
+                symbol=symbol,
+                indicator="按报告期",
+                cache_ttl=3600,
+            )
             if df is None or df.empty:
                 logger.warning(f"No income statement found for {stock_code}")
                 return {"success": False, "data": [], "count": 0}
@@ -1196,7 +1202,12 @@ class AkshareIngestor(BaseIngestor):
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare balance sheet for {symbol}")
-            df = await self._run_in_executor(ak.stock_financial_debt_ths, symbol=symbol, indicator="按报告期")
+            df = await self._run_in_executor(
+                ak.stock_financial_debt_ths,
+                symbol=symbol,
+                indicator="按报告期",
+                cache_ttl=3600,
+            )
             if df is None or df.empty:
                 logger.warning(f"No balance sheet found for {stock_code}")
                 return {"success": False, "data": [], "count": 0}
@@ -1225,7 +1236,12 @@ class AkshareIngestor(BaseIngestor):
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare cashflow statement for {symbol}")
-            df = await self._run_in_executor(ak.stock_financial_cash_ths, symbol=symbol, indicator="按报告期")
+            df = await self._run_in_executor(
+                ak.stock_financial_cash_ths,
+                symbol=symbol,
+                indicator="按报告期",
+                cache_ttl=3600,
+            )
             if df is None or df.empty:
                 logger.warning(f"No cashflow statement found for {stock_code}")
                 return {"success": False, "data": [], "count": 0}

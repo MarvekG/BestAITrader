@@ -39,9 +39,24 @@ class RiskSource:
                     return data.get(key)
             return None
 
-        latest_indicator = fin_ctx.get("financial_indicator_latest", {}) or {}
-        latest_balance_sheet = fin_ctx.get("balance_sheet_latest", {}) or {}
-        latest_cashflow = fin_ctx.get("cashflow_statement_latest", {}) or {}
+        def latest_item(value: Any) -> Dict[str, Any]:
+            """从多期财务列表中取最新一期。
+
+            Args:
+                value: 财务上下文字段值。
+
+            Returns:
+                最新一期财务快照；缺失时返回空字典。
+            """
+            if isinstance(value, list) and value and isinstance(value[0], dict):
+                return value[0]
+            if isinstance(value, dict):
+                return value
+            return {}
+
+        latest_indicator = latest_item(fin_ctx.get("financial_indicator"))
+        latest_balance_sheet = latest_item(fin_ctx.get("balance_sheet"))
+        latest_cashflow = latest_item(fin_ctx.get("cashflow_statement"))
 
         latest = {}
         if isinstance(latest_indicator.get("data"), dict):

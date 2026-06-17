@@ -25,7 +25,9 @@ MOCK_CONTEXT = {
     },
     "snapshot": {
         "company": {"basic": {"industry": "银行"}},
-        "financial_statements": {"financial_indicator_latest": {"report_date": "2025-12-31"}},
+        "financial_statements": {
+            "financial_indicator": {"items": [{"meta": {"report_date": "2025-12-31"}}]},
+        },
         "valuation": {"pe_ttm": 6.1},
         "forecast": {},
         "northbound": {},
