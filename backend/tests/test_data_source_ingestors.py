@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, Mock, patch
 from app.core.config import settings
 from app.data.ingestors.manager import ingestor_manager
+from app.data.ingestors.plugins.akshare_ingestor import AkshareIngestor
 from app.data.ingestors.plugins.tushare_ingestor import TushareIngestor
 from app.core.utils.date_utils import normalize_compact_date
 from app.models.data_storage import StockBasic
@@ -140,6 +141,41 @@ async def test_sync_all_boards_and_pools_excludes_concept_boards(monkeypatch):
         "stock_zhaban_pool",
     ]
     ingestor_manager.fetch_and_ingest_board_concept.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_akshare_board_industry_converts_market_cap_to_10k_cny():
+    """AKShare 行业板块总市值入库前应从元转换为万元。"""
+    mock_ingestion_service = Mock()
+    mock_ingestion_service.write_dataframe = Mock(return_value=True)
+    source_df = pd.DataFrame({
+        "排名": [1],
+        "板块名称": ["白酒"],
+        "板块代码": ["BK0896"],
+        "最新价": [1000.0],
+        "涨跌额": [10.0],
+        "涨跌幅": [1.0],
+        "总市值": [5_600_000_000.0],
+        "换手率": [2.0],
+        "上涨家数": [12],
+        "下跌家数": [3],
+        "领涨股票": ["贵州茅台"],
+        "领涨股票-涨跌幅": [4.5],
+    })
+
+    with patch(
+        "app.data.ingestors.plugins.akshare_ingestor.DataIngestionService",
+        return_value=mock_ingestion_service,
+    ):
+        ingestor = AkshareIngestor()
+    ingestor._run_in_executor = AsyncMock(side_effect=lambda func, *args, **kwargs: func(*args, **kwargs))
+
+    with patch("app.data.ingestors.plugins.akshare_ingestor.ak.stock_board_industry_name_em", return_value=source_df):
+        result = await ingestor.fetch_and_ingest_board_industry()
+
+    assert result["success"] is True
+    df_arg = mock_ingestion_service.write_dataframe.call_args[0][1]
+    assert df_arg["total_market_cap"].iloc[0] == 560_000.0
 
 
 class TestDateUtils:

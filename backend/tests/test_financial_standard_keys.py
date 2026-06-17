@@ -881,7 +881,7 @@ def test_industry_rank_uses_latest_snapshot_and_structured_signal():
         rank=12,
         latest_price=1200.0,
         change_percent=0.8,
-        total_market_cap=5_000_000_000.0,
+        total_market_cap=500_000.0,
         rising_stocks_count=6,
         falling_stocks_count=5,
         leading_stock_name="旧龙头",
@@ -895,7 +895,7 @@ def test_industry_rank_uses_latest_snapshot_and_structured_signal():
         rank=3,
         latest_price=1250.0,
         change_percent=2.6,
-        total_market_cap=5_600_000_000.0,
+        total_market_cap=560_000.0,
         rising_stocks_count=12,
         falling_stocks_count=3,
         leading_stock_name="贵州茅台",
@@ -920,7 +920,7 @@ def test_industry_rank_uses_latest_snapshot_and_structured_signal():
     assert result["breadth"]["advance_decline_ratio"] == 4.0
     assert result["signal"]["strength_label"] == "leading"
     assert result["leader"]["stock_name"] == "贵州茅台"
-    assert result["market_cap"]["total_market_cap_cny"] == 5600000000.0
+    assert result["market_cap"]["total_market_cap_10k_cny"] == "560000万元"
 
 
 def test_insider_activity_returns_structured_signal_and_role_breakdown():

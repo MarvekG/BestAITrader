@@ -710,6 +710,8 @@ class AkshareIngestor(BaseIngestor):
 
             # 补充必需字段
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
+            if 'hold_ratio' in df.columns:
+                df['hold_ratio'] = pd.to_numeric(df['hold_ratio'], errors='coerce') / 100
             df['data_source'] = self.source
 
             await self._run_in_executor(
@@ -782,6 +784,8 @@ class AkshareIngestor(BaseIngestor):
             df['trade_date'] = pd.to_datetime(date_str, format='%Y%m%d').date()
             if 'stock_code' in df.columns:
                 df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
+            if 'total_trade_amount' in df.columns:
+                df['total_trade_amount'] = pd.to_numeric(df['total_trade_amount'], errors='coerce') * 10000
             df['data_source'] = self.source
 
             await self._run_in_executor(
@@ -823,6 +827,9 @@ class AkshareIngestor(BaseIngestor):
                 '领涨股票-涨跌幅': 'leading_stock_change_percent'
             }
             df.rename(columns=column_rename, inplace=True)
+
+            if 'total_market_cap' in df.columns:
+                df['total_market_cap'] = pd.to_numeric(df['total_market_cap'], errors='coerce') / 10000
 
             df['data_source'] = self.source
             df['timestamp'] = pd.Timestamp.now()
@@ -956,10 +963,23 @@ class AkshareIngestor(BaseIngestor):
             return None
 
     async def fetch_and_ingest_all_pledge_summary(self, stock_code: str = None) -> Optional[dict]:
-        """采集全市场股权质押汇总数据。注意：此接口返回全市场数据，不支持单股查询。"""
+        """采集全市场股权质押汇总数据。
+
+        AKShare 当前使用的质押汇总接口只返回全市场数据。即使上层传入股票代码，也保持全量写入，避免
+        按股票循环时重复拉取同一份全市场数据。
+
+        Args:
+            stock_code: 兼容旧调用方的股票代码参数；AKShare 全市场接口不使用该参数。
+
+        Returns:
+            返回字典 ``{"success": bool, "data": 数据列表, "count": 数据行数}``；异常返回 None。
+        """
         try:
             if stock_code:
-                logger.warning(f"AKShare pledge summary API does not support single stock query, will fetch all market data")
+                logger.info(
+                    "AKShare pledge summary ignores stock_code and writes full market data",
+                    extra={"stock_code": stock_code},
+                )
             logger.info("Fetching AKShare pledge summary for all market")
 
             # 使用 stock_gpzy_pledge_ratio_em（更快更全面，替代旧的 stock_gpzy_profile_em）
@@ -988,11 +1008,6 @@ class AkshareIngestor(BaseIngestor):
             # 标准化股票代码
             if 'stock_code' in df.columns:
                 df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
-            if stock_code:
-                standardized_code = StockCodeStandardizer.standardize(stock_code)
-                df = df[df['stock_code'] == standardized_code]
-                if df.empty:
-                    return {"success": False, "data": [], "count": 0}
 
             df['data_source'] = self.source
             await self._run_in_executor(
@@ -1061,8 +1076,15 @@ class AkshareIngestor(BaseIngestor):
     async def fetch_and_ingest_stock_margin_data(self, stock_code: str) -> Optional[dict]:
         """采集单只股票融资融券明细数据。
 
-        注意：AKShare 融资融券接口返回全市场数据，此方法会采集全市场数据后筛选指定股票。
+        AKShare 融资融券接口返回交易日全市场数据，不支持真正单股查询。此方法保留 ``stock_code`` 参数
+        以兼容现有调用方，但不再筛选单只股票，避免按股票循环时重复拉取同一份全市场数据。
         数据通常为 T-1 日数据（当日数据需要下一交易日才能获取）。
+
+        Args:
+            stock_code: 兼容旧调用方的股票代码参数，仅用于推断交易所。
+
+        Returns:
+            返回字典 ``{"success": bool, "data": 数据列表, "count": 数据行数}``；异常返回 None。
         """
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
@@ -1110,12 +1132,6 @@ class AkshareIngestor(BaseIngestor):
                 return None
 
             df.rename(columns=column_rename, inplace=True)
-
-            # 筛选指定股票
-            df = df[df['stock_code'] == symbol].copy()
-            if df.empty:
-                logger.warning(f"No margin data found for {stock_code}")
-                return {"success": False, "data": [], "count": 0}
 
             # 标准化股票代码
             df['stock_code'] = df['stock_code'].apply(lambda x: StockCodeStandardizer.standardize(x))
@@ -1289,29 +1305,22 @@ class AkshareIngestor(BaseIngestor):
             logger.error(f"Failed to ingest AKShare zhaban pool: {e}")
             return None
 
-    async def fetch_and_ingest_stock_insider_trading(self, stock_code: str) -> Optional[dict]:
-        """采集高管及相关人员持股变动数据。"""
-        try:
-            symbol = StockCodeStandardizer.to_number(stock_code)
-            logger.info(f"Fetching AKShare insider trading for {symbol}")
-            logger.warning(
-                "AKShare stock_shareholder_change_ths returns descriptive share-change strings; "
-                "skip stock_insider_trading ingestion to avoid non-explicit unit parsing"
-            )
-            return {
-                "success": False,
-                "data": [],
-                "count": 0,
-                "message": "AKShare stock_shareholder_change_ths does not provide explicit numeric columns required by stock_insider_trading."
-            }
-        except Exception as e:
-            logger.error(f"Failed to ingest AKShare insider trading for {stock_code}: {e}")
-            return None
-
     async def fetch_and_ingest_stock_block_trade(
         self, stock_code: str, start_date: str = None, end_date: str = None
     ) -> Optional[dict]:
-        """采集个股或全市场大宗交易数据。"""
+        """采集全市场大宗交易数据。
+
+        AKShare 大宗交易每日明细接口只支持按市场类别和日期范围查询。此方法保留 ``stock_code`` 参数以兼容
+        旧调用方，但不再筛选单只股票，避免按股票循环时重复拉取同一份全市场数据。
+
+        Args:
+            stock_code: 兼容旧调用方的股票代码参数；AKShare 全市场接口不使用该参数。
+            start_date: 开始日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时使用当天。
+            end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时使用开始日期。
+
+        Returns:
+            返回字典 ``{"success": bool, "data": 数据列表, "count": 数据行数}``；异常返回 None。
+        """
         try:
             symbol = StockCodeStandardizer.to_number(stock_code) if stock_code else None
             logger.info(f"Fetching AKShare block trade for {symbol or 'all'}")
@@ -1332,11 +1341,6 @@ class AkshareIngestor(BaseIngestor):
                 '卖方营业部': 'seller',
             }, inplace=True)
             df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
-            if stock_code:
-                standardized_code = StockCodeStandardizer.standardize(stock_code)
-                df = df[df['stock_code'] == standardized_code].copy()
-                if df.empty:
-                    return {"success": False, "data": [], "count": 0}
             df['trade_date'] = pd.to_datetime(df['trade_date'], errors='coerce').dt.date
             for col in ['price', 'premium_rate', 'volume', 'amount']:
                 if col in df.columns:

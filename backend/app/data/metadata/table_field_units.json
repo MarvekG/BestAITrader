@@ -745,7 +745,25 @@
       "precision": 2
     }
   },
-  "fundamental.industry_rank": {},
+  "fundamental.industry_rank": {
+    "total_market_cap_10k_cny": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.cny"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.cny"
+        ],
+        "scale": 0.01
+      },
+      "precision": 2
+    }
+  },
   "fundamental.insider_activity": {
     "change_ratio_pct": {
       "zh": {

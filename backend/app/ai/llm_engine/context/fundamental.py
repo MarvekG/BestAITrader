@@ -621,7 +621,7 @@ class FundamentalSource:
                 "breadth_label": breadth_label,
             },
             "market_cap": {
-                "total_market_cap_cny": round(industry_info.total_market_cap, 2) if industry_info.total_market_cap is not None else None,
+                "total_market_cap_10k_cny": round(industry_info.total_market_cap, 2) if industry_info.total_market_cap is not None else None,
             },
         }
         return format_payload_values("fundamental.industry_rank", payload)
