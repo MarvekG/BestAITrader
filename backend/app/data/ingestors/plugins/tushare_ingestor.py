@@ -1546,60 +1546,6 @@ class TushareIngestor(BaseIngestor):
             logger.error(f"Failed to ingest lockup release for {stock_code} (Tushare): {e}")
             return {"success": False, "data": [], "count": 0}
 
-    async def fetch_and_ingest_stock_earnings_forecast(self, stock_code: str) -> Optional[dict]:
-        """
-        采集单只股票业绩预告数据并写入标准表。
-
-        官方文档:
-            - forecast: https://tushare.pro/document/2?doc_id=45
-
-        Args:
-            stock_code: Tushare 标准股票代码。
-
-        Returns:
-            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
-        """
-        try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
-
-            df = await self._run_in_executor(
-                self.pro.forecast, ts_code=stock_code
-            )
-
-            if df is not None and not df.empty:
-                df = ColumnMapper.map_columns(
-                    df, 'data.stock_earnings_forecast', source=self.source, strict=False
-                )
-                df['data_source'] = self.source
-                df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
-
-                # Date conversion
-                if 'report_date' in df.columns:
-                    df['report_date'] = pd.to_datetime(df['report_date'].astype(str), errors='coerce').dt.date
-                if 'ann_date' in df.columns:
-                    df['ann_date'] = pd.to_datetime(df['ann_date'].astype(str), errors='coerce').dt.date
-
-                await self._run_in_executor(
-                    self.ingestion_service.write_dataframe,
-                    'forecast', df, source=self.source, target_table='stock_earnings_forecast'
-                )
-                # 返回字典格式
-
-                return {
-
-                    "success": True,
-
-                    "data": df.to_dict("records"),
-
-                    "count": len(df)
-
-                }
-            return {"success": False, "data": [], "count": 0}
-        except Exception as e:
-            logger.error(f"Failed to ingest earnings forecast for {stock_code} (Tushare): {e}")
-            return {"success": False, "data": [], "count": 0}
-
     async def fetch_and_ingest_stock_margin_data(self, stock_code: str) -> Optional[dict]:
         """
         采集单只股票融资融券明细数据并写入两融表。

@@ -600,34 +600,6 @@ class  StockRelease(Base):
   )
 
 
-class  StockForecast(Base):
-  """业绩预告/快报数据"""
-  __tablename__  =  "stock_earnings_forecast"
-
-  id  =  Column(UUID(as_uuid=True),  primary_key=True,  default=uuid.uuid4)
-  stock_code  =  Column(String(20),  ForeignKey('data.stock_basic.stock_code',  ondelete='CASCADE'),  nullable=False,  index=True)
-  report_date  =  Column(Date,  nullable=False,  index=True)  #  报告期末
-  ann_date  =  Column(Date)  #  公告日
-
-  forecast_type  =  Column(String(50))  #  预告类型  (如:  略增,  预增,  亏损)
-  net_profit_min  =  Column(Float)  #  净利润下限  (万元)
-  net_profit_max  =  Column(Float)  #  净利润上限  (万元)
-  prev_year_profit  =  Column(Float)  #  上年同期净利润
-
-  growth_min  =  Column(Float)  #  增长下限  (%)
-  growth_max  =  Column(Float)  #  增长上限  (%)
-  forecast_content  =  Column(Text)  #  业绩变动原因说明
-
-  data_source  =  Column(String(20),  default='tushare')
-  created_at  =  Column(DateTime,  default=datetime.now)
-  updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)
-
-  __table_args__  =  (
-  UniqueConstraint('stock_code',  'report_date',  'ann_date',  name='idx_forecast_unique'),
-  {"schema": "data"}
-  )
-
-
 class  StockMargin(Base):
   """融资融券数据  (两融博弈)"""
   __tablename__  =  "stock_margin_data"

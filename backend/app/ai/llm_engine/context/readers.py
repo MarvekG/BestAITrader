@@ -62,9 +62,6 @@ class FundamentalReader(_WrapDictMixin):
     def valuation(self, db: Session, stock_code: str) -> dict[str, Any]:
         return self.source._get_valuation(db, stock_code)
 
-    def forecast(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_forecast(db, stock_code)
-
     def northbound_flow(self, db: Session, stock_code: str) -> dict[str, Any]:
         return self.source._get_northbound_flow(db, stock_code)
 

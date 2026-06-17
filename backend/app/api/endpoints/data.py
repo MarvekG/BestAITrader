@@ -287,7 +287,7 @@ async def get_db_data(
         StockBasic, KlineData, NorthboundData,
         DragonTigerData, StockRealtimeMarket, StockValuationHistory,
         StockLimitUpPool, StockLimitDownPool, StockZhabanPool, StockMoneyFlow, SectorMoneyFlow, StockShareholder, StockPledge,
-        StockInsider, StockRelease, StockForecast, StockMargin, IndexDaily,
+        StockInsider, StockRelease, StockMargin, IndexDaily,
         StockBlockTrade, StockPledgeSummary, StockTopHolders, StockInteractiveQA
     )
     from app.models.stock_indicators import StockIndicators
@@ -318,7 +318,6 @@ async def get_db_data(
         "stock_pledge_risk": StockPledge,
         "stock_insider_trading": StockInsider,
         "stock_lockup_release": StockRelease,
-        "stock_earnings_forecast": StockForecast,
         "stock_margin_data": StockMargin,
         "stock_limit_down_pool": StockLimitDownPool,
         "stock_zhaban_pool": StockZhabanPool,
@@ -999,7 +998,7 @@ async def sync_granular_data(
 ):
     """
     Manually sync specific granular data type for a stock
-    data_type: money_flow, shareholders, pledge, insider, lockup, forecast, margin
+    data_type: money_flow, shareholders, pledge, insider, lockup, margin
     """
     from app.tasks.task_manager import task_manager
     from app.tasks.task_functions import sync_granular_data_func
@@ -1008,7 +1007,7 @@ async def sync_granular_data(
 
     valid_types = [
         "money_flow", "shareholders", "pledge", "insider",
-        "lockup", "forecast", "margin", "block_trade"
+        "lockup", "margin", "block_trade"
     ]
     if data_type not in valid_types:
         raise HTTPException(status_code=400, detail=f"Invalid data type. Must be one of {valid_types}")

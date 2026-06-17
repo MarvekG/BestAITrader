@@ -326,9 +326,6 @@ class IngestorManager(BaseIngestor):
     async def fetch_and_ingest_stock_lockup_release(self, stock_code: str) -> bool:
         return await self._execute_with_failover('fetch_and_ingest_stock_lockup_release', stock_code)
 
-    async def fetch_and_ingest_stock_earnings_forecast(self, stock_code: str) -> bool:
-        return await self._execute_with_failover("fetch_and_ingest_stock_earnings_forecast", stock_code)
-
     async def fetch_and_ingest_stock_margin_data(self, stock_code: str) -> bool:
         return await self._execute_with_failover('fetch_and_ingest_stock_margin_data', stock_code)
 
@@ -439,17 +436,6 @@ class IngestorManager(BaseIngestor):
             if (i + 1) % 100 == 0:
                 logger.info(f"K-line progress: {i + 1}/{len(stock_codes)} stocks processed")
         logger.info(f"Sync All K-line ({period}) completed. Success: {success_count}/{len(stock_codes)}")
-        return True
-
-    async def sync_all_financial_data(self) -> bool:
-        """全量同步仍本地维护的业绩预告。"""
-        logger.info("Starting Sync All: Financial-adjacent Data")
-        stock_codes = self._get_all_stock_codes()
-
-        for i, code in enumerate(stock_codes):
-            await self.fetch_and_ingest_stock_earnings_forecast(code)
-            if (i + 1) % 50 == 0:
-                logger.info(f"Financial-adjacent data progress: {i + 1}/{len(stock_codes)} stocks")
         return True
 
     async def sync_all_valuation(self) -> bool:

@@ -21,7 +21,6 @@ def get_sync_date_range(task_type: str = "normal") -> tuple[str, str]:
     - normal: 最近 3 天 (Last 3 days)
     - kline_base_info: 最近 365 天 (Last 365 days, for base info kline sync)
     - event_long: 前后 180 天 (Next and previous 180 days, for dividends, etc.)
-    - forecast: 前后 90 天 (Next and previous 90 days, for earnings forecast)
     - margin: 最近 15 天 (Last 15 days, for margin and flow data)
     - survey: 最近 180 天 (Last 180 days, for institutional survey data)
     """
@@ -29,9 +28,6 @@ def get_sync_date_range(task_type: str = "normal") -> tuple[str, str]:
     if task_type == "event_long":
         start_date = (now - timedelta(days=180)).strftime("%Y-%m-%d")
         end_date = (now + timedelta(days=180)).strftime("%Y-%m-%d")
-    elif task_type == "forecast":
-        start_date = (now - timedelta(days=90)).strftime("%Y-%m-%d")
-        end_date = (now + timedelta(days=90)).strftime("%Y-%m-%d")
     elif task_type == "margin":
         start_date = (now - timedelta(days=15)).strftime("%Y-%m-%d")
         end_date = now.strftime("%Y-%m-%d")
@@ -90,14 +86,12 @@ async def sync_stock_data_func(
         return start_date or default_start, end_date or default_end
 
     normal_start_date, normal_end_date = resolve_date_range("normal")
-    forecast_start_date, forecast_end_date = resolve_date_range("forecast")
     margin_start_date, margin_end_date = resolve_date_range("margin")
     survey_start_date, survey_end_date = resolve_date_range("survey")
 
     logger.info(
         f"Starting sync task for stock_code: {stock_code}, task_id: {task_id}, "
         f"normal_range=({normal_start_date}, {normal_end_date}), "
-        f"forecast_range=({forecast_start_date}, {forecast_end_date}), "
         f"margin_range=({margin_start_date}, {margin_end_date}), "
         f"survey_range=({survey_start_date}, {survey_end_date})"
     )
@@ -124,7 +118,6 @@ async def sync_stock_data_func(
         {"name": i18n_service.t("market.data_manager.stock_pledge_risk"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_pledge_risk(stock_code)},
         {"name": i18n_service.t("market.data_manager.stock_insider_trading"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_insider_trading(stock_code)},
         {"name": i18n_service.t("market.data_manager.stock_lockup_release"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_lockup_release(stock_code)},
-        {"name": i18n_service.t("market.data_manager.stock_earnings_forecast"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_earnings_forecast(stock_code)},
         {"name": i18n_service.t("market.data_manager.stock_margin_data"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_margin_data(stock_code)},
         {"name": i18n_service.t("common.stock_block_trade"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_block_trade(stock_code, start_date=normal_start_date, end_date=normal_end_date)},
 
@@ -261,9 +254,7 @@ async def sync_bulk_tables_func(
         'stocks':                  {'method': ingestor_manager.fetch_and_ingest_all_stock_basic,           'mode': 'bulk'},
         'kline':                   {'method': ingestor_manager.fetch_and_ingest_stock_kline,               'mode': 'per_stock', 'needs_scope': True},
         'index_daily':             {'method': ingestor_manager.fetch_and_ingest_index_daily,               'mode': 'index'},
-        # --- Financial-adjacent local datasets ---
         'valuation':               {'method': ingestor_manager.fetch_and_ingest_stock_valuation,           'mode': 'per_stock', 'needs_scope': True},
-        'stock_earnings_forecast': {'method': ingestor_manager.fetch_and_ingest_stock_earnings_forecast,   'mode': 'per_stock', 'needs_scope': True},
         # --- Realtime / Quotes ---
         'realtime':                {'method': ingestor_manager.fetch_and_ingest_realtime_market,            'mode': 'per_stock', 'needs_scope': True},
         # --- Expanded Info ---
@@ -656,7 +647,7 @@ async def sync_granular_data_func(
 ) -> Dict[str, Any]:
     """
     同步个股细分数据任务
-    data_type enum: money_flow, shareholders, pledge, insider, lockup, forecast, margin
+    data_type enum: money_flow, shareholders, pledge, insider, lockup, margin
     """
     from app.data.ingestors.manager import ingestor_manager
     from app.core.utils.formatters import StockCodeStandardizer
@@ -669,8 +660,6 @@ async def sync_granular_data_func(
             date_task_type = "normal"
             if data_type == "lockup":
                 date_task_type = "event_long"
-            elif data_type == "forecast":
-                date_task_type = "forecast"
             elif data_type in ["margin", "money_flow"]:
                 date_task_type = "margin"
           
@@ -693,8 +682,6 @@ async def sync_granular_data_func(
             success = await ingestor_manager.fetch_and_ingest_stock_insider_trading(stock_code)
         elif data_type == 'lockup':
             success = await ingestor_manager.fetch_and_ingest_stock_lockup_release(stock_code)
-        elif data_type == 'forecast':
-            success = await ingestor_manager.fetch_and_ingest_stock_earnings_forecast(stock_code)
         elif data_type == 'margin':
             success = await ingestor_manager.fetch_and_ingest_stock_margin_data(stock_code)
         elif data_type == 'block_trade':

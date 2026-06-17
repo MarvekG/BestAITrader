@@ -39,7 +39,6 @@ MOCK_CONTEXT = {
             "financial_indicator": {"items": [{"meta": {"report_date": "2025-12-31"}}]},
         },
         "valuation": {"pe_ttm": 6.1},
-        "forecast": {"eps": 1.2},
         "northbound": {"hold_ratio": 2.1},
         "ownership": {"top_holders": {"items": []}, "fund_holding": {"item_count": 3}},
         "flow": {"northbound": {"net_buy": 10}, "dragon_tiger": {"status": "available"}},

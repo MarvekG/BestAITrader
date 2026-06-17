@@ -213,13 +213,6 @@
     "ratio_to_total": "%",
     "ratio_to_float": "%"
   },
-  "data.stock_earnings_forecast": {
-    "net_profit_min": "万元",
-    "net_profit_max": "万元",
-    "prev_year_profit": "万元",
-    "growth_min": "%",
-    "growth_max": "%"
-  },
   "data.stock_margin_data": {
     "margin_balance": "元",
     "margin_buy_amount": "元",

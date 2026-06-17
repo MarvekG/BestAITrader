@@ -592,23 +592,6 @@
         "holder_name": "holder_name"
       }
     },
-    "data.stock_earnings_forecast": {
-      "tushare": {
-        "ts_code": "stock_code",
-        "ann_date": "ann_date",
-        "end_date": "report_date",
-        "type": "forecast_type",
-        "p_change_min": "growth_min",
-        "p_change_max": "growth_max",
-        "net_profit_min": "net_profit_min",
-        "net_profit_max": "net_profit_max",
-        "last_parent_net": "prev_year_profit",
-        "summary": "forecast_content",
-        "change_reason": "forecast_content",
-        "first_ann_date": "first_ann_date",
-        "update_flag": "_unused_update_flag"
-      }
-    },
     "data.stock_margin_data": {
       "tushare": {
         "ts_code": "stock_code",

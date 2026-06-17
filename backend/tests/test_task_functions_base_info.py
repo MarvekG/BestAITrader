@@ -98,7 +98,6 @@ async def test_sync_stock_data_func_does_not_sync_concept_boards():
         fetch_and_ingest_stock_pledge_risk=AsyncMock(side_effect=_mark_side_effect("stock_pledge_risk")),
         fetch_and_ingest_stock_insider_trading=AsyncMock(side_effect=_mark_side_effect("stock_insider_trading")),
         fetch_and_ingest_stock_lockup_release=AsyncMock(side_effect=_mark_side_effect("stock_lockup_release")),
-        fetch_and_ingest_stock_earnings_forecast=AsyncMock(side_effect=_mark_side_effect("stock_earnings_forecast")),
         fetch_and_ingest_stock_margin_data=AsyncMock(side_effect=_mark_side_effect("stock_margin_data")),
         fetch_and_ingest_stock_block_trade=AsyncMock(side_effect=_mark_side_effect("stock_block_trade")),
         fetch_and_ingest_sector_money_flow=AsyncMock(side_effect=_mark_side_effect("sector_money_flow")),

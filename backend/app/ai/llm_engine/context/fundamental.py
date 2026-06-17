@@ -9,7 +9,7 @@ from app.data.metadata.field_units import format_payload_values
 from app.ai.llm_engine.context.section_wrappers import status_payload
 from app.models.data_storage import (
     StockBasic, StockValuationHistory,
-    StockForecast, StockTopHolders,
+    StockTopHolders,
     StockFundHolding,
     IndustryData,
     NorthboundData, DragonTigerData,
@@ -28,7 +28,6 @@ class FundamentalSource:
     - Basic stock info
     - Financial indicators (Growth, Profitability)
     - Valuation metrics (PE, PB, History)
-    - Earnings forecasts
     """
 
     @staticmethod
@@ -157,124 +156,6 @@ class FundamentalSource:
             "free_share": val.free_share,
         }
         return format_payload_values("fundamental.valuation", payload)
-
-    def _load_latest_forecast_record(self, db: Session, stock_code: str):
-        two_years_ago = (datetime.now() - timedelta(days=730)).date()
-        forecast = db.query(StockForecast).filter(
-            StockForecast.stock_code == stock_code,
-            StockForecast.ann_date >= two_years_ago
-        ).order_by(desc(StockForecast.ann_date)).first()
-
-        if not forecast:
-            forecast = db.query(StockForecast).filter(
-                StockForecast.stock_code == stock_code
-            ).order_by(desc(StockForecast.report_date)).first()
-
-        return forecast
-
-    def _get_forecast(self, db: Session, stock_code: str) -> Dict[str, Any]:
-        """获取最新业绩预告，输出适合 LLM 消费的结构化指引"""
-        forecast = self._load_latest_forecast_record(db, stock_code)
-        if not forecast:
-            return {}
-
-        is_stale = False
-        age_days = None
-        if forecast.ann_date:
-            age_days = (datetime.now().date() - forecast.ann_date).days
-            months_elapsed = age_days / 30
-            is_stale = months_elapsed > 18
-
-        growth_min = forecast.growth_min
-        growth_max = forecast.growth_max
-        net_profit_min = forecast.net_profit_min
-        net_profit_max = forecast.net_profit_max
-
-        growth_midpoint = None
-        if growth_min is not None and growth_max is not None:
-            growth_midpoint = round((growth_min + growth_max) / 2, 2)
-        elif growth_min is not None:
-            growth_midpoint = round(growth_min, 2)
-        elif growth_max is not None:
-            growth_midpoint = round(growth_max, 2)
-
-        profit_midpoint = None
-        if net_profit_min is not None and net_profit_max is not None:
-            profit_midpoint = round((net_profit_min + net_profit_max) / 2, 2)
-        elif net_profit_min is not None:
-            profit_midpoint = round(net_profit_min, 2)
-        elif net_profit_max is not None:
-            profit_midpoint = round(net_profit_max, 2)
-
-        if growth_min is not None and growth_min >= 50:
-            direction_label = "strong_positive"
-        elif growth_min is not None and growth_min > 0:
-            direction_label = "positive"
-        elif growth_max is not None and growth_max < 0:
-            direction_label = "negative"
-        elif (
-            growth_min is not None and growth_max is not None
-            and growth_min <= 0 <= growth_max
-        ):
-            direction_label = "mixed"
-        else:
-            direction_label = "unclear"
-
-        if growth_midpoint is not None and growth_midpoint >= 50:
-            momentum_label = "strong"
-        elif growth_midpoint is not None and growth_midpoint > 0:
-            momentum_label = "positive"
-        elif growth_midpoint is not None and growth_midpoint < 0:
-            momentum_label = "weak"
-        else:
-            momentum_label = "unclear"
-
-        risk_flags = []
-        if is_stale:
-            risk_flags.append("Guidance is stale")
-        if (
-            growth_min is not None and growth_max is not None
-            and (growth_max - growth_min) >= 30
-        ):
-            risk_flags.append("Guidance range is wide")
-        if direction_label == "negative":
-            risk_flags.append("Management guidance implies contraction")
-        if direction_label == "mixed":
-            risk_flags.append("Guidance range crosses zero growth")
-
-        payload = {
-            "overview": {
-                "window": "latest",
-                "report_date": str(forecast.report_date),
-                "ann_date": str(forecast.ann_date) if forecast.ann_date else None,
-                "forecast_type": forecast.forecast_type,
-                "is_stale": is_stale,
-                "reference_status": "stale" if is_stale else "active",
-                "age_days": age_days,
-            },
-            "profit_guidance_latest": {
-                "metric": "net_profit",
-                "window": "latest",
-                "min": round(net_profit_min, 2) if net_profit_min is not None else None,
-                "max": round(net_profit_max, 2) if net_profit_max is not None else None,
-                "midpoint": profit_midpoint,
-            },
-            "growth_guidance_latest": {
-                "metric": "net_profit_growth",
-                "window": "latest",
-                "min_pct": round(growth_min, 2) if growth_min is not None else None,
-                "max_pct": round(growth_max, 2) if growth_max is not None else None,
-                "midpoint_pct": growth_midpoint,
-                "direction_label": direction_label,
-            },
-            "signal": {
-                "direction_label": direction_label,
-                "momentum_label": momentum_label,
-            },
-            "risk_flags": risk_flags,
-            "content_summary": forecast.forecast_content[:200] if forecast.forecast_content else "",
-        }
-        return format_payload_values("fundamental.forecast", payload)
 
     def _get_northbound_flow(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """北向资金最近 12 条记录，适合 LLM 判断外资情绪变化"""
@@ -740,7 +621,7 @@ class FundamentalSource:
                 "breadth_label": breadth_label,
             },
             "market_cap": {
-                "total_market_cap_cny": round(industry_info.total_market_cap, 2) if industry_info.total_market_cap is not None else None,
+                "total_market_cap_10k_cny": round(industry_info.total_market_cap, 2) if industry_info.total_market_cap is not None else None,
             },
         }
         return format_payload_values("fundamental.industry_rank", payload)

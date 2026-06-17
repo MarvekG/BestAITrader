@@ -77,11 +77,6 @@ def test_tushare_income_statement_mapping_includes_optional_fields():
         assert mapping[field] == field
 
 
-def test_tushare_earnings_forecast_ignores_update_flag():
-    mapping = ColumnMapper.get_table_mapping("data.stock_earnings_forecast", "tushare")
-    assert mapping["update_flag"] == "_unused_update_flag"
-
-
 def test_get_table_field_label_prefers_table_labels():
     assert get_table_field_label("data.financial_indicator", "diluted_eps") == "稀释每股收益"
     assert get_table_field_label("data.financial_indicator", "gross_margin") == "毛利"

@@ -28,7 +28,6 @@
     "sync_failed": "Data sync failed",
     "sync_insider": "Sync Insider Trading",
     "sync_lockup": "Sync Lockup",
-    "sync_forecast": "Sync Forecast",
     "sync_margin": "Sync Margin",
     "sync_base_info": "Full Sync Stock Base Info",
     "sync_base_info_tip": "Full sync of base information. Tables: stock_basic, kline_data, financial_indicator, stock_valuation_history, stock_top_holders, stock_realtime_market, stock_indicators",
@@ -79,7 +78,6 @@
     "money_flow": "Money Flow",
     "shareholder_count": "Shareholder Count",
     "risk_monitoring": "Pledge Risk",
-    "earnings_forecast": "Earnings Forecast",
     "margin_trading": "Margin Trading",
     "date": "Date",
     "end_date": "End Date",
@@ -652,7 +650,6 @@
       "sync_pledge_summary": "Sync Pledge Summary",
       "stock_insider_trading": "Insider Trading",
       "stock_lockup_release": "Lockup Release",
-      "stock_earnings_forecast": "Earnings Forecast",
       "stock_margin_data": "Margin Data",
       "sync_money_flow": "Sync Money Flow",
       "sync_northbound": "Sync Northbound",
@@ -1843,18 +1840,6 @@
     "ratio_to_total": "Total Ratio %",
     "release_type": "Release Type"
   },
-  "stock_earnings_forecast": {
-    "report_date": "Report Date",
-    "ann_date": "Ann Date",
-    "stock_code": "Stock Code",
-    "forecast_type": "Forecast Type",
-    "net_profit_min": "Profit Min (10k)",
-    "net_profit_max": "Profit Max (10k)",
-    "growth_min": "Growth Min %",
-    "growth_max": "Growth Max %",
-    "prev_year_profit": "Prev Year Profit",
-    "forecast_content": "Reasoning"
-  },
   "stock_margin_data": {
     "trade_date": "Trade Date",
     "stock_code": "Stock Code",
@@ -1886,13 +1871,6 @@
     "lockup_release": "Lockup Release",
     "release_shares": "Release Shares",
     "ratio_to_total": "Ratio to Total"
-  },
-  "forecast": {
-    "type": "Forecast Type",
-    "growth_range": "Growth Range",
-    "content": "Content",
-    "growth_min": "Growth Min",
-    "growth_max": "Growth Max"
   },
   "margin": {
     "balance": "Margin Balance",
