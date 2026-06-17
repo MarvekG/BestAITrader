@@ -115,7 +115,6 @@ def _sqlite_test_tables():
     )
     from app.models.async_task import AsyncTask
     from app.models.data_storage import (
-        FinancialIndicator,
         IndexDaily,
         KlineData,
         StockBasic,
@@ -135,7 +134,6 @@ def _sqlite_test_tables():
     from app.models.trade_record import TradeRecord
     from app.models.user import User
 
-    FinancialIndicator.__table__.columns["data"].type = JSON()
 
     return [
         User.__table__,
@@ -153,7 +151,6 @@ def _sqlite_test_tables():
         ExperienceReviewEvent.__table__,
         ExperienceIndex.__table__,
         StockBasic.__table__,
-        FinancialIndicator.__table__,
         KlineData.__table__,
         IndexDaily.__table__,
         StockRealtimeMarket.__table__,

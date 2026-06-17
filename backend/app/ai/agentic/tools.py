@@ -10,7 +10,6 @@ from app.ai.agentic.tooling.stock_tools import StockTools, UnsupportedColumnsErr
 from app.data.ingestors.manager import ingestor_manager
 from app.core.logger import get_logger
 from app.trading.trading_engine import TradingEngine
-from app.data.metadata.financial_report_localizer import localize_financial_report_data_field
 from app.data.metadata.field_units import get_schema_field_unit, get_schema_table_units
 
 from datetime import date, datetime
@@ -18,14 +17,6 @@ import uuid
 
 logger = get_logger(__name__)
 trading_engine = TradingEngine()
-
-FINANCIAL_REPORT_QUERY_MODELS = {
-    "financial": ("FinancialIndicator", "data.financial_indicator"),
-    "income_statement": ("StockIncomeStatement", "data.stock_income_statement"),
-    "balance_sheet": ("StockBalanceSheet", "data.stock_balance_sheet"),
-    "cashflow_statement": ("StockCashflowStatement", "data.stock_cashflow_statement"),
-}
-
 
 def _format_trade_execution_result(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -243,16 +234,6 @@ def _evaluate_pm_trade_gate(
 STOCK_QUERY_HANDLERS = {
     "status": lambda stock_code, limit: StockTools.check_data_status(stock_code),
     "basic": lambda stock_code, limit: StockTools.get_stock_basic_info(stock_code),
-    "financial": lambda stock_code, limit: StockTools.get_latest_indicators(stock_code),
-    "income_statement": (
-        lambda stock_code, limit: StockTools.get_generic_db_data("StockIncomeStatement", stock_code, limit)
-    ),
-    "balance_sheet": (
-        lambda stock_code, limit: StockTools.get_generic_db_data("StockBalanceSheet", stock_code, limit)
-    ),
-    "cashflow_statement": (
-        lambda stock_code, limit: StockTools.get_generic_db_data("StockCashflowStatement", stock_code, limit)
-    ),
     "valuation": lambda stock_code, limit: StockTools.get_valuation_history(stock_code, limit),
     "kline": lambda stock_code, limit: StockTools.get_recent_kline(stock_code, limit),
     "top_holders": lambda stock_code, limit: StockTools.get_top_holders(stock_code),
@@ -289,14 +270,6 @@ SYNC_TASK_CONFIG = {
         "target_param": "stock_code",
         "required_params": ["start_date", "end_date"],
         "extra_params": ["adjust"],
-    },
-    "financial": {
-        "method_name": "fetch_and_ingest_financial_indicators",
-        "target_param": "stock_code",
-    },
-    "income_statement": {
-        "method_name": "fetch_and_ingest_income_statement",
-        "target_param": "stock_code",
     },
     "valuation": {
         "method_name": "fetch_and_ingest_stock_valuation",
@@ -544,10 +517,6 @@ async def query_stock_data(
         try:
             # 优先使用通用的 get_generic_db_data 以支持日期过滤
             model_map = {
-                "financial": "FinancialIndicator",
-                "income_statement": "StockIncomeStatement",
-                "balance_sheet": "StockBalanceSheet",
-                "cashflow_statement": "StockCashflowStatement",
                 "valuation": "StockValuationHistory",
                 "kline": "KlineData",
                 "top_holders": "StockTopHolders",
@@ -583,15 +552,6 @@ async def query_stock_data(
                 raw_data = handler(stock_code, limit)
 
             serial_data = make_json_serializable(raw_data)
-            if data_type in FINANCIAL_REPORT_QUERY_MODELS:
-                _, table_label = FINANCIAL_REPORT_QUERY_MODELS[data_type]
-                if isinstance(serial_data, list):
-                    serial_data = [
-                        localize_financial_report_data_field(item, table_label)
-                        for item in serial_data
-                    ]
-                elif isinstance(serial_data, dict):
-                    serial_data = localize_financial_report_data_field(serial_data, table_label)
             char_len = len(str(serial_data))
             logger.info(
                 f"query_stock_data: sub-table '{data_type}' for {stock_code}, "
@@ -1006,7 +966,7 @@ async def query_and_calculate(
     **注意：该工具不返回原始行数据，仅返回沙箱执行报告。**
 
     参数:
-    - table_name: 字符串。目标 SQLAlchemy 模型名（如 'KlineData', 'StockBasic', 'FinancialIndicator'）。
+    - table_name: 字符串。目标 SQLAlchemy 模型名（如 'KlineData', 'StockBasic', 'StockValuationHistory'）。
     - filters: 列表。过滤条件字典的集合。格式示例:
       `[{"column": "stock_code", "op": "==", "value": "000001.SZ"}, {"column": "date", "op": ">=", "value": "2024-01-01"}]`
       支持的操作符 (op):

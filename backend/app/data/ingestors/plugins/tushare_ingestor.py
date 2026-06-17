@@ -1,6 +1,5 @@
 import tushare as ts
 import asyncio
-import time
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Any, List
@@ -9,129 +8,12 @@ from app.core.config import settings
 from app.data.ingestors.base_ingestor import BaseIngestor
 from app.data.ingestors.plugins.column_mapping import ColumnMapper
 from app.data.ingestors.rate_limiter import LeakyBucketRateLimiter
+from app.data.metadata.field_units import format_payload_values
 from app.core.utils.formatters import StockCodeStandardizer
 from app.core.utils.date_utils import normalize_compact_date
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
-
-
-class TushareRateLimiter(LeakyBucketRateLimiter):
-    """
-    Tushare Pro API 限流器，基于令牌桶算法。
-
-    继承自 LeakyBucketRateLimiter，扩展支持根据积分等级自动配置限流速率。
-
-    根据用户积分等级控制每分钟 API 调用频率：
-    - 120分：50次/分钟
-    - 2000分：200次/分钟
-    - 5000分及以上：500次/分钟
-
-    官方文档：https://tushare.pro/document/1?doc_id=290
-    """
-
-    # 积分等级对应的每分钟调用次数限制
-    RATE_LIMITS: Dict[int, int] = {
-        120: 50,
-        2000: 200,
-        5000: 500,
-        10000: 500,
-        15000: 500,
-    }
-
-    def __init__(self, credits: int = 5000):
-        """
-        初始化限流器。
-
-        Args:
-            credits: Tushare 用户积分等级，默认 5000。
-        """
-        self.credits = credits
-        max_calls_per_minute = self._get_rate_limit(credits)
-
-        # 调用基类初始化
-        super().__init__(max_calls_per_minute=max_calls_per_minute)
-
-        # 令牌桶算法：初始满令牌（与漏桶不同）
-        self.tokens = float(self.max_calls_per_minute)
-
-        logger.info(
-            "Tushare rate limiter initialized (Token Bucket)",
-            extra={
-                "credits": credits,
-                "max_calls_per_minute": self.max_calls_per_minute,
-            }
-        )
-
-    def _get_rate_limit(self, credits: int) -> int:
-        """
-        根据积分等级获取每分钟调用次数限制。
-
-        Args:
-            credits: 用户积分。
-
-        Returns:
-            每分钟最大调用次数。
-        """
-        # 从高到低查找匹配的积分等级
-        for threshold in sorted(self.RATE_LIMITS.keys(), reverse=True):
-            if credits >= threshold:
-                return self.RATE_LIMITS[threshold]
-        # 低于最低等级，返回最低限制
-        return self.RATE_LIMITS[120]
-
-    async def acquire(self, timeout: Optional[float] = None) -> bool:
-        """
-        获取一个令牌（异步阻塞直到有令牌可用）。
-
-        令牌桶算法：令牌上限为 max_calls_per_minute（允许突发）。
-
-        Args:
-            timeout: 超时时间（秒），None 表示无限等待。
-
-        Returns:
-            获取成功返回 True；超时返回 False。
-        """
-        start_time = time.monotonic()
-
-        while True:
-            async with self.lock:
-                now = time.monotonic()
-                elapsed = now - self.last_update
-
-                # 补充令牌（按每分钟补充速率）
-                tokens_to_add = elapsed * (self.max_calls_per_minute / 60.0)
-                # 令牌桶算法：令牌上限为 max_calls_per_minute（允许突发）
-                self.tokens = min(self.max_calls_per_minute, self.tokens + tokens_to_add)
-                self.last_update = now
-
-                # 如果有令牌，立即消耗并返回
-                if self.tokens >= 1.0:
-                    self.tokens -= 1.0
-                    # 返回字典格式
-
-                    return {
-
-                        "success": True,
-
-                        "data": df.to_dict("records"),
-
-                        "count": len(df)
-
-                    }
-
-                # 计算需要等待的时间
-                tokens_needed = 1.0 - self.tokens
-                wait_time = tokens_needed / (self.max_calls_per_minute / 60.0)
-
-            # 检查超时
-            if timeout is not None:
-                elapsed_total = time.monotonic() - start_time
-                if elapsed_total + wait_time > timeout:
-                    return {"success": False, "data": [], "count": 0}
-
-            # 等待令牌补充
-            await asyncio.sleep(wait_time)
 
 
 class TushareIngestor(BaseIngestor):
@@ -140,7 +22,7 @@ class TushareIngestor(BaseIngestor):
     required_settings = ("TUSHARE_TOKEN",)
 
     # 类级别的限流器实例（所有 Tushare 实例共享）
-    _shared_rate_limiter: Optional[TushareRateLimiter] = None
+    _shared_rate_limiter: Optional[LeakyBucketRateLimiter] = None
 
     def __init__(self):
         self.ingestion_service = DataIngestionService()
@@ -150,7 +32,9 @@ class TushareIngestor(BaseIngestor):
 
         # 初始化限流器（单例模式）
         if TushareIngestor._shared_rate_limiter is None:
-            TushareIngestor._shared_rate_limiter = TushareRateLimiter(credits=settings.TUSHARE_CREDITS)
+            TushareIngestor._shared_rate_limiter = LeakyBucketRateLimiter(
+                max_calls_per_minute=settings.TUSHARE_MAX_CALLS_PER_MINUTE
+            )
 
         # 实例级别的限流器引用（Tushare 独立使用）
         self.rate_limiter = TushareIngestor._shared_rate_limiter
@@ -473,7 +357,7 @@ class TushareIngestor(BaseIngestor):
             start_date: Optional[str] = None,
             end_date: Optional[str] = None) -> Optional[dict]:
         """
-        采集单只股票财务指标并写入标准财务指标表。
+        获取单只股票财务指标并返回标准化记录。
 
         官方文档:
             - fina_indicator: https://tushare.pro/document/2?doc_id=79
@@ -484,7 +368,7 @@ class TushareIngestor(BaseIngestor):
             end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时默认今天。
 
         Returns:
-            采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
+            获取成功返回标准化记录；无数据、配置缺失或异常返回空结果。
         """
         try:
             if not self.pro:
@@ -554,6 +438,7 @@ class TushareIngestor(BaseIngestor):
                     if k in ['stock_code', 'announcement_date', 'report_date']:
                         continue
                     standardized_data[k] = v if pd.notnull(v) else None
+                standardized_data = format_payload_values('data.financial_indicator', standardized_data)
 
                 record = {
                     'stock_code': code,
@@ -594,25 +479,10 @@ class TushareIngestor(BaseIngestor):
                     },
                 )
 
-            write_success = await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
-                'fina_indicator', final_df, source=self.source,
-                target_table='financial_indicator'
-            )
-            if not write_success:
-                logger.error("Failed to write financial indicators for %s via Tushare", code)
-                return {"success": False, "data": [], "count": 0}
-            logger.info(f"Successfully synced financial indicators for {code}")
-            # 返回字典格式
-
             return {
-
                 "success": True,
-
-                "data": df.to_dict("records"),
-
-                "count": len(df)
-
+                "data": final_df.to_dict("records"),
+                "count": len(final_df),
             }
         except Exception as e:
             logger.error(f"Failed to ingest tushare financial indicators: {e}")
@@ -2511,7 +2381,7 @@ class TushareIngestor(BaseIngestor):
             start_date: Optional[str] = None,
             end_date: Optional[str] = None) -> Optional[dict]:
         """
-        采集单只股票利润表并写入标准利润表。
+        获取单只股票利润表并返回标准化记录。
 
         官方文档:
             - income: https://tushare.pro/document/2?doc_id=33
@@ -2522,7 +2392,7 @@ class TushareIngestor(BaseIngestor):
             end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD；为空时默认今天。
 
         Returns:
-            采集并写入成功返回 True；无数据、参数缺失、配置缺失或异常返回 False。
+            获取成功返回标准化记录；无数据、参数缺失、配置缺失或异常返回空结果。
         """
         try:
             if not self.pro:
@@ -2597,6 +2467,10 @@ class TushareIngestor(BaseIngestor):
                         standardized_data[key] = None
                     else:
                         standardized_data[key] = value
+                standardized_data = format_payload_values(
+                    'data.stock_income_statement',
+                    standardized_data,
+                )
 
                 if not standardized_data:
                     continue
@@ -2624,26 +2498,10 @@ class TushareIngestor(BaseIngestor):
                 keep='first',
             )
 
-            write_success = await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
-                'income', final_df, source=self.source,
-                target_table='stock_income_statement'
-            )
-            if not write_success:
-                logger.error("Failed to write income statement records for %s via Tushare", code)
-                return {"success": False, "data": [], "count": 0}
-
-            logger.info("Successfully synced income statement for %s via Tushare", code)
-            # 返回字典格式
-
             return {
-
                 "success": True,
-
-                "data": df.to_dict("records"),
-
-                "count": len(df)
-
+                "data": final_df.to_dict("records"),
+                "count": len(final_df),
             }
 
         except Exception as e:
@@ -2656,7 +2514,7 @@ class TushareIngestor(BaseIngestor):
             start_date: str,
             end_date: str) -> Optional[dict]:
         """
-        采集单只股票资产负债表并写入标准资产负债表。
+        获取单只股票资产负债表并返回标准化记录。
 
         官方文档:
             - balancesheet: https://tushare.pro/document/2?doc_id=36
@@ -2667,7 +2525,7 @@ class TushareIngestor(BaseIngestor):
             end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD。
 
         Returns:
-            采集并写入成功返回 True；无数据、参数缺失、配置缺失或异常返回 False。
+            获取成功返回标准化记录；无数据、参数缺失、配置缺失或异常返回空结果。
         """
         try:
             if not self.pro:
@@ -2749,6 +2607,10 @@ class TushareIngestor(BaseIngestor):
                         standardized_data[key] = None
                     else:
                         standardized_data[key] = value
+                standardized_data = format_payload_values(
+                    'data.stock_balance_sheet',
+                    standardized_data,
+                )
 
                 if not standardized_data:
                     continue
@@ -2776,26 +2638,10 @@ class TushareIngestor(BaseIngestor):
                 keep='first',
             )
 
-            write_success = await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
-                'balancesheet', final_df, source=self.source,
-                target_table='stock_balance_sheet'
-            )
-            if not write_success:
-                logger.error("Failed to write balance sheet records for %s via Tushare", code)
-                return {"success": False, "data": [], "count": 0}
-
-            logger.info("Successfully synced balance sheet for %s via Tushare", code)
-            # 返回字典格式
-
             return {
-
                 "success": True,
-
-                "data": df.to_dict("records"),
-
-                "count": len(df)
-
+                "data": final_df.to_dict("records"),
+                "count": len(final_df),
             }
 
         except Exception as e:
@@ -2808,7 +2654,7 @@ class TushareIngestor(BaseIngestor):
             start_date: str,
             end_date: str) -> Optional[dict]:
         """
-        采集单只股票现金流量表并写入标准现金流量表。
+        获取单只股票现金流量表并返回标准化记录。
 
         官方文档:
             - cashflow: https://tushare.pro/document/2?doc_id=44
@@ -2819,7 +2665,7 @@ class TushareIngestor(BaseIngestor):
             end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD。
 
         Returns:
-            采集并写入成功返回 True；无数据、参数缺失、配置缺失或异常返回 False。
+            获取成功返回标准化记录；无数据、参数缺失、配置缺失或异常返回空结果。
         """
         try:
             if not self.pro:
@@ -2901,6 +2747,10 @@ class TushareIngestor(BaseIngestor):
                         standardized_data[key] = None
                     else:
                         standardized_data[key] = value
+                standardized_data = format_payload_values(
+                    'data.stock_cashflow_statement',
+                    standardized_data,
+                )
 
                 if not standardized_data:
                     continue
@@ -2928,26 +2778,10 @@ class TushareIngestor(BaseIngestor):
                 keep='first',
             )
 
-            write_success = await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
-                'cashflow', final_df, source=self.source,
-                target_table='stock_cashflow_statement'
-            )
-            if not write_success:
-                logger.error("Failed to write cashflow statement records for %s via Tushare", code)
-                return {"success": False, "data": [], "count": 0}
-
-            logger.info("Successfully synced cashflow statement for %s via Tushare", code)
-            # 返回字典格式
-
             return {
-
                 "success": True,
-
-                "data": df.to_dict("records"),
-
-                "count": len(df)
-
+                "data": final_df.to_dict("records"),
+                "count": len(final_df),
             }
 
         except Exception as e:

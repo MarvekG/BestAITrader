@@ -62,16 +62,9 @@ export const DataManagerPage: React.FC = () => {
 
     const [dragonTigerDateRange, setDragonTigerDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([dayjs().subtract(1, 'day'), dayjs().subtract(1, 'day')]);
     const [syncDateRange, setSyncDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([dayjs().subtract(1, 'week'), dayjs()]);
-    const [isFinancialReportSyncModalVisible, setIsFinancialReportSyncModalVisible] = useState(false);
-    const [financialReportSyncType, setFinancialReportSyncType] = useState<'financial' | 'income_statement' | 'balance_sheet' | 'cashflow_statement' | null>(null);
-    const [financialReportDateRange, setFinancialReportDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([dayjs().subtract(2, 'year'), dayjs()]);
     const [basicSyncing, setBasicSyncing] = useState(false);
     const basicSyncTaskIdRef = React.useRef<string | null>(null);
     const [indicatorsSyncing, setIndicatorsSyncing] = useState(false);
-    const [financialSyncing, setFinancialSyncing] = useState(false);
-    const [incomeStatementSyncing, setIncomeStatementSyncing] = useState(false);
-    const [balanceSheetSyncing, setBalanceSheetSyncing] = useState(false);
-    const [cashflowStatementSyncing, setCashflowStatementSyncing] = useState(false);
     const [valuationSyncing, setValuationSyncing] = useState(false);
     const [blockTradeSyncing, setBlockTradeSyncing] = useState(false);
     const [blockTradeDateRange, setBlockTradeDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([dayjs().subtract(3, 'day'), dayjs()]);
@@ -265,10 +258,6 @@ export const DataManagerPage: React.FC = () => {
             'realtime': 'stock_realtime_market', // Based on backend
             'valuation': 'stock_valuation_history',
             'industry': 'industry_data', // Hypothesized
-            'financial': 'financial_indicator',
-            'income_statement': 'stock_income_statement',
-            'balance_sheet': 'stock_balance_sheet',
-            'cashflow_statement': 'stock_cashflow_statement',
             'northbound': 'northbound_data',
             'dragontiger': 'dragon_tiger_data',
             'stock_interactive_qa': 'stock_interactive_qa',
@@ -321,8 +310,6 @@ export const DataManagerPage: React.FC = () => {
                 });
             } else if (tab === 'stock_interactive_qa') {
                 res = await marketApi.getDbData(tab, { stock_code: code, skip, limit: size, sort_by: 'answer_time', order: 'desc' });
-            } else if (tab === 'income_statement' || tab === 'balance_sheet' || tab === 'cashflow_statement') {
-                res = await marketApi.getDbData(tab, { stock_code: code, skip, limit: size, sort_by: 'report_date', order: 'desc' });
             } else {
                 const actualTab = tab;
 
@@ -612,92 +599,6 @@ export const DataManagerPage: React.FC = () => {
             message.error(getApiErrorMessage(error, 'Interactive QA sync failed'));
         } finally {
             setInteractiveQASyncing(false);
-        }
-    };
-
-    const handleFinancialSync = async () => {
-        if (!stockCode) {
-            message.warning(t('common.please_select_stock'));
-            return;
-        }
-        setFinancialReportSyncType('financial');
-        setFinancialReportDateRange([dayjs().subtract(2, 'year'), dayjs()]);
-        setIsFinancialReportSyncModalVisible(true);
-    };
-
-    const handleIncomeStatementSync = async () => {
-        if (!stockCode) {
-            message.warning(t('common.please_select_stock'));
-            return;
-        }
-        setFinancialReportSyncType('income_statement');
-        setFinancialReportDateRange([dayjs().subtract(2, 'year'), dayjs()]);
-        setIsFinancialReportSyncModalVisible(true);
-    };
-
-    const handleBalanceSheetSync = async () => {
-        if (!stockCode) {
-            message.warning(t('common.please_select_stock'));
-            return;
-        }
-        setFinancialReportSyncType('balance_sheet');
-        setFinancialReportDateRange([dayjs().subtract(2, 'year'), dayjs()]);
-        setIsFinancialReportSyncModalVisible(true);
-    };
-
-    const handleCashflowStatementSync = async () => {
-        if (!stockCode) {
-            message.warning(t('common.please_select_stock'));
-            return;
-        }
-        setFinancialReportSyncType('cashflow_statement');
-        setFinancialReportDateRange([dayjs().subtract(2, 'year'), dayjs()]);
-        setIsFinancialReportSyncModalVisible(true);
-    };
-
-    const handleFinancialReportSyncConfirm = async () => {
-        if (!stockCode || !financialReportSyncType) {
-            message.warning(t('common.please_select_stock'));
-            return;
-        }
-
-        const startDate = financialReportDateRange?.[0]?.format('YYYYMMDD');
-        const endDate = financialReportDateRange?.[1]?.format('YYYYMMDD');
-        if (!startDate || !endDate) {
-            message.warning(t('common.please_select_date_range'));
-            return;
-        }
-
-        const setSyncingState = financialReportSyncType === 'financial'
-            ? setFinancialSyncing
-            : financialReportSyncType === 'income_statement'
-                ? setIncomeStatementSyncing
-                : financialReportSyncType === 'balance_sheet'
-                    ? setBalanceSheetSyncing
-                    : setCashflowStatementSyncing;
-
-        setSyncingState(true);
-        try {
-            const res = financialReportSyncType === 'financial'
-                ? await marketApi.syncFinancialData(stockCode, startDate, endDate)
-                : financialReportSyncType === 'income_statement'
-                    ? await marketApi.syncIncomeStatementData(stockCode, startDate, endDate)
-                    : financialReportSyncType === 'balance_sheet'
-                        ? await marketApi.syncBalanceSheetData(stockCode, startDate, endDate)
-                        : await marketApi.syncCashflowStatementData(stockCode, startDate, endDate);
-            message.success(res.message);
-            setIsFinancialReportSyncModalVisible(false);
-        } catch (error) {
-            const fallback = financialReportSyncType === 'financial'
-                ? 'Financial sync failed'
-                : financialReportSyncType === 'income_statement'
-                    ? 'Income statement sync failed'
-                    : financialReportSyncType === 'balance_sheet'
-                        ? 'Balance sheet sync failed'
-                        : 'Cashflow statement sync failed';
-            message.error(getApiErrorMessage(error, fallback));
-        } finally {
-            setSyncingState(false);
         }
     };
 
@@ -1406,46 +1307,6 @@ export const DataManagerPage: React.FC = () => {
                                 </Button>
                             </Space>
                         )}
-                        {activeTab === 'financial' && (
-                            <Button
-                                type="primary"
-                                icon={<SyncOutlined spin={financialSyncing} />}
-                                onClick={handleFinancialSync}
-                                loading={financialSyncing}
-                            >
-                                {stockCode ? `${t('market.data_manager.sync_financial')} [${stockCode}]` : t('market.data_manager.sync_financial')}
-                            </Button>
-                        )}
-                        {activeTab === 'income_statement' && (
-                            <Button
-                                type="primary"
-                                icon={<SyncOutlined spin={incomeStatementSyncing} />}
-                                onClick={handleIncomeStatementSync}
-                                loading={incomeStatementSyncing}
-                            >
-                                {stockCode ? `${t('market.data_manager.sync_income_statement')} [${stockCode}]` : t('market.data_manager.sync_income_statement')}
-                            </Button>
-                        )}
-                        {activeTab === 'balance_sheet' && (
-                            <Button
-                                type="primary"
-                                icon={<SyncOutlined spin={balanceSheetSyncing} />}
-                                onClick={handleBalanceSheetSync}
-                                loading={balanceSheetSyncing}
-                            >
-                                {stockCode ? `${t('market.data_manager.sync_balance_sheet')} [${stockCode}]` : t('market.data_manager.sync_balance_sheet')}
-                            </Button>
-                        )}
-                        {activeTab === 'cashflow_statement' && (
-                            <Button
-                                type="primary"
-                                icon={<SyncOutlined spin={cashflowStatementSyncing} />}
-                                onClick={handleCashflowStatementSync}
-                                loading={cashflowStatementSyncing}
-                            >
-                                {stockCode ? `${t('market.data_manager.sync_cashflow_statement')} [${stockCode}]` : t('market.data_manager.sync_cashflow_statement')}
-                            </Button>
-                        )}
                         {activeTab === 'valuation' && (
                             <Button
                                 type="primary"
@@ -1789,22 +1650,6 @@ export const DataManagerPage: React.FC = () => {
                             },
 
                             {
-                                key: 'financial',
-                                label: <span><DollarOutlined />{t('market.data_manager.financial_indicator')}</span>,
-                            },
-                            {
-                                key: 'income_statement',
-                                label: <span><DollarOutlined />{t('market.data_manager.income_statement')}</span>,
-                            },
-                            {
-                                key: 'balance_sheet',
-                                label: <span><DollarOutlined />{t('market.data_manager.balance_sheet')}</span>,
-                            },
-                            {
-                                key: 'cashflow_statement',
-                                label: <span><DollarOutlined />{t('market.data_manager.cashflow_statement')}</span>,
-                            },
-                            {
                                 key: 'realtime',
                                 label: <span><SyncOutlined />{t('market.data_manager.realtime')}</span>,
                             },
@@ -1890,127 +1735,7 @@ export const DataManagerPage: React.FC = () => {
 
                     <Table
                         dataSource={data.items}
-                        columns={['financial', 'income_statement', 'balance_sheet', 'cashflow_statement'].includes(activeTab) && data.items.length > 0 ? (() => {
-                            const items = data.items;
-                            const allKeys = new Set<string>();
-
-                            items.forEach(item => {
-                                // Collect all flattened and prefixed keys
-                                Object.keys(item).forEach(key => allKeys.add(key));
-                            });
-
-                            const excludeSuffixes = ['.id', '.created_at', '.updated_at', '.data_source', '.data'];
-                            const excludeKeysExact = [
-                                'financial_indicator.stock_code',
-                                'financial_indicator.report_date',
-                                'financial_indicator.report_type',
-                                'financial_indicator.ts_code',
-                                'financial_indicator.announcement_date',
-                                'financial_indicator.update_date',
-                                'stock_income_statement.stock_code',
-                                'stock_income_statement.report_date',
-                                'stock_income_statement.announcement_date',
-                                'stock_income_statement.report_type',
-                                'stock_income_statement.currency',
-                                'stock_income_statement.is_audit',
-                                'stock_income_statement.update_date',
-                                'stock_balance_sheet.stock_code',
-                                'stock_balance_sheet.report_date',
-                                'stock_balance_sheet.announcement_date',
-                                'stock_balance_sheet.report_type',
-                                'stock_balance_sheet.currency',
-                                'stock_balance_sheet.is_audit',
-                                'stock_balance_sheet.update_date',
-                                'stock_cashflow_statement.stock_code',
-                                'stock_cashflow_statement.report_date',
-                                'stock_cashflow_statement.announcement_date',
-                                'stock_cashflow_statement.report_type',
-                                'stock_cashflow_statement.currency',
-                                'stock_cashflow_statement.is_audit',
-                                'stock_cashflow_statement.update_date'
-                            ];
-
-                            // Dynamic filter
-                            const dynamicKeys = Array.from(allKeys).filter(key => {
-                                if (excludeKeysExact.includes(key)) return false;
-                                for (const suffix of excludeSuffixes) {
-                                    if (key.endsWith(suffix)) return false;
-                                }
-                                return true;
-                            });
-
-                            let basicCols: any[] = [];
-
-                            if (activeTab === 'financial') {
-                                basicCols = [
-                                    { title: t('financial_indicator.report_date'), dataIndex: 'financial_indicator.report_date', key: 'financial_indicator.report_date', fixed: 'left' as const, width: 110, render: (t: string) => t ? dayjs(t).format('YYYY-MM-DD') : '-' },
-                                    { title: t('financial_indicator.announcement_date'), dataIndex: 'financial_indicator.announcement_date', key: 'financial_indicator.announcement_date', width: 110, render: (t: string) => t ? dayjs(t).format('YYYY-MM-DD') : '-' },
-                                    { title: t('financial_indicator.stock_code'), dataIndex: ['financial_indicator.stock_code'], key: 'financial_indicator.stock_code', fixed: 'left' as const, width: 90 },
-                                    { title: t('financial_indicator.update_date'), dataIndex: 'financial_indicator.update_date', key: 'financial_indicator.update_date', width: 110, render: (t: string) => t ? dayjs(t).format('YYYY-MM-DD') : '-' },
-                                ];
-                            } else if (activeTab === 'income_statement') {
-                                basicCols = [
-                                    { title: t('stock_income_statement.report_date'), dataIndex: 'stock_income_statement.report_date', key: 'stock_income_statement.report_date', fixed: 'left' as const, width: 110, render: (t: string) => t ? dayjs(t).format('YYYY-MM-DD') : '-' },
-                                    { title: t('stock_income_statement.announcement_date'), dataIndex: 'stock_income_statement.announcement_date', key: 'stock_income_statement.announcement_date', width: 110, render: (t: string) => t ? dayjs(t).format('YYYY-MM-DD') : '-' },
-                                    { title: t('stock_income_statement.stock_code'), dataIndex: ['stock_income_statement.stock_code'], key: 'stock_income_statement.stock_code', fixed: 'left' as const, width: 90 },
-                                    { title: t('stock_income_statement.report_type'), dataIndex: 'stock_income_statement.report_type', key: 'stock_income_statement.report_type', width: 120 },
-                                    { title: t('stock_income_statement.currency'), dataIndex: 'stock_income_statement.currency', key: 'stock_income_statement.currency', width: 90 },
-                                    { title: t('stock_income_statement.is_audit'), dataIndex: 'stock_income_statement.is_audit', key: 'stock_income_statement.is_audit', width: 90 },
-                                    { title: t('stock_income_statement.update_date'), dataIndex: 'stock_income_statement.update_date', key: 'stock_income_statement.update_date', width: 110, render: (t: string) => t ? dayjs(t).format('YYYY-MM-DD') : '-' },
-                                ];
-                            } else if (activeTab === 'balance_sheet') {
-                                basicCols = [
-                                    { title: t('stock_balance_sheet.report_date'), dataIndex: 'stock_balance_sheet.report_date', key: 'stock_balance_sheet.report_date', fixed: 'left' as const, width: 110, render: (t: string) => t ? dayjs(t).format('YYYY-MM-DD') : '-' },
-                                    { title: t('stock_balance_sheet.announcement_date'), dataIndex: 'stock_balance_sheet.announcement_date', key: 'stock_balance_sheet.announcement_date', width: 110, render: (t: string) => t ? dayjs(t).format('YYYY-MM-DD') : '-' },
-                                    { title: t('stock_balance_sheet.stock_code'), dataIndex: ['stock_balance_sheet.stock_code'], key: 'stock_balance_sheet.stock_code', fixed: 'left' as const, width: 90 },
-                                    { title: t('stock_balance_sheet.report_type'), dataIndex: 'stock_balance_sheet.report_type', key: 'stock_balance_sheet.report_type', width: 120 },
-                                    { title: t('stock_balance_sheet.currency'), dataIndex: 'stock_balance_sheet.currency', key: 'stock_balance_sheet.currency', width: 90 },
-                                    { title: t('stock_balance_sheet.is_audit'), dataIndex: 'stock_balance_sheet.is_audit', key: 'stock_balance_sheet.is_audit', width: 90 },
-                                    { title: t('stock_balance_sheet.update_date'), dataIndex: 'stock_balance_sheet.update_date', key: 'stock_balance_sheet.update_date', width: 110, render: (t: string) => t ? dayjs(t).format('YYYY-MM-DD') : '-' },
-                                ];
-                            } else if (activeTab === 'cashflow_statement') {
-                                basicCols = [
-                                    { title: t('stock_cashflow_statement.report_date'), dataIndex: 'stock_cashflow_statement.report_date', key: 'stock_cashflow_statement.report_date', fixed: 'left' as const, width: 110, render: (t: string) => t ? dayjs(t).format('YYYY-MM-DD') : '-' },
-                                    { title: t('stock_cashflow_statement.announcement_date'), dataIndex: 'stock_cashflow_statement.announcement_date', key: 'stock_cashflow_statement.announcement_date', width: 110, render: (t: string) => t ? dayjs(t).format('YYYY-MM-DD') : '-' },
-                                    { title: t('stock_cashflow_statement.stock_code'), dataIndex: ['stock_cashflow_statement.stock_code'], key: 'stock_cashflow_statement.stock_code', fixed: 'left' as const, width: 90 },
-                                    { title: t('stock_cashflow_statement.report_type'), dataIndex: 'stock_cashflow_statement.report_type', key: 'stock_cashflow_statement.report_type', width: 120 },
-                                    { title: t('stock_cashflow_statement.currency'), dataIndex: 'stock_cashflow_statement.currency', key: 'stock_cashflow_statement.currency', width: 90 },
-                                    { title: t('stock_cashflow_statement.is_audit'), dataIndex: 'stock_cashflow_statement.is_audit', key: 'stock_cashflow_statement.is_audit', width: 90 },
-                                    { title: t('stock_cashflow_statement.update_date'), dataIndex: 'stock_cashflow_statement.update_date', key: 'stock_cashflow_statement.update_date', width: 110, render: (t: string) => t ? dayjs(t).format('YYYY-MM-DD') : '-' },
-                                ];
-                            }
-
-                            // Generic Render for values
-                            const valueRender = (v: any) => {
-                                if (typeof v === 'number') {
-                                    if (Math.abs(v) > 100000000) return formatNumber(v);
-                                    // if (Math.abs(v) > 10000) return formatNumber(v);
-                                    return v.toFixed(2);
-                                }
-                                return v ?? '-';
-                            };
-
-                            const dynamicCols = dynamicKeys.map(key => ({
-                                title: (() => {
-                                    const suffix = key.split('.').pop() || key;
-                                    if (activeTab === 'financial' || activeTab === 'income_statement' || activeTab === 'balance_sheet' || activeTab === 'cashflow_statement') {
-                                        return suffix;
-                                    }
-                                    const translated = t(key);
-                                    if (translated === key) {
-                                        return suffix;
-                                    }
-                                    return translated;
-                                })(),
-                                dataIndex: [key],
-                                key: key,
-                                width: 110,
-                                render: valueRender,
-                                sorter: (a: any, b: any) => (a[key] || 0) - (b[key] || 0),
-                            }));
-
-                            return [...basicCols, ...dynamicCols];
-                        })() : (columnsMap[activeTab] || [])}
+                        columns={columnsMap[activeTab] || []}
                         rowKey={(record) => record['stock_interactive_qa.id'] || record['stock_zhaban_pool.id'] || record['stock_limit_up_pool.id'] || record['stock_limit_down_pool.id'] || record['stock_basic.stock_code'] || record['kline_data.date'] || record.id || `${record['stock_zhaban_pool.stock_code'] || record.stock_code}-${record['stock_zhaban_pool.update_date'] || record.date || record.report_date || record.trade_date || record.publish_date || Math.random()}`}
                         loading={loading}
                         pagination={{
@@ -2023,7 +1748,7 @@ export const DataManagerPage: React.FC = () => {
                         }}
                         size="middle"
                         scroll={{
-                            x: ['financial', 'income_statement', 'balance_sheet', 'cashflow_statement', 'stock_interactive_qa', 'stock_zhaban_pool'].includes(activeTab) && data.items.length > 0 ?
+                            x: ['stock_interactive_qa', 'stock_zhaban_pool'].includes(activeTab) && data.items.length > 0 ?
                                 'max-content' :
                                 1200
                         }}
@@ -2031,31 +1756,6 @@ export const DataManagerPage: React.FC = () => {
                 </Card>
             </Space >
 
-
-            <Modal
-                title={
-                    financialReportSyncType === 'financial'
-                        ? t('market.data_manager.sync_financial')
-                        : financialReportSyncType === 'income_statement'
-                            ? t('market.data_manager.sync_income_statement')
-                            : financialReportSyncType === 'balance_sheet'
-                                ? t('market.data_manager.sync_balance_sheet')
-                                : t('market.data_manager.sync_cashflow_statement')
-                }
-                open={isFinancialReportSyncModalVisible}
-                onCancel={() => setIsFinancialReportSyncModalVisible(false)}
-                onOk={handleFinancialReportSyncConfirm}
-                okText={t('common.sync')}
-                cancelText={t('common.cancel')}
-                confirmLoading={financialSyncing || incomeStatementSyncing || balanceSheetSyncing || cashflowStatementSyncing}
-            >
-                <Text strong style={{ display: 'block', marginBottom: '8px' }}>{t('market.data_manager.date_range')}</Text>
-                <DatePicker.RangePicker
-                    value={financialReportDateRange}
-                    onChange={(dates) => setFinancialReportDateRange(dates as [dayjs.Dayjs | null, dayjs.Dayjs | null])}
-                    style={{ width: '100%' }}
-                />
-            </Modal>
 
             <Modal
                 title={modalTitle || t('common.view')}
@@ -2300,12 +2000,8 @@ export const DataManagerPage: React.FC = () => {
                                     <Checkbox value="index_daily">{t('market.data_manager.index_daily')}</Checkbox>
                                 </Space>
                             </Card>
-                            <Card size="small" title={t('market.data_manager.financial_indicator')}>
+                            <Card size="small" title={t('market.data_manager.financial_data')}>
                                 <Space direction="vertical">
-                                    <Checkbox value="financial">{t('common.financial_abstract')}</Checkbox>
-                                    <Checkbox value="income_statement">{t('market.data_manager.income_statement')}</Checkbox>
-                                    <Checkbox value="balance_sheet">{t('market.data_manager.balance_sheet')}</Checkbox>
-                                    <Checkbox value="cashflow_statement">{t('market.data_manager.cashflow_statement')}</Checkbox>
                                     <Checkbox value="valuation">{t('market.valuation_metrics')}</Checkbox>
                                     <Checkbox value="stock_earnings_forecast">{t('market.data_manager.stock_earnings_forecast')}</Checkbox>
                                 </Space>

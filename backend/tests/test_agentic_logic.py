@@ -1196,7 +1196,12 @@ async def test_query_stock_data_returns_structured_column_error_without_tracebac
 
 @pytest.mark.asyncio
 async def test_query_stock_data_jsonb_report_rejects_nested_metric_columns():
-    from app.ai.agentic.tools import query_stock_data
+    from app.ai.agentic.tools import query_stock_data, SUPPORTED_STOCK_QUERY_TYPES
+
+    assert "financial" not in SUPPORTED_STOCK_QUERY_TYPES
+    assert "income_statement" not in SUPPORTED_STOCK_QUERY_TYPES
+    assert "balance_sheet" not in SUPPORTED_STOCK_QUERY_TYPES
+    assert "cashflow_statement" not in SUPPORTED_STOCK_QUERY_TYPES
 
     res = await query_stock_data.ainvoke({
         "stock_code": "000001.SZ",
@@ -1209,12 +1214,7 @@ async def test_query_stock_data_jsonb_report_rejects_nested_metric_columns():
         },
     })
 
-    error_payload = res["results"]["financial"]
-    assert error_payload["error"] == "Unsupported columns"
-    assert error_payload["model_name"] == "FinancialIndicator"
-    assert error_payload["unsupported_columns"] == ["eps", "roe"]
-    assert "data" in error_payload["available_columns"]
-    assert "For JSONB report data, request the top-level data column" in error_payload["hint"]
+    assert res["results"]["financial"]["error"] == "Unsupported data type: financial"
 
 
 def test_query_market_data_passes_columns_to_generic_db_data():
@@ -1295,67 +1295,18 @@ def test_query_market_data_passes_columns_to_custom_queries():
 @pytest.mark.asyncio
 async def test_query_stock_data_localizes_financial_report_data_keys():
     from app.ai.agentic.tools import query_stock_data
-    from app.ai.agentic.tooling.stock_tools import StockTools
 
-    side_effect = [
-        [{"stock_code": "000001.SZ", "data": {"eps": 1.23}}],
-        [{"stock_code": "000001.SZ", "data": {"revenue": 100.0}}],
-        [{"stock_code": "000001.SZ", "data": {"total_assets": 300.0}}],
-        [{"stock_code": "000001.SZ", "data": {"n_cashflow_act": 50.0}}],
-    ]
-
-    with patch.object(settings, "SYSTEM_LANGUAGE", "zh"), patch.object(
-        StockTools,
-        "get_generic_db_data",
-        side_effect=side_effect,
-    ) as mock_generic:
-        res = await query_stock_data.ainvoke({
-            "stock_code": "000001.SZ",
-            "data_configs": {
-                "financial": {
-                    "start_time": "2024-01-01 00:00:00",
-                    "end_time": "2024-12-31 23:59:59",
-                },
-                "income_statement": {
-                    "start_time": "2024-01-01 00:00:00",
-                    "end_time": "2024-12-31 23:59:59",
-                },
-                "balance_sheet": {
-                    "start_time": "2024-01-01 00:00:00",
-                    "end_time": "2024-12-31 23:59:59",
-                },
-                "cashflow_statement": {
-                    "start_time": "2024-01-01 00:00:00",
-                    "end_time": "2024-12-31 23:59:59",
-                },
+    res = await query_stock_data.ainvoke({
+        "stock_code": "000001.SZ",
+        "data_configs": {
+            "income_statement": {
+                "start_time": "2024-01-01 00:00:00",
+                "end_time": "2024-12-31 23:59:59",
             },
-        })
+        },
+    })
 
-    assert res["results"]["financial"][0]["data"]["每股收益"] == 1.23
-    assert "eps" not in res["results"]["financial"][0]["data"]
-    assert res["results"]["income_statement"][0]["data"]["营业收入"] == 100.0
-    assert res["results"]["balance_sheet"][0]["data"]["资产总计"] == 300.0
-    assert res["results"]["cashflow_statement"][0]["data"]["经营活动产生的现金流量净额"] == 50.0
-    mock_generic.assert_any_call(
-        "FinancialIndicator", "000001.SZ", 20,
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-12-31 23:59:59",
-    )
-    mock_generic.assert_any_call(
-        "StockIncomeStatement", "000001.SZ", 20,
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-12-31 23:59:59",
-    )
-    mock_generic.assert_any_call(
-        "StockBalanceSheet", "000001.SZ", 20,
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-12-31 23:59:59",
-    )
-    mock_generic.assert_any_call(
-        "StockCashflowStatement", "000001.SZ", 20,
-        start_time="2024-01-01 00:00:00",
-        end_time="2024-12-31 23:59:59",
-    )
+    assert res["results"]["income_statement"]["error"] == "Unsupported data type: income_statement"
 
 
 @pytest.mark.asyncio
@@ -1535,7 +1486,7 @@ async def test_unified_agentic_tools():
             },
         })
         assert result["results"]["status"]["basic_info"] == "exists"
-        assert result["results"]["financial"][0]["roe"] == 12.5
+        assert result["results"]["financial"]["error"] == "Unsupported data type: financial"
 
     with patch.object(StockTools, "get_generic_db_data", return_value=[{"index_code": "000001.SH", "close": 3201.0}]):
         result = query_market_data.invoke({
@@ -1549,14 +1500,9 @@ async def test_unified_agentic_tools():
         assert result[0]["results"][0]["index_code"] == "000001.SH"
         assert result[0]["data_type"] == "index_daily"
 
-    with patch(
-        "app.ai.agentic.tools.ingestor_manager.fetch_and_ingest_financial_indicators",
-        new=AsyncMock(return_value=True),
-    ) as mock_sync:
-        result = await sync_market_data.ainvoke({"task_type": "financial", "target": "000001.SZ"})
-        assert result["success"] is True
-        assert result["resolved_method"] == "fetch_and_ingest_financial_indicators"
-        mock_sync.assert_awaited_once_with(stock_code="000001.SZ")
+    result = await sync_market_data.ainvoke({"task_type": "financial", "target": "000001.SZ"})
+    assert result["success"] is False
+    assert result["error"] == "Unsupported sync task type."
 
     with patch(
         "app.ai.agentic.tools.ingestor_manager.fetch_and_ingest_realtime_market",

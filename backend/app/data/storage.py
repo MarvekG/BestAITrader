@@ -4,7 +4,6 @@ from app.core.database import SessionLocal
 from app.models.data_storage import (
     StockBasic,
     KlineData,
-    FinancialIndicator,
     IndustryData,
     NorthboundData,
     DragonTigerData,
@@ -480,173 +479,6 @@ class DataStorageService:
             logger.error(f"Failed to get dragon tiger data by date {start_date}: {e}")
             return None
 
-    def get_financial_indicators(self, stock_code: str, limit: int = 100) -> Optional[List[Dict[str, Any]]]:
-        """获取财务指标数据"""
-        try:
-            with SessionLocal() as db:
-                data_list = db.query(FinancialIndicator).filter(
-                    FinancialIndicator.stock_code == stock_code
-                ).order_by(FinancialIndicator.report_date.desc()).limit(limit).all()
-
-                result = []
-                for d in data_list:
-                    item = d.data.copy() if d.data else {}
-                    item["report_date"] = d.report_date.strftime("%Y-%m-%d")
-                    result.append(item)
-                return result
-        except Exception as e:
-            logger.error(f"Failed to get financial indicators for {stock_code}: {e}")
-            return None
-
-    def get_stock_realtime_market(self, stock_code: str) -> Optional[Dict[str, Any]]:
-        """
-        从实时行情表获取最近一条有效股票行情。
-
-        Args:
-            stock_code: 标准化股票代码。
-
-        Returns:
-            行情字段字典；没有有效行情或查询失败时返回 None。
-        """
-        try:
-            with SessionLocal() as db:
-                d = db.query(StockRealtimeMarket)\
-                      .filter(StockRealtimeMarket.stock_code == stock_code)\
-                      .filter(StockRealtimeMarket.current_price.isnot(None), StockRealtimeMarket.current_price > 0)\
-                      .order_by(StockRealtimeMarket.timestamp.desc())\
-                      .first()
-                if d:
-                    return {
-                        "stock_code": d.stock_code,
-                        "latest_price": d.current_price,
-                        "change_percent": d.change_percent,
-                        "volume": d.volume,
-                        "turnover": d.turnover,
-                        "turnover_rate": d.turnover_rate,
-                        "pe_dynamic": d.pe_dynamic,
-                        "pb": d.pb_ratio,
-                        "total_market_value": d.total_market_cap,
-                        "circulating_market_value": d.circulating_market_cap,
-                        "update_time": d.timestamp.strftime("%Y-%m-%d %H:%M:%S") if d.timestamp else None,
-                        "high": d.high,
-                        "low": d.low,
-                        "open": d.open,
-                        "change_amount": d.change_amount,
-                        "yesterday_close": d.prev_close
-                    }
-                return None
-        except Exception as e:
-            logger.error(f"Failed to get realtime market data for {stock_code}: {e}")
-            return None
-
-    def get_all_stock_realtime_market(self) -> List[Dict[str, Any]]:
-        """获取所有股票的实时行情数据"""
-        try:
-            with SessionLocal() as db:
-                records = db.query(StockRealtimeMarket).all()
-                return [{
-                    "stock_code": d.stock_code,
-                    "latest_price": d.current_price,
-                    "current_price": d.current_price,  # 保持兼容性
-                    "change_percent": d.change_percent,
-                    "volume": d.volume,
-                    "turnover": d.turnover,
-                    "turnover_rate": d.turnover_rate,
-                    "pe_dynamic": d.pe_dynamic,
-                    "pb": d.pb_ratio,
-                    "total_market_value": d.total_market_cap,
-                    "circulating_market_value": d.circulating_market_cap,
-                    "update_time": d.timestamp.strftime("%Y-%m-%d %H:%M:%S") if d.timestamp else None,
-                    "high": d.high,
-                    "low": d.low,
-                    "open": d.open,
-                    "change_amount": d.change_amount,
-                    "yesterday_close": d.prev_close
-                } for d in records]
-        except Exception as e:
-            logger.error(f"Failed to get all realtime market data: {e}")
-            return []
-
-    def get_valuation_latest(self, stock_code: str) -> Optional[Dict[str, Any]]:
-        """获取最新的估值历史数据"""
-        try:
-            with SessionLocal() as db:
-                d = db.query(StockValuationHistory).filter(
-                    StockValuationHistory.stock_code == stock_code
-                ).order_by(StockValuationHistory.data_date.desc()).first()
-                if d:
-                    return {
-                        "date": d.data_date.strftime("%Y-%m-%d"),
-                        "pe_ttm": d.pe_ttm,
-                        "pe_static": d.pe_static,
-                        "pb": d.pb,
-                        "peg": d.peg,
-                        "ps": getattr(
-                            d, 'ps_ttm', getattr(d, 'ps', 0.0)),
-                        "pcf": getattr(d, 'pcf', 0.0),
-                        "total_market_value": d.total_market_value,
-                        "circulating_market_value": d.circulating_market_value
-                    }
-                return None
-        except Exception as e:
-            logger.error(
-                f"Failed to get latest valuation data for {stock_code}: {e}")
-            return None
-
-    def get_valuation_history(
-            self, stock_code: str, limit: int = 100
-    ) -> Optional[List[Dict[str, Any]]]:
-        """获取估值历史数据"""
-        try:
-            with SessionLocal() as db:
-                data_list = db.query(StockValuationHistory).filter(
-                    StockValuationHistory.stock_code == stock_code
-                ).order_by(StockValuationHistory.data_date.desc()).limit(limit).all()
-
-                return [{
-                    "stock_code": d.stock_code,
-                    "data_date": d.data_date.strftime("%Y-%m-%d"),
-                    "close_price": d.close_price,
-                    "change_percent": d.change_percent,
-                    "total_market_value": d.total_market_value,
-                    "circulating_market_value": d.circulating_market_value,
-                    "pe_ttm": d.pe_ttm,
-                    "pe_static": d.pe_static,
-                    "pb": d.pb,
-                    "peg": d.peg,
-                    "ps_ttm": d.ps_ttm,
-                    "ps_static": d.ps_static,
-                    "dividend_yield": d.dividend_yield,
-                    "data_source": d.data_source
-                } for d in data_list]
-        except Exception as e:
-            logger.error(f"Failed to get valuation history for {stock_code}: {e}")
-            return None
-
-    def get_industry_data_latest(self, industry_name: str) -> Optional[Dict[str, Any]]:
-        """获取最新行业数据"""
-        try:
-            with SessionLocal() as db:
-                d = db.query(IndustryData).filter(
-                    IndustryData.board_name == industry_name
-                ).order_by(IndustryData.timestamp.desc()).first()
-                if d:
-                    # Construct dictionary from parameters
-                    return {
-                        "board_code": d.board_code,
-                        "board_name": d.board_name,
-                        "rank": d.rank,
-                        "latest_price": d.latest_price,
-                        "change_percent": d.change_percent,
-                        "total_market_cap": d.total_market_cap,
-                        "turnover_rate": d.turnover_rate,
-                        "timestamp": d.timestamp.strftime("%Y-%m-%d %H:%M:%S") if d.timestamp else None
-                    }
-                return None
-        except Exception as e:
-            logger.error(f"Failed to get latest industry data for {industry_name}: {e}")
-            return None
-
     def get_stock_data_from_db(self, stock_code: str) -> Optional[Dict[str, Any]]:
         """从数据库获取完整的股票数据"""
         try:
@@ -664,18 +496,15 @@ class DataStorageService:
             klines = self.get_latest_kline_data(stock_code, limit=180)
             kline_dict = {"data": klines} if klines else None
 
-            # 4. 获取财务指标
-            financials = self.get_financial_indicators(stock_code, limit=200)
-
-            # 5. 获取北向资金
+            # 4. 获取北向资金
             northbound = self.get_northbound_data(stock_code, limit=1)
             nb_data = northbound[0] if northbound else {}
 
-            # 6. 获取龙虎榜
+            # 5. 获取龙虎榜
             dragon_tiger = self.get_dragon_tiger_data(stock_code, limit=1)
             dt_data = dragon_tiger[0] if dragon_tiger else {}
 
-            # 7. 获取行业数据
+            # 6. 获取行业数据
             industry_name = basic.get("industry", "未知")
             industry_data = self.get_industry_data_latest(industry_name)
 
@@ -704,7 +533,6 @@ class DataStorageService:
                 },
                 "technical_indicators": {},  # 由 Collector 计算
                 "fundamentals": {},  # 由 Collector 构建
-                "financial_indicators": financials or [],
                 "industry": {
                     "name": industry_name,
                     "pe_avg": industry_data.get("pe_avg", 0)

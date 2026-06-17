@@ -3,7 +3,7 @@ import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -21,9 +21,6 @@ from app.models.data_storage import (
     StockFundHolding,
     StockBasic,
     StockBlockTrade,
-    StockBalanceSheet,
-    StockCashflowStatement,
-    StockIncomeStatement,
     StockMoneyFlow,
     IndustryData,
     StockInsider,
@@ -32,7 +29,6 @@ from app.models.data_storage import (
     StockValuationHistory,
     StockSEO,
     StockTopHolders,
-    FinancialIndicator,
 )
 
 
@@ -77,6 +73,115 @@ class ModelMapSession:
 
     def query(self, model):
         return FakeQuery(self.records_by_model.get(model, []))
+
+
+@pytest.mark.asyncio
+async def test_snapshot_provider_fetches_financial_reports_during_context_build(monkeypatch):
+    """组装快照上下文时实时拉取财务报表数据。
+
+    Args:
+        monkeypatch: pytest 提供的运行期替换工具。
+    """
+    from app.data.ingestors.manager import ingestor_manager
+
+    async def _fetch_financial(*_args):
+        return {
+            "success": True,
+            "data": [{
+                "stock_code": "600519.SH",
+                "report_date": date(2025, 12, 31),
+                "announcement_date": date(2026, 1, 10),
+                "data_source": "fake",
+                "data": {"eps": "1.2345元"},
+            }],
+            "count": 1,
+        }
+
+    async def _fetch_income(*_args):
+        return {
+            "success": True,
+            "data": [{
+                "stock_code": "600519.SH",
+                "report_date": date(2025, 12, 31),
+                "announcement_date": date(2026, 1, 10),
+                "report_type": "合并报表",
+                "data_source": "fake",
+                "data": {"total_revenue": "100亿元", "basic_eps": "1.2346元"},
+            }],
+            "count": 1,
+        }
+
+    async def _fetch_balance(*_args):
+        return {
+            "success": True,
+            "data": [{
+                "stock_code": "600519.SH",
+                "report_date": date(2025, 12, 31),
+                "announcement_date": date(2026, 1, 10),
+                "report_type": "合并报表",
+                "data_source": "fake",
+                "data": {"total_assets": "678.9亿元"},
+            }],
+            "count": 1,
+        }
+
+    async def _fetch_cashflow(*_args):
+        return {
+            "success": True,
+            "data": [{
+                "stock_code": "600519.SH",
+                "report_date": date(2025, 12, 31),
+                "announcement_date": date(2026, 1, 10),
+                "report_type": "合并报表",
+                "data_source": "fake",
+                "data": {"n_cashflow_act": "321亿元"},
+            }],
+            "count": 1,
+        }
+
+    financial_mock = AsyncMock(side_effect=_fetch_financial)
+    income_mock = AsyncMock(side_effect=_fetch_income)
+    balance_mock = AsyncMock(side_effect=_fetch_balance)
+    cashflow_mock = AsyncMock(side_effect=_fetch_cashflow)
+    monkeypatch.setattr(ingestor_manager, "fetch_and_ingest_financial_indicators", financial_mock)
+    monkeypatch.setattr(ingestor_manager, "fetch_and_ingest_income_statement", income_mock)
+    monkeypatch.setattr(ingestor_manager, "fetch_and_ingest_balance_sheet", balance_mock)
+    monkeypatch.setattr(ingestor_manager, "fetch_and_ingest_cashflow_statement", cashflow_mock)
+    monkeypatch.setattr(settings, "SYSTEM_LANGUAGE", "zh")
+
+    class EmptyReader:
+        def __getattr__(self, _name):
+            return lambda *_args, **_kwargs: {}
+
+    class Runtime:
+        stock_code = "600519.SH"
+        readers = SimpleNamespace(
+            financial=FinancialReader(),
+            fundamental=EmptyReader(),
+            capital_flow=EmptyReader(),
+        )
+
+        def db_session(self):
+            class SessionContext:
+                def __enter__(self):
+                    return FakeSession([])
+
+                def __exit__(self, *_args):
+                    return False
+
+            return SessionContext()
+
+    layer = await SnapshotProvider().build(Runtime(), {})
+    statements = layer.payload["financial_statements"]
+
+    assert statements["financial_indicator_latest"]["data"]["每股收益"] == "1.2345元"
+    assert statements["income_statement_latest"]["data"]["营业总收入"] == "100亿元"
+    assert statements["balance_sheet_latest"]["data"]["资产总计"] == "678.9亿元"
+    assert statements["cashflow_statement_latest"]["data"]["经营活动产生的现金流量净额"] == "321亿元"
+    financial_mock.assert_awaited()
+    income_mock.assert_awaited()
+    balance_mock.assert_awaited()
+    cashflow_mock.assert_awaited()
 
 
 def test_format_payload_values_uses_i18n_unit_suffix(monkeypatch):
@@ -397,166 +502,6 @@ class TopHoldersFakeSession:
                 return FakeQuery([holder for holder in self.holders if holder.report_date == latest_date])
         return FakeQuery(self.holders)
 
-
-def test_fundamental_financial_calculation_uses_standard_keys_for_600519():
-    record = SimpleNamespace(
-        report_date=date(2025, 12, 31),
-        announcement_date=date(2026, 1, 15),
-        data={
-            "total_revenue": 1000.0,
-            "total_revenue_yoy": 12.5,
-            "net_profit_yoy": 18.8,
-            "roe": 31.2,
-            "grossprofit_margin": 91.5,
-            "net_profit_margin": 52.4,
-            "debt_to_assets_ratio": 18.6,
-            "eps": 67.8,
-        },
-    )
-
-    builder = FundamentalReader()
-    result = builder.financials(FakeSession([record]), "600519.SH")
-
-    assert result["report_date"] == "2025-12-31"
-    assert result["total_revenue_yoy"] == "12.5%"
-    assert result["net_profit_yoy"] == "18.8%"
-    assert result["roe"] == "31.2%"
-    assert result["gross_margin"] == "91.5%"
-    assert result["net_margin"] == "52.4%"
-    assert result["debt_to_asset"] == "18.6%"
-    assert result["eps"] == 67.8
-
-
-def test_fundamental_financials_returns_none_for_missing_values_instead_of_zero():
-    record = SimpleNamespace(
-        report_date=date(2025, 9, 30),
-        announcement_date=date(2025, 10, 30),
-        data={"unrelated_metric": 1.0},
-    )
-
-    builder = FundamentalReader()
-    result = builder.financials(FakeSession([record]), "688111.SH")
-
-    assert result["total_revenue_yoy"] is None
-    assert result["net_profit_yoy"] is None
-    assert result["roe"] is None
-    assert result["gross_margin"] is None
-    assert result["net_margin"] is None
-    assert result["debt_to_asset"] is None
-    assert result["eps"] is None
-
-
-def test_fundamental_financials_falls_back_to_cogs_ratio_for_gross_margin():
-    record = SimpleNamespace(
-        report_date=date(2025, 12, 31),
-        announcement_date=date(2026, 1, 15),
-        data={
-            "total_revenue": 1000.0,
-            "cogs_ratio": 8.7066,
-        },
-    )
-
-    builder = FundamentalReader()
-    result = builder.financials(FakeSession([record]), "600519.SH")
-
-    assert result["gross_margin"] == "91.29%"
-
-
-def test_fundamental_financials_prefers_grossprofit_margin_for_new_mapping():
-    record = SimpleNamespace(
-        report_date=date(2025, 12, 31),
-        announcement_date=date(2026, 1, 15),
-        data={
-            "gross_margin": 11_779_497_981.0,
-            "grossprofit_margin": 27.4158,
-        },
-    )
-
-    builder = FundamentalReader()
-    result = builder.financials(FakeSession([record]), "000651.SZ")
-
-    assert result["gross_margin"] == "27.42%"
-
-
-def test_fundamental_financials_falls_back_to_operating_cost_for_gross_margin():
-    record = SimpleNamespace(
-        report_date=date(2025, 12, 31),
-        announcement_date=date(2026, 1, 15),
-        data={
-            "operating_income": 1000.0,
-            "operating_cost": 320.0,
-        },
-    )
-
-    builder = FundamentalReader()
-    result = builder.financials(FakeSession([record]), "600519.SH")
-
-    assert result["gross_margin"] == "68%"
-
-
-def test_fundamental_financials_keeps_small_percentage_as_reported():
-    record = SimpleNamespace(
-        report_date=date(2026, 3, 31),
-        announcement_date=date(2026, 4, 29),
-        data={"net_profit_dedt_yoy": -0.27, "net_profit_yoy": 3.0096},
-    )
-
-    builder = FundamentalReader()
-    result = builder.source._get_financial_trend(FakeSession([record, record]), "000651.SZ")
-
-    assert result["growth_trend"]["series"]["net_profit_dedt_yoy"][0]["net_profit_dedt_yoy"] == "-0.27%"
-
-
-def test_financial_history_and_dupont_use_standard_keys_for_601988():
-    latest_record = SimpleNamespace(
-        report_date=date(2025, 12, 31),
-        announcement_date=date(2026, 1, 10),
-        data_source="tushare",
-        data={
-            "total_revenue": 2000.0,
-            "net_profit": 500.0,
-            "total_assets": 10000.0,
-            "total_equity": 1200.0,
-            "total_revenue_yoy": 5.6,
-            "net_profit_yoy": 4.2,
-            "grossprofit_margin": 48.3,
-            "roe": 9.7,
-            "net_profit_margin": 25.0,
-            "debt_to_assets_ratio": 88.0,
-            "asset_turnover": 0.2,
-            "equity_multiplier": 8.3,
-            "tr_yoy": 999.0,
-            "np_yoy": 999.0,
-            "n_income": 999.0,
-            "gpm": 999.0,
-            "al_ratio": 999.0,
-        },
-    )
-    prev_record = SimpleNamespace(
-        report_date=date(2025, 9, 30),
-        announcement_date=date(2025, 10, 30),
-        data_source="tushare",
-        data={
-            "total_revenue": 1900.0,
-            "net_profit": 460.0,
-            "total_revenue_yoy": 4.9,
-            "net_profit_yoy": 3.8,
-            "grossprofit_margin": 47.5,
-            "roe": 9.2,
-        },
-    )
-
-    financial_builder = FinancialReader()
-    history = financial_builder.historical_summary(
-        FakeSession([latest_record, prev_record]),
-        "601988.SH",
-    )
-
-    assert history[0]["meta"]["report_date"] == "2025-12-31"
-    assert history[0]["data"]["net_profit"] == 500.0
-    assert history[0]["data"]["total_revenue_yoy"] == 5.6
-    assert history[0]["data"]["net_profit_yoy"] == 4.2
-    assert history[0]["data"]["grossprofit_margin"] == 48.3
 
 def test_top_holders_use_latest_period_only_and_mark_staleness():
     latest_date = date.today() - timedelta(days=220)
@@ -1182,139 +1127,6 @@ def test_margin_analysis_returns_structured_leverage_signal():
     assert "Margin positioning is skewed heavily to the long side" in result["risk_flags"]
 
 
-def test_financial_trend_uses_gross_margin_fallbacks():
-    records = [
-        SimpleNamespace(
-            report_date=date(2025, 12, 31),
-            announcement_date=date(2026, 1, 10),
-            updated_at=date(2026, 1, 10),
-            data={"cogs_ratio": 8.0, "roe": 20.0, "total_revenue_yoy": 18.0, "net_profit_yoy": 20.0, "net_profit_dedt_yoy": 19.0, "debt_to_assets_ratio": 30.0},
-        ),
-        SimpleNamespace(
-            report_date=date(2025, 9, 30),
-            announcement_date=date(2025, 10, 30),
-            updated_at=date(2025, 10, 30),
-            data={"cogs_ratio": 10.0, "roe": 18.0, "total_revenue_yoy": 15.0, "net_profit_yoy": 16.0, "net_profit_dedt_yoy": 15.0, "debt_to_assets_ratio": 32.0},
-        ),
-        SimpleNamespace(
-            report_date=date(2025, 6, 30),
-            announcement_date=date(2025, 8, 30),
-            updated_at=date(2025, 8, 30),
-            data={"operating_income": 1000.0, "operating_cost": 150.0, "roe": 16.0, "total_revenue_yoy": 12.0, "net_profit_yoy": 13.0, "net_profit_dedt_yoy": 12.0, "debt_to_assets_ratio": 34.0},
-        ),
-        SimpleNamespace(
-            report_date=date(2025, 3, 31),
-            announcement_date=date(2025, 4, 30),
-            updated_at=date(2025, 4, 30),
-            data={"gross_margin": 80.0, "roe": 15.0, "total_revenue_yoy": 10.0, "net_profit_yoy": 9.0, "net_profit_dedt_yoy": 8.0, "debt_to_assets_ratio": 36.0},
-        ),
-        SimpleNamespace(
-            report_date=date(2024, 12, 31),
-            announcement_date=date(2025, 1, 30),
-            updated_at=date(2025, 1, 30),
-            data={"gross_margin": 78.0, "roe": 14.0, "total_revenue_yoy": 8.0, "net_profit_yoy": 7.0, "net_profit_dedt_yoy": 7.0, "debt_to_assets_ratio": 38.0},
-        ),
-        SimpleNamespace(
-            report_date=date(2024, 9, 30),
-            announcement_date=date(2024, 10, 30),
-            updated_at=date(2024, 10, 30),
-            data={"gross_margin": 76.0, "roe": 13.0, "total_revenue_yoy": 7.0, "net_profit_yoy": 6.0, "net_profit_dedt_yoy": 6.0, "debt_to_assets_ratio": 40.0},
-        ),
-        SimpleNamespace(
-            report_date=date(2024, 6, 30),
-            announcement_date=date(2024, 8, 30),
-            updated_at=date(2024, 8, 30),
-            data={"gross_margin": 74.0, "roe": 12.0, "total_revenue_yoy": 6.0, "net_profit_yoy": 5.0, "net_profit_dedt_yoy": 5.0, "debt_to_assets_ratio": 42.0},
-        ),
-        SimpleNamespace(
-            report_date=date(2024, 3, 31),
-            announcement_date=date(2024, 4, 30),
-            updated_at=date(2024, 4, 30),
-            data={"gross_margin": 72.0, "roe": 11.0, "total_revenue_yoy": 5.0, "net_profit_yoy": 4.0, "net_profit_dedt_yoy": 4.0, "debt_to_assets_ratio": 44.0},
-        ),
-    ]
-
-    builder = FundamentalReader()
-    result = builder.financial_trend(FakeSession(records), "600519.SH")
-
-    assert result["overview"]["level"] == "Strong"
-    assert result["overview"]["quarters_analyzed"] == 8
-    assert result["overview"]["recent_quarters_used"] == 8
-    assert result["profitability_trend"]["direction"] == "improving"
-    assert result["profitability_trend"]["series"]["gross_margin"][0]["gross_margin"] == "92%"
-    assert result["profitability_trend"]["series"]["gross_margin"][1]["gross_margin"] == "90%"
-    assert result["profitability_trend"]["series"]["gross_margin"][2]["gross_margin"] == "85%"
-    assert result["profitability_trend"]["series"]["gross_margin"][3]["gross_margin"] == "80%"
-    assert result["profitability_trend"]["series"]["gross_margin"][7]["gross_margin"] == "72%"
-    assert result["growth_trend"]["direction"] == "improving"
-    assert result["leverage_trend"]["direction"] == "improving"
-    assert result["recent_quarters"][0]["roe"] == "20%"
-    assert result["recent_quarters"][0]["gross_margin"] == "92%"
-    assert result["recent_quarters"][7]["debt_to_asset"] == "44%"
-
-
-def test_financial_trend_keeps_extreme_growth_rates_and_uses_non_null_latest():
-    records = [
-        SimpleNamespace(
-            report_date=date(2025, 12, 31),
-            announcement_date=date(2026, 1, 10),
-            updated_at=date(2026, 1, 10),
-            data={"roe": 18.0, "gross_margin": 60.0, "total_revenue_yoy": 1500.0, "net_profit_dedt_yoy": 1400.0, "debt_to_assets_ratio": 28.0},
-        ),
-        SimpleNamespace(
-            report_date=date(2025, 9, 30),
-            announcement_date=date(2025, 10, 30),
-            updated_at=date(2025, 10, 30),
-            data={"roe": 17.0, "gross_margin": 59.0, "total_revenue_yoy": 1300.0, "net_profit_yoy": 1200.0, "net_profit_dedt_yoy": 1100.0, "debt_to_assets_ratio": 30.0},
-        ),
-        SimpleNamespace(
-            report_date=date(2025, 6, 30),
-            announcement_date=date(2025, 8, 30),
-            updated_at=date(2025, 8, 30),
-            data={"roe": 16.0, "gross_margin": 58.0, "total_revenue_yoy": 900.0, "net_profit_yoy": 800.0, "net_profit_dedt_yoy": 780.0, "debt_to_assets_ratio": 32.0},
-        ),
-        SimpleNamespace(
-            report_date=date(2025, 3, 31),
-            announcement_date=date(2025, 4, 30),
-            updated_at=date(2025, 4, 30),
-            data={"roe": 15.0, "gross_margin": 57.0, "total_revenue_yoy": 700.0, "net_profit_yoy": 600.0, "net_profit_dedt_yoy": 580.0, "debt_to_assets_ratio": 34.0},
-        ),
-        SimpleNamespace(
-            report_date=date(2024, 12, 31),
-            announcement_date=date(2025, 1, 30),
-            updated_at=date(2025, 1, 30),
-            data={"roe": 14.0, "gross_margin": 56.0, "total_revenue_yoy": 600.0, "net_profit_yoy": 500.0, "net_profit_dedt_yoy": 480.0, "debt_to_assets_ratio": 36.0},
-        ),
-        SimpleNamespace(
-            report_date=date(2024, 9, 30),
-            announcement_date=date(2024, 10, 30),
-            updated_at=date(2024, 10, 30),
-            data={"roe": 13.0, "gross_margin": 55.0, "total_revenue_yoy": 500.0, "net_profit_yoy": 400.0, "net_profit_dedt_yoy": 380.0, "debt_to_assets_ratio": 38.0},
-        ),
-        SimpleNamespace(
-            report_date=date(2024, 6, 30),
-            announcement_date=date(2024, 8, 30),
-            updated_at=date(2024, 8, 30),
-            data={"roe": 12.0, "gross_margin": 54.0, "total_revenue_yoy": 400.0, "net_profit_yoy": 300.0, "net_profit_dedt_yoy": 280.0, "debt_to_assets_ratio": 40.0},
-        ),
-        SimpleNamespace(
-            report_date=date(2024, 3, 31),
-            announcement_date=date(2024, 4, 30),
-            updated_at=date(2024, 4, 30),
-            data={"roe": 11.0, "gross_margin": 53.0, "total_revenue_yoy": 200.0, "net_profit_yoy": 100.0, "net_profit_dedt_yoy": 90.0, "debt_to_assets_ratio": 42.0},
-        ),
-    ]
-
-    builder = FundamentalReader()
-    result = builder.financial_trend(FakeSession(records), "300750.SZ")
-
-    assert result["growth_trend"]["direction"] == "improving"
-    assert result["growth_trend"]["series"]["total_revenue_yoy"][0]["total_revenue_yoy"] == "1500%"
-    assert result["growth_trend"]["latest"]["net_profit_yoy"] == "1200%"
-    assert result["growth_trend"]["change_vs_oldest"] == "1100%"
-    assert result["growth_trend"]["quarters_used"] == 7
-
-
 def test_financial_context_localizes_raw_data_keys_by_system_language(monkeypatch):
     monkeypatch.setattr(settings, "SYSTEM_LANGUAGE", "zh")
 
@@ -1393,148 +1205,3 @@ def test_financial_context_localizes_tushare_optional_indicator_fields(monkeypat
     assert localized["data"]["单季度经营活动净收益"] == "2.35亿元"
     assert localized["data"]["年化投入资本回报率"] == "8.91%"
     assert localized["data"]["更新标识"] == "1"
-
-
-def test_financial_context_includes_localized_balance_sheet_data(monkeypatch):
-    monkeypatch.setattr(settings, "SYSTEM_LANGUAGE", "zh")
-
-    income_record = SimpleNamespace(
-        report_date=date(2025, 12, 31),
-        announcement_date=date(2026, 1, 10),
-        updated_at=date(2026, 1, 10),
-        report_type="合并报表",
-        currency="CNY",
-        is_audit=True,
-        data_source="tushare",
-        data={
-            "total_revenue": 10_000_000_000.0,
-            "basic_eps": 1.23456,
-        },
-    )
-    balance_record = SimpleNamespace(
-        report_date=date(2025, 12, 31),
-        announcement_date=date(2026, 1, 10),
-        updated_at=date(2026, 1, 10),
-        report_type="合并报表",
-        currency="CNY",
-        is_audit=True,
-        data_source="tushare",
-        data={
-            "money_cap": 12_345_000_000.0,
-            "total_assets": 67_890_000_000.0,
-            "total_share": 100_000_000.0,
-        },
-    )
-    cashflow_record = SimpleNamespace(
-        report_date=date(2025, 12, 31),
-        announcement_date=date(2026, 1, 10),
-        updated_at=date(2026, 1, 10),
-        report_type="合并报表",
-        currency="CNY",
-        is_audit=True,
-        data_source="tushare",
-        data={
-            "n_cashflow_act": 32_100_000_000.0,
-            "n_cashflow_inv_act": -4_560_000_000.0,
-        },
-    )
-
-    builder = FinancialReader()
-    latest_income = builder.latest_income_statement(FakeSession([income_record]), "600519.SH")
-    income_history = builder.income_statement_summary(FakeSession([income_record]), "600519.SH")
-    latest_balance = builder.latest_balance_sheet(FakeSession([balance_record]), "600519.SH")
-    balance_history = builder.balance_sheet_history(FakeSession([balance_record]), "600519.SH")
-    latest_cashflow = builder.latest_cashflow_statement(FakeSession([cashflow_record]), "600519.SH")
-    cashflow_history = builder.cashflow_statement_history(FakeSession([cashflow_record]), "600519.SH")
-
-    assert latest_income["data"]["营业总收入"] == "100亿元"
-    assert latest_income["data"]["基本每股收益"] == "1.2346元"
-    assert income_history[0]["data"]["营业总收入"] == "100亿元"
-    assert latest_balance["data"]["货币资金"] == "123.45亿元"
-    assert latest_balance["data"]["资产总计"] == "678.9亿元"
-    assert latest_balance["data"]["实收资本(或股本金额)"] == "1亿元"
-    assert latest_balance["meta"]["报告期"] == "2025-12-31"
-    assert balance_history[0]["data"]["货币资金"] == "123.45亿元"
-    assert latest_cashflow["data"]["经营活动产生的现金流量净额"] == "321亿元"
-    assert cashflow_history[0]["data"]["投资活动产生的现金流量净额"] == "-45.6亿元"
-
-
-@pytest.mark.asyncio
-async def test_snapshot_context_exposes_financial_statements_with_units(monkeypatch):
-    monkeypatch.setattr(settings, "SYSTEM_LANGUAGE", "zh")
-
-    financial_record = SimpleNamespace(
-        report_date=date(2025, 12, 31),
-        announcement_date=date(2026, 1, 10),
-        data={"eps": 1.2345},
-    )
-    income_record = SimpleNamespace(
-        report_date=date(2025, 12, 31),
-        announcement_date=date(2026, 1, 10),
-        updated_at=date(2026, 1, 10),
-        report_type="合并报表",
-        currency="CNY",
-        is_audit=True,
-        data_source="tushare",
-        data={"total_revenue": 10_000_000_000.0, "basic_eps": 1.23456},
-    )
-    balance_record = SimpleNamespace(
-        report_date=date(2025, 12, 31),
-        announcement_date=date(2026, 1, 10),
-        updated_at=date(2026, 1, 10),
-        report_type="合并报表",
-        currency="CNY",
-        is_audit=True,
-        data_source="tushare",
-        data={"total_assets": 67_890_000_000.0},
-    )
-    cashflow_record = SimpleNamespace(
-        report_date=date(2025, 12, 31),
-        announcement_date=date(2026, 1, 10),
-        updated_at=date(2026, 1, 10),
-        report_type="合并报表",
-        currency="CNY",
-        is_audit=True,
-        data_source="tushare",
-        data={"n_cashflow_act": 32_100_000_000.0},
-    )
-    db = ModelMapSession(
-        {
-            FinancialIndicator: [financial_record],
-            StockIncomeStatement: [income_record],
-            StockBalanceSheet: [balance_record],
-            StockCashflowStatement: [cashflow_record],
-        }
-    )
-
-    class EmptyReader:
-        def __getattr__(self, _name):
-            return lambda *_args, **_kwargs: {}
-
-    class Runtime:
-        stock_code = "600519.SH"
-        readers = SimpleNamespace(
-            financial=FinancialReader(),
-            fundamental=EmptyReader(),
-            capital_flow=EmptyReader(),
-        )
-
-        def db_session(self):
-            class SessionContext:
-                def __enter__(self):
-                    return db
-
-                def __exit__(self, *_args):
-                    return False
-
-            return SessionContext()
-
-    layer = await SnapshotProvider().build(Runtime(), {})
-    statements = layer.payload["financial_statements"]
-
-    assert statements["status"] == "available"
-    assert statements["financial_indicator_latest"]["data"]["每股收益"] == "1.2345元"
-    assert statements["income_statement_latest"]["data"]["营业总收入"] == "100亿元"
-    assert statements["income_statement_latest"]["data"]["基本每股收益"] == "1.2346元"
-    assert statements["balance_sheet_latest"]["data"]["资产总计"] == "678.9亿元"
-    assert statements["cashflow_statement_latest"]["data"]["经营活动产生的现金流量净额"] == "321亿元"

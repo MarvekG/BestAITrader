@@ -22,20 +22,8 @@ async def test_process_single_stock_syncs_kline_and_indicators():
     async def _kline_data(*args, **kwargs):
         return await _mark("kline_data")
 
-    async def _financial_indicator(*args, **kwargs):
-        return await _mark("financial_indicator")
-
     async def _valuation(*args, **kwargs):
         return await _mark("valuation")
-
-    async def _income_statement(*args, **kwargs):
-        return await _mark("income_statement")
-
-    async def _balance_sheet(*args, **kwargs):
-        return await _mark("balance_sheet")
-
-    async def _cashflow_statement(*args, **kwargs):
-        return await _mark("cashflow_statement")
 
     async def _top_holders(*args, **kwargs):
         return await _mark("top_holders")
@@ -52,11 +40,7 @@ async def test_process_single_stock_syncs_kline_and_indicators():
     mock_ingestor = SimpleNamespace(
         fetch_and_ingest_stock_info=AsyncMock(side_effect=_stock_basic),
         fetch_and_ingest_stock_kline=AsyncMock(side_effect=_kline_data),
-        fetch_and_ingest_financial_indicators=AsyncMock(side_effect=_financial_indicator),
         fetch_and_ingest_stock_valuation=AsyncMock(side_effect=_valuation),
-        fetch_and_ingest_income_statement=AsyncMock(side_effect=_income_statement),
-        fetch_and_ingest_balance_sheet=AsyncMock(side_effect=_balance_sheet),
-        fetch_and_ingest_cashflow_statement=AsyncMock(side_effect=_cashflow_statement),
         fetch_and_ingest_stock_top_holders=AsyncMock(side_effect=_top_holders),
         fetch_and_ingest_stock_fund_holding=AsyncMock(side_effect=_fund_holding),
         fetch_and_ingest_realtime_market=AsyncMock(side_effect=_realtime_market),
@@ -64,7 +48,7 @@ async def test_process_single_stock_syncs_kline_and_indicators():
 
     with patch(
         "app.tasks.task_functions.get_sync_date_range",
-        side_effect=[("2025-03-30", "2026-03-30"), ("2025-03-30", "2026-03-30")],
+        return_value=("2025-03-30", "2026-03-30"),
     ), patch("app.data.ingestors.manager.ingestor_manager", mock_ingestor), patch(
         "app.tasks.task_functions.calculate_indicators_func",
         new=AsyncMock(side_effect=_stock_indicators),
@@ -101,12 +85,8 @@ async def test_sync_stock_data_func_does_not_sync_concept_boards():
     mock_ingestor = SimpleNamespace(
         fetch_and_ingest_stock_info=AsyncMock(side_effect=_mark_side_effect("stock_info")),
         fetch_and_ingest_stock_kline=AsyncMock(side_effect=_mark_side_effect("stock_kline")),
-        fetch_and_ingest_financial_indicators=AsyncMock(side_effect=_mark_side_effect("financial_indicators")),
         fetch_and_ingest_realtime_market=AsyncMock(side_effect=_mark_side_effect("realtime_market")),
         fetch_and_ingest_stock_valuation=AsyncMock(side_effect=_mark_side_effect("stock_valuation")),
-        fetch_and_ingest_income_statement=AsyncMock(side_effect=_mark_side_effect("income_statement")),
-        fetch_and_ingest_balance_sheet=AsyncMock(side_effect=_mark_side_effect("balance_sheet")),
-        fetch_and_ingest_cashflow_statement=AsyncMock(side_effect=_mark_side_effect("cashflow_statement")),
         fetch_and_ingest_board_industry=AsyncMock(side_effect=_mark_side_effect("board_industry")),
         fetch_and_ingest_board_concept=AsyncMock(side_effect=AssertionError("concept board sync should be removed")),
         fetch_and_ingest_northbound=AsyncMock(side_effect=_mark_side_effect("northbound")),

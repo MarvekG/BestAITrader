@@ -235,16 +235,15 @@ class SnapshotProvider:
                 "industry_rank": _wrap_dict(fundamental, industry_rank),
             }
 
-            latest_financials = financial.latest_financials(db, runtime.stock_code)
-            latest_financials_for_context = financial.source._format_latest_financials_for_context(latest_financials)
-            latest_income = financial.latest_income_statement(db, runtime.stock_code)
-            latest_balance = financial.latest_balance_sheet(db, runtime.stock_code)
-            latest_cashflow = financial.latest_cashflow_statement(db, runtime.stock_code)
+            latest_financials = await financial.latest_financials(db, runtime.stock_code)
+            latest_income = await financial.latest_income_statement(db, runtime.stock_code)
+            latest_balance = await financial.latest_balance_sheet(db, runtime.stock_code)
+            latest_cashflow = await financial.latest_cashflow_statement(db, runtime.stock_code)
             financial_statements = {
                 "status": merge_status(latest_financials, latest_income, latest_balance, latest_cashflow),
                 "financial_indicator_latest": _wrap_snapshot(
                     financial,
-                    financial.localize_raw_data(latest_financials_for_context, "data.financial_indicator")
+                    financial.localize_raw_data(latest_financials, "data.financial_indicator")
                 ),
                 "income_statement_latest": _wrap_snapshot(financial, latest_income),
                 "balance_sheet_latest": _wrap_snapshot(financial, latest_balance),
@@ -314,7 +313,6 @@ class HistoryProvider:
             kline_items = technical.recent_klines(db, runtime.stock_code, days=30)
             money_flow_trend_items = capital_flow.money_flow_trend(db, runtime.stock_code)
             northbound_trend = capital_flow.northbound_trend(db, runtime.stock_code)
-            financial_trend = fundamental.financial_trend(db, runtime.stock_code)
             insider_activity = fundamental.insider_activity(db, runtime.stock_code)
             interactive_qa_items = sentiment.recent_interactive_qa(db, runtime.stock_code)
             seo_history = fundamental.seo_history(db, runtime.stock_code)
@@ -332,14 +330,12 @@ class HistoryProvider:
                     kline,
                     money_flow_trend,
                     northbound_trend,
-                    financial_trend,
                     interactive_qa_items,
                     seo_history,
                 ),
                 "kline": kline,
                 "money_flow_trend": money_flow_trend,
                 "northbound_trend": northbound_trend,
-                "financial_trend": _wrap_dict(fundamental, financial_trend),
                 "insider_activity": _wrap_dict(fundamental, insider_activity),
                 "interactive_qa": _wrap_list(
                     sentiment,
@@ -371,9 +367,9 @@ class SignalsProvider:
         financial = runtime.readers.financial
         fundamental = runtime.readers.fundamental
         with runtime.db_session() as db:
-            latest_financials = financial.latest_financials(db, runtime.stock_code)
-            latest_balance = financial.latest_balance_sheet(db, runtime.stock_code, format_for_context=False)
-            latest_cashflow = financial.latest_cashflow_statement(db, runtime.stock_code, format_for_context=False)
+            latest_financials = await financial.latest_financials(db, runtime.stock_code)
+            latest_balance = await financial.latest_balance_sheet(db, runtime.stock_code, format_for_context=False)
+            latest_cashflow = await financial.latest_cashflow_statement(db, runtime.stock_code, format_for_context=False)
             financial_ctx = {
                 "financial_indicator_latest": _wrap_snapshot(
                     financial,

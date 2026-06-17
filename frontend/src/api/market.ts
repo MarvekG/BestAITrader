@@ -67,8 +67,6 @@ export interface DetailedSnapshot {
     pe_ttm: number;
     pb: number;
     total_market_value: number;
-    revenue_growth: number;
-    profit_growth: number;
   };
   policy_news: Array<{
     title: string;
@@ -279,66 +277,6 @@ export const marketApi = {
   syncSectorMoneyFlow: async (stockCode: string) => {
     return apiClient.post<{ success: boolean; message: string; task_id?: string }>('/data/market/sync/sector-money-flow', null, {
       params: { stock_code: stockCode }
-    });
-  },
-
-  syncFinancialData: async (stockCode: string, startDate: string, endDate: string) => {
-    return apiClient.post<{
-      task_id: string;
-      task_name: string;
-      status: string;
-      message: string
-    }>('/data/db/sync/financial', null, {
-      params: {
-        stock_code: stockCode,
-        start_date: startDate,
-        end_date: endDate,
-      }
-    });
-  },
-
-  syncIncomeStatementData: async (stockCode: string, startDate: string, endDate: string) => {
-    return apiClient.post<{
-      task_id: string;
-      task_name: string;
-      status: string;
-      message: string
-    }>('/data/db/sync/income-statement', null, {
-      params: {
-        stock_code: stockCode,
-        start_date: startDate,
-        end_date: endDate,
-      }
-    });
-  },
-
-  syncBalanceSheetData: async (stockCode: string, startDate: string, endDate: string) => {
-    return apiClient.post<{
-      task_id: string;
-      task_name: string;
-      status: string;
-      message: string
-    }>('/data/db/sync/balance-sheet', null, {
-      params: {
-        stock_code: stockCode,
-        start_date: startDate,
-        end_date: endDate,
-      }
-    });
-  },
-
-  syncCashflowStatementData: async (stockCode: string, startDate: string, endDate: string) => {
-    return apiClient.post<{
-      task_id: string;
-      task_name: string;
-      status: string;
-      message: string
-    }>('/data/db/sync/cashflow-statement', null, {
-      params: {
-        stock_code: stockCode,
-        start_date: startDate,
-        end_date: endDate,
-      }
     });
   },
 

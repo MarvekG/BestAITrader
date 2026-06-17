@@ -56,9 +56,6 @@ class FundamentalReader(_WrapDictMixin):
     def basic_info(self, db: Session, stock_code: str) -> dict[str, Any]:
         return self.source._get_basic_info(db, stock_code)
 
-    def financials(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_financials(db, stock_code)
-
     def industry_rank(self, db: Session, stock_code: str) -> dict[str, Any]:
         return self.source._get_industry_rank(db, stock_code)
 
@@ -79,9 +76,6 @@ class FundamentalReader(_WrapDictMixin):
 
     def fund_holding(self, db: Session, stock_code: str) -> dict[str, Any]:
         return self.source._get_fund_holding(db, stock_code)
-
-    def financial_trend(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_financial_trend(db, stock_code)
 
     def insider_activity(self, db: Session, stock_code: str, *, months: int = 6) -> dict[str, Any]:
         return self.source._get_insider_activity(db, stock_code, months=months)
@@ -192,13 +186,13 @@ class FinancialReader(_WrapSnapshotMixin):
     def localize_raw_data(self, raw_data: dict[str, Any] | None, table: str) -> dict[str, Any] | None:
         return self.source._localize_raw_data(raw_data, table)
 
-    def latest_financials(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_latest_financials(db, stock_code)
+    async def latest_financials(self, db: Session, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_latest_financials(db, stock_code)
 
-    def historical_summary(self, db: Session, stock_code: str) -> list[dict[str, Any]]:
-        return self.source._get_historical_summary(db, stock_code)
+    async def historical_summary(self, db: Session, stock_code: str) -> list[dict[str, Any]]:
+        return await self.source._get_historical_summary(db, stock_code)
 
-    def latest_income_statement(
+    async def latest_income_statement(
         self,
         db: Session,
         stock_code: str,
@@ -215,36 +209,13 @@ class FinancialReader(_WrapSnapshotMixin):
         Returns:
             最新一期利润表快照；缺少数据时返回空字典。
         """
-        return self.source._get_latest_income_statement(
+        return await self.source._get_latest_income_statement(
             db,
             stock_code,
             format_for_context=format_for_context,
         )
 
-    def income_statement_summary(
-        self,
-        db: Session,
-        stock_code: str,
-        *,
-        format_for_context: bool = True,
-    ) -> list[dict[str, Any]]:
-        """读取利润表最近多期摘要。
-
-        Args:
-            db: 数据库会话。
-            stock_code: 股票代码。
-            format_for_context: 是否输出面向 AI 上下文的单位和翻译展示值。
-
-        Returns:
-            按报告期倒序排列的利润表摘要列表。
-        """
-        return self.source._get_income_statement_summary(
-            db,
-            stock_code,
-            format_for_context=format_for_context,
-        )
-
-    def latest_balance_sheet(
+    async def latest_balance_sheet(
         self,
         db: Session,
         stock_code: str,
@@ -261,36 +232,13 @@ class FinancialReader(_WrapSnapshotMixin):
         Returns:
             最新一期资产负债表快照；缺少数据时返回空字典。
         """
-        return self.source._get_latest_balance_sheet(
+        return await self.source._get_latest_balance_sheet(
             db,
             stock_code,
             format_for_context=format_for_context,
         )
 
-    def balance_sheet_history(
-        self,
-        db: Session,
-        stock_code: str,
-        *,
-        format_for_context: bool = True,
-    ) -> list[dict[str, Any]]:
-        """读取资产负债表最近多期摘要。
-
-        Args:
-            db: 数据库会话。
-            stock_code: 股票代码。
-            format_for_context: 是否输出面向 AI 上下文的单位和翻译展示值。
-
-        Returns:
-            按报告期倒序排列的资产负债表摘要列表。
-        """
-        return self.source._get_balance_sheet_history(
-            db,
-            stock_code,
-            format_for_context=format_for_context,
-        )
-
-    def latest_cashflow_statement(
+    async def latest_cashflow_statement(
         self,
         db: Session,
         stock_code: str,
@@ -307,30 +255,7 @@ class FinancialReader(_WrapSnapshotMixin):
         Returns:
             最新一期现金流量表快照；缺少数据时返回空字典。
         """
-        return self.source._get_latest_cashflow_statement(
-            db,
-            stock_code,
-            format_for_context=format_for_context,
-        )
-
-    def cashflow_statement_history(
-        self,
-        db: Session,
-        stock_code: str,
-        *,
-        format_for_context: bool = True,
-    ) -> list[dict[str, Any]]:
-        """读取现金流量表最近多期摘要。
-
-        Args:
-            db: 数据库会话。
-            stock_code: 股票代码。
-            format_for_context: 是否输出面向 AI 上下文的单位和翻译展示值。
-
-        Returns:
-            按报告期倒序排列的现金流量表摘要列表。
-        """
-        return self.source._get_cashflow_statement_history(
+        return await self.source._get_latest_cashflow_statement(
             db,
             stock_code,
             format_for_context=format_for_context,

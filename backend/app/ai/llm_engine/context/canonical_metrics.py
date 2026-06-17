@@ -7,7 +7,7 @@ from sqlalchemy import desc
 
 from app.ai.llm_engine.context.types import AIContextLayer, AIContextPayload
 from app.data.metadata.field_units import format_payload_values
-from app.models.data_storage import StockBalanceSheet, StockValuationHistory
+from app.models.data_storage import StockValuationHistory
 
 
 @dataclass(slots=True)
@@ -190,16 +190,12 @@ def build_canonical_metrics(db: Any, stock_code: str) -> AIContextPayload:
     valuation = db.query(StockValuationHistory).filter(
         StockValuationHistory.stock_code == stock_code,
     ).order_by(desc(StockValuationHistory.data_date)).first()
-    balance = db.query(StockBalanceSheet).filter(
-        StockBalanceSheet.stock_code == stock_code,
-    ).order_by(desc(StockBalanceSheet.report_date)).first()
-
-    if valuation is None and balance is None:
+    if valuation is None:
         return {"status": "missing"}
 
-    balance_data: Mapping[str, Any] = (balance.data or {}) if balance is not None else {}
+    balance_data: Mapping[str, Any] = {}
     valuation_date = str(valuation.data_date) if valuation is not None else None
-    balance_date = str(balance.report_date) if balance is not None else None
+    balance_date = None
 
     metrics = _build_metrics(
         close_price=_to_float(valuation.close_price) if valuation else None,

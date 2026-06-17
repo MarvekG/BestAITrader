@@ -2,7 +2,7 @@ from typing import List, Dict, Any
 from app.data.ingestors.manager import ingestor_manager
 from app.core.database import SessionLocal
 from app.models.data_storage import (
-    StockBasic, FinancialIndicator, StockValuationHistory,
+    StockBasic, StockValuationHistory,
     StockTopHolders, KlineData
 )
 from app.core.logger import get_logger
@@ -85,19 +85,6 @@ class StockTools:
         return {}
 
     @staticmethod
-    def get_latest_indicators(stock_code: str) -> Dict[str, Any]:
-        """获取最新的财务指标 (Get latest financial indicators)"""
-        with SessionLocal() as db:
-            indicator = db.query(FinancialIndicator)\
-                .filter(FinancialIndicator.stock_code == stock_code)\
-                .order_by(desc(FinancialIndicator.report_date))\
-                .first()
-            if indicator:
-                # 转换为字典并过滤私有字段
-                return {k: v for k, v in indicator.__dict__.items() if not k.startswith('_')}
-        return {}
-
-    @staticmethod
     def get_valuation_history(stock_code: str, limit: int = 10) -> List[Dict[str, Any]]:
         """获取最近的估值历史 (Get recent valuation history)"""
         with SessionLocal() as db:
@@ -164,12 +151,6 @@ class StockTools:
             # 基础信息
             basic = db.query(StockBasic).filter(StockBasic.stock_code == stock_code).first()
             status["basic_info"] = "exists" if basic else "missing"
-
-            # 财务指标
-            latest_fin = db.query(FinancialIndicator.report_date)\
-                .filter(FinancialIndicator.stock_code == stock_code)\
-                .order_by(desc(FinancialIndicator.report_date)).first()
-            status["financial_indicators"] = str(latest_fin[0]) if latest_fin else "missing"
 
             # K线数据
             latest_k = db.query(KlineData.date)\
