@@ -1,6 +1,8 @@
 # 数据源政策
 
-本仓库提供用于研究工作流的数据适配器和工具，但不授予任何第三方数据权利。启用任何数据源前，部署方必须自行确认该数据源的当前条款、账户权限、API Key 规则、缓存规则、再分发限制和非商业使用边界。
+本仓库提供用于研究工作流的数据适配器和工具，但**本项目的 MIT License 不覆盖任何第三方数据**。第三方数据、数据源内容、API 返回结果、行情数据、新闻内容等均**不在本项目授权范围内**，部署方必须自行获取各数据源的合法授权。
+
+启用任何数据源前，部署方必须自行确认该数据源的当前条款、账户权限、API Key 规则、缓存规则、再分发限制和许可范围。
 
 ## 通用规则
 
@@ -11,7 +13,7 @@
 - 优先使用链接、元数据和短摘要，避免复制完整文章或完整专有数据 payload。
 - 遵守限速、robots 规则、账户限制、付费墙边界和反滥用控制。
 - 不要构建或贡献用于绕过鉴权、验证码、付费墙、技术限制、API 配额或合同限制的代码。
-- 不要将本仓库用于商业部署。本项目许可证不允许商业使用。
+- 不要将本仓库用于数据源授权不明确的部署。每个数据源必须拥有合法的授权。
 
 ## 数据源清单
 
@@ -67,9 +69,10 @@
 
 # Data Source Policy
 
-This repository provides adapters and tooling for research workflows. It does not grant rights to any third-party
-data. Before enabling a source, the operator must confirm the source's current terms, account permissions, API key
-rules, caching rules, redistribution limits, and noncommercial-use restrictions.
+This repository provides adapters and tooling for research workflows. **The MIT License of this project does not cover any third-party data.** Third-party data, data-source content, API responses, market data, news content, etc. are **not within the scope of this project's license**. Operators must obtain their own legal authorization from each data source.
+
+Before enabling a source, the operator must confirm the source's current terms, account permissions, API key
+rules, caching rules, redistribution limits, and use permissions.
 
 ## General Rules
 
@@ -81,7 +84,7 @@ rules, caching rules, redistribution limits, and noncommercial-use restrictions.
 - Respect rate limits, robots rules, account restrictions, paywall boundaries, and anti-abuse controls.
 - Do not build or contribute code whose purpose is to bypass authentication, captchas, paywalls, technical controls,
   API quotas, or contractual restrictions.
-- Do not use this repository for commercial deployments. Commercial use is not permitted by the project license.
+- Do not use this repository for deployments where data-source terms are not met. Verify that each data source permits the intended use.
 
 ## Source Inventory
 
