@@ -429,7 +429,11 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
         }}
         footer={null}
         width="90%"
-        styles={{ body: { padding: 0, height: '85vh' } }}
+        style={{ top: 24 }}
+        styles={{
+          content: { height: '95vh', display: 'flex', flexDirection: 'column' },
+          body: { flex: 1, minHeight: 0, padding: 0, overflow: 'hidden' },
+        }}
       >
         {reportSessionId && <DecisionAuditLog sessionId={reportSessionId} isActive={reportModalVisible} />}
       </Modal>
