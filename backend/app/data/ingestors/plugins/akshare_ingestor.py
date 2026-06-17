@@ -417,44 +417,43 @@ class AkshareIngestor(BaseIngestor):
             logger.error(f"Failed to ingest all stock basic from AKShare: {e}")
             return None
 
-    async def fetch_and_ingest_realtime_market(self, stock_code: str) -> Optional[dict]:
+    async def fetch_and_ingest_realtime_market(self, stock_code: str = None) -> Optional[dict]:
         """
-        采集单只股票实时行情并写入实时行情表。
+        采集全市场实时行情并写入实时行情表。
+
+        注意：此方法总是获取全市场数据（约5500只股票），耗时约20秒。
+        stock_code 参数已废弃，保留仅为兼容性，实际会忽略并获取全市场数据。
+
+        建议使用方式：
+        1. 定时任务每分钟调用一次，更新全市场数据
+        2. 查询时直接从数据库读取，无需重复调用此接口
 
         官方文档:
             - stock_zh_a_spot: https://akshare.akfamily.xyz/data/stock/stock.html#id4
 
         Args:
-            stock_code: 股票代码。
+            stock_code: 已废弃，保留仅为兼容性。传入任何值都会获取全市场数据。
 
         Returns:
-            采集并写入有效价格行情成功返回 True；无数据或异常返回 False。
+            采集并写入成功返回字典 {"success": bool, "data": list, "count": int}；异常返回 None。
         """
         try:
-            # 准备查询代码（使用 6 位数字代码）
-            symbol = StockCodeStandardizer.to_number(stock_code)
+            if stock_code:
+                logger.warning(
+                    f"fetch_and_ingest_realtime_market called with stock_code={stock_code}, "
+                    "but this parameter is deprecated. Fetching full market data instead."
+                )
 
-            logger.info(f"Fetching AKShare realtime market for {symbol}")
+            logger.info("Fetching AKShare full market realtime data (~5500 stocks, ~20s)")
 
-            # 调用 AKShare 接口（使用已验证可用的 stock_zh_a_spot）
+            # 调用 AKShare 接口获取全市场实时行情
             df = await self._run_in_executor(ak.stock_zh_a_spot)
 
             if df is None or df.empty:
                 logger.warning("No realtime data returned from AKShare")
                 return {"success": False, "data": [], "count": 0}
 
-            # 筛选目标股票（通过股票名称或代码匹配）
-            # 尝试通过代码匹配
-            target_df = df[df['代码'].str.contains(symbol, na=False)].copy()
-
-            if target_df.empty:
-                logger.warning(f"No realtime data found for {stock_code} ({symbol}) in AKShare spot data")
-                return None
-
-            # 只取第一条匹配记录
-            target_df = target_df.head(1)
-
-            # 列名映射（对齐 Tushare 的 realtime_market 字段）
+            # 列名映射
             # AKShare 返回：代码, 名称, 最新价, 涨跌额, 涨跌幅, 买入, 卖出, 昨收, 今开, 最高, 最低, 成交量, 成交额, 时间戳
             column_rename = {
                 '代码': 'stock_code',
@@ -471,37 +470,42 @@ class AkshareIngestor(BaseIngestor):
                 '买入': 'bid',
                 '卖出': 'ask'
             }
-            target_df.rename(columns=column_rename, inplace=True)
+            df.rename(columns=column_rename, inplace=True)
 
             # 标准化股票代码（添加市场后缀）
-            target_df['stock_code'] = target_df['stock_code'].apply(StockCodeStandardizer.standardize)
+            df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
 
             # 补充字段
-            target_df['data_source'] = self.source
-            target_df['timestamp'] = pd.Timestamp.now()
+            df['data_source'] = self.source
+            df['timestamp'] = pd.Timestamp.now()
 
             # 数值转换
             numeric_cols = ['current_price', 'change_percent', 'change_amount', 'volume',
                           'turnover', 'high', 'low', 'open', 'pre_close', 'bid', 'ask']
             for col in numeric_cols:
-                if col in target_df.columns:
-                    target_df[col] = pd.to_numeric(target_df[col], errors='coerce')
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
 
-            # 过滤无效价格
-            if 'current_price' in target_df.columns:
-                target_df = target_df[target_df['current_price'] > 0].copy()
-                if target_df.empty:
-                    logger.warning(f"Invalid price for {stock_code} in AKShare realtime data")
+            # 过滤无效价格（保留有效数据）
+            original_count = len(df)
+            if 'current_price' in df.columns:
+                df = df[df['current_price'] > 0].copy()
+                filtered_count = original_count - len(df)
+                if filtered_count > 0:
+                    logger.info(f"Filtered {filtered_count} stocks with invalid price")
+
+            if df.empty:
+                logger.warning("All stocks have invalid price in AKShare realtime data")
                 return {"success": False, "data": [], "count": 0}
 
-            # 写入数据库
+            # 写入数据库（全量）
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
-                'stock_zh_a_spot', target_df, source=self.source, target_table='data.stock_realtime_market'
+                'stock_zh_a_spot', df, source=self.source, target_table='data.stock_realtime_market'
             )
 
-            logger.info(f"Successfully ingested AKShare realtime market for {stock_code}")
-            
+            logger.info(f"Successfully ingested {len(df)} stocks realtime market data from AKShare")
+
             # 返回字典格式
             return {
                 "success": True,
