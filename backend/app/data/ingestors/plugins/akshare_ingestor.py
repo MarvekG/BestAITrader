@@ -680,13 +680,30 @@ class AkshareIngestor(BaseIngestor):
             df = await self._run_in_executor(ak.stock_hsgt_individual_em, symbol=symbol)
             if df is None or df.empty:
                 return None
+
+            # 列名映射：AKShare 中文列名 -> 数据库英文字段
+            column_rename = {
+                '持股日期': 'date',
+                '当日收盘价': 'close_price',
+                '当日涨跌幅': 'change_percent',
+                '持股数量': 'hold_shares',
+                '持股市值': 'hold_value',
+                '持股数量占A股百分比': 'hold_ratio',
+                '今日增持股数': 'net_buy_volume',
+                '今日增持资金': 'net_buy_amount',
+                '今日持股市值变化': 'hold_value_change'
+            }
+            df.rename(columns=column_rename, inplace=True)
+
+            # 补充必需字段
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
+
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'northbound', df, source=self.source, target_table='northbound_data'
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
@@ -731,12 +748,29 @@ class AkshareIngestor(BaseIngestor):
             df = await self._run_in_executor(ak.stock_lhb_detail_daily_sina, date=date_str)
             if df is None or df.empty:
                 return None
+
+            # 列名映射：AKShare 中文列名 -> 数据库英文字段
+            # AKShare 返回：序号, 股票代码, 股票名称, 收盘价, 对应值, 成交量, 成交额, 指标
+            # 数据库期望：stock_code, stock_name, trade_date, close_price, net_buy_amount,
+            #            buy_amount, sell_amount, listing_reason 等
+            column_rename = {
+                '股票代码': 'stock_code',
+                '股票名称': 'stock_name',
+                '收盘价': 'close_price',
+                '成交额': 'total_trade_amount',
+                '指标': 'listing_reason'
+            }
+            df.rename(columns=column_rename, inplace=True)
+
+            # 补充必需字段
+            df['trade_date'] = pd.to_datetime(date_str, format='%Y%m%d').date()
             df['data_source'] = self.source
+
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'dragon_tiger', df, source=self.source, target_table='dragon_tiger_data'
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
@@ -779,13 +813,43 @@ class AkshareIngestor(BaseIngestor):
             df = await self._run_in_executor(ak.stock_individual_fund_flow, stock=symbol, market="sh" if symbol.startswith('6') else "sz")
             if df is None or df.empty:
                 return None
+
+            # 列名映射：AKShare 中文列名 -> 数据库英文字段
+            column_rename = {
+                '日期': 'trade_date',
+                '收盘价': 'close_price',
+                '涨跌幅': 'pct_change',
+                '主力净流入-净额': 'net_inflow_main',
+                '主力净流入-净占比': 'net_inflow_main_pct',
+                '超大单净流入-净额': 'net_inflow_huge',
+                '超大单净流入-净占比': 'net_inflow_huge_pct',
+                '大单净流入-净额': 'net_inflow_large',
+                '大单净流入-净占比': 'net_inflow_large_pct',
+                '中单净流入-净额': 'net_inflow_medium',
+                '中单净流入-净占比': 'net_inflow_medium_pct',
+                '小单净流入-净额': 'net_inflow_small',
+                '小单净流入-净占比': 'net_inflow_small_pct'
+            }
+            df.rename(columns=column_rename, inplace=True)
+
+            # 单位转换：AKShare 返回的是元，数据库存储单位是万元
+            amount_columns = [
+                'net_inflow_main', 'net_inflow_huge', 'net_inflow_large',
+                'net_inflow_medium', 'net_inflow_small'
+            ]
+            for col in amount_columns:
+                if col in df.columns:
+                    df[col] = df[col] / 10000
+
+            # 补充必需字段
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
+
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'money_flow', df, source=self.source, target_table='stock_money_flow'
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
@@ -804,13 +868,37 @@ class AkshareIngestor(BaseIngestor):
             df = await self._run_in_executor(ak.stock_zh_a_gdhs, symbol=symbol)
             if df is None or df.empty:
                 return None
-            df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
+
+            # 列名映射：AKShare 中文列名 -> 数据库英文字段
+            column_rename = {
+                '代码': 'stock_code',
+                '名称': 'stock_name',
+                '最新价': 'price_at_end',
+                '涨跌幅': 'price_change_ratio',
+                '股东户数-本次': 'holder_count',
+                '股东户数-上次': 'holder_count_prev',
+                '股东户数-增减': 'holder_count_change',
+                '股东户数-增减比例': 'holder_count_change_ratio',
+                '区间涨跌幅': 'interval_return',
+                '股东户数统计截止日-本次': 'end_date',
+                '股东户数统计截止日-上次': 'prev_end_date',
+                '户均持股市值': 'avg_hold_value',
+                '户均持股数量': 'avg_hold_shares',
+                '总市值': 'total_mv',
+                '总股本': 'total_share',
+                '公告日期': 'ann_date'
+            }
+            df.rename(columns=column_rename, inplace=True)
+
+            # 补充必需字段
+            df['stock_code'] = df['stock_code'].apply(lambda x: StockCodeStandardizer.standardize(x))
             df['data_source'] = self.source
+
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'shareholder_count', df, source=self.source, target_table='stock_shareholder_count'
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
@@ -884,13 +972,29 @@ class AkshareIngestor(BaseIngestor):
             if df is None or df.empty:
                 logger.warning(f"No lockup release data found for {stock_code}")
                 return {"success": False, "data": [], "count": 0}
+
+            # 列名映射：AKShare 中文列名 -> 数据库英文字段
+            column_rename = {
+                '解禁时间': 'release_date',
+                '解禁数量': 'release_shares_original',
+                '实际解禁数量': 'release_shares',
+                '未解禁数量': 'unreleased_shares',
+                '实际解禁数量市值': 'release_market_value',
+                '占总市值比例': 'ratio_to_total',
+                '占流通市值比例': 'ratio_to_float',
+                '限售股类型': 'release_type'
+            }
+            df.rename(columns=column_rename, inplace=True)
+
+            # 补充必需字段
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
+
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'lockup_release', df, source=self.source, target_table='stock_lockup_release'
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
@@ -927,20 +1031,73 @@ class AkshareIngestor(BaseIngestor):
             return None
 
     async def fetch_and_ingest_stock_margin_data(self, stock_code: str) -> Optional[dict]:
-        """采集单只股票融资融券明细数据。"""
+        """采集单只股票融资融券明细数据。
+
+        注意：AKShare 融资融券接口返回全市场数据，此方法会采集全市场数据后筛选指定股票。
+        数据通常为 T-1 日数据（当日数据需要下一交易日才能获取）。
+        """
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare stock margin data for {symbol}")
-            df = await self._run_in_executor(ak.stock_margin_detail_em, symbol=symbol)
+
+            # AKShare 融资融券接口按日期查询全市场数据
+            # 上交所: stock_margin_detail_sse(date)
+            # 深交所: stock_margin_detail_szse(date)
+            # 使用昨天的日期（融资融券数据通常是 T-1）
+            from datetime import datetime, timedelta
+            date_str = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+
+            if symbol.startswith('6'):
+                # 上交所
+                df = await self._run_in_executor(ak.stock_margin_detail_sse, date=date_str)
+                # 列名映射
+                column_rename = {
+                    '信用交易日期': 'trade_date',
+                    '标的证券代码': 'stock_code',
+                    '标的证券简称': 'stock_name',
+                    '融资余额': 'margin_balance',
+                    '融资买入额': 'margin_buy_amount',
+                    '融资偿还额': 'margin_repay_amount',
+                    '融券余量': 'short_volume',
+                    '融券卖出量': 'short_sell_volume',
+                    '融券偿还量': 'short_repay_volume'
+                }
+            else:
+                # 深交所
+                df = await self._run_in_executor(ak.stock_margin_detail_szse, date=date_str)
+                # 列名映射
+                column_rename = {
+                    '证券代码': 'stock_code',
+                    '证券简称': 'stock_name',
+                    '融资买入额': 'margin_buy_amount',
+                    '融资余额': 'margin_balance',
+                    '融券卖出量': 'short_sell_volume',
+                    '融券余量': 'short_volume',
+                    '融券余额': 'short_balance',
+                    '融资融券余额': 'margin_short_balance'
+                }
+                df['trade_date'] = date_str
+
             if df is None or df.empty:
                 return None
-            df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
+
+            df.rename(columns=column_rename, inplace=True)
+
+            # 筛选指定股票
+            df = df[df['stock_code'] == symbol].copy()
+            if df.empty:
+                logger.warning(f"No margin data found for {stock_code}")
+                return {"success": False, "data": [], "count": 0}
+
+            # 标准化股票代码
+            df['stock_code'] = df['stock_code'].apply(lambda x: StockCodeStandardizer.standardize(x))
             df['data_source'] = self.source
+
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'margin_data', df, source=self.source, target_table='stock_margin_data'
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
