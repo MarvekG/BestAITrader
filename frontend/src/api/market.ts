@@ -377,11 +377,6 @@ export const marketApi = {
     return { ...res, items: res.items.map(item => stripPrefix(item, 'stock_lockup_release')) };
   },
 
-  getEarningsForecast: async (stockCode: string) => {
-    const res = await marketApi.getDbData('stock_earnings_forecast', { stock_code: stockCode });
-    return { ...res, items: res.items.map(item => stripPrefix(item, 'stock_earnings_forecast')) };
-  },
-
   getMarginData: async (stockCode: string) => {
     const res = await marketApi.getDbData('stock_margin_data', { stock_code: stockCode });
     return { ...res, items: res.items.map(item => stripPrefix(item, 'stock_margin_data')) };
@@ -636,17 +631,6 @@ export interface LockupReleaseData {
   release_market_value: number;
   ratio_to_total: number;
   release_type: string;
-}
-
-export interface EarningsForecastData {
-  id: string;
-  stock_code: string;
-  report_date: string;
-  ann_date: string;
-  forecast_type: string;
-  growth_min: number;
-  growth_max: number;
-  forecast_content: string;
 }
 
 export interface MarginData {

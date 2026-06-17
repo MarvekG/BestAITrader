@@ -437,10 +437,6 @@ class BaseIngestor(ABC):
         """采集限售解禁"""
         return False
 
-    async def fetch_and_ingest_stock_earnings_forecast(self, stock_code: str) -> bool:
-        """采集业绩预告"""
-        return False
-
     async def fetch_and_ingest_stock_margin_data(self, stock_code: str) -> bool:
         """采集融资融券"""
         return False

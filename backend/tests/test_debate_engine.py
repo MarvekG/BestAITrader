@@ -29,7 +29,6 @@ MOCK_CONTEXT = {
             "financial_indicator": {"items": [{"meta": {"report_date": "2025-12-31"}}]},
         },
         "valuation": {"pe_ttm": 6.1},
-        "forecast": {},
         "northbound": {},
         "ownership": {},
         "flow": {},

@@ -28,7 +28,6 @@
     "sync_failed": "数据同步失败",
     "sync_insider": "同步高管持股",
     "sync_lockup": "同步限售解禁",
-    "sync_forecast": "同步业绩预告",
     "sync_margin": "同步融资融券",
     "sync_base_info": "全量同步股票基础信息",
     "sync_base_info_tip": "全量更新所有股票的基础资料。同步表：stock_basic, kline_data, financial_indicator, stock_valuation_history, stock_top_holders, stock_realtime_market, stock_indicators",
@@ -79,7 +78,6 @@
     "money_flow": "资金流向",
     "shareholder_count": "股东户数",
     "risk_monitoring": "股票质押",
-    "earnings_forecast": "业绩预告",
     "margin_trading": "融资融券",
     "date": "日期",
     "end_date": "截止日期",
@@ -652,7 +650,6 @@
       "sync_pledge_summary": "同步质押汇总",
       "stock_insider_trading": "高管持股",
       "stock_lockup_release": "限售解禁",
-      "stock_earnings_forecast": "业绩预告",
       "stock_margin_data": "融资融券",
       "sync_money_flow": "同步资金流向",
       "sync_northbound": "同步北向资金",
@@ -1843,18 +1840,6 @@
     "ratio_to_total": "总股本比(%)",
     "release_type": "解禁类型"
   },
-  "stock_earnings_forecast": {
-    "report_date": "报告期末",
-    "ann_date": "公告日期",
-    "stock_code": "股票代码",
-    "forecast_type": "预告类型",
-    "net_profit_min": "利润下限(万)",
-    "net_profit_max": "利润上限(万)",
-    "growth_min": "增长下限(%)",
-    "growth_max": "增长上限(%)",
-    "prev_year_profit": "上年同期值",
-    "forecast_content": "变动原因说明"
-  },
   "stock_margin_data": {
     "trade_date": "交易日期",
     "stock_code": "股票代码",
@@ -1886,13 +1871,6 @@
     "lockup_release": "限售解禁",
     "release_shares": "解禁数量",
     "ratio_to_total": "占总股本比"
-  },
-  "forecast": {
-    "type": "业绩预告类型",
-    "growth_range": "增长幅度",
-    "content": "预告内容",
-    "growth_min": "增长下限",
-    "growth_max": "增长上限"
   },
   "margin": {
     "balance": "融资余额",

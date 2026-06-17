@@ -1058,26 +1058,6 @@ class AkshareIngestor(BaseIngestor):
             logger.error(f"Failed to ingest AKShare stock lockup release for {stock_code}: {e}")
             return None
 
-    async def fetch_and_ingest_stock_earnings_forecast(self, stock_code: str = None) -> Optional[dict]:
-        """采集业绩预告数据。
-
-        AKShare ``stock_yjyg_em`` 不提供目标表必填的明确报告期字段，因此不写入专用表。
-        """
-        try:
-            logger.warning(
-                "AKShare stock_yjyg_em has no explicit report_date/end_date column; "
-                "skip stock_earnings_forecast ingestion"
-            )
-            return {
-                "success": False,
-                "data": [],
-                "count": 0,
-                "message": "AKShare stock_yjyg_em lacks explicit report_date/end_date required by stock_earnings_forecast."
-            }
-        except Exception as e:
-            logger.error(f"Failed to ingest AKShare stock earnings forecast for {stock_code}: {e}")
-            return None
-
     async def fetch_and_ingest_stock_margin_data(self, stock_code: str) -> Optional[dict]:
         """采集单只股票融资融券明细数据。
 

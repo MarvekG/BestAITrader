@@ -15,7 +15,6 @@ from app.models.data_storage import (
     StockPledge,
     StockInsider,
     StockRelease,
-    StockForecast,
     StockMargin
 )
 from app.core.logger import get_logger
@@ -780,14 +779,6 @@ class DataStorageService:
             records = db.query(StockRelease).filter(
                 StockRelease.stock_code == stock_code
             ).order_by(StockRelease.release_date.desc()).limit(limit).all()
-            return [self._to_dict(r) for r in records]
-
-    def get_stock_earnings_forecast(self, stock_code: str, limit: int = 10) -> List[Dict[str, Any]]:
-        """获取业绩预告"""
-        with SessionLocal() as db:
-            records = db.query(StockForecast).filter(
-                StockForecast.stock_code == stock_code
-            ).order_by(StockForecast.report_date.desc()).limit(limit).all()
             return [self._to_dict(r) for r in records]
 
     def get_stock_margin_data(self, stock_code: str, limit: int = 30) -> List[Dict[str, Any]]:

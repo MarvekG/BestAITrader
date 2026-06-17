@@ -278,13 +278,6 @@ class ExampleIngestor(BaseIngestor):
 
 推荐字段：`data_source`
 
-### `fetch_and_ingest_stock_earnings_forecast` -> `stock_earnings_forecast`
-
-必选字段：`stock_code`, `report_date`, `ann_date`, `forecast_type`, `growth_min`, `growth_max`,
-`net_profit_min`, `net_profit_max`, `forecast_content`
-
-推荐字段：`prev_year_profit`, `data_source`
-
 ### `fetch_and_ingest_stock_interactive_qa` -> `stock_interactive_qa`
 
 必选字段：`stock_code`, `question`, `answer`, `question_time`, `answer_time`, `trade_date`

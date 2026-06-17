@@ -259,7 +259,6 @@ class SnapshotProvider:
                 ),
             }
             valuation = _wrap_dict(fundamental, fundamental.valuation(db, runtime.stock_code))
-            forecast = _wrap_dict(fundamental, fundamental.forecast(db, runtime.stock_code))
             northbound = _wrap_dict(fundamental, fundamental.northbound_flow(db, runtime.stock_code))
 
             top_holders = fundamental.top_holders(db, runtime.stock_code)
@@ -282,7 +281,6 @@ class SnapshotProvider:
                     company,
                     financial_statements,
                     valuation,
-                    forecast,
                     northbound,
                     ownership,
                     flow_snapshot,
@@ -290,7 +288,6 @@ class SnapshotProvider:
                 "company": company,
                 "financial_statements": financial_statements,
                 "valuation": valuation,
-                "forecast": forecast,
                 "northbound": northbound,
                 "ownership": ownership,
                 "flow": flow_snapshot,

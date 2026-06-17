@@ -244,7 +244,6 @@ STOCK_QUERY_HANDLERS = {
     "insider": lambda stock_code, limit: StockTools.get_generic_db_data("StockInsider", stock_code, limit),
     "pledge": lambda stock_code, limit: StockTools.get_generic_db_data("StockPledge", stock_code, limit),
     "shareholder": lambda stock_code, limit: StockTools.get_generic_db_data("StockShareholder", stock_code, limit),
-    "forecast": lambda stock_code, limit: StockTools.get_generic_db_data("StockForecast", stock_code, limit),
     "technical": lambda stock_code, limit: StockTools.get_generic_db_data("StockIndicators", stock_code, limit),
     "block_trade": lambda stock_code, limit: StockTools.get_generic_db_data("StockBlockTrade", stock_code, limit),
     "fund_holding": lambda stock_code, limit: StockTools.get_generic_db_data("StockFundHolding", stock_code, limit),
@@ -547,7 +546,6 @@ async def query_stock_data(
     - insider: 内幕/高管交易
     - pledge: 股权质押
     - shareholder: 股东人数
-    - forecast: 业绩预告
     - technical: 技术指标
     - block_trade: 大宗交易
     - fund_holding: 基金持仓
@@ -591,7 +589,6 @@ async def query_stock_data(
                 "insider": "StockInsiderTrading",
                 "pledge": "StockPledge",
                 "shareholder": "StockShareholder",
-                "forecast": "StockForecast",
                 "technical": "StockIndicators",
                 "block_trade": "StockBlockTrade",
                 "fund_holding": "StockFundHolding",

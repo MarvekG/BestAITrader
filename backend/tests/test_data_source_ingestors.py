@@ -404,43 +404,6 @@ class TestTushareIngestor:
         assert ingestor._run_in_executor.await_count == 1
 
     @pytest.mark.asyncio
-    async def test_fetch_stock_earnings_forecast_ignores_missing_update_flag(
-        self, test_stock_code
-    ):
-        mock_pro = Mock()
-        mock_pro.forecast = Mock(return_value=pd.DataFrame({
-            'ts_code': [test_stock_code],
-            'ann_date': ['20260115'],
-            'end_date': ['20251231'],
-            'type': ['预增'],
-            'p_change_min': [10.0],
-            'p_change_max': [20.0],
-            'net_profit_min': [100000.0],
-            'net_profit_max': [120000.0],
-            'last_parent_net': [90000.0],
-            'summary': ['业绩增长'],
-            'change_reason': ['主营业务改善'],
-            'first_ann_date': ['20260110'],
-        }))
-
-        with patch('app.data.ingestors.plugins.tushare_ingestor.DataIngestionService', return_value=Mock()), \
-             patch('app.data.ingestors.plugins.tushare_ingestor.ts.pro_api', return_value=Mock()):
-            ingestor = TushareIngestor()
-        ingestor._run_in_executor = AsyncMock(side_effect=lambda func, *args, **kwargs: func(*args, **kwargs))
-
-        with patch.object(ingestor, 'pro', mock_pro), \
-             patch.object(ingestor.ingestion_service, 'write_dataframe', return_value=True) as mock_write:
-            result = await ingestor.fetch_and_ingest_stock_earnings_forecast(test_stock_code)
-
-        assert result is True
-        final_df = mock_write.call_args[0][1]
-        assert final_df.iloc[0]['stock_code'] == test_stock_code
-        assert final_df.iloc[0]['report_date'].isoformat() == '2025-12-31'
-        assert final_df.iloc[0]['ann_date'].isoformat() == '2026-01-15'
-        assert 'update_flag' not in final_df.columns
-        assert '_unused_update_flag' not in final_df.columns
-
-    @pytest.mark.asyncio
     async def test_fetch_stock_pledge_risk_with_mock(
         self, test_stock_code
     ):

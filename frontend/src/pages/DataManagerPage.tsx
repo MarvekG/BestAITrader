@@ -34,7 +34,6 @@ export const DataManagerPage: React.FC = () => {
     const [pledgeSummarySyncing, setPledgeSummarySyncing] = useState(false);
     const [insiderSyncing, setInsiderSyncing] = useState(false);
     const [lockupSyncing, setLockupSyncing] = useState(false);
-    const [forecastSyncing, setForecastSyncing] = useState(false);
     const [marginSyncing, setMarginSyncing] = useState(false);
     const [limitUpSyncing, setLimitUpSyncing] = useState(false);
     const [limitDownSyncing, setLimitDownSyncing] = useState(false);
@@ -270,7 +269,6 @@ export const DataManagerPage: React.FC = () => {
             'stock_pledge_summary': 'stock_pledge_summary',
             'stock_insider_trading': 'stock_insider_trading',
             'stock_lockup_release': 'stock_lockup_release',
-            'stock_earnings_forecast': 'stock_earnings_forecast',
             'stock_margin_data': 'stock_margin_data',
             'index_daily': 'index_daily',
             'stock_indicators': 'stock_indicators',
@@ -1103,18 +1101,6 @@ export const DataManagerPage: React.FC = () => {
             { title: t('stock_lockup_release.ratio_to_total'), dataIndex: ['stock_lockup_release.ratio_to_total'], key: 'ratio_to_total', render: (v: number) => `${v}%` },
             { title: t('stock_lockup_release.release_type'), dataIndex: ['stock_lockup_release.release_type'], key: 'release_type', ellipsis: true },
         ],
-        stock_earnings_forecast: [
-            { title: t('stock_earnings_forecast.report_date'), dataIndex: ['stock_earnings_forecast.report_date'], key: 'report_date' },
-            { title: t('stock_earnings_forecast.ann_date'), dataIndex: ['stock_earnings_forecast.ann_date'], key: 'ann_date' },
-            { title: t('stock_earnings_forecast.stock_code'), dataIndex: ['stock_earnings_forecast.stock_code'], key: 'stock_code' },
-            { title: t('stock_earnings_forecast.forecast_type'), dataIndex: ['stock_earnings_forecast.forecast_type'], key: 'forecast_type', render: (v: string) => <Tag color="blue">{v}</Tag> },
-            { title: t('stock_earnings_forecast.net_profit_min'), dataIndex: ['stock_earnings_forecast.net_profit_min'], key: 'net_profit_min', render: (v: number) => v != null ? formatNumber(v) : '-' },
-            { title: t('stock_earnings_forecast.net_profit_max'), dataIndex: ['stock_earnings_forecast.net_profit_max'], key: 'net_profit_max', render: (v: number) => v != null ? formatNumber(v) : '-' },
-            { title: t('stock_earnings_forecast.growth_min'), dataIndex: ['stock_earnings_forecast.growth_min'], key: 'growth_min', render: (v: number) => v != null ? <Text type={v > 0 ? 'danger' : 'success'}>{v}%</Text> : '-' },
-            { title: t('stock_earnings_forecast.growth_max'), dataIndex: ['stock_earnings_forecast.growth_max'], key: 'growth_max', render: (v: number) => v != null ? <Text type={v > 0 ? 'danger' : 'success'}>{v}%</Text> : '-' },
-            { title: t('stock_earnings_forecast.prev_year_profit'), dataIndex: ['stock_earnings_forecast.prev_year_profit'], key: 'prev_year_profit', render: (v: number) => v != null ? formatNumber(v) : '-' },
-            { title: t('stock_earnings_forecast.forecast_content'), dataIndex: ['stock_earnings_forecast.forecast_content'], key: 'forecast_content', ellipsis: true, width: 200 },
-        ],
         stock_margin_data: [
             { title: t('stock_margin_data.trade_date'), dataIndex: ['stock_margin_data.trade_date'], key: 'trade_date' },
             { title: t('stock_margin_data.stock_code'), dataIndex: ['stock_margin_data.stock_code'], key: 'stock_code' },
@@ -1545,19 +1531,6 @@ export const DataManagerPage: React.FC = () => {
                                 </Button>
                             </Tooltip>
                         )}
-                        {activeTab === 'stock_earnings_forecast' && (
-                            <Tooltip title={!stockCode ? t('common.please_select_stock') : t('common.sync_forecast')}>
-                                <Button
-                                    type="primary"
-                                    icon={<SyncOutlined spin={forecastSyncing} />}
-                                    onClick={() => handleGranularSync('Earnings Forecast', setForecastSyncing, 'forecast')}
-                                    loading={forecastSyncing}
-                                    disabled={!stockCode}
-                                >
-                                    {t('common.sync_forecast')} {stockCode ? `[${stockCode}]` : ''}
-                                </Button>
-                            </Tooltip>
-                        )}
                         {activeTab === 'stock_margin_data' && (
                             <Tooltip title={!stockCode ? t('common.please_select_stock') : t('common.sync_margin')}>
                                 <Button
@@ -1708,10 +1681,6 @@ export const DataManagerPage: React.FC = () => {
                             {
                                 key: 'stock_lockup_release',
                                 label: <span><ReadOutlined />{t('market.data_manager.stock_lockup_release')}</span>,
-                            },
-                            {
-                                key: 'stock_earnings_forecast',
-                                label: <span><FundViewOutlined />{t('market.data_manager.stock_earnings_forecast')}</span>,
                             },
                             {
                                 key: 'stock_margin_data',
@@ -2003,7 +1972,6 @@ export const DataManagerPage: React.FC = () => {
                             <Card size="small" title={t('market.data_manager.financial_data')}>
                                 <Space direction="vertical">
                                     <Checkbox value="valuation">{t('market.valuation_metrics')}</Checkbox>
-                                    <Checkbox value="stock_earnings_forecast">{t('market.data_manager.stock_earnings_forecast')}</Checkbox>
                                 </Space>
                             </Card>
                             <Card size="small" title={t('common.realtime_quote')}>
