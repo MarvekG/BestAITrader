@@ -47,6 +47,25 @@ def _format_symbol_for_daily(stock_code: str) -> str:
         return f"sz{symbol}" if symbol.startswith(('0', '3')) else f"sh{symbol}"
 
 
+def _format_index_symbol_for_akshare(index_code: str) -> str:
+    """将指数代码格式化为 AKShare 指数日线接口需要的格式。
+
+    Args:
+        index_code: 指数代码，支持 ``000001.SH``、``399001.SZ``、``sh000001`` 或纯数字。
+
+    Returns:
+        AKShare 接口使用的 ``sh000001`` 或 ``sz399001`` 格式。
+    """
+    standard_code = StockCodeStandardizer.to_standard_index(index_code)
+    if standard_code.lower().startswith(("sh", "sz")):
+        return standard_code.lower()
+    if "." in standard_code:
+        number, market = standard_code.split(".", 1)
+        return f"{market.lower()}{number}"
+    market = "sz" if standard_code.startswith("399") else "sh"
+    return f"{market}{standard_code}"
+
+
 class AkshareIngestor(BaseIngestor):
     """AKShare 数据采集插件。"""
 
@@ -321,7 +340,7 @@ class AkshareIngestor(BaseIngestor):
         采集单只股票基础信息并写入股票基础表。
 
         官方文档:
-            - stock_individual_info_em: https://akshare.akfamily.xyz/data/stock/stock.html#id73
+            - stock_profile_cninfo: https://akshare.akfamily.xyz/data/stock/stock.html
 
         Args:
             stock_code: 股票代码。
@@ -332,11 +351,11 @@ class AkshareIngestor(BaseIngestor):
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
 
-            logger.info(f"Fetching AKShare stock info for {symbol}")
+            logger.info(f"Fetching AKShare stock info from CNInfo for {symbol}")
 
-            # 调用 AKShare 个股信息接口
+            # 调用巨潮个股资料接口，避开东财 stock_individual_info_em 的连接不稳定问题。
             df = await self._run_in_executor(
-                ak.stock_individual_info_em,
+                ak.stock_profile_cninfo,
                 symbol=symbol
             )
 
@@ -344,19 +363,19 @@ class AkshareIngestor(BaseIngestor):
                 logger.warning(f"No stock info returned from AKShare for {stock_code}")
                 return {"success": False, "data": [], "count": 0}
 
-            # AKShare 返回的是 key-value 格式，需要转换
-            info_dict = dict(zip(df['item'], df['value']))
+            info = df.iloc[0].to_dict()
 
             # 构造标准格式
             result_df = pd.DataFrame([{
                 'stock_code': StockCodeStandardizer.standardize(stock_code),
-                'name': info_dict.get('股票简称', ''),
-                'industry': info_dict.get('行业', ''),
-                'area': info_dict.get('地域', ''),
+                'name': info.get('A股简称') or info.get('公司名称') or '',
+                'industry': info.get('所属行业') or '',
+                'area': '',
                 'market': StockCodeStandardizer.get_market(stock_code),
-                'list_date': None,  # AKShare 个股信息接口不直接提供上市日期
+                'list_date': pd.to_datetime(info.get('上市日期'), errors='coerce'),
                 'data_source': self.source
             }])
+            result_df['list_date'] = result_df['list_date'].dt.date
 
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
@@ -545,8 +564,7 @@ class AkshareIngestor(BaseIngestor):
         """
         try:
             # AKShare 的指数接口使用指数代码（如 sh000001）
-            # 标准化为带市场前缀的代码
-            symbol = StockCodeStandardizer.to_standard_index(index_code)
+            symbol = _format_index_symbol_for_akshare(index_code)
 
             logger.info(f"Fetching AKShare index daily for {symbol}")
 
@@ -732,16 +750,17 @@ class AkshareIngestor(BaseIngestor):
         """采集上市公司基础资料。"""
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
-            logger.info(f"Fetching AKShare company profile for {symbol}")
-            # AKShare 使用 stock_individual_info_em
-            df = await self._run_in_executor(ak.stock_individual_info_em, symbol=symbol)
+            logger.info(f"Fetching AKShare company profile from CNInfo for {symbol}")
+            # 使用巨潮个股资料接口，避开东财 stock_individual_info_em 的连接不稳定问题。
+            df = await self._run_in_executor(ak.stock_profile_cninfo, symbol=symbol)
             if df is None or df.empty:
                 return None
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
+            df['update_date'] = datetime.now().date()
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
-                'stock_individual_info', df, source=self.source
+                'stock_profile_cninfo', df, source=self.source
             )
 
             # 返回字典格式
@@ -1419,13 +1438,18 @@ class AkshareIngestor(BaseIngestor):
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare top holders for {symbol}")
-            market_symbol = f"sh{symbol}" if symbol.startswith('6') else f"sz{symbol}"
+            market_symbol = _format_symbol_for_daily(stock_code)
+            today = datetime.now().date()
             quarter_dates = [
-                datetime.now().strftime('%Y1231'),
-                datetime.now().strftime('%Y0930'),
-                datetime.now().strftime('%Y0630'),
-                datetime.now().strftime('%Y0331'),
-                f"{datetime.now().year - 1}1231",
+                quarter_date
+                for quarter_date in (
+                    datetime.now().strftime('%Y1231'),
+                    datetime.now().strftime('%Y0930'),
+                    datetime.now().strftime('%Y0630'),
+                    datetime.now().strftime('%Y0331'),
+                    f"{datetime.now().year - 1}1231",
+                )
+                if pd.to_datetime(quarter_date, format='%Y%m%d').date() <= today
             ]
             df = None
             report_date = None
