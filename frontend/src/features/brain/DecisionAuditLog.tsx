@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { App as AntdApp, Avatar, Button, Card, Col, Descriptions, Divider, Dropdown, Empty, Row, Space, Spin, Steps, Tag, Typography } from 'antd';
+import { App as AntdApp, Avatar, Button, Card, Descriptions, Dropdown, Empty, Space, Spin, Steps, Tag, Typography } from 'antd';
 import { useSessionStore } from '../../store/useSessionStore';
 import { DebateThread, debateApi } from '../../api/debate';
 import { sessionApi, Session } from '../../api/session';
-import { AuditOutlined, BarChartOutlined, MessageOutlined, FileSearchOutlined, RobotOutlined, ReloadOutlined, ExportOutlined, DownOutlined, CopyOutlined } from '@ant-design/icons';
+import { AuditOutlined, BarChartOutlined, MessageOutlined, FileSearchOutlined, RobotOutlined, ReloadOutlined, ExportOutlined, DownOutlined, CopyOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -81,6 +81,7 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
   const [messages, setMessages] = useState<AuditMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
+  const [activeCardIndex, setActiveCardIndex] = useState(0);
 
   const effectiveSessionId = sessionId || activeSession?.session_id;
 
@@ -225,6 +226,30 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
     return getStepMessagesFor(messages, stepIndex);
   };
 
+  const currentStepMessages = getStepMessages(currentStep);
+
+  useEffect(() => {
+    setActiveCardIndex(0);
+  }, [currentStep, messages]);
+
+  const scrollToCard = (cardIndex: number) => {
+    setActiveCardIndex(cardIndex);
+    requestAnimationFrame(() => {
+      document.getElementById(`audit-message-${currentStep}-${cardIndex}`)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
+    });
+  };
+
+  const handlePreviousCard = () => {
+    scrollToCard(Math.max(activeCardIndex - 1, 0));
+  };
+
+  const handleNextCard = () => {
+    scrollToCard(Math.min(activeCardIndex + 1, currentStepMessages.length - 1));
+  };
+
   const handleCopyMessage = (msg: AuditMessage) => {
     const roleConfig = getRoleConfig(msg.agent_role || 'pm', t);
     let mdContent = `## ${roleConfig.title} (Round ${msg.round_number})\n`;
@@ -252,13 +277,14 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
       .catch(err => console.error('Failed to copy text: ', err));
   };
 
-  const renderMessageCard = (msg: AuditMessage) => {
+  const renderMessageCard = (msg: AuditMessage, index: number) => {
     const roleConfig = getRoleConfig(msg.agent_role || 'pm', t);
     const analysis = msg.reasoning_chain || {};
 
     return (
       <Card
         key={msg.id}
+        id={`audit-message-${currentStep}-${index}`}
         size="small"
         className="bg-gray-800 border-gray-700 mb-4"
         title={
@@ -338,30 +364,16 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
     );
   };
 
-  const renderExpertAnalysis = (msgs: AuditMessage[]) => {
-    // 专家分析阶段通常有 5 个 Agent，适合网格展示
+  const renderStackedMessages = (msgs: AuditMessage[]) => {
     return (
-      <Row gutter={[16, 16]}>
-        {msgs.map((msg: AuditMessage) => (
-          <Col xs={24} lg={12} key={msg.id}>
-            {renderMessageCard(msg)}
-          </Col>
-        ))}
-      </Row>
-    );
-  };
-
-  const renderCrossDebate = (msgs: AuditMessage[]) => {
-    // 交叉辩论可以分轮次展示，或者按角色分组
-    return (
-      <div>
-        {msgs.map((msg: AuditMessage) => renderMessageCard(msg))}
+      <div style={{ width: '100%' }}>
+        {msgs.map((msg: AuditMessage, index: number) => renderMessageCard(msg, index))}
       </div>
     );
   };
 
   const renderContent = () => {
-    const stepMsgs = getStepMessages(currentStep);
+    const stepMsgs = currentStepMessages;
 
     if (stepMsgs.length === 0) {
       return (
@@ -371,26 +383,14 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
       );
     }
 
-    switch (currentStep) {
-      case 0: // News / Policy / Sentiment
-      case 1: // Expert Analysis
-        return renderExpertAnalysis(stepMsgs);
-      case 3: // Cross Debate
-        return renderCrossDebate(stepMsgs);
-      default:
-        return (
-          <div style={{ maxWidth: 800, margin: '0 auto' }}>
-            {stepMsgs.map(msg => renderMessageCard(msg))}
-          </div>
-        );
-    }
+    return renderStackedMessages(stepMsgs);
   };
 
   if (!effectiveSessionId) return <Empty description={t('brain.select_session')} />;
 
   return (
-    <div style={{ padding: '24px', height: '100%', overflowY: 'auto', background: 'var(--app-bg-layout)' }}>
-      <div style={{ marginBottom: 32, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+    <div className="audit-log-shell">
+      <div className="audit-toolbar">
         <div style={{ flex: 1 }}>
           <Steps
             current={currentStep}
@@ -403,7 +403,24 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
             }))}
           />
         </div>
-        <Space style={{ marginLeft: 16 }}>
+        <Space style={{ marginLeft: 16 }} wrap>
+          <Button
+            icon={<LeftOutlined />}
+            disabled={activeCardIndex <= 0 || currentStepMessages.length <= 1}
+            onClick={handlePreviousCard}
+          >
+            {t('common.previous', { defaultValue: '上一个' })}
+          </Button>
+          <Text type="secondary" style={{ whiteSpace: 'nowrap' }}>
+            {currentStepMessages.length > 0 ? `${activeCardIndex + 1}/${currentStepMessages.length}` : '0/0'}
+          </Text>
+          <Button
+            icon={<RightOutlined />}
+            disabled={activeCardIndex >= currentStepMessages.length - 1 || currentStepMessages.length <= 1}
+            onClick={handleNextCard}
+          >
+            {t('common.next', { defaultValue: '下一个' })}
+          </Button>
           <Button
             type="primary"
             ghost
@@ -424,17 +441,41 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
         </Space>
       </div>
 
-      <Divider style={{ borderColor: 'var(--app-border)' }} />
-
-      {loading && messages.length === 0 ? (
-        <div className="text-center p-12"><Spin size="large" /></div>
-      ) : (
-        <div className="audit-content-area">
-          {renderContent()}
-        </div>
-      )}
+      <div className="audit-scroll-area">
+        {loading && messages.length === 0 ? (
+          <div className="text-center p-12"><Spin size="large" /></div>
+        ) : (
+          <div className="audit-content-area">
+            {renderContent()}
+          </div>
+        )}
+      </div>
 
       <style>{`
+        .audit-log-shell {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+          background: var(--app-bg-layout);
+          overflow: hidden;
+        }
+        .audit-toolbar {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 16px;
+          padding: 16px 24px;
+          background: color-mix(in srgb, var(--app-bg-layout) 94%, transparent);
+          border-bottom: 1px solid var(--app-border);
+          backdrop-filter: blur(8px);
+          flex: 0 0 auto;
+        }
+        .audit-scroll-area {
+          flex: 1 1 auto;
+          min-height: 0;
+          overflow-y: auto;
+          padding: 24px;
+        }
         .audit-content-area .ant-card-head {
           border-bottom: 1px solid var(--app-border) !important;
           background: var(--app-bg-container) !important;
