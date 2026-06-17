@@ -798,16 +798,49 @@ class AkshareIngestor(BaseIngestor):
         """采集外部行业板块数据。"""
         try:
             logger.info("Fetching AKShare board industry")
-            df = await self._run_in_executor(ak.stock_board_industry_name_em)
+
+            # 添加重试机制，首次可能网络失败
+            max_retries = 2
+            df = None
+            for attempt in range(max_retries):
+                try:
+                    df = await self._run_in_executor(ak.stock_board_industry_name_em)
+                    if df is not None and not df.empty:
+                        break
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Attempt {attempt + 1} failed for board industry, retrying: {e}")
+                        await asyncio.sleep(2)
+                    else:
+                        raise
+
             if df is None or df.empty:
                 return None
+
+            # 列名映射：AKShare 中文列名 -> 数据库英文字段
+            column_rename = {
+                '排名': 'rank',
+                '板块名称': 'board_name',
+                '板块代码': 'board_code',
+                '最新价': 'latest_price',
+                '涨跌额': 'change_amount',
+                '涨跌幅': 'change_percent',
+                '总市值': 'total_market_cap',
+                '换手率': 'turnover_rate',
+                '上涨家数': 'rising_stocks_count',
+                '下跌家数': 'falling_stocks_count',
+                '领涨股票': 'leading_stock_name',
+                '领涨股票-涨跌幅': 'leading_stock_change_percent'
+            }
+            df.rename(columns=column_rename, inplace=True)
+
             df['data_source'] = self.source
             df['timestamp'] = pd.Timestamp.now()
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'board_industry', df, source=self.source, target_table='industry_data'
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
@@ -955,16 +988,40 @@ class AkshareIngestor(BaseIngestor):
             if stock_code:
                 logger.warning(f"AKShare pledge summary API does not support single stock query, will fetch all market data")
             logger.info("Fetching AKShare pledge summary for all market")
-            # 使用 stock_gpzy_profile_em (仅全市场)
-            df = await self._run_in_executor(ak.stock_gpzy_profile_em)
+
+            # 使用 stock_gpzy_pledge_ratio_em（更快更全面，替代旧的 stock_gpzy_profile_em）
+            df = await self._run_in_executor(ak.stock_gpzy_pledge_ratio_em)
             if df is None or df.empty:
                 return None
+
+            # 列名映射：AKShare 中文列名 -> 数据库英文字段
+            column_rename = {
+                '序号': 'sequence_number',
+                '股票代码': 'stock_code',
+                '股票简称': 'stock_name',
+                '交易日期': 'trade_date',
+                '所属行业': 'industry_name',
+                '质押比例': 'pledge_ratio',
+                '质押股数': 'pledged_shares',
+                '质押市值': 'pledge_market_value',
+                '质押笔数': 'pledge_count',
+                '无限售股质押数': 'unrestricted_pledged_shares',
+                '限售股质押数': 'restricted_pledged_shares',
+                '近一年涨跌幅': 'yearly_return',
+                '所属行业代码': 'industry_code'
+            }
+            df.rename(columns=column_rename, inplace=True)
+
+            # 标准化股票代码
+            if 'stock_code' in df.columns:
+                df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
+
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
                 'pledge_summary', df, source=self.source, target_table='stock_pledge_summary'
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
