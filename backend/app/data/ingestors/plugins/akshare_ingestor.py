@@ -274,6 +274,12 @@ class AkshareIngestor(BaseIngestor):
                 return {"success": False, "data": [], "count": 0}
 
             # stock_zh_a_daily 返回列名：date, open, high, low, close, volume, amount等
+            # 列名映射：AKShare 列名 -> 数据库字段
+            column_rename = {
+                'amount': 'turnover'  # 成交额
+            }
+            df.rename(columns=column_rename, inplace=True)
+
             # 过滤日期范围
             start_date_obj = pd.to_datetime(start_date.replace('-', ''), format='%Y%m%d')
             end_date_obj = pd.to_datetime(end_date.replace('-', ''), format='%Y%m%d')
@@ -291,7 +297,7 @@ class AkshareIngestor(BaseIngestor):
             df['date'] = df['date'].dt.date
 
             # 数值类型确保
-            numeric_cols = ['open', 'close', 'high', 'low', 'volume', 'amount']
+            numeric_cols = ['open', 'close', 'high', 'low', 'volume', 'turnover']
             for col in numeric_cols:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
