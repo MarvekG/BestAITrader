@@ -754,9 +754,12 @@ class AkshareIngestor(BaseIngestor):
             # 数据库期望：stock_code, stock_name, trade_date, close_price, net_buy_amount,
             #            buy_amount, sell_amount, listing_reason 等
             column_rename = {
+                '序号': 'sequence_number',
                 '股票代码': 'stock_code',
                 '股票名称': 'stock_name',
                 '收盘价': 'close_price',
+                '对应值': 'indicator_value',
+                '成交量': 'volume',
                 '成交额': 'total_trade_amount',
                 '指标': 'listing_reason'
             }
@@ -1005,15 +1008,52 @@ class AkshareIngestor(BaseIngestor):
             logger.error(f"Failed to ingest AKShare stock lockup release for {stock_code}: {e}")
             return None
 
-    async def fetch_and_ingest_stock_earnings_forecast(self, stock_code: str) -> Optional[dict]:
-        """采集单只股票业绩预告数据。"""
+    async def fetch_and_ingest_stock_earnings_forecast(self, stock_code: str = None) -> Optional[dict]:
+        """采集业绩预告数据。
+
+        注意：使用 stock_yjyg_em 接口获取全市场业绩预告数据。
+        如果提供 stock_code，则筛选该股票的数据。
+        """
         try:
-            symbol = StockCodeStandardizer.to_number(stock_code)
-            logger.info(f"Fetching AKShare stock earnings forecast for {symbol}")
-            df = await self._run_in_executor(ak.stock_yysj_em, symbol=symbol)
+            logger.info(f"Fetching AKShare earnings forecast")
+            # 使用新接口 stock_yjyg_em 获取业绩预告数据
+            df = await self._run_in_executor(ak.stock_yjyg_em)
             if df is None or df.empty:
                 return None
-            df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
+
+            # 列名映射：AKShare 中文列名 -> 数据库英文字段
+            column_rename = {
+                '序号': 'sequence_number',
+                '股票代码': 'stock_code',
+                '股票简称': 'stock_name',
+                '预测指标': 'forecast_indicator',
+                '业绩变动': 'forecast_description',
+                '预测数值': 'forecast_value',
+                '业绩变动幅度': 'change_percent',
+                '业绩变动原因': 'forecast_content',
+                '预告类型': 'forecast_type',
+                '上年同期值': 'prev_year_value',
+                '公告日期': 'ann_date'
+            }
+            df.rename(columns=column_rename, inplace=True)
+
+            # 标准化股票代码
+            if 'stock_code' in df.columns:
+                df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
+
+            # 单位转换：元 → 万元
+            amount_columns = ['forecast_value', 'prev_year_value']
+            for col in amount_columns:
+                if col in df.columns:
+                    df[col] = df[col] / 10000
+
+            # 如果提供了股票代码，筛选该股票数据
+            if stock_code:
+                standardized_code = StockCodeStandardizer.standardize(stock_code)
+                df = df[df['stock_code'] == standardized_code]
+                if df.empty:
+                    return None
+
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,
@@ -1116,6 +1156,32 @@ class AkshareIngestor(BaseIngestor):
             df = await self._run_in_executor(ak.stock_zt_pool_em, date=date_str)
             if df is None or df.empty:
                 return None
+
+            # 列名映射：AKShare 中文列名 -> 数据库英文字段
+            column_rename = {
+                '序号': 'sequence_number',
+                '代码': 'stock_code',
+                '名称': 'stock_name',
+                '涨跌幅': 'pct_chg',
+                '最新价': 'limit_up_price',
+                '成交额': 'turnover',
+                '流通市值': 'circ_mv',
+                '总市值': 'total_mv',
+                '换手率': 'turnover_rate',
+                '封板资金': 'fund_amount',
+                '首次封板时间': 'first_limit_up_time',
+                '最后封板时间': 'last_limit_up_time',
+                '炸板次数': 'open_times',
+                '涨停统计': 'limit_up_stats',
+                '连板数': 'limit_up_days',
+                '所属行业': 'limit_up_reason'
+            }
+            df.rename(columns=column_rename, inplace=True)
+
+            # 标准化股票代码
+            if 'stock_code' in df.columns:
+                df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
+
             df['data_source'] = self.source
             df['update_date'] = pd.to_datetime(date_str).date()
             await self._run_in_executor(
@@ -1141,6 +1207,32 @@ class AkshareIngestor(BaseIngestor):
             df = await self._run_in_executor(ak.stock_zt_pool_dtgc_em, date=date_str)
             if df is None or df.empty:
                 return None
+
+            # 列名映射：AKShare 中文列名 -> 数据库英文字段
+            column_rename = {
+                '序号': 'sequence_number',
+                '代码': 'stock_code',
+                '名称': 'stock_name',
+                '涨跌幅': 'pct_chg',
+                '最新价': 'limit_down_price',
+                '成交额': 'turnover',
+                '流通市值': 'circ_mv',
+                '总市值': 'total_mv',
+                '动态市盈率': 'dynamic_pe',
+                '换手率': 'turnover_rate',
+                '封单资金': 'fund_amount',
+                '最后封板时间': 'last_limit_down_time',
+                '板上成交额': 'board_turnover',
+                '连续跌停': 'limit_down_days',
+                '开板次数': 'open_times',
+                '所属行业': 'limit_down_reason'
+            }
+            df.rename(columns=column_rename, inplace=True)
+
+            # 标准化股票代码
+            if 'stock_code' in df.columns:
+                df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
+
             df['data_source'] = self.source
             df['update_date'] = pd.to_datetime(date_str).date()
             await self._run_in_executor(
@@ -1166,6 +1258,32 @@ class AkshareIngestor(BaseIngestor):
             df = await self._run_in_executor(ak.stock_zt_pool_zbgc_em, date=date_str)
             if df is None or df.empty:
                 return None
+
+            # 列名映射：AKShare 中文列名 -> 数据库英文字段
+            column_rename = {
+                '序号': 'sequence_number',
+                '代码': 'stock_code',
+                '名称': 'stock_name',
+                '涨跌幅': 'pct_chg',
+                '最新价': 'latest_price',
+                '涨停价': 'limit_up_price',
+                '成交额': 'turnover',
+                '流通市值': 'circ_mv',
+                '总市值': 'total_mv',
+                '换手率': 'turnover_rate',
+                '涨速': 'speed_increase',
+                '首次封板时间': 'first_limit_up_time',
+                '炸板次数': 'open_times',
+                '涨停统计': 'limit_up_stats',
+                '振幅': 'swing',
+                '所属行业': 'limit_up_reason'
+            }
+            df.rename(columns=column_rename, inplace=True)
+
+            # 标准化股票代码
+            if 'stock_code' in df.columns:
+                df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
+
             df['data_source'] = self.source
             df['update_date'] = pd.to_datetime(date_str).date()
             await self._run_in_executor(
