@@ -31,8 +31,6 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     -r requirements-news-plugins.txt \
     -r requirements-skills.txt
 
-RUN python -c "import akshare, pathlib; print(pathlib.Path(akshare.__file__).parent / 'utils' / 'func.py')" | xargs sed -i 's/random.uniform(0.5, 1.5)/random.uniform(2.5, 5.0)/'
-
 # 切换到非 root 用户
 USER trader
 
