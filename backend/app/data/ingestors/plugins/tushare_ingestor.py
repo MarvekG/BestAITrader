@@ -42,7 +42,8 @@ class TushareIngestor(BaseIngestor):
             "TushareIngestor initialized",
             extra={
                 "config": self.get_tushare_config(),
-                "rate_limit": f"{self.rate_limiter.max_calls_per_minute} calls/min"
+                "rate_limit": f"{self.rate_limiter.max_calls_per_minute} calls/min",
+                "rate_limit_timeout_seconds": settings.DATA_SOURCE_RATE_LIMIT_TIMEOUT_SECONDS,
             }
         )
 
@@ -61,13 +62,16 @@ class TushareIngestor(BaseIngestor):
             函数执行结果。
         """
         # 在调用 API 前先获取 Tushare 限流令牌
-        acquired = await self.rate_limiter.acquire(timeout=30.0)
+        acquired = await self.rate_limiter.acquire(timeout=settings.DATA_SOURCE_RATE_LIMIT_TIMEOUT_SECONDS)
         if not acquired:
             logger.warning(
-                "Tushare rate limiter timeout after 30s",
-                extra={"func": self._get_func_name(func)}
+                "Tushare rate limiter timeout",
+                extra={
+                    "func": self._get_func_name(func),
+                    "timeout_seconds": settings.DATA_SOURCE_RATE_LIMIT_TIMEOUT_SECONDS,
+                }
             )
-            # 超时后仍尝试调用（让 Tushare 自己返回限流错误）
+            return False
 
         # 调用基类方法执行实际 API 请求
         return await super()._run_in_executor(func, *args, use_cache=use_cache, cache_ttl=cache_ttl, **kwargs)

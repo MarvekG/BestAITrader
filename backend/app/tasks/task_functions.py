@@ -49,6 +49,23 @@ from app.data.market_utils import is_trading_time
 logger = logging.getLogger(__name__)
 
 
+def _sync_step_result(result: Any) -> bool:
+    """
+    从同步步骤返回值中提取最小结果，避免把接口明细数据写入任务结果。
+
+    Args:
+        result: 采集器或计算步骤返回的任意结果。
+
+    Returns:
+        步骤是否成功。
+    """
+    if result is None or result is False:
+        return False
+    if isinstance(result, dict):
+        return bool(result.get("success", True))
+    return True
+
+
 async def sync_stock_data_func(
     stock_code: Optional[str] = None,
     task_id: Optional[str] = None,
@@ -156,7 +173,7 @@ async def sync_stock_data_func(
                 logger.info(f"[{task_id}] Executing step {progress}/{total_steps}: {step_name}")
                 func = step["func"]
                 success = await func()
-                results[step_name] = success
+                results[step_name] = _sync_step_result(success)
             except Exception as e:
                 logger.error(f"[{task_id}] Step '{step_name}' failed: {e}", exc_info=True)
                 results[step_name] = False
@@ -351,7 +368,8 @@ async def sync_bulk_tables_func(
                         kwargs = get_method_kwargs(table_key, code)
                         kwargs['stock_code'] = code
                         success = await method(**kwargs)
-                        if success:
+                        step_result = _sync_step_result(success)
+                        if step_result:
                             success_count += 1
 
                         if task_id and (code_idx + 1) % 5 == 0:
@@ -389,7 +407,7 @@ async def sync_bulk_tables_func(
                     )
                     kwargs = get_method_kwargs(table_key)
                     success = await method(**kwargs)
-                    results[table_key] = success
+                    results[table_key] = _sync_step_result(success)
 
             except Exception as e:
                 logger.error(f"[{task_id}] Step '{table_key}' failed: {e}", exc_info=True)
@@ -1177,8 +1195,8 @@ async def _process_single_stock(single_code: str, current_task_id: str) -> Dict[
             logger.info(f"[{current_task_id}] Executing step {progress}/{total_steps}: {step_name} for {single_code}")
             func = step["func"]
             success = await func()
-            results[step_key] = success
-            if success:
+            results[step_key] = _sync_step_result(success)
+            if results[step_key]:
                 success_count += 1
         except Exception as e:
             logger.error(f"[{current_task_id}] Step '{step_name}' failed: {e}", exc_info=True)
