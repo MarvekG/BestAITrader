@@ -540,7 +540,7 @@ export const InteractiveResearchTab: React.FC = () => {
                   type="text"
                   size="small"
                   icon={<ArrowsAltOutlined />}
-                  title={t('ai_stock_picker.interactive.actions.expand_message')}
+                  title={t('ai_stock_picker.interactive.actions.fullscreen')}
                   onClick={() => setExpandedMessage(item)}
                 />
               </Space>
@@ -560,7 +560,7 @@ export const InteractiveResearchTab: React.FC = () => {
                   type="text"
                   size="small"
                   icon={<ArrowsAltOutlined />}
-                  title={t('ai_stock_picker.interactive.actions.expand_message')}
+                  title={t('ai_stock_picker.interactive.actions.fullscreen')}
                   onClick={() => setExpandedMessage(item)}
                 />
               </div>
@@ -785,7 +785,7 @@ export const InteractiveResearchTab: React.FC = () => {
         className="interactive-research-message-expanded-modal"
         footer={null}
         open={expandedMessage !== null}
-        title={t('ai_stock_picker.interactive.actions.expand_message')}
+        title={t('ai_stock_picker.interactive.actions.fullscreen')}
         width="74vw"
         style={{ top: '6vh', maxWidth: '74vw' }}
         onCancel={() => setExpandedMessage(null)}
