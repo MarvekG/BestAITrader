@@ -1405,28 +1405,41 @@ class AkshareIngestor(BaseIngestor):
             return None
 
     async def fetch_and_ingest_sector_money_flow(self, stock_code: str) -> Optional[dict]:
-        """采集股票所属行业的板块资金流。"""
+        """采集同花顺行业资金流快照并写入板块资金流表。
+
+        Args:
+            stock_code: 兼容上层按股票调用的参数；同花顺行业资金流接口返回全行业数据，不使用该参数筛选。
+
+        Returns:
+            返回字典 ``{"success": bool, "data": 数据列表, "count": 数据行数}``；异常返回 None。
+        """
         try:
-            logger.info(f"Fetching AKShare sector money flow for {stock_code}")
-            df = await self._run_in_executor(ak.stock_sector_fund_flow_rank, indicator="今日")
+            logger.info("Fetching AKShare sector money flow from THS", extra={"stock_code": stock_code})
+            df = await self._run_in_executor(ak.stock_fund_flow_industry, symbol="即时")
             if df is None or df.empty:
                 return {"success": False, "data": [], "count": 0}
             df.rename(columns={
-                '名称': 'sector_name',
-                '今日涨跌幅': 'change_percent',
-                '今日主力净流入-净额': 'main_net_inflow',
-                '今日主力净流入-净占比': 'net_inflow_rate',
-                '今日超大单净流入-净额': 'huge_net_inflow',
-                '今日超大单净流入-净占比': 'huge_net_inflow_rate',
-                '今日大单净流入-净额': 'large_net_inflow',
-                '今日大单净流入-净占比': 'large_net_inflow_rate',
-                '今日中单净流入-净额': 'medium_net_inflow',
-                '今日中单净流入-净占比': 'medium_net_inflow_rate',
-                '今日小单净流入-净额': 'small_net_inflow',
-                '今日小单净流入-净占比': 'small_net_inflow_rate',
+                '行业': 'sector_name',
+                '行业-涨跌幅': 'change_percent',
+                '净额': 'net_inflow',
+                '领涨股': 'leading_stock',
             }, inplace=True)
-            if 'main_net_inflow' in df.columns:
-                df['net_inflow'] = df['main_net_inflow']
+            df['net_inflow'] = pd.to_numeric(df['net_inflow'], errors='coerce') * 100_000_000
+            df['main_net_inflow'] = df['net_inflow']
+            df['change_percent'] = pd.to_numeric(df['change_percent'], errors='coerce')
+            for unavailable_col in [
+                'net_inflow_rate',
+                'huge_net_inflow',
+                'huge_net_inflow_rate',
+                'large_net_inflow',
+                'large_net_inflow_rate',
+                'medium_net_inflow',
+                'medium_net_inflow_rate',
+                'small_net_inflow',
+                'small_net_inflow_rate',
+                'close_price',
+            ]:
+                df[unavailable_col] = None
             df['trade_date'] = datetime.now().date()
             df['data_source'] = self.source
             await self._run_in_executor(
