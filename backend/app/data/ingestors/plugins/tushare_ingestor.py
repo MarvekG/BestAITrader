@@ -398,6 +398,7 @@ class TushareIngestor(BaseIngestor):
 
             df = await self._run_in_executor(
                 self.pro.fina_indicator,
+                cache_ttl=3600,
                 **fina_indicator_params,
             )
 
@@ -2419,6 +2420,7 @@ class TushareIngestor(BaseIngestor):
 
             df = await self._run_in_executor(
                 self.pro.income,
+                cache_ttl=3600,
                 **params,
             )
 
@@ -2559,6 +2561,7 @@ class TushareIngestor(BaseIngestor):
 
             df = await self._run_in_executor(
                 self.pro.balancesheet,
+                cache_ttl=3600,
                 **params,
             )
 
@@ -2699,6 +2702,7 @@ class TushareIngestor(BaseIngestor):
 
             df = await self._run_in_executor(
                 self.pro.cashflow,
+                cache_ttl=3600,
                 **params,
             )
 

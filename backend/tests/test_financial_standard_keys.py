@@ -87,14 +87,17 @@ async def test_snapshot_provider_fetches_financial_reports_during_context_build(
     async def _fetch_financial(*_args):
         return {
             "success": True,
-            "data": [{
-                "stock_code": "600519.SH",
-                "report_date": date(2025, 12, 31),
-                "announcement_date": date(2026, 1, 10),
-                "data_source": "fake",
-                "data": {"eps": "1.2345元"},
-            }],
-            "count": 1,
+            "data": [
+                {
+                    "stock_code": "600519.SH",
+                    "report_date": date(2025, 12, 31) - timedelta(days=90 * index),
+                    "announcement_date": date(2026, 1, 10),
+                    "data_source": "fake",
+                    "data": {"eps": f"{index + 1}.2345元"},
+                }
+                for index in range(8)
+            ],
+            "count": 8,
         }
 
     async def _fetch_income(*_args):
@@ -174,10 +177,12 @@ async def test_snapshot_provider_fetches_financial_reports_during_context_build(
     layer = await SnapshotProvider().build(Runtime(), {})
     statements = layer.payload["financial_statements"]
 
-    assert statements["financial_indicator_latest"]["data"]["每股收益"] == "1.2345元"
-    assert statements["income_statement_latest"]["data"]["营业总收入"] == "100亿元"
-    assert statements["balance_sheet_latest"]["data"]["资产总计"] == "678.9亿元"
-    assert statements["cashflow_statement_latest"]["data"]["经营活动产生的现金流量净额"] == "321亿元"
+    assert statements["financial_indicator"]["item_count"] == 4
+    assert statements["financial_indicator"]["items"][0]["data"]["每股收益"] == "1.2345元"
+    assert statements["financial_indicator"]["items"][-1]["data"]["每股收益"] == "4.2345元"
+    assert statements["income_statement"]["items"][0]["data"]["营业总收入"] == "100亿元"
+    assert statements["balance_sheet"]["items"][0]["data"]["资产总计"] == "678.9亿元"
+    assert statements["cashflow_statement"]["items"][0]["data"]["经营活动产生的现金流量净额"] == "321亿元"
     financial_mock.assert_awaited()
     income_mock.assert_awaited()
     balance_mock.assert_awaited()

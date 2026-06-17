@@ -3,6 +3,9 @@ services:
     image: postgres:17-alpine
     container_name: best_ai_trader_postgres
     restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    mem_swappiness: 0
     environment:
       POSTGRES_USER: tradeuser
       POSTGRES_PASSWORD: tradepassword
@@ -25,6 +28,9 @@ services:
     image: redis:7-alpine
     container_name: best_ai_trader_redis
     restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    mem_swappiness: 0
 
     volumes:
       - redis_data:/data
@@ -44,6 +50,9 @@ services:
     image: pgvector/pgvector:pg17
     container_name: best_ai_trader_memo_postgres
     restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    mem_swappiness: 0
     environment:
       POSTGRES_USER: tradeuser
       POSTGRES_PASSWORD: tradepassword
@@ -65,6 +74,9 @@ services:
     image: docker.litellm.ai/berriai/litellm-non_root:latest
     container_name: best_ai_trader_litellm
     restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    mem_swappiness: 0
     command: ["--config", "/run/secrets/litellm_config", "--port", "4000"]
     secrets:
       - litellm_config
@@ -91,6 +103,9 @@ services:
       dockerfile: Dockerfile
     container_name: best_ai_trader_memo
     restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    mem_swappiness: 0
     env_file:
       - ./memo/.env
     environment:
@@ -119,6 +134,9 @@ services:
       dockerfile: Dockerfile
     container_name: best_ai_trader_backend
     restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    mem_swappiness: 0
     env_file:
       - ./backend/.env
     environment:
@@ -153,7 +171,7 @@ services:
     restart: unless-stopped
     cpus: "4.0"
     mem_limit: 4g
-    memswap_limit: 4g
+    memswap_limit: 6g
     mem_swappiness: 0
     environment:
       TZ: Asia/Shanghai
@@ -189,7 +207,7 @@ services:
     restart: unless-stopped
     cpus: "4.0"
     mem_limit: 2g
-    memswap_limit: 2g
+    memswap_limit: 4g
     mem_swappiness: 0
     environment:
       TZ: Asia/Shanghai
@@ -222,7 +240,7 @@ services:
     command: ["mcp", "--http", "--host", "0.0.0.0", "--port", "8765"]
     cpus: "4.0"
     mem_limit: 4g
-    memswap_limit: 4g
+    memswap_limit: 6g
     mem_swappiness: 0
     environment:
       TZ: Asia/Shanghai
@@ -248,6 +266,9 @@ services:
       dockerfile: Dockerfile
     container_name: best_ai_trader_frontend
     restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    mem_swappiness: 0
     environment:
       - NODE_ENV=production
       - TZ=Asia/Shanghai
@@ -268,6 +289,9 @@ services:
     image: nginxinc/nginx-unprivileged:alpine
     container_name: best_ai_trader_nginx
     restart: unless-stopped
+    mem_limit: 2g
+    memswap_limit: 4g
+    mem_swappiness: 0
     depends_on:
       backend:
         condition: service_healthy

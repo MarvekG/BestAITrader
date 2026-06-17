@@ -333,6 +333,25 @@ def _normalize_list_arg(value: Any) -> List[str]:
 
 SUPPORTED_STOCK_QUERY_TYPES = sorted(STOCK_QUERY_HANDLERS.keys())
 
+FINANCIAL_FETCH_CONFIG = {
+    "financial_indicator": {
+        "method_name": "fetch_and_ingest_financial_indicators",
+        "description": "财务指标",
+    },
+    "income_statement": {
+        "method_name": "fetch_and_ingest_income_statement",
+        "description": "利润表",
+    },
+    "balance_sheet": {
+        "method_name": "fetch_and_ingest_balance_sheet",
+        "description": "资产负债表",
+    },
+    "cashflow_statement": {
+        "method_name": "fetch_and_ingest_cashflow_statement",
+        "description": "现金流量表",
+    },
+}
+
 
 def make_json_serializable(obj: Any) -> Any:
     """
@@ -361,6 +380,51 @@ def make_json_serializable(obj: Any) -> Any:
             if not key.startswith("_")
         }
     return obj
+
+
+def _normalize_date_arg(value: Optional[str]) -> Optional[str]:
+    """规范化工具入参日期。
+
+    Args:
+        value: 用户传入的日期字符串，支持 ``YYYYMMDD`` 或 ``YYYY-MM-DD``。
+
+    Returns:
+        ``YYYYMMDD`` 格式日期；未传入时返回 None。
+
+    Raises:
+        ValueError: 日期格式不符合要求。
+    """
+    if value is None:
+        return None
+    normalized = str(value).strip().replace("-", "")
+    if not normalized:
+        return None
+    try:
+        datetime.strptime(normalized, "%Y%m%d")
+    except ValueError as exc:
+        raise ValueError("date must use YYYYMMDD or YYYY-MM-DD format") from exc
+    return normalized
+
+
+def _sort_financial_records(records: Any) -> List[Dict[str, Any]]:
+    """按报告期倒序整理财务采集结果。
+
+    Args:
+        records: 数据源返回的原始记录列表。
+
+    Returns:
+        仅保留字典记录并按报告期、公告日和报告类型倒序排列。
+    """
+    normalized = [record for record in records or [] if isinstance(record, dict)]
+    return sorted(
+        normalized,
+        key=lambda item: (
+            str(item.get("report_date") or ""),
+            str(item.get("announcement_date") or ""),
+            str(item.get("report_type") or ""),
+        ),
+        reverse=True,
+    )
 
 
 def _compact_order_id(order_id: Any) -> str:
@@ -706,6 +770,7 @@ async def sync_market_data(
     """
     统一同步数据库数据 (Unified DB sync tool).
     优先使用该工具替代多个 sync_source_* 工具，以减少工具 schema 数量。
+    财务数据不要使用该工具；需要财务指标、利润表、资产负债表或现金流量表时调用 fetch_financial_data。
     参数:
     - task_type: 同步任务类型
     - target: 统一承载 stock_code / index_code / symbol
@@ -723,8 +788,6 @@ async def sync_market_data(
       - start_date 必填
       - end_date 必填
       - extra_params 可选: adjust='qfq'|'hfq'
-    - financial:
-      - target 必填，表示 stock_code
     - valuation:
       - target 必填，表示 stock_code
       - start_date/end_date 可选
@@ -881,6 +944,101 @@ async def sync_market_data(
             "task_type": task_type,
             "target": target,
             "error": str(exc),
+        }
+
+
+@tool
+async def fetch_financial_data(
+    stock_code: str,
+    table_type: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+) -> Dict[str, Any]:
+    """实时抓取单只股票的一类财务数据。
+
+    财务数据按季度披露，抓取日期范围应至少覆盖半年以上，避免窗口过窄导致没有返回数据。
+
+    Args:
+        stock_code: 股票代码，如 ``600519.SH``。
+        table_type: 财务数据类型，支持 financial_indicator、income_statement、balance_sheet、cashflow_statement。
+        start_date: 开始日期，支持 ``YYYYMMDD`` 或 ``YYYY-MM-DD``；不传则由数据源默认处理。
+        end_date: 结束日期，支持 ``YYYYMMDD`` 或 ``YYYY-MM-DD``；不传则由数据源默认处理。
+
+    Returns:
+        实时采集结果，包含数据源返回记录、记录数、日期范围和实际调用的方法名。
+    """
+    normalized_stock_code = str(stock_code or "").strip()
+    normalized_table_type = str(table_type or "").strip()
+    config = FINANCIAL_FETCH_CONFIG.get(normalized_table_type)
+    if not normalized_stock_code:
+        return {
+            "success": False,
+            "error": "stock_code is required.",
+            "supported_table_types": sorted(FINANCIAL_FETCH_CONFIG.keys()),
+        }
+    if config is None:
+        return {
+            "success": False,
+            "error": "Unsupported table_type.",
+            "table_type": table_type,
+            "supported_table_types": sorted(FINANCIAL_FETCH_CONFIG.keys()),
+        }
+
+    try:
+        normalized_start_date = _normalize_date_arg(start_date)
+        normalized_end_date = _normalize_date_arg(end_date)
+    except ValueError as exc:
+        return {
+            "success": False,
+            "error": str(exc),
+            "stock_code": normalized_stock_code,
+            "table_type": normalized_table_type,
+        }
+
+    method_name = config["method_name"]
+    try:
+        method = getattr(ingestor_manager, method_name)
+        result = await method(normalized_stock_code, normalized_start_date, normalized_end_date)
+        if isinstance(result, dict):
+            success = bool(result.get("success"))
+            raw_records = result.get("data") or []
+            source_count = result.get("count")
+            error = result.get("error")
+        else:
+            success = bool(result)
+            raw_records = []
+            source_count = None
+            error = None
+
+        records = _sort_financial_records(raw_records)
+        return {
+            "success": success,
+            "stock_code": normalized_stock_code,
+            "table_type": normalized_table_type,
+            "table_description": config["description"],
+            "start_date": normalized_start_date,
+            "end_date": normalized_end_date,
+            "resolved_method": method_name,
+            "source_count": source_count if source_count is not None else len(raw_records),
+            "count": len(records),
+            "data": make_json_serializable(records),
+            "error": error,
+        }
+    except Exception as exc:
+        logger.exception(
+            "fetch_financial_data failed",
+            extra={
+                "stock_code": normalized_stock_code,
+                "table_type": normalized_table_type,
+                "error": str(exc),
+            },
+        )
+        return {
+            "success": False,
+            "error": str(exc),
+            "stock_code": normalized_stock_code,
+            "table_type": normalized_table_type,
+            "resolved_method": method_name,
         }
 
 
@@ -1335,6 +1493,7 @@ def get_all_tools() -> List[Any]:
         query_stock_data,
         query_market_data,
         sync_market_data,
+        fetch_financial_data,
         execute_python_sandboxed,
         browse_web_page_html,
         parse_pdf_to_markdown,

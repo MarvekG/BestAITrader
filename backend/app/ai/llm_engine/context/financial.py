@@ -51,10 +51,10 @@ class FinancialSource:
         """生成财务上下文实时拉取使用的默认日期范围。
 
         Returns:
-            最近两年的起止日期，格式为 ``YYYYMMDD``。
+            最近一年的起止日期，格式为 ``YYYYMMDD``。
         """
         today = datetime.now().date()
-        start_date = today - timedelta(days=730)
+        start_date = today - timedelta(days=365)
         return start_date.strftime("%Y%m%d"), today.strftime("%Y%m%d")
 
     @staticmethod
@@ -120,7 +120,7 @@ class FinancialSource:
             return []
         return [record for record in records if isinstance(record, dict)]
 
-    async def _fetch_financial_data_from_source(self, stock_code: str, data_type: str) -> Dict[str, Any]:
+    async def _fetch_financial_data_from_source(self, stock_code: str, data_type: str) -> list[Dict[str, Any]]:
         """实时从数据源拉取财务数据。
 
         Args:
@@ -134,76 +134,53 @@ class FinancialSource:
 
         fetcher_map = {
             "financial_indicator": ingestor_manager.fetch_and_ingest_financial_indicators,
-            "financial_indicator_history": ingestor_manager.fetch_and_ingest_financial_indicators,
             "income_statement": ingestor_manager.fetch_and_ingest_income_statement,
             "balance_sheet": ingestor_manager.fetch_and_ingest_balance_sheet,
             "cashflow_statement": ingestor_manager.fetch_and_ingest_cashflow_statement,
         }
         fetcher = fetcher_map.get(data_type)
         if fetcher is None:
-            return {}
+            return []
 
         records = self._sort_records(await self._call_financial_fetcher(fetcher, stock_code))
         if not records:
-            return {}
-        snapshots = [self._normalize_record(record) for record in records]
-        if data_type.endswith("_history"):
-            return {"items": snapshots}
-        return snapshots[0]
+            return []
+        return [self._normalize_record(record) for record in records]
 
-    async def _get_latest_financials(self, db: Session, stock_code: str) -> Dict[str, Any]:
-        """获取最新财务指标 - 实时拉取模式。
-
-        Args:
-            db: 数据库会话（保留接口兼容性，暂不使用）。
-            stock_code: 股票代码。
-
-        Returns:
-            财务指标快照。
-        """
-        formatted_code = StockCodeStandardizer.standardize(stock_code)
-
-        # 实时拉取财务指标数据
-        raw_data = await self._fetch_financial_data_from_source(formatted_code, "financial_indicator")
-
-        if not raw_data:
-            return {}
-
-        data = self._drop_nulls(raw_data.get("data", {}))
-        meta = raw_data.get("meta", {})
-
-        result = {
-            "data": data,
-            "meta": meta
-        }
-
-        return self._drop_nulls(result)
-
-    async def _get_historical_summary(self, db: Session, stock_code: str, limit: int = 8) -> list[Dict[str, Any]]:
-        """获取财务指标历史摘要 - 实时拉取模式。
+    async def _get_financial_records(
+        self,
+        db: Session,
+        stock_code: str,
+        data_type: str,
+        *,
+        table: str | None = None,
+        limit: int = 4,
+    ) -> list[Dict[str, Any]]:
+        """获取最近多期财务数据。
 
         Args:
             db: 数据库会话（保留接口兼容性，暂不使用）。
             stock_code: 股票代码。
+            data_type: 财务数据类型。
+            table: 需要本地化字段名的表名；为空时不本地化。
             limit: 返回期数上限。
 
         Returns:
-            历史财务指标摘要列表。
+            按报告期倒序排列的财务数据列表。
         """
         formatted_code = StockCodeStandardizer.standardize(stock_code)
-
-        # 实时拉取历史财务指标
-        raw_data = await self._fetch_financial_data_from_source(formatted_code, "financial_indicator_history")
-
-        history: list[Dict[str, Any]] = []
-        for item in raw_data.get("items", [])[:limit]:
-            if not item:
-                continue
-            history.append(self._drop_nulls({
+        records = await self._fetch_financial_data_from_source(formatted_code, data_type)
+        result: list[Dict[str, Any]] = []
+        for item in records[:limit]:
+            snapshot = self._drop_nulls({
                 "data": self._drop_nulls(item.get("data", {})),
                 "meta": item.get("meta", {}),
-            }))
-        return history
+            })
+            if table:
+                snapshot = self._localize_raw_data(snapshot, table) or {}
+            if snapshot:
+                result.append(snapshot)
+        return result
 
     async def _get_latest_income_statement(
         self,
@@ -224,10 +201,11 @@ class FinancialSource:
         """
         formatted_code = StockCodeStandardizer.standardize(stock_code)
 
-        raw_data = await self._fetch_financial_data_from_source(formatted_code, "income_statement")
+        records = await self._fetch_financial_data_from_source(formatted_code, "income_statement")
 
-        if not raw_data or not raw_data.get("data"):
+        if not records:
             return {}
+        raw_data = records[0]
 
         data = self._drop_nulls(raw_data.get("data", {}))
 
@@ -251,10 +229,11 @@ class FinancialSource:
         """读取最新一期资产负债表 - 实时拉取模式。"""
         formatted_code = StockCodeStandardizer.standardize(stock_code)
 
-        raw_data = await self._fetch_financial_data_from_source(formatted_code, "balance_sheet")
+        records = await self._fetch_financial_data_from_source(formatted_code, "balance_sheet")
 
-        if not raw_data or not raw_data.get("data"):
+        if not records:
             return {}
+        raw_data = records[0]
 
         data = self._drop_nulls(raw_data.get("data", {}))
 
@@ -278,10 +257,11 @@ class FinancialSource:
         """读取最新一期现金流量表 - 实时拉取模式。"""
         formatted_code = StockCodeStandardizer.standardize(stock_code)
 
-        raw_data = await self._fetch_financial_data_from_source(formatted_code, "cashflow_statement")
+        records = await self._fetch_financial_data_from_source(formatted_code, "cashflow_statement")
 
-        if not raw_data or not raw_data.get("data"):
+        if not records:
             return {}
+        raw_data = records[0]
 
         data = self._drop_nulls(raw_data.get("data", {}))
 
