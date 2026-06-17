@@ -899,7 +899,7 @@ class AkshareIngestor(BaseIngestor):
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare stock shareholder count for {symbol}")
-            df = await self._run_in_executor(ak.stock_zh_a_gdhs, symbol=symbol)
+            df = await self._run_in_executor(ak.stock_zh_a_gdhs_detail_em, symbol=symbol)
             if df is None or df.empty:
                 return None
 
@@ -913,14 +913,18 @@ class AkshareIngestor(BaseIngestor):
                 '股东户数-上次': 'holder_count_prev',
                 '股东户数-增减': 'holder_count_change',
                 '股东户数-增减比例': 'holder_count_change_ratio',
-                '区间涨跌幅': 'interval_return',
+                '区间涨跌幅': 'price_change_ratio',
+                '股东户数统计截止日': 'end_date',
                 '股东户数统计截止日-本次': 'end_date',
                 '股东户数统计截止日-上次': 'prev_end_date',
                 '户均持股市值': 'avg_hold_value',
                 '户均持股数量': 'avg_hold_shares',
                 '总市值': 'total_mv',
                 '总股本': 'total_share',
-                '公告日期': 'ann_date'
+                '股本变动': 'share_change',
+                '股本变动原因': 'share_change_reason',
+                '公告日期': 'ann_date',
+                '股东户数公告日期': 'ann_date',
             }
             df.rename(columns=column_rename, inplace=True)
 
