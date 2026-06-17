@@ -770,6 +770,7 @@ async def sync_market_data(
     """
     统一同步数据库数据 (Unified DB sync tool).
     优先使用该工具替代多个 sync_source_* 工具，以减少工具 schema 数量。
+    财务数据不要使用该工具；需要财务指标、利润表、资产负债表或现金流量表时调用 fetch_financial_data。
     参数:
     - task_type: 同步任务类型
     - target: 统一承载 stock_code / index_code / symbol
@@ -787,8 +788,6 @@ async def sync_market_data(
       - start_date 必填
       - end_date 必填
       - extra_params 可选: adjust='qfq'|'hfq'
-    - financial:
-      - target 必填，表示 stock_code
     - valuation:
       - target 必填，表示 stock_code
       - start_date/end_date 可选
