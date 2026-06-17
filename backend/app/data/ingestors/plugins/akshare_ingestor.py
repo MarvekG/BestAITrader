@@ -14,7 +14,6 @@ from typing import Any, Optional
 
 from app.data.ingestors.base_ingestor import BaseIngestor
 from app.data.ingestion.service import DataIngestionService
-from app.data.ingestors.plugins.column_mapping import ColumnMapper
 from app.data.ingestors.rate_limiter import LeakyBucketRateLimiter
 from app.core.utils.formatters import StockCodeStandardizer
 from app.core.logger import get_logger
@@ -494,14 +493,6 @@ class AkshareIngestor(BaseIngestor):
                 if target_df.empty:
                     logger.warning(f"Invalid price for {stock_code} in AKShare realtime data")
                 return {"success": False, "data": [], "count": 0}
-
-            # 使用 ColumnMapper 映射到标准表（与 Tushare 对齐）
-            target_df = ColumnMapper.map_columns(
-                target_df,
-                'data.stock_realtime_market',
-                source=self.source,
-                strict=False
-            )
 
             # 写入数据库
             await self._run_in_executor(
