@@ -6,8 +6,6 @@ AKShare 是开源的财经数据接口库，无需 token 即可获取 A 股行�
 """
 
 import akshare as ak
-import asyncio
-import time
 import pandas as pd
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -364,7 +362,7 @@ class AkshareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 'stock_individual_info', result_df, source=self.source, target_table='stock_basic'
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
@@ -410,7 +408,7 @@ class AkshareIngestor(BaseIngestor):
             )
 
             logger.info(f"Successfully synced {len(df)} stocks basic info from AKShare")
-            
+
             # 返回字典格式
             return {
                 "success": True,
@@ -485,8 +483,10 @@ class AkshareIngestor(BaseIngestor):
             df['timestamp'] = pd.Timestamp.now()
 
             # 数值转换
-            numeric_cols = ['current_price', 'change_percent', 'change_amount', 'volume',
-                          'turnover', 'high', 'low', 'open', 'prev_close', 'bid', 'ask']
+            numeric_cols = [
+                'current_price', 'change_percent', 'change_amount', 'volume',
+                'turnover', 'high', 'low', 'open', 'prev_close', 'bid', 'ask'
+            ]
             for col in numeric_cols:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
@@ -594,7 +594,6 @@ class AkshareIngestor(BaseIngestor):
                 'stock_zh_index_daily', df, source=self.source, target_table='index_daily'
             )
 
-            
             # 返回字典格式
             return {
                 "success": True,
@@ -744,7 +743,7 @@ class AkshareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 'stock_individual_info', df, source=self.source
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
@@ -853,7 +852,11 @@ class AkshareIngestor(BaseIngestor):
         try:
             symbol = StockCodeStandardizer.to_number(stock_code)
             logger.info(f"Fetching AKShare stock money flow for {symbol}")
-            df = await self._run_in_executor(ak.stock_individual_fund_flow, stock=symbol, market="sh" if symbol.startswith('6') else "sz")
+            df = await self._run_in_executor(
+                ak.stock_individual_fund_flow,
+                stock=symbol,
+                market="sh" if symbol.startswith('6') else "sz",
+            )
             if df is None or df.empty:
                 return None
 
@@ -1196,7 +1199,7 @@ class AkshareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 'limit_up_pool', df, source=self.source, target_table='stock_limit_up_pool'
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
@@ -1247,7 +1250,7 @@ class AkshareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 'limit_down_pool', df, source=self.source, target_table='stock_limit_down_pool'
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
@@ -1298,7 +1301,7 @@ class AkshareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 'zhaban_pool', df, source=self.source, target_table='stock_zhaban_pool'
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
@@ -1360,7 +1363,7 @@ class AkshareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 'block_trade', df, source=self.source, target_table='stock_block_trade'
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
@@ -1400,7 +1403,7 @@ class AkshareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 'sector_money_flow', df, source=self.source, target_table='sector_money_flow'
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
@@ -1454,7 +1457,7 @@ class AkshareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 'top_holders', df, source=self.source, target_table='stock_top_holders'
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
@@ -1506,7 +1509,7 @@ class AkshareIngestor(BaseIngestor):
                 self.ingestion_service.write_dataframe,
                 'interactive_qa', df, source=self.source, target_table='stock_interactive_qa'
             )
-            
+
             # 返回字典格式
             return {
                 "success": True,
