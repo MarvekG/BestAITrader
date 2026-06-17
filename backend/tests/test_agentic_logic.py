@@ -476,12 +476,84 @@ def test_agentic_tools_registered():
     assert "query_stock_data" in tool_names
     assert "query_market_data" in tool_names
     assert "sync_market_data" in tool_names
+    assert "fetch_financial_data" in tool_names
     assert "browse_web_page_html" in tool_names
     assert "parse_pdf_to_markdown" in tool_names
     assert "search_news" in tool_names
     assert "search_tavily" not in tool_names
     assert "get_latest_indicators" not in tool_names
     assert "sync_source_financial_report" not in tool_names
+
+
+@pytest.mark.asyncio
+async def test_fetch_financial_data_invokes_selected_table_with_date_range(monkeypatch):
+    """财务实时抓取工具按表类型和日期范围调用对应采集入口。
+
+    Args:
+        monkeypatch: pytest 提供的运行期替换工具。
+    """
+    from app.ai.agentic.tools import fetch_financial_data
+    from app.data.ingestors.manager import ingestor_manager
+
+    fetch_mock = AsyncMock(return_value={
+        "success": True,
+        "data": [
+            {
+                "stock_code": "600519.SH",
+                "report_date": date(2025, 6, 30),
+                "announcement_date": date(2025, 8, 30),
+                "data_source": "fake",
+                "data": {"total_revenue": "200亿元"},
+            },
+            {
+                "stock_code": "600519.SH",
+                "report_date": date(2025, 9, 30),
+                "announcement_date": date(2025, 10, 30),
+                "data_source": "fake",
+                "data": {"total_revenue": "300亿元"},
+            },
+        ],
+        "count": 2,
+    })
+    monkeypatch.setattr(ingestor_manager, "fetch_and_ingest_income_statement", fetch_mock)
+
+    result = await fetch_financial_data.ainvoke({
+        "stock_code": "600519.SH",
+        "table_type": "income_statement",
+        "start_date": "2025-01-01",
+        "end_date": "2025-12-31",
+    })
+
+    assert result["success"] is True
+    assert result["table_type"] == "income_statement"
+    assert result["start_date"] == "20250101"
+    assert result["end_date"] == "20251231"
+    assert result["resolved_method"] == "fetch_and_ingest_income_statement"
+    assert result["source_count"] == 2
+    assert result["count"] == 2
+    assert result["data"][0]["report_date"] == "2025-09-30"
+    assert result["data"][1]["report_date"] == "2025-06-30"
+    fetch_mock.assert_awaited_once_with("600519.SH", "20250101", "20251231")
+
+
+@pytest.mark.asyncio
+async def test_fetch_financial_data_rejects_invalid_table_type():
+    """财务实时抓取工具拒绝不支持的表类型。"""
+    from app.ai.agentic.tools import fetch_financial_data
+
+    result = await fetch_financial_data.ainvoke({
+        "stock_code": "600519.SH",
+        "table_type": "financial",
+    })
+
+    assert result["success"] is False
+    assert result["error"] == "Unsupported table_type."
+    assert result["supported_table_types"] == [
+        "balance_sheet",
+        "cashflow_statement",
+        "financial_indicator",
+        "income_statement",
+    ]
 
 
 def test_base_agent_can_attach_runtime_recall_tools_for_bull_role():
