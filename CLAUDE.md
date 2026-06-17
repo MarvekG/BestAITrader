@@ -104,6 +104,7 @@
 
 ## 完成修改后的验证清单
 - 先运行与改动范围最近的测试或构建命令，不用无关大套件替代近邻验证。
+- 后端 Python 修改必须允许并优先运行最小范围 `flake8`（如 `python -m flake8 <changed files>`）；发现问题必须修复后再交付或提交。
 - 后端 API/鉴权/路由：至少运行 `pytest backend/tests/test_api_auth_required.py`，再加相关 endpoint/service 测试。
 - 后端模型/数据层：检查 `_sqlite_test_tables()`，运行相关数据库、ingestor 或 CRUD 测试。
 - 交易/组合/风控：运行 trading、risk_control、portfolio、performance 相关测试。
