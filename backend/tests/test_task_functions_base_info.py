@@ -128,6 +128,47 @@ async def test_sync_stock_data_func_does_not_sync_concept_boards():
 
 
 @pytest.mark.asyncio
+async def test_sync_stock_data_func_stores_only_step_statuses():
+    def _mark_side_effect(name: str):
+        async def _side_effect(*args, **kwargs):
+            return {"success": True, "data": [{"source": name, "payload": "large interface data"}], "count": 1}
+
+        return _side_effect
+
+    mock_ingestor = SimpleNamespace(
+        fetch_and_ingest_stock_info=AsyncMock(side_effect=_mark_side_effect("stock_info")),
+        fetch_and_ingest_stock_kline=AsyncMock(side_effect=_mark_side_effect("stock_kline")),
+        fetch_and_ingest_realtime_market=AsyncMock(side_effect=_mark_side_effect("realtime_market")),
+        fetch_and_ingest_stock_valuation=AsyncMock(side_effect=_mark_side_effect("stock_valuation")),
+        fetch_and_ingest_board_industry=AsyncMock(side_effect=_mark_side_effect("board_industry")),
+        fetch_and_ingest_northbound=AsyncMock(side_effect=_mark_side_effect("northbound")),
+        fetch_and_ingest_dragon_tiger=AsyncMock(side_effect=_mark_side_effect("dragon_tiger")),
+        fetch_and_ingest_stock_interactive_qa=AsyncMock(side_effect=_mark_side_effect("stock_interactive_qa")),
+        fetch_and_ingest_stock_limit_up_pool=AsyncMock(side_effect=_mark_side_effect("stock_limit_up_pool")),
+        fetch_and_ingest_stock_money_flow=AsyncMock(side_effect=_mark_side_effect("stock_money_flow")),
+        fetch_and_ingest_stock_shareholder_count=AsyncMock(side_effect=_mark_side_effect("stock_shareholder_count")),
+        fetch_and_ingest_stock_pledge_risk=AsyncMock(side_effect=_mark_side_effect("stock_pledge_risk")),
+        fetch_and_ingest_stock_insider_trading=AsyncMock(side_effect=_mark_side_effect("stock_insider_trading")),
+        fetch_and_ingest_stock_lockup_release=AsyncMock(side_effect=_mark_side_effect("stock_lockup_release")),
+        fetch_and_ingest_stock_margin_data=AsyncMock(side_effect=_mark_side_effect("stock_margin_data")),
+        fetch_and_ingest_stock_block_trade=AsyncMock(side_effect=_mark_side_effect("stock_block_trade")),
+        fetch_and_ingest_sector_money_flow=AsyncMock(side_effect=_mark_side_effect("sector_money_flow")),
+        fetch_and_ingest_stock_top_holders=AsyncMock(side_effect=_mark_side_effect("stock_top_holders")),
+    )
+
+    with patch("app.data.ingestors.manager.ingestor_manager", mock_ingestor), patch(
+        "app.tasks.task_functions.calculate_indicators_func",
+        new=AsyncMock(return_value={"success": True, "data": [{"payload": "indicator data"}], "count": 1}),
+    ):
+        result = await sync_stock_data_func("600519.SH")
+
+    assert result["status"] == "success"
+    assert set(result["details"].values()) == {True}
+    assert "large interface data" not in str(result)
+    assert "indicator data" not in str(result)
+
+
+@pytest.mark.asyncio
 async def test_cleanup_stock_realtime_market_history_keeps_recent_24h_records(test_db) -> None:
     latest_market_time = datetime.now() - timedelta(days=3)
     db = test_db()
