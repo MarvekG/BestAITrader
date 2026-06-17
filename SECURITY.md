@@ -78,9 +78,8 @@ the public internet without hardening it.
 
 ## Supported Use
 
-The safe default use case is a private, authenticated, noncommercial research deployment. Public, multi-tenant,
-or real-money trading deployments require additional security, privacy, legal, and operational review. Commercial
-use is not permitted by the repository license.
+The safe default use case is a private, authenticated research deployment. Public, multi-tenant,
+or real-money trading deployments require additional security, privacy, legal, and operational review.
 
 ## High-Risk Surfaces
 

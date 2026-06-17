@@ -1,10 +1,10 @@
 # 贡献指南
 
-感谢你为天枢智投（Best-AI-Trader）做贡献。本项目采用源码开放的非商业许可，并涉及金融工作流和第三方数据。所有贡献都需要保持这个边界清晰。
+感谢你为天枢智投（Best-AI-Trader）做贡献。本项目采用 MIT License，并涉及金融工作流和第三方数据。
 
 ## 贡献许可
 
-提交 Pull Request、补丁或其他贡献，即表示你确认自己有权贡献这些内容，并同意贡献内容按本仓库的 PolyForm Noncommercial License 1.0.0 分发。
+提交 Pull Request、补丁或其他贡献，即表示你确认自己有权贡献这些内容，并同意贡献内容按本仓库的 MIT License 分发。
 
 如果你单独向 `memo/` 子模块贡献，请遵循 MemoFlux 项目的上游贡献流程。
 
@@ -18,8 +18,7 @@
 - 真实用户账户数据、订单历史、持仓、prompt、记忆记录、日志或个人信息；
 - 无法说明兼容许可证和署名要求的第三方代码或数据集；
 - 将项目表述为持牌投资顾问、券商或真实资金交易系统的改动。
-- 更改本仓库许可证或移除非商业许可边界的改动。
-- 允许、弱化或包装任何商业行为的改动，包括利用本项目产生、提供或支持的商业行为。
+- 更改本仓库许可证的改动。
 
 ## 金融和数据源改动
 
@@ -65,14 +64,13 @@
 
 # Contributing
 
-Thanks for contributing to Best-AI-Trader. This project is source-available under a noncommercial license, and it
-touches regulated financial workflows and third-party data. Contributions need to keep that boundary clear.
+Thanks for contributing to Best-AI-Trader. This project is available under the MIT License, and it touches
+regulated financial workflows and third-party data.
 
 ## Contribution License
 
 By submitting a pull request, issue patch, or other contribution to this repository, you confirm that you have the
-right to contribute it and that your contribution may be distributed under the repository's PolyForm Noncommercial
-License 1.0.0.
+right to contribute it and that your contribution may be distributed under the repository's MIT License.
 
 If you contribute to the `memo/` submodule separately, follow the MemoFlux project's upstream contribution
 process.
@@ -87,9 +85,7 @@ Do not submit:
 - real user account data, order history, holdings, prompts, memory records, logs, or personal information;
 - third-party code or datasets unless you can point to a compatible license and attribution requirement;
 - changes that present the project as a licensed investment adviser, broker, or real-money trading system;
-- changes that alter this repository's license or remove the noncommercial license boundary;
-- changes that allow, weaken restrictions on, or repackage any commercial activity, including commercial activity
-  enabled by, based on, or using this project.
+- changes that alter this repository's license.
 
 ## Financial And Data-Source Changes
 
@@ -123,7 +119,7 @@ article bodies, proprietary row batches, and sensitive identifiers.
 
 ## Pull Request Checklist
 
-- The change keeps the noncommercial, research/simulation positioning intact.
+- The change keeps the research/simulation positioning intact.
 - No secrets or real user data are included.
 - No unlicensed third-party data is committed.
 - Data-source terms were checked and documented when relevant.
