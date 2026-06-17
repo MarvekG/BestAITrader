@@ -798,22 +798,7 @@ class AkshareIngestor(BaseIngestor):
         """采集外部行业板块数据。"""
         try:
             logger.info("Fetching AKShare board industry")
-
-            # 添加重试机制，首次可能网络失败
-            max_retries = 2
-            df = None
-            for attempt in range(max_retries):
-                try:
-                    df = await self._run_in_executor(ak.stock_board_industry_name_em)
-                    if df is not None and not df.empty:
-                        break
-                except Exception as e:
-                    if attempt < max_retries - 1:
-                        logger.warning(f"Attempt {attempt + 1} failed for board industry, retrying: {e}")
-                        await asyncio.sleep(2)
-                    else:
-                        raise
-
+            df = await self._run_in_executor(ak.stock_board_industry_name_em)
             if df is None or df.empty:
                 return None
 
