@@ -2474,9 +2474,6 @@
         "selection_mode": "Selection Mode",
         "tool_scope": "Tool Scope",
         "open_questions": "Open Questions",
-        "llm_calls": "LLM Calls",
-        "total_tokens": "Actual Tokens",
-        "input_output_tokens": "Input/Output Tokens",
         "factor_count": "AI Factor Count",
         "search_required": "Search Required"
       },

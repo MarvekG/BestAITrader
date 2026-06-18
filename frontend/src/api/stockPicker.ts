@@ -128,7 +128,6 @@ export interface InteractiveResearchRunSummary {
   raw_requirement: string;
   pending_message_id?: string | null;
   checkpoint_payload: Record<string, unknown>;
-  llm_usage?: Record<string, unknown>;
   cache_context_version: string;
   version: number;
   error_message?: string | null;

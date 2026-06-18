@@ -48,7 +48,6 @@ class InteractiveResearchRunSummary(BaseModel):
     raw_requirement: str
     pending_message_id: Optional[UUID] = None
     checkpoint_payload: Dict[str, Any] = Field(default_factory=dict)
-    llm_usage: Dict[str, Any] = Field(default_factory=dict)
     cache_context_version: str
     version: int
     error_message: Optional[str] = None

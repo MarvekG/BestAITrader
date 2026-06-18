@@ -365,7 +365,6 @@ def persist_plan_card_record(
     run_id: UUID,
     *,
     plan_message: str,
-    usage_record: Optional[Dict[str, Any]],
     reason: str,
     bump_version: bool,
 ) -> Dict[str, Any]:
@@ -374,7 +373,6 @@ def persist_plan_card_record(
     Args:
         run_id: 研究 run ID。
         plan_message: 计划 Agent Markdown 输出。
-        usage_record: 本轮 LLM usage。
         reason: checkpoint 原因。
         bump_version: 是否递增 run 版本。
 
@@ -391,7 +389,6 @@ def persist_plan_card_record(
             db,
             run,
             plan_message=plan_message,
-            usage_record=usage_record,
             reason=reason,
             bump_version=bump_version,
         )
@@ -755,20 +752,6 @@ def build_recent_chat_messages_record(run_id: UUID) -> List[Dict[str, Any]]:
         ]
 
 
-def accumulate_llm_usage_record(run_id: UUID, usage_record: Optional[Dict[str, Any]]) -> None:
-    """累加 run 级 LLM usage。
-
-    Args:
-        run_id: 研究 run ID。
-        usage_record: 单次 LLM usage 记录。
-    """
-    with SessionLocal() as db:
-        run = _get_run(db, run_id)
-        if run is not None:
-            accumulate_llm_usage(db, run, usage_record)
-            db.commit()
-
-
 def _get_run(db: Session, run_id: UUID) -> Optional[InteractiveResearchRun]:
     """在当前会话中按 ID 查询 run。
 
@@ -982,52 +965,11 @@ def write_checkpoint(
         "reason": reason,
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "run_config": existing_payload.get("run_config") or {},
-        "llm_usage": existing_payload.get("llm_usage") or {},
         **(extra_payload or {}),
     }
     run.checkpoint_payload = checkpoint_payload
     db.flush()
     return checkpoint_payload
-
-
-def accumulate_llm_usage(
-    db: Session,
-    run: InteractiveResearchRun,
-    usage_record: Optional[Dict[str, Any]],
-) -> Dict[str, Any]:
-    """把一次 LLM 调用的 usage 累加到 run checkpoint。
-
-    Args:
-        db: 数据库会话。
-        run: 当前研究 run。
-        usage_record: record_llm_usage 返回的单次调用记录。
-
-    Returns:
-        累加后的 run 级 usage 汇总。
-    """
-    checkpoint_payload = dict(run.checkpoint_payload or {})
-    current_usage = dict(checkpoint_payload.get("llm_usage") or {})
-    if not usage_record:
-        return current_usage
-
-    current_usage["calls"] = int(current_usage.get("calls") or 0) + 1
-    for key in (
-        "input_tokens",
-        "output_tokens",
-        "total_tokens",
-        "cached_tokens",
-        "cache_miss_tokens",
-        "reasoning_tokens",
-    ):
-        current_usage[key] = int(current_usage.get(key) or 0) + int(usage_record.get(key) or 0)
-
-    input_tokens = int(current_usage.get("input_tokens") or 0)
-    cached_tokens = int(current_usage.get("cached_tokens") or 0)
-    current_usage["cache_hit_rate"] = cached_tokens / input_tokens if input_tokens > 0 else 0.0
-    checkpoint_payload["llm_usage"] = current_usage
-    run.checkpoint_payload = checkpoint_payload
-    db.flush()
-    return current_usage
 
 
 def _max_iterations_from_checkpoint(run: InteractiveResearchRun) -> int:
@@ -1049,20 +991,18 @@ def persist_plan_card(
     run: InteractiveResearchRun,
     *,
     plan_message: str,
-    usage_record: Optional[Dict[str, Any]],
     reason: str,
     bump_version: bool,
 ) -> InteractiveResearchMessage:
-    """写入一轮计划卡，并同步更新 run checkpoint 和 LLM usage。
+    """写入一轮计划卡，并同步更新 run checkpoint。
 
     把计划阶段每轮固定的数据库写入（重置 pending、递增版本、追加 plan_card 消息、写
-    checkpoint、累加 usage）收敛到一处，调用方只需负责打开会话和提交事务。
+    checkpoint）收敛到一处，调用方只需负责打开会话和提交事务。
 
     Args:
         db: 数据库会话。
         run: 当前研究 run。
         plan_message: 计划 Agent 本轮 Markdown 输出。
-        usage_record: 本轮计划 LLM 调用的 usage 记录。
         reason: checkpoint 生成原因。
         bump_version: 是否递增 run 版本号。
 
@@ -1081,7 +1021,6 @@ def persist_plan_card(
         payload={"actions": ["approve", "cancel"]},
     )
     write_checkpoint(db, run, reason=reason)
-    accumulate_llm_usage(db, run, usage_record)
     return message
 
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import UUID
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -137,7 +137,7 @@ class PlanAgent:
             "interactive research plan agent tools loaded",
             extra={"run_id": str(run_id), "tool_names": [str(getattr(tool, "name", "")) for tool in tools]},
         )
-        plan_message, usage_record = await self._invoke_plan_markdown(run_id, messages, tools)
+        plan_message = await self._invoke_plan_markdown(run_id, messages, tools)
 
         latest_turn_record = load_plan_turn_record(run_id)
         if latest_turn_record is None:
@@ -152,7 +152,6 @@ class PlanAgent:
         result = persist_plan_card_record(
             run_id,
             plan_message=plan_message,
-            usage_record=usage_record,
             reason="plan_drafted" if initial else "plan_updated",
             bump_version=not initial,
         )
@@ -274,7 +273,7 @@ class PlanAgent:
 
     async def _invoke_plan_markdown(
         self, run_id: UUID, messages: List[Any], tools: List[Any]
-    ) -> Tuple[str, Optional[Dict[str, Any]]]:
+    ) -> str:
         """调用计划阶段 LLM 生成 Markdown 研究计划。
 
         Args:
@@ -283,12 +282,11 @@ class PlanAgent:
             tools: 可供计划阶段使用的联网工具列表。
 
         Returns:
-            计划 Agent 输出的 Markdown 正文和 usage 记录。
+            计划 Agent 输出的 Markdown 正文。
         """
         llm = self._build_llm()
         llm_with_tools = llm.bind_tools(tools) if tools else llm
         tool_map = {str(getattr(tool, "name", "")): tool for tool in tools if getattr(tool, "name", "")}
-        usage_records: List[Dict[str, Any]] = []
 
         iteration_budget = max(1, int(settings.INTERACTIVE_RESEARCH_PLAN_MAX_ITERATIONS))
         for iteration_index in range(1, iteration_budget + 1):
@@ -302,9 +300,7 @@ class PlanAgent:
                 },
             )
             response = await llm_with_tools.ainvoke(messages)
-            usage_record = self._record_llm_usage(run_id, response, iteration_index, call_kind="plan_markdown")
-            if usage_record:
-                usage_records.append(usage_record)
+            self._record_llm_usage(run_id, response, iteration_index, call_kind="plan_markdown")
             response, invalid_tool_calls = self._llm_provider.sanitize_tool_call_response_for_replay(response)
             messages.append(response)
 
@@ -320,7 +316,7 @@ class PlanAgent:
                 },
             )
             if not tool_calls and not invalid_tool_calls:
-                return str(getattr(response, "content", "") or "").strip(), _merge_usage_records(usage_records)
+                return str(getattr(response, "content", "") or "").strip()
 
             for tool_call in tool_calls:
                 await self._execute_tool_call(run_id, tool_map, messages, tool_call, iteration_index, llm)
@@ -343,20 +339,18 @@ class PlanAgent:
         )
         messages.append(HumanMessage(content=_plan_iteration_budget_instruction(iteration_budget)))
         final_response = await llm.ainvoke(messages)
-        usage_record = self._record_llm_usage(
+        self._record_llm_usage(
             run_id,
             final_response,
             iteration_budget + 1,
             call_kind="plan_final_no_tools",
         )
-        if usage_record:
-            usage_records.append(usage_record)
         final_response, _ = self._llm_provider.sanitize_tool_call_response_for_replay(final_response)
         logger.info(
             "interactive research plan agent final no-tools response completed",
             extra={"run_id": str(run_id), "content_length": len(str(getattr(final_response, "content", "") or ""))},
         )
-        return str(getattr(final_response, "content", "") or "").strip(), _merge_usage_records(usage_records)
+        return str(getattr(final_response, "content", "") or "").strip()
 
     async def _load_tools(self, run_id: UUID) -> List[Any]:
         """加载计划阶段允许使用的联网工具。
@@ -527,7 +521,7 @@ class PlanAgent:
         iteration_index: int,
         *,
         call_kind: str,
-    ) -> Optional[Dict[str, Any]]:
+    ) -> None:
         """记录计划阶段单次 LLM usage。
 
         Args:
@@ -536,10 +530,8 @@ class PlanAgent:
             iteration_index: 调用迭代序号。
             call_kind: LLM 调用类型。
 
-        Returns:
-            record_llm_usage 生成的 usage 记录。
         """
-        return record_llm_usage(
+        record_llm_usage(
             response,
             settings.LLM_MODEL,
             "interactive_stock_research",
@@ -558,25 +550,6 @@ class PlanAgent:
         """
         if self._notification_callback is not None and payload is not None:
             await self._notification_callback(payload)
-
-
-def _merge_usage_records(records: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """合并计划阶段多轮 LLM usage，供计划卡一次性落库。
-
-    Args:
-        records: 多次 record_llm_usage 返回的 usage 记录。
-
-    Returns:
-        合并后的 usage；没有有效记录时返回 None。
-    """
-    merged: Dict[str, Any] = {}
-    for record in records:
-        for key, value in record.items():
-            if isinstance(value, int):
-                merged[key] = int(merged.get(key) or 0) + value
-            elif key not in merged:
-                merged[key] = value
-    return merged or None
 
 
 def _compact_plan_tool_result(result_text: str) -> str:
