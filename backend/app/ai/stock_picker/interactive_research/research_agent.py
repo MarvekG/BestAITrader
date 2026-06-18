@@ -25,7 +25,6 @@ from app.ai.stock_picker.interactive_research.flow_control import (
     flow_control_decision_from_tool_args,
 )
 from app.ai.stock_picker.interactive_research.persistence import (
-    accumulate_llm_usage_record,
     append_assistant_text_record,
     append_queued_input_status_record,
     append_tool_result_and_progress_record,
@@ -155,7 +154,7 @@ class InteractiveResearchAgent:
                 },
             )
             response = await llm_with_tools.ainvoke(messages)
-            self._record_and_accumulate_llm_usage(
+            self._record_llm_usage(
                 run_id,
                 response,
                 stage="agent_loop",
@@ -250,7 +249,7 @@ class InteractiveResearchAgent:
             )
             for retry_index in range(MAX_FLOW_CONTROL_RETRIES + 1):
                 final_response = await llm_with_tools.ainvoke(messages)
-                self._record_and_accumulate_llm_usage(
+                self._record_llm_usage(
                     run_id,
                     final_response,
                     stage="agent_loop",
@@ -653,7 +652,7 @@ class InteractiveResearchAgent:
             return self._llm_factory()
         return build_chat_model(model=settings.LLM_MODEL, temperature=0.2)
 
-    def _record_and_accumulate_llm_usage(
+    def _record_llm_usage(
         self,
         run_id: UUID,
         response: Any,
@@ -662,7 +661,7 @@ class InteractiveResearchAgent:
         call_kind: str,
         iteration_index: int,
     ) -> None:
-        """记录单次 LLM usage，并同步累加到 run checkpoint。
+        """记录单次 LLM usage。
 
         Args:
             run_id: 当前研究 run ID。
@@ -671,7 +670,7 @@ class InteractiveResearchAgent:
             call_kind: LLM 调用类型。
             iteration_index: 调用迭代序号。
         """
-        usage_record = record_llm_usage(
+        record_llm_usage(
             response,
             settings.LLM_MODEL,
             "interactive_stock_research",
@@ -681,7 +680,6 @@ class InteractiveResearchAgent:
             call_kind=call_kind,
             iteration_index=iteration_index,
         )
-        accumulate_llm_usage_record(run_id, usage_record)
 
     def _parse_flow_control_tool_or_retry(
         self,

@@ -2474,9 +2474,6 @@
         "selection_mode": "选择模式",
         "tool_scope": "工具范围",
         "open_questions": "开放问题",
-        "llm_calls": "LLM 调用次数",
-        "total_tokens": "实际 Token",
-        "input_output_tokens": "输入/输出 Token",
         "factor_count": "AI 因子数",
         "search_required": "需要搜索"
       },

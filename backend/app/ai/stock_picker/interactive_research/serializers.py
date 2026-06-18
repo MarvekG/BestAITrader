@@ -35,8 +35,6 @@ def serialize_run_summary(run: InteractiveResearchRun) -> Dict[str, Any]:
         可被 Pydantic 响应模型校验且可直接 JSON 序列化的字典。
     """
     checkpoint_payload = run.checkpoint_payload or {}
-    llm_usage_payload = checkpoint_payload.get("llm_usage") if isinstance(checkpoint_payload, dict) else {}
-    llm_usage = llm_usage_payload if isinstance(llm_usage_payload, dict) else {}
     return jsonable_encoder({
         "run_id": run.run_id,
         "user_id": run.user_id,
@@ -53,7 +51,6 @@ def serialize_run_summary(run: InteractiveResearchRun) -> Dict[str, Any]:
         "created_at": run.created_at,
         "updated_at": run.updated_at,
         "finished_at": run.finished_at,
-        "llm_usage": llm_usage,
     })
 
 

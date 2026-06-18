@@ -196,10 +196,6 @@
   flex: 0 0 auto;
 }
 
-.interactive-research-inline-usage {
-  font-size: 12px;
-}
-
 .interactive-research-fullscreen-modal .ant-modal-content {
   display: flex;
   flex-direction: column;

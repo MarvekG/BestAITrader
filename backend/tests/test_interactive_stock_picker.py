@@ -449,8 +449,7 @@ async def test_create_run_writes_user_message_plan_card_and_checkpoint(db_sessio
     assert "open_questions" not in serialized_plan_message["markdown"]
     assert serialized_plan_message["payload"] == {"actions": ["approve", "cancel"]}
     assert "plan_payload" not in run.checkpoint_payload
-    run.checkpoint_payload = {**run.checkpoint_payload, "llm_usage": None}
-    assert service.serialize_run_summary(run)["llm_usage"] == {}
+    assert "llm_usage" not in run.checkpoint_payload
     assert set(service.serialize_run_summary(run)) == {
         "run_id",
         "user_id",
@@ -461,7 +460,6 @@ async def test_create_run_writes_user_message_plan_card_and_checkpoint(db_sessio
         "raw_requirement",
         "pending_message_id",
         "checkpoint_payload",
-        "llm_usage",
         "cache_context_version",
         "version",
         "error_message",
@@ -913,7 +911,7 @@ def test_interactive_http_contract_is_chat_only(client, auth_headers, monkeypatc
 
     assert list_response.status_code == 200
     assert list_response.json()[0]["run_id"] == run_id
-    assert "llm_usage" in list_response.json()[0]
+    assert "llm_usage" not in list_response.json()[0]
     assert messages_response.status_code == 200
     assert result_response.status_code == 404
     assert artifacts_response.status_code == 404

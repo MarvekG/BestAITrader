@@ -204,11 +204,6 @@ const shouldShowFooterExpandAction = (content: string, isToolMessage: boolean): 
   return !isToolMessage && content.length > 700;
 };
 
-const getNumberValue = (value: unknown): number => {
-  const numberValue = Number(value || 0);
-  return Number.isFinite(numberValue) ? numberValue : 0;
-};
-
 const getStatusColor = (status: string) => {
   if (status === 'completed') return 'green';
   if (status === 'cancelled') return 'default';
@@ -815,19 +810,6 @@ export const InteractiveResearchTab: React.FC = () => {
                 ? t('ai_stock_picker.interactive.actions.send_message')
                 : t('ai_stock_picker.interactive.actions.create_run')}
             </Button>
-            {selectedRun && (
-              <Space className="interactive-research-inline-usage" size={12} wrap>
-                <Text type="secondary">
-                  {t('ai_stock_picker.interactive.fields.llm_calls')}: {getNumberValue(selectedRun.llm_usage?.calls).toLocaleString()}
-                </Text>
-                <Text type="secondary">
-                  {t('ai_stock_picker.interactive.fields.total_tokens')}: {getNumberValue(selectedRun.llm_usage?.total_tokens).toLocaleString()}
-                </Text>
-                <Text type="secondary">
-                  {t('ai_stock_picker.interactive.fields.input_output_tokens')}: {getNumberValue(selectedRun.llm_usage?.input_tokens).toLocaleString()} / {getNumberValue(selectedRun.llm_usage?.output_tokens).toLocaleString()}
-                </Text>
-              </Space>
-            )}
           </Space>
         </Form>
       </div>
