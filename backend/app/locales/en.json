@@ -2501,7 +2501,7 @@
         "load_runs_failed": "Failed to load AI Deep Research stock-picking history",
         "load_details_failed": "Failed to load AI Deep Research stock-picking detail",
         "active_run_exists": "An unfinished AI Deep Research stock-picking run already exists ({{run_id}}). Handle it first",
-        "run_created": "Research plan generated and awaiting approval",
+        "run_created": "Research plan generation has started. Please wait",
         "approve_success": "Plan approved and execution started",
         "approve_failed": "Failed to approve plan",
         "cancel_success": "Research cancelled",
@@ -2548,7 +2548,11 @@
         "tool": "Tool"
       },
       "execution_statuses": {
+        "created": "Created",
         "queued": "Queued",
+        "streaming": "Streaming",
+        "running": "Running",
+        "started": "Started",
         "completed": "Completed",
         "failed": "Failed"
       },
@@ -2585,12 +2589,15 @@
           }
         },
         "messages": {
-          "plan_generated": "Research plan generated and awaiting approval.",
+          "plan_generated": "Research plan generation has started. Please wait.",
           "plan_approved": "Research plan approved.",
           "plan_updated": "Research plan updated from the additional input and awaiting approval.",
           "research_started": "Research plan approved. Starting LLM-driven research loop.",
           "tool_start": "Calling {tool_name} with LLM-selected arguments.",
           "tool_completed": "Tool {tool_name} completed and its evidence was added to the next agent turn.",
+          "tool_failed": "Tool {tool_name} failed and the error was added to the next agent turn.",
+          "tool_call_success": "Tool call succeeded",
+          "tool_call_failed": "Tool call failed",
           "llm_loop_completed": "LLM-driven research loop completed.",
           "completed": "Deep Research run completed.",
           "cancelled": "Interactive research run cancelled.",

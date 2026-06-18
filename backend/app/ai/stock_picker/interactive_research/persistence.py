@@ -434,17 +434,24 @@ def start_research_run_record(run_id: UUID) -> Optional[Dict[str, Any]]:
             payload={"phase_instruction": phase_instructions()["research"]},
         )
         payload = _notification_payload(run, message, "research_started")
+        plan_conversation = _build_plan_conversation_snapshot(_load_plan_messages(db, run))
         snapshot = {
             "user_id": run.user_id,
             "raw_requirement": run.raw_requirement,
             "max_iterations": _max_iterations_from_checkpoint(run),
             "queued_before": queued_messages,
+            "plan_conversation": plan_conversation,
         }
         db.commit()
         return {"snapshot": snapshot, "notification": payload}
 
 
-def append_tool_start_record(run_id: UUID, tool_name: str, tool_args: Dict[str, Any], tool_call_id: str) -> Dict[str, Any]:
+def append_tool_start_record(
+    run_id: UUID,
+    tool_name: str,
+    tool_args: Dict[str, Any],
+    tool_call_id: str,
+) -> Dict[str, Any]:
     """记录工具开始调用消息。
 
     Args:
@@ -817,6 +824,40 @@ def _load_plan_messages(db: Session, run: InteractiveResearchRun) -> List[Dict[s
         {"role": item.role, "message_type": item.message_type, "content": item.content or ""}
         for item in persisted
     ]
+
+
+def _build_plan_conversation_snapshot(plan_messages: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+    """构造计划阶段用户输入和计划卡的顺序快照。
+
+    Args:
+        plan_messages: 计划阶段可见消息快照。
+
+    Returns:
+        按原消息顺序排列的用户输入和计划卡记录。
+    """
+    plan_conversation = []
+    user_round = 0
+    plan_round = 0
+    for item in plan_messages:
+        if item.get("role") == "user" and item.get("content"):
+            user_round += 1
+            plan_conversation.append(
+                {
+                    "kind": "user_input",
+                    "round": user_round,
+                    "content": item.get("content") or "",
+                }
+            )
+        elif item.get("role") == "assistant" and item.get("message_type") == "plan_card" and item.get("content"):
+            plan_round += 1
+            plan_conversation.append(
+                {
+                    "kind": "plan_card",
+                    "round": plan_round,
+                    "content": item.get("content") or "",
+                }
+            )
+    return plan_conversation
 
 
 def _process_queued_user_inputs(db: Session, run: InteractiveResearchRun) -> List[Dict[str, str]]:

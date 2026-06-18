@@ -41,6 +41,25 @@ DEFAULT_RISK_LEVEL = "medium"
 DEFAULT_RESEARCH_DEPTH = "standard"
 CACHE_CONTEXT_VERSION = "research-agent-v1"
 
+PLAN_ITERATION_BUDGET_INSTRUCTION_ZH = (
+    "计划阶段已经用完 {iteration_budget} 轮联网工具预算。不要再调用工具，直接输出完整 Markdown 研究计划。"
+)
+PLAN_ITERATION_BUDGET_INSTRUCTION_EN = (
+    "The planning stage has used its {iteration_budget}-iteration online tool budget. "
+    "Do not call tools again; output the complete Markdown research plan now."
+)
+PLAN_CONVERSATION_CONTEXT_HEADER_ZH = (
+    "计划阶段对话记录（按顺序，仅含用户输入和计划卡；最终确认计划优先，以下用于理解修订语义）："
+)
+PLAN_CONVERSATION_USER_LINE_ZH = "第 {round} 轮用户输入: {content}"
+PLAN_CONVERSATION_PLAN_LINE_ZH = "第 {round} 版计划卡: {content}"
+PLAN_CONVERSATION_CONTEXT_HEADER_EN = (
+    "Planning-stage conversation in order. Includes only user inputs and plan cards; "
+    "the final approved plan has priority, and this record is for interpreting revisions:"
+)
+PLAN_CONVERSATION_USER_LINE_EN = "Round {round} user input: {content}"
+PLAN_CONVERSATION_PLAN_LINE_EN = "Plan card version {round}: {content}"
+
 FLOW_CONTROL_TOOL_ACTION_DESCRIPTION = "下一步流程动作：continue 继续研究，ask 暂停并向用户提问，done 输出最终答案。"
 FLOW_CONTROL_TOOL_MESSAGE_DESCRIPTION = "展示给用户的进展、问题或最终 Markdown 答案。"
 FLOW_CONTROL_TOOL_DESCRIPTION = (
@@ -171,11 +190,15 @@ def planning_stage_prompt() -> str:
     """
     if prompt_language() == "en":
         return (
-            "You control the planning stage for an interactive A-share deep research chat. You are the PlanAgent, "
+            "You control the planning stage for an interactive A-share deep research chat, with stock picking as "
+            "the primary focus. You are the PlanAgent, "
             "a research architect who turns the user's natural-language requirement and the draft JSON plan into an "
             "executable research contract. Your output is the plan shown to the user before research starts; it must "
             "be specific enough for the Research Agent to execute, but it must not recommend stocks. "
-            "Always output only the revised Markdown research plan. Do not call tools, do not ask whether to proceed, "
+            "Always output only the revised Markdown research plan. You may call available online evidence tools "
+            "before writing the plan when recent facts, source availability, or data freshness assumptions need "
+            "verification, "
+            "but keep tool use minimal and planning-oriented. Do not ask whether to proceed, "
             "and do not decide whether research should start; the user confirms execution with the UI button. "
             "If constraints conflict, preserve explicit user constraints first and expose the tradeoff in the plan.\n\n"
             "Plan card requirements:\n"
@@ -202,10 +225,12 @@ def planning_stage_prompt() -> str:
             "monitoring/stop-loss/take-profit is already active."
         )
     return (
-        "你负责交互式 A 股深度研究聊天的规划阶段。你是 PlanAgent，是研究方案架构师，"
+        "你负责交互式 A 股深度研究聊天的规划阶段。重点是选股。你是 PlanAgent，是研究方案架构师，"
         "职责是把用户自然语言需求和本地结构化计划初稿整理成可执行的研究契约。你的输出会在研究开始前展示给用户确认，"
         "必须足够具体，让 Research Agent 可以据此执行，但不能直接推荐股票。"
-        "始终只输出修订后的 Markdown 研究计划，不调用工具，不询问是否执行，也不判断是否开始研究；"
+        "始终只输出修订后的 Markdown 研究计划。"
+        "当近期事实、来源可得性或数据时效性假设需要核实时，可以先调用可用联网证据工具，"
+        "但工具使用必须克制，并且只服务于规划。不要询问是否执行，也不判断是否开始研究；"
         "是否执行由用户点击前端确认按钮决定。"
         "如果约束互相冲突，优先保留用户明确约束，并把取舍写进计划，不要静默放宽。\n\n"
         "计划卡要求：\n"

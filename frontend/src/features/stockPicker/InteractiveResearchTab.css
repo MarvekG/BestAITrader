@@ -111,11 +111,93 @@
   overflow: hidden;
 }
 
+.interactive-research-card {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 135px);
+  max-height: calc(100vh - 135px);
+  min-height: 0;
+}
+
+.interactive-research-card .ant-card-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 10px 12px;
+  overflow: hidden;
+}
+
+.interactive-research-card .ant-card-head {
+  min-height: 44px;
+  padding: 0 12px;
+}
+
+.interactive-research-card .ant-card-head-title,
+.interactive-research-card .ant-card-extra {
+  padding: 8px 0;
+}
+
+.interactive-research-card .ant-card-head-wrapper {
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.interactive-research-run-select {
+  width: clamp(220px, 30vw, 360px);
+}
+
+.interactive-research-run-option,
+.interactive-research-run-select .ant-select-selection-item {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.interactive-research-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+}
+
+.interactive-research-content .ant-descriptions-view {
+  font-size: 12px;
+}
+
+.interactive-research-content .ant-descriptions {
+  line-height: 1.3;
+}
+
+.interactive-research-content .ant-descriptions-row > th,
+.interactive-research-content .ant-descriptions-row > td {
+  padding-bottom: 2px;
+}
+
+.interactive-research-message-panel-shell {
+  flex: 1;
+  min-height: 0;
+}
+
+.interactive-research-message-panel-shell .ant-spin-nested-loading,
+.interactive-research-message-panel-shell .ant-spin-container {
+  height: 100%;
+}
+
 .interactive-research-message-panel {
-  min-height: 40vh;
-  max-height: 50vh;
+  height: 100%;
+  min-height: 0;
   padding: 12px;
   overflow: auto;
+}
+
+.interactive-research-input-form {
+  flex: 0 0 auto;
+}
+
+.interactive-research-inline-usage {
+  font-size: 12px;
 }
 
 .interactive-research-fullscreen-modal .ant-modal-content {

@@ -123,16 +123,22 @@ def test_cors_does_not_allow_arbitrary_origins_by_default(client):
     assert "access-control-allow-origin" not in response.headers
 
 
-def test_access_log_redacts_sensitive_query_string_values(client, caplog):
+def test_access_log_uses_dedicated_logger_and_redacts_query_string(client, caplog):
+    caplog.set_level(logging.INFO, logger="app.access")
     caplog.set_level(logging.INFO, logger="app.main")
 
     client.get("/health?token=secret-token&api_key=secret-key&safe=value")
 
+    main_access_records = [
+        record for record in caplog.records
+        if record.name == "app.main" and record.getMessage().startswith("http request ")
+    ]
     started_records = [
         record for record in caplog.records
-        if record.name == "app.main" and record.getMessage().startswith("http request started")
+        if record.name == "app.access" and record.getMessage().startswith("http request started")
     ]
 
+    assert main_access_records == []
     assert started_records
     for record in started_records:
         assert "secret-token" not in record.getMessage()

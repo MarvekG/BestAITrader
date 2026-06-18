@@ -77,6 +77,8 @@ class FakeInteractiveResearchLLM:
         self.multiple_final_control_calls = False
         self.mixed_tool_and_flow_control = False
         self.never_uses_tools = False
+        self.plan_uses_tool = False
+        self.research_message_snapshots = []
 
     def bind_tools(self, tools):
         """记录绑定工具并返回自身。
@@ -103,9 +105,21 @@ class FakeInteractiveResearchLLM:
         if "planning stage" in first_content or "规划阶段" in first_content:
             self.plan_calls += 1
             self.plan_message_counts.append(len(messages))
+            if self.plan_uses_tool and self.plan_calls == 1:
+                return AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "search_news",
+                            "args": {"keyword": "AI hardware policy", "source": "interactive_research"},
+                            "id": "plan-tool-call-1",
+                        }
+                    ],
+                )
             return AIMessage(content="Plan updated: exclude banks and favor AI hardware.")
 
         self.research_calls += 1
+        self.research_message_snapshots.append([str(getattr(message, "content", "") or "") for message in messages])
         if self.never_uses_tools and self.research_calls <= 10:
             return AIMessage(content="Still thinking without tool calls.")
         if self.ask_on_first_research and not self.asked:
@@ -569,6 +583,58 @@ async def test_plan_stage_user_input_iterates_plan_card(db_session):
     assert "当前完整 PLAN" not in plan_cards[-1].content
     assert "user_inputs" not in plan_cards[-1].content
     assert "plan_payload" not in run.checkpoint_payload
+
+
+@pytest.mark.asyncio
+async def test_plan_agent_can_use_online_tool_before_writing_plan(db_session):
+    """计划阶段允许先调用联网工具，再把工具结果纳入计划卡。"""
+    user_id = _create_user_id(db_session)
+    service, fake_llm, fake_tool = _service_with_fake_runner()
+    fake_llm.plan_uses_tool = True
+
+    run = await _create_run_with_plan(service, user_id, _request_data())
+    messages = service.get_messages(run.run_id, user_id)
+    plan_card = messages[-1]
+
+    assert fake_tool.calls == [{"keyword": "AI hardware policy", "source": "interactive_research"}]
+    assert fake_llm.plan_calls == 2
+    assert [tool.name for tool in fake_llm.bound_tools] == ["search_news"]
+    assert _message_types(db_session, run.run_id) == [
+        "user_input",
+        "tool_start",
+        "tool_result",
+        "progress_update",
+        "plan_card",
+    ]
+    assert plan_card.content == "Plan updated: exclude banks and favor AI hardware."
+
+
+@pytest.mark.asyncio
+async def test_research_agent_receives_planning_conversation_in_order(db_session, monkeypatch):
+    """研究阶段输入应包含计划阶段用户输入和计划卡顺序记录。"""
+    user_id = _create_user_id(db_session)
+    service, fake_llm, _ = _service_with_fake_runner()
+    run = await _create_run_with_plan(service, user_id, _request_data())
+    revise_tasks = FakeBackgroundTasks()
+    await service.append_user_message(
+        run.run_id,
+        user_id,
+        "Second planning round: exclude banks",
+        background_tasks=revise_tasks,
+    )
+    await revise_tasks.run_all()
+
+    await service.process_action(run.run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
+    await _execute_background(monkeypatch, service, db_session, run.run_id)
+
+    first_research_context = "\n".join(fake_llm.research_message_snapshots[0])
+    assert "第 1 轮用户输入" in first_research_context
+    assert "Find A-share opportunities with policy catalysts" in first_research_context
+    assert "第 1 版计划卡" in first_research_context
+    assert "Plan updated: exclude banks and favor AI hardware." in first_research_context
+    assert "第 2 轮用户输入" in first_research_context
+    assert "Second planning round: exclude banks" in first_research_context
+    assert "第 2 版计划卡" in first_research_context
 
 
 def test_tool_result_success_false_marks_trace_failed():

@@ -15,6 +15,7 @@ import {
   Space,
   Spin,
   Tag,
+  Tooltip,
   Typography,
   theme,
 } from 'antd';
@@ -63,6 +64,7 @@ const activeStatuses = new Set([
 ]);
 
 const terminalStatuses = new Set(['completed', 'cancelled', 'failed']);
+const WEBSOCKET_REFRESH_DEBOUNCE_MS = 1000;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -250,6 +252,9 @@ export const InteractiveResearchTab: React.FC = () => {
   const [expandedMessage, setExpandedMessage] = React.useState<InteractiveResearchMessage | null>(null);
   const selectedRunIdRef = React.useRef<string | null>(null);
   const messagesEndRef = React.useRef<HTMLDivElement | null>(null);
+  const websocketRefreshTimerRef = React.useRef<number | null>(null);
+  const websocketRefreshInFlightRef = React.useRef(false);
+  const websocketRefreshPendingRef = React.useRef(false);
 
   const getStatusLabel = React.useCallback(
     (status: string) => t(`ai_stock_picker.interactive.statuses.${status}`, { defaultValue: status }),
@@ -319,6 +324,51 @@ export const InteractiveResearchTab: React.FC = () => {
     }
   }, [loadRunDetails, loadRuns]);
 
+  const refreshSelectedRunDetails = React.useCallback(async () => {
+    const runId = selectedRunIdRef.current;
+    if (!runId) {
+      return;
+    }
+    await loadRunDetails(runId, { silent: true });
+  }, [loadRunDetails]);
+
+  const flushWebSocketRefresh = React.useCallback(async () => {
+    if (websocketRefreshInFlightRef.current) {
+      websocketRefreshPendingRef.current = true;
+      return;
+    }
+    websocketRefreshInFlightRef.current = true;
+    try {
+      await refreshSelectedRunDetails();
+    } finally {
+      websocketRefreshInFlightRef.current = false;
+      if (websocketRefreshPendingRef.current) {
+        websocketRefreshPendingRef.current = false;
+        window.setTimeout(() => {
+          flushWebSocketRefresh().catch(() => undefined);
+        }, WEBSOCKET_REFRESH_DEBOUNCE_MS);
+      }
+    }
+  }, [refreshSelectedRunDetails]);
+
+  const scheduleWebSocketRefresh = React.useCallback(() => {
+    if (websocketRefreshTimerRef.current !== null) {
+      window.clearTimeout(websocketRefreshTimerRef.current);
+    }
+    websocketRefreshTimerRef.current = window.setTimeout(() => {
+      websocketRefreshTimerRef.current = null;
+      flushWebSocketRefresh().catch(() => undefined);
+    }, WEBSOCKET_REFRESH_DEBOUNCE_MS);
+  }, [flushWebSocketRefresh]);
+
+  React.useEffect(() => {
+    return () => {
+      if (websocketRefreshTimerRef.current !== null) {
+        window.clearTimeout(websocketRefreshTimerRef.current);
+      }
+    };
+  }, []);
+
   React.useEffect(() => {
     loadRuns().catch(() => {
       message.error(t('ai_stock_picker.interactive.messages.load_runs_failed'));
@@ -356,7 +406,7 @@ export const InteractiveResearchTab: React.FC = () => {
     if (data?.run_id && data.run_id !== selectedRunIdRef.current) {
       return;
     }
-    refreshSelectedRun().catch(() => undefined);
+    scheduleWebSocketRefresh();
   });
 
   React.useEffect(() => {
@@ -653,13 +703,20 @@ export const InteractiveResearchTab: React.FC = () => {
     () =>
       runs.map((run) => ({
         value: run.run_id,
-        label: `${getStatusLabel(run.status)} · ${run.title || run.raw_requirement}`,
+        label: (
+          <Tooltip title={`${getStatusLabel(run.status)} · ${run.title || run.raw_requirement}`}>
+            <span className="interactive-research-run-option">
+              {getStatusLabel(run.status)} · {run.title || run.raw_requirement}
+            </span>
+          </Tooltip>
+        ),
       })),
     [getStatusLabel, runs],
   );
 
   return (
     <Card
+      className="interactive-research-card"
       title={
         <Space>
           <MessageOutlined />
@@ -672,7 +729,7 @@ export const InteractiveResearchTab: React.FC = () => {
             allowClear
             loading={loadingRuns}
             placeholder={t('ai_stock_picker.interactive.empty.select_run')}
-            style={{ minWidth: 280 }}
+            className="interactive-research-run-select"
             value={selectedRunId ?? undefined}
             options={runOptions}
             onChange={(value) => setSelectedRunId(value ?? null)}
@@ -687,7 +744,7 @@ export const InteractiveResearchTab: React.FC = () => {
         </Space>
       }
     >
-      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+      <div className="interactive-research-content">
         {activeRun && activeRun.run_id !== selectedRun?.run_id && (
           <Alert
             type="info"
@@ -712,29 +769,20 @@ export const InteractiveResearchTab: React.FC = () => {
             <Descriptions.Item label={t('ai_stock_picker.interactive.fields.updated_at')}>
               {dayjs(selectedRun.updated_at).format('YYYY-MM-DD HH:mm:ss')}
             </Descriptions.Item>
-            <Descriptions.Item label={t('ai_stock_picker.interactive.fields.llm_calls')}>
-              {getNumberValue(selectedRun.llm_usage?.calls).toLocaleString()}
-            </Descriptions.Item>
-            <Descriptions.Item label={t('ai_stock_picker.interactive.fields.total_tokens')}>
-              {getNumberValue(selectedRun.llm_usage?.total_tokens).toLocaleString()}
-            </Descriptions.Item>
-            <Descriptions.Item label={t('ai_stock_picker.interactive.fields.input_output_tokens')}>
-              {getNumberValue(selectedRun.llm_usage?.input_tokens).toLocaleString()} / {getNumberValue(selectedRun.llm_usage?.output_tokens).toLocaleString()}
-            </Descriptions.Item>
           </Descriptions>
         )}
         {selectedRun?.error_message && <Alert type="error" showIcon message={selectedRun.error_message} />}
 
-        {renderMessagesPanel()}
+        <div className="interactive-research-message-panel-shell">{renderMessagesPanel()}</div>
 
-        <Form form={messageForm} layout="vertical" initialValues={{ max_iterations: 60 }}>
+        <Form className="interactive-research-input-form" form={messageForm} layout="vertical" initialValues={{ max_iterations: 60 }}>
           <Form.Item
             name="content"
             rules={[{ required: true, message: t('ai_stock_picker.interactive.validations.message_required') }]}
             style={{ marginBottom: 8 }}
           >
             <Input.TextArea
-              rows={3}
+              rows={2}
               maxLength={4000}
               showCount
               placeholder={t('ai_stock_picker.interactive.placeholders.message')}
@@ -767,9 +815,22 @@ export const InteractiveResearchTab: React.FC = () => {
                 ? t('ai_stock_picker.interactive.actions.send_message')
                 : t('ai_stock_picker.interactive.actions.create_run')}
             </Button>
+            {selectedRun && (
+              <Space className="interactive-research-inline-usage" size={12} wrap>
+                <Text type="secondary">
+                  {t('ai_stock_picker.interactive.fields.llm_calls')}: {getNumberValue(selectedRun.llm_usage?.calls).toLocaleString()}
+                </Text>
+                <Text type="secondary">
+                  {t('ai_stock_picker.interactive.fields.total_tokens')}: {getNumberValue(selectedRun.llm_usage?.total_tokens).toLocaleString()}
+                </Text>
+                <Text type="secondary">
+                  {t('ai_stock_picker.interactive.fields.input_output_tokens')}: {getNumberValue(selectedRun.llm_usage?.input_tokens).toLocaleString()} / {getNumberValue(selectedRun.llm_usage?.output_tokens).toLocaleString()}
+                </Text>
+              </Space>
+            )}
           </Space>
         </Form>
-      </Space>
+      </div>
       <Modal
         className="interactive-research-fullscreen-modal"
         footer={null}
