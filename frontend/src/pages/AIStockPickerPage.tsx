@@ -24,7 +24,6 @@ import {
   DeleteOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
-  RobotOutlined,
   SyncOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -46,7 +45,7 @@ import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
 import { formatErrorMessage, getApiErrorDetail } from '../utils/errorUtils';
 import { InteractiveResearchTab } from '../features/stockPicker/InteractiveResearchTab';
 
-const { Title, Paragraph, Text } = Typography;
+const { Paragraph, Text } = Typography;
 
 const statusColor = (status: string) => {
   if (status === 'completed') return 'green';
@@ -649,14 +648,6 @@ export const AIStockPickerPage: React.FC = () => {
 
   return (
     <Space direction="vertical" size={8} style={{ width: '100%' }}>
-      <Card styles={{ body: { padding: '12px 16px' } }}>
-        <Space direction="vertical" size={4}>
-          <Title level={3} style={{ margin: 0 }}>
-            <RobotOutlined /> {t('ai_stock_picker.title')}
-          </Title>
-        </Space>
-      </Card>
-
       <Modal
         title={t('ai_stock_picker.cards.data_sync')}
         open={isDataSyncModalOpen}
