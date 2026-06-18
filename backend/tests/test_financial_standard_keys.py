@@ -376,6 +376,32 @@ def test_format_payload_values_formats_realtime_market_units(monkeypatch):
     assert result["total_market_cap"] == "15788.28亿元"
 
 
+def test_format_payload_values_formats_akshare_pledge_units(monkeypatch):
+    """质押汇总进入 AI Context 时应保留数据库单位并补充明确后缀。"""
+    monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "zh")
+
+    payload = {
+        "ratio_total": 12.5,
+        "ratio_holder": 35.2,
+        "total_shares": 6789.0,
+        "market_value": 45678.9,
+        "pledge_count": 8,
+        "pledge_price": 10.5,
+    }
+
+    zh_result = format_payload_values("risk.pledge", payload)
+    en_result = format_payload_values("risk.pledge", payload, language="en")
+
+    assert zh_result["ratio_total"] == "12.5%"
+    assert zh_result["ratio_holder"] == "35.2%"
+    assert zh_result["total_shares"] == "6789万股"
+    assert zh_result["market_value"] == "45678.9万元"
+    assert zh_result["pledge_count"] == "8笔"
+    assert zh_result["pledge_price"] == "10.5元"
+    assert en_result["total_shares"] == "67.89 million shares"
+    assert en_result["market_value"] == "456.79 million CNY"
+
+
 def test_format_payload_values_formats_stock_picker_units(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "zh")
 

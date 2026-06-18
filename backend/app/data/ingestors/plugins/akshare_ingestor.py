@@ -514,8 +514,6 @@ class AkshareIngestor(BaseIngestor):
             for col in numeric_cols:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
-            if 'volume' in df.columns:
-                df['volume'] = df['volume'] / 100
 
             # 过滤无效价格（保留有效数据）
             original_count = len(df)
@@ -1387,12 +1385,12 @@ class AkshareIngestor(BaseIngestor):
             for col in ['price', 'premium_rate', 'volume', 'amount']:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
+            if 'premium_rate' in df.columns:
+                df['premium_rate'] = df['premium_rate'] * 100
             if 'volume' in df.columns:
                 df['volume'] = df['volume'] / 10000
             if 'amount' in df.columns:
                 df['amount'] = df['amount'] / 10000
-            if 'premium_rate' in df.columns:
-                df['premium_rate'] = df['premium_rate'] * 100
             df['data_source'] = self.source
             await self._run_in_executor(
                 self.ingestion_service.write_dataframe,

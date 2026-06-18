@@ -192,7 +192,12 @@
     "main_net_inflow_10d": "10d Main Inflow",
     "main_net_inflow_rank_today": "Main Inflow Rank Today",
     "main_net_inflow_rank_5d": "5d Main Inflow Rank",
-    "main_net_inflow_rank_10d": "10d Main Inflow Rank"
+    "main_net_inflow_rank_10d": "10d Main Inflow Rank",
+    "amplitude": "Amplitude",
+    "volume_ratio": "Volume Ratio",
+    "circulating_market_cap": "Circulating Market Cap",
+    "speed_increase": "Price Change Speed",
+    "change_5min": "5-Minute Change"
   },
   "errors": {
     "tushare_pledge_summary_requires_stock_code": "TuShare pledge_stat API requires stock_code; bulk fetch is not supported"
@@ -279,7 +284,11 @@
     "data_source": "Data Source",
     "id": "ID",
     "created_at": "Created At",
-    "updated_at": "Updated At"
+    "updated_at": "Updated At",
+    "total_share": "Total Shares",
+    "float_share": "Float Shares",
+    "free_share": "Free Float Shares",
+    "peg": "PEG"
   },
   "northbound_data": {
     "date": "Date",
@@ -301,7 +310,19 @@
     "buy_amount": "Buy",
     "sell_amount": "Sell",
     "price_change_percent": "Change %",
-    "listing_reason": "Reason"
+    "listing_reason": "Reason",
+    "sequence_number": "Sequence Number",
+    "close_price": "Close Price",
+    "total_trade_amount": "Total Trade Amount",
+    "market_total_trade_amount": "Market Total Trade Amount",
+    "net_buy_ratio": "Net Buy Ratio",
+    "trade_amount_ratio": "Trade Amount Ratio",
+    "turnover_rate": "Turnover Rate",
+    "floating_market_capitalization": "Floating Market Capitalization",
+    "post_1_day_price_change_percent": "1-Day Post-event Change",
+    "post_2_day_price_change_percent": "2-Day Post-event Change",
+    "post_5_day_price_change_percent": "5-Day Post-event Change",
+    "post_10_day_price_change_percent": "10-Day Post-event Change"
   },
   "stock_block_trade": {
     "stock_code": "Stock Code",
@@ -317,7 +338,7 @@
   "sector_money_flow": {
     "trade_date": "Trade Date",
     "sector_name": "Sector Name",
-    "close_price": "Close Price",
+    "close_price": "Latest Sector Index",
     "change_percent": "Change %",
     "net_inflow": "Main Net Inflow",
     "net_inflow_rate": "Main Inflow Rate",
@@ -331,7 +352,8 @@
     "small_net_inflow_rate": "Small Rate",
     "data_source": "Source",
     "stock_code_required": "Please enter a stock code first",
-    "sync_button": "Sync Sector Money Flow"
+    "sync_button": "Sync Sector Money Flow",
+    "main_net_inflow": "Main Net Inflow"
   },
   "stock_pledge_risk": {
     "stock_code": "Stock Code",
@@ -972,7 +994,14 @@
     "days": " days",
     "times": " times",
     "households": " holders",
-    "percent": "%"
+    "percent": "%",
+    "rank": " rank",
+    "score": " points",
+    "stocks": " stocks",
+    "sequence": " no.",
+    "ratio": " ratio",
+    "entries": " entries",
+    "articles": " articles"
   },
   "trading": {
     "order_updated": "Order updated",
@@ -1739,7 +1768,9 @@
     "open_times": "Open Times",
     "limit_up_stats": "Limit Stats",
     "limit_up_days": "Limit Up Days",
-    "limit_up_reason": "Reason"
+    "limit_up_reason": "Reason",
+    "circ_mv": "Circulating Market Value",
+    "total_mv": "Total Market Value"
   },
   "stock_limit_down_pool": {
     "update_date": "Date",
@@ -1757,7 +1788,9 @@
     "limit_down_days": "Limit Down Days",
     "limit_down_reason": "Reason",
     "board_turnover": "Board Turnover",
-    "dynamic_pe": "Dynamic PE"
+    "dynamic_pe": "Dynamic PE",
+    "circ_mv": "Circulating Market Value",
+    "total_mv": "Total Market Value"
   },
   "stock_zhaban_pool": {
     "update_date": "Update Date",
@@ -1779,26 +1812,29 @@
     "prev_year_profit": "Prev Year Profit",
     "forecast_content": "Forecast Content",
     "growth_min": "Growth Min",
-    "growth_max": "Growth Max"
+    "growth_max": "Growth Max",
+    "circ_mv": "Circulating Market Value",
+    "total_mv": "Total Market Value",
+    "swing": "Amplitude"
   },
   "stock_money_flow": {
     "trade_date": "Trade Date",
     "stock_code": "Stock Code",
     "close_price": "Close",
     "change_pct": "Change %",
-    "net_inflow_small": "Small Net Inflow (10k)",
+    "net_inflow_small": "Small Net Inflow",
     "net_inflow_ratio_small": "Small Ratio %",
-    "net_inflow_medium": "Med Net Inflow (10k)",
+    "net_inflow_medium": "Med Net Inflow",
     "net_inflow_ratio_medium": "Med Ratio %",
-    "net_inflow_large": "Large Net Inflow (10k)",
+    "net_inflow_large": "Large Net Inflow",
     "net_inflow_ratio_large": "Large Ratio %",
-    "net_inflow_huge": "Huge Net Inflow (10k)",
+    "net_inflow_huge": "Huge Net Inflow",
     "net_inflow_ratio_huge": "Huge Ratio %",
-    "net_inflow_main": "Main Net Inflow (10k)",
+    "net_inflow_main": "Main Net Inflow",
     "net_inflow_ratio_main": "Main Ratio %",
-    "net_inflow_main_3d": "3D Main Net Inflow (10k)",
-    "net_inflow_main_5d": "5D Main Net Inflow (10k)",
-    "net_inflow_main_10d": "10D Main Net Inflow (10k)"
+    "net_inflow_main_3d": "3D Main Net Inflow",
+    "net_inflow_main_5d": "5D Main Net Inflow",
+    "net_inflow_main_10d": "10D Main Net Inflow"
   },
   "stock_shareholder_count": {
     "end_date": "Due Date",
@@ -1838,7 +1874,8 @@
     "release_shares": "Release Shares",
     "release_market_value": "Release MV (10k)",
     "ratio_to_total": "Total Ratio %",
-    "release_type": "Release Type"
+    "release_type": "Release Type",
+    "ratio_to_float": "Ratio to Float Shares"
   },
   "stock_margin_data": {
     "trade_date": "Trade Date",
@@ -1848,7 +1885,10 @@
     "short_balance": "Short Bal",
     "short_volume": "Short Vol",
     "margin_short_balance": "Margin/Short Bal",
-    "data_source": "Data Source"
+    "data_source": "Data Source",
+    "margin_repay_amount": "Margin Repayment Amount",
+    "short_sell_volume": "Short Sell Volume",
+    "short_repay_volume": "Short Repayment Volume"
   },
   "money_flow": {
     "net_inflow_main": "Main Net Inflow",
@@ -3052,5 +3092,32 @@
         "expected_positions_mismatch": "expected {expected} unique in-candidate recommended stocks but got {actual}"
       }
     }
+  },
+  "stock_hot_rank": {
+    "rank": "Current Rank",
+    "rank_change": "Rank Change",
+    "hot_value": "Hot Value",
+    "current_rank": "Overall Popularity Rank",
+    "new_fans": "New Fan Ratio",
+    "irons_fans": "Loyal Fan Ratio"
+  },
+  "stock_fund_holding": {
+    "hold_amount": "Holding Amount",
+    "hold_market_value": "Holding Market Value",
+    "hold_ratio_stock": "Ratio to Float Shares",
+    "hold_ratio_fund": "Ratio to Fund NAV"
+  },
+  "stock_seo": {
+    "issue_price": "Issue Price",
+    "issue_volume": "Issue Volume",
+    "raise_amount": "Funds Raised"
+  },
+  "stock_sentiment": {
+    "sentiment_score": "Sentiment Score",
+    "confidence": "Confidence",
+    "article_count": "Article Count",
+    "positive_count": "Positive Article Count",
+    "negative_count": "Negative Article Count",
+    "neutral_count": "Neutral Article Count"
   }
 }

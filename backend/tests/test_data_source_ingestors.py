@@ -10,6 +10,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, Mock, patch
 from app.core.config import settings
+from app.data.ingestors.plugins.akshare_ingestor import AkshareIngestor
 from app.data.ingestors.manager import ingestor_manager
 from app.data.ingestors.plugins.tushare_ingestor import TushareIngestor
 from app.core.utils.date_utils import normalize_compact_date
@@ -193,6 +194,107 @@ class TestTushareIngestor:
             await ingestor.fetch_and_ingest_all_stock_basic()
 
         assert ingestor._run_in_executor.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_akshare_realtime_market_keeps_volume_in_shares():
+    """AKShare 实时行情应按统一表约定保留成交量的股数单位。"""
+    ingestor = AkshareIngestor.__new__(AkshareIngestor)
+    ingestor.source = "akshare"
+    ingestor.ingestion_service = Mock()
+    source_df = pd.DataFrame(
+        [
+            {
+                "代码": "000001",
+                "名称": "平安银行",
+                "最新价": 10.0,
+                "涨跌幅": 1.0,
+                "涨跌额": 0.1,
+                "成交量": 123456,
+                "成交额": 1234560,
+                "最高": 10.1,
+                "最低": 9.9,
+                "今开": 9.95,
+                "昨收": 9.9,
+                "买入": 9.99,
+                "卖出": 10.0,
+            }
+        ]
+    )
+    ingestor._run_in_executor = AsyncMock(side_effect=[source_df, True])
+
+    result = await ingestor.fetch_and_ingest_realtime_market()
+
+    written_df = ingestor._run_in_executor.await_args_list[1].args[2]
+    assert result["success"] is True
+    assert written_df.iloc[0]["volume"] == 123456
+
+
+@pytest.mark.asyncio
+async def test_akshare_block_trade_normalizes_source_units():
+    """AKShare 大宗交易原始股数、元和比例应换算为库表约定单位。"""
+    ingestor = AkshareIngestor.__new__(AkshareIngestor)
+    ingestor.source = "akshare"
+    ingestor.ingestion_service = Mock()
+    source_df = pd.DataFrame(
+        [
+            {
+                "交易日期": "2026-06-18",
+                "证券代码": "000001",
+                "成交价": 10.5,
+                "折溢率": -0.053452,
+                "成交量": 302100,
+                "成交额": 1283900,
+                "买方营业部": "买方",
+                "卖方营业部": "卖方",
+            }
+        ]
+    )
+    ingestor._run_in_executor = AsyncMock(side_effect=[source_df, True])
+
+    result = await ingestor.fetch_and_ingest_stock_block_trade(
+        stock_code="000001.SZ",
+        start_date="20260618",
+        end_date="20260618",
+    )
+
+    written_df = ingestor._run_in_executor.await_args_list[1].args[2]
+    assert result["success"] is True
+    assert written_df.iloc[0]["volume"] == pytest.approx(30.21)
+    assert written_df.iloc[0]["amount"] == pytest.approx(128.39)
+    assert written_df.iloc[0]["premium_rate"] == pytest.approx(-5.3452)
+
+
+@pytest.mark.asyncio
+async def test_akshare_lockup_release_converts_ratio_to_percent():
+    """AKShare 解禁占比原始比例应换算为库表约定的百分数。"""
+    ingestor = AkshareIngestor.__new__(AkshareIngestor)
+    ingestor.source = "akshare"
+    ingestor.ingestion_service = Mock()
+    source_df = pd.DataFrame(
+        [
+            {
+                "解禁时间": "2026-06-18",
+                "解禁数量": 2_000_000,
+                "实际解禁数量": 1_500_000,
+                "未解禁数量": 500_000,
+                "实际解禁数量市值": 30_000_000,
+                "占总市值比例": 0.014691,
+                "占流通市值比例": 0.025,
+                "限售股类型": "首发原股东限售股份",
+            }
+        ]
+    )
+    ingestor._run_in_executor = AsyncMock(side_effect=[source_df, True])
+
+    result = await ingestor.fetch_and_ingest_stock_lockup_release("000001.SZ")
+
+    written_df = ingestor._run_in_executor.await_args_list[1].args[2]
+    assert result["success"] is True
+    assert written_df.iloc[0]["release_shares"] == 1_500_000
+    assert written_df.iloc[0]["release_market_value"] == 3000.0
+    assert written_df.iloc[0]["ratio_to_total"] == pytest.approx(1.4691)
+    assert written_df.iloc[0]["ratio_to_float"] == pytest.approx(2.5)
 
 
 class TestFailoverMechanism:

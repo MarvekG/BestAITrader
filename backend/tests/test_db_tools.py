@@ -33,13 +33,18 @@ async def test_get_database_schema_returns_model_columns():
     assert dragon_tiger_schema["floating_market_capitalization"]["unit"] == "元"
 
     realtime_schema = {column["name"]: column for column in result["schemas"]["StockRealtimeMarket"]}
+    assert realtime_schema["volume"]["unit"] == "股"
     assert realtime_schema["total_market_cap"]["unit"] == "元"
+    assert result["field_units"]["StockRealtimeMarket"]["volume"]["unit"] == "股"
 
     industry_schema = {column["name"]: column for column in result["schemas"]["IndustryData"]}
     assert industry_schema["total_market_cap"]["unit"] == "万元"
 
     sector_schema = {column["name"]: column for column in result["schemas"]["SectorMoneyFlow"]}
     assert sector_schema["net_inflow"]["unit"] == "元"
+    assert sector_schema["close_price"]["display_name"] == "板块最新指数"
+    assert sector_schema["close_price"]["unit"] == "点"
+    assert result["field_units"]["SectorMoneyFlow"]["close_price"]["unit"] == "点"
 
 
 @pytest.mark.asyncio
@@ -55,3 +60,27 @@ async def test_query_and_calculate_rejects_unknown_table_without_db_access():
     )
 
     assert result == {"error": "Table 'MissingTable' not found."}
+
+
+@pytest.mark.asyncio
+async def test_get_database_schema_translates_column_info():
+    """数据库结构工具应翻译 SQLAlchemy Column.info 中的名称和单位 key。"""
+    result = await get_database_schema.ainvoke({})
+    kline_schema = {column["name"]: column for column in result["schemas"]["KlineData"]}
+    assert kline_schema["open"]["display_name"] == "开盘"
+    assert kline_schema["open"]["unit"] == "元"
+
+
+@pytest.mark.asyncio
+async def test_get_database_schema_column_units_match_field_unit_metadata():
+    """所有模型字段单位应与 schema 字段单位元数据保持一致。"""
+    result = await get_database_schema.ainvoke({})
+
+    for model_name, columns in result["schemas"].items():
+        field_units = result["field_units"].get(model_name, {})
+        for column in columns:
+            if "unit" not in column:
+                continue
+            assert field_units[column["name"]]["unit"] == column["unit"], (
+                f"{model_name}.{column['name']} unit metadata mismatch"
+            )

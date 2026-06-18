@@ -67,7 +67,6 @@ MOCK_CONTEXT = {
             "shareholder": {"households": 100000},
             "shareholder_trend": {"trend": "stable"},
             "regulatory": {"items": []},
-            "financial_warning": {"level": "low"},
         },
     },
     "events": {
