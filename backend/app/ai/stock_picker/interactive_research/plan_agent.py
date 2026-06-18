@@ -25,6 +25,7 @@ from app.ai.stock_picker.interactive_research.persistence import (
 from app.ai.stock_picker.interactive_research.tool_registry import InteractiveResearchToolRegistry, ToolLoaderFactory
 from app.core.config import settings
 from app.core.i18n import i18n_service
+from app.core.logger import get_logger
 from app.crud.llm_usage_log import record_llm_usage
 
 
@@ -35,6 +36,7 @@ PLAN_AGENT_TOOL_NAMES = {
     "parse_pdf_to_markdown",
     "search_news",
 }
+logger = get_logger(__name__)
 
 
 def _t(key: str, **kwargs: Any) -> str:
@@ -110,7 +112,20 @@ class PlanAgent:
         if turn_record is None:
             raise LookupError(_t("errors.run_not_found"))
         if turn_record["status"] != "awaiting_plan_approval":
+            logger.info(
+                "interactive research plan agent skipped by run status",
+                extra={"run_id": str(run_id), "status": turn_record["status"], "initial": initial},
+            )
             return
+        logger.info(
+            "interactive research plan agent started",
+            extra={
+                "run_id": str(run_id),
+                "initial": initial,
+                "persisted_message_count": len(turn_record["persisted_messages"]),
+                "input_length": len(normalized_input),
+            },
+        )
 
         messages = self._build_plan_messages(
             run_id,
@@ -118,12 +133,20 @@ class PlanAgent:
             persisted_messages=turn_record["persisted_messages"],
         )
         tools = await self._load_tools(run_id)
+        logger.info(
+            "interactive research plan agent tools loaded",
+            extra={"run_id": str(run_id), "tool_names": [str(getattr(tool, "name", "")) for tool in tools]},
+        )
         plan_message, usage_record = await self._invoke_plan_markdown(run_id, messages, tools)
 
         latest_turn_record = load_plan_turn_record(run_id)
         if latest_turn_record is None:
             raise LookupError(_t("errors.run_not_found"))
         if latest_turn_record["status"] != "awaiting_plan_approval":
+            logger.info(
+                "interactive research plan card skipped by latest status",
+                extra={"run_id": str(run_id), "status": latest_turn_record["status"], "initial": initial},
+            )
             return
 
         result = persist_plan_card_record(
@@ -135,11 +158,19 @@ class PlanAgent:
         )
         persisted = result["persisted"]
         if not persisted:
+            logger.info(
+                "interactive research plan card not persisted",
+                extra={"run_id": str(run_id), "initial": initial, "plan_length": len(plan_message)},
+            )
             return
         await self._notify_change(result["notification"])
 
         self._remember_plan_turn(run_id, effective_history_input, plan_message)
         self._latest_plan_outputs[run_id] = plan_message
+        logger.info(
+            "interactive research plan card persisted",
+            extra={"run_id": str(run_id), "initial": initial, "plan_length": len(plan_message)},
+        )
 
     def latest_plan_output(self, run_id: UUID) -> str:
         """读取当前进程内指定 run 的最新计划输出。
@@ -261,6 +292,15 @@ class PlanAgent:
 
         iteration_budget = max(1, int(settings.INTERACTIVE_RESEARCH_PLAN_MAX_ITERATIONS))
         for iteration_index in range(1, iteration_budget + 1):
+            logger.info(
+                "interactive research plan agent llm iteration started",
+                extra={
+                    "run_id": str(run_id),
+                    "iteration_index": iteration_index,
+                    "iteration_budget": iteration_budget,
+                    "message_count": len(messages),
+                },
+            )
             response = await llm_with_tools.ainvoke(messages)
             usage_record = self._record_llm_usage(run_id, response, iteration_index, call_kind="plan_markdown")
             if usage_record:
@@ -269,16 +309,38 @@ class PlanAgent:
             messages.append(response)
 
             tool_calls = list(getattr(response, "tool_calls", []) or [])
+            logger.info(
+                "interactive research plan agent llm iteration completed",
+                extra={
+                    "run_id": str(run_id),
+                    "iteration_index": iteration_index,
+                    "tool_call_count": len(tool_calls),
+                    "invalid_tool_call_count": len(invalid_tool_calls),
+                    "content_length": len(str(getattr(response, "content", "") or "")),
+                },
+            )
             if not tool_calls and not invalid_tool_calls:
                 return str(getattr(response, "content", "") or "").strip(), _merge_usage_records(usage_records)
 
             for tool_call in tool_calls:
                 await self._execute_tool_call(run_id, tool_map, messages, tool_call, iteration_index, llm)
             if invalid_tool_calls:
+                logger.warning(
+                    "interactive research plan agent invalid tool calls",
+                    extra={
+                        "run_id": str(run_id),
+                        "iteration_index": iteration_index,
+                        "invalid_tool_call_count": len(invalid_tool_calls),
+                    },
+                )
                 messages.append(
                     HumanMessage(content=self._llm_provider.build_invalid_tool_call_retry_message(invalid_tool_calls))
                 )
 
+        logger.warning(
+            "interactive research plan agent iteration budget exhausted",
+            extra={"run_id": str(run_id), "iteration_budget": iteration_budget},
+        )
         messages.append(HumanMessage(content=_plan_iteration_budget_instruction(iteration_budget)))
         final_response = await llm.ainvoke(messages)
         usage_record = self._record_llm_usage(
@@ -290,6 +352,10 @@ class PlanAgent:
         if usage_record:
             usage_records.append(usage_record)
         final_response, _ = self._llm_provider.sanitize_tool_call_response_for_replay(final_response)
+        logger.info(
+            "interactive research plan agent final no-tools response completed",
+            extra={"run_id": str(run_id), "content_length": len(str(getattr(final_response, "content", "") or ""))},
+        )
         return str(getattr(final_response, "content", "") or "").strip(), _merge_usage_records(usage_records)
 
     async def _load_tools(self, run_id: UUID) -> List[Any]:
@@ -337,6 +403,16 @@ class PlanAgent:
         tool_name = str(tool_call.get("name") or "")
         tool_args = tool_call.get("args") if isinstance(tool_call.get("args"), dict) else {}
         tool_call_id = str(tool_call.get("id") or f"plan-{iteration_index}-{len(messages)}")
+        logger.info(
+            "interactive research plan agent tool call started",
+            extra={
+                "run_id": str(run_id),
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
+                "iteration_index": iteration_index,
+                "tool_arg_keys": sorted(tool_args.keys()),
+            },
+        )
         start_message_id = await self._append_tool_start(run_id, tool_name, tool_args, tool_call_id)
         success = False
         tool = tool_map.get(tool_name)
@@ -360,6 +436,16 @@ class PlanAgent:
                 success = True
             except Exception as exc:
                 result_text = f"Error: {exc}"
+                logger.warning(
+                    "interactive research plan agent tool call failed",
+                    extra={
+                        "run_id": str(run_id),
+                        "tool_name": tool_name,
+                        "tool_call_id": tool_call_id,
+                        "iteration_index": iteration_index,
+                        "exception": str(exc),
+                    },
+                )
         messages.append(ToolMessage(tool_call_id=tool_call_id, content=result_text))
         await self._append_tool_result_and_progress(
             run_id,
@@ -369,6 +455,17 @@ class PlanAgent:
             start_message_id,
             success,
             result_text,
+        )
+        logger.info(
+            "interactive research plan agent tool call completed",
+            extra={
+                "run_id": str(run_id),
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
+                "iteration_index": iteration_index,
+                "success": success,
+                "result_length": len(result_text),
+            },
         )
 
     async def _append_tool_start(

@@ -38,6 +38,7 @@ from app.ai.stock_picker.interactive_research.persistence import (
 from app.ai.stock_picker.interactive_research.tool_registry import InteractiveResearchToolRegistry, ToolLoaderFactory
 from app.core.config import settings
 from app.core.i18n import i18n_service
+from app.core.logger import get_logger
 from app.crud.llm_usage_log import record_llm_usage
 
 
@@ -47,6 +48,7 @@ DEFAULT_INTERACTIVE_RESEARCH_ITERATIONS = 60
 MIN_INTERACTIVE_RESEARCH_ITERATIONS = 10
 MAX_FLOW_CONTROL_RETRIES = 2
 FLOW_CONTROL_RETRY_MARKER = "FLOW_CONTROL_RETRY"
+logger = get_logger(__name__)
 
 
 def flow_control_protocol_instruction() -> str:
@@ -102,7 +104,19 @@ class InteractiveResearchAgent:
         tool_trace: List[Dict[str, Any]] = []
         run_snapshot = await self._start_research_run(run_id)
         if run_snapshot is None:
+            logger.warning("interactive research agent skipped missing run", extra={"run_id": str(run_id)})
             return
+        logger.info(
+            "interactive research agent started",
+            extra={
+                "run_id": str(run_id),
+                "user_id": run_snapshot["user_id"],
+                "queued_before_count": len(run_snapshot["queued_before"]),
+                "plan_conversation_count": len(run_snapshot.get("plan_conversation", [])),
+                "approved_plan_length": len(str(approved_plan or "")),
+                "max_iterations": run_snapshot["max_iterations"],
+            },
+        )
 
         messages = self._build_agent_messages(
             run_snapshot["raw_requirement"],
@@ -118,11 +132,28 @@ class InteractiveResearchAgent:
         }
         llm = self._build_llm()
         llm_with_tools = llm.bind_tools(tools)
+        logger.info(
+            "interactive research agent tools loaded",
+            extra={
+                "run_id": str(run_id),
+                "tool_names": [str(getattr(tool, "name", "")) for tool in tools],
+                "evidence_tool_count": len(tool_map),
+            },
+        )
         final_content = ""
         iteration_budget = self._iteration_budget(run_snapshot["max_iterations"])
         stopped_by_iteration_limit = False
 
         for iteration_index in range(1, iteration_budget + 1):
+            logger.info(
+                "interactive research agent llm iteration started",
+                extra={
+                    "run_id": str(run_id),
+                    "iteration_index": iteration_index,
+                    "iteration_budget": iteration_budget,
+                    "message_count": len(messages),
+                },
+            )
             response = await llm_with_tools.ainvoke(messages)
             self._record_and_accumulate_llm_usage(
                 run_id,
@@ -135,7 +166,22 @@ class InteractiveResearchAgent:
             messages.append(response)
             tool_calls = list(getattr(response, "tool_calls", []) or [])
             flow_control_calls, evidence_tool_calls = _partition_tool_calls(tool_calls)
+            logger.info(
+                "interactive research agent llm iteration completed",
+                extra={
+                    "run_id": str(run_id),
+                    "iteration_index": iteration_index,
+                    "evidence_tool_call_count": len(evidence_tool_calls),
+                    "flow_control_call_count": len(flow_control_calls),
+                    "invalid_tool_call_count": len(invalid_tool_calls),
+                    "content_length": len(str(getattr(response, "content", "") or "")),
+                },
+            )
             if not evidence_tool_calls and not flow_control_calls and not invalid_tool_calls:
+                logger.warning(
+                    "interactive research agent missing flow control tool",
+                    extra={"run_id": str(run_id), "iteration_index": iteration_index},
+                )
                 messages.append(HumanMessage(content=_missing_flow_control_tool_retry_message()))
                 continue
 
@@ -145,10 +191,26 @@ class InteractiveResearchAgent:
 
             queued_after_tool = self._process_queued_user_inputs(run_id)
             if queued_after_tool:
+                logger.info(
+                    "interactive research agent queued inputs merged",
+                    extra={
+                        "run_id": str(run_id),
+                        "iteration_index": iteration_index,
+                        "queued_input_count": len(queued_after_tool),
+                    },
+                )
                 self._append_queued_inputs_to_messages(messages, queued_after_tool)
                 await self._append_queued_input_status(run_id, queued_after_tool)
 
             if invalid_tool_calls:
+                logger.warning(
+                    "interactive research agent invalid tool calls",
+                    extra={
+                        "run_id": str(run_id),
+                        "iteration_index": iteration_index,
+                        "invalid_tool_call_count": len(invalid_tool_calls),
+                    },
+                )
                 messages.append(
                     HumanMessage(content=self._llm_provider.build_invalid_tool_call_retry_message(invalid_tool_calls))
                 )
@@ -157,6 +219,15 @@ class InteractiveResearchAgent:
                 decision = self._parse_flow_control_tool_or_retry(messages, flow_control_calls)
                 if decision is None:
                     continue
+                logger.info(
+                    "interactive research agent flow control decision",
+                    extra={
+                        "run_id": str(run_id),
+                        "iteration_index": iteration_index,
+                        "decision": decision.status,
+                        "message_length": len(decision.message),
+                    },
+                )
                 if decision.status == "ask":
                     await self._pause_for_user_question(run_id, decision.message)
                     return
@@ -168,6 +239,10 @@ class InteractiveResearchAgent:
 
         if not final_content:
             stopped_by_iteration_limit = True
+            logger.warning(
+                "interactive research agent iteration budget exhausted",
+                extra={"run_id": str(run_id), "iteration_budget": iteration_budget},
+            )
             messages.append(
                 HumanMessage(
                     content=_iteration_budget_instruction(iteration_budget)
@@ -188,10 +263,32 @@ class InteractiveResearchAgent:
                 messages.append(final_response)
                 tool_calls = list(getattr(final_response, "tool_calls", []) or [])
                 flow_control_calls, evidence_tool_calls = _partition_tool_calls(tool_calls)
+                logger.info(
+                    "interactive research agent final retry completed",
+                    extra={
+                        "run_id": str(run_id),
+                        "retry_index": retry_index,
+                        "evidence_tool_call_count": len(evidence_tool_calls),
+                        "flow_control_call_count": len(flow_control_calls),
+                        "invalid_tool_call_count": len(invalid_tool_calls),
+                    },
+                )
                 if evidence_tool_calls:
+                    logger.warning(
+                        "interactive research agent final retry used evidence tool",
+                        extra={"run_id": str(run_id), "retry_index": retry_index},
+                    )
                     messages.append(HumanMessage(content=_final_must_use_control_tool_retry_message()))
                     continue
                 if invalid_tool_calls:
+                    logger.warning(
+                        "interactive research agent final retry invalid tool calls",
+                        extra={
+                            "run_id": str(run_id),
+                            "retry_index": retry_index,
+                            "invalid_tool_call_count": len(invalid_tool_calls),
+                        },
+                    )
                     messages.append(
                         HumanMessage(
                             content=self._llm_provider.build_invalid_tool_call_retry_message(invalid_tool_calls)
@@ -204,6 +301,10 @@ class InteractiveResearchAgent:
                     break
             if not final_content:
                 final_content = _iteration_budget_fallback_answer(iteration_budget)
+                logger.warning(
+                    "interactive research agent using iteration budget fallback answer",
+                    extra={"run_id": str(run_id), "iteration_budget": iteration_budget},
+                )
 
         await self._synthesize_final_message(
             run_id,
@@ -211,6 +312,15 @@ class InteractiveResearchAgent:
             final_content,
             stopped_by_iteration_limit=stopped_by_iteration_limit,
             iteration_budget=iteration_budget,
+        )
+        logger.info(
+            "interactive research agent completed",
+            extra={
+                "run_id": str(run_id),
+                "tool_trace_count": len(tool_trace),
+                "final_content_length": len(final_content),
+                "stopped_by_iteration_limit": stopped_by_iteration_limit,
+            },
         )
 
     async def _start_research_run(self, run_id: UUID) -> Optional[Dict[str, Any]]:
@@ -226,6 +336,14 @@ class InteractiveResearchAgent:
         if result is None:
             return None
         await self._notify_change(result["notification"])
+        logger.info(
+            "interactive research run entered research phase",
+            extra={
+                "run_id": str(run_id),
+                "queued_before_count": len(result["snapshot"]["queued_before"]),
+                "max_iterations": result["snapshot"]["max_iterations"],
+            },
+        )
         return result["snapshot"]
 
     async def _execute_tool_call(
@@ -253,12 +371,31 @@ class InteractiveResearchAgent:
         tool_name = str(tool_call.get("name") or "")
         tool_args = tool_call.get("args") if isinstance(tool_call.get("args"), dict) else {}
         tool_call_id = str(tool_call.get("id") or f"interactive-{iteration_index}-{len(messages)}")
+        logger.info(
+            "interactive research agent tool call started",
+            extra={
+                "run_id": str(run_id),
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
+                "iteration_index": iteration_index,
+                "tool_arg_keys": sorted(tool_args.keys()),
+            },
+        )
         start_message_id = await self._append_tool_start(run_id, tool_name, tool_args, tool_call_id)
         trace_item: Dict[str, Any] = {"name": tool_name, "args": tool_args, "success": False}
         tool = tool_map.get(tool_name)
         if tool is None:
             result_text = _t("errors.tool_not_allowed", tool_name=tool_name)
             trace_item["error"] = result_text
+            logger.warning(
+                "interactive research agent tool not allowed",
+                extra={
+                    "run_id": str(run_id),
+                    "tool_name": tool_name,
+                    "tool_call_id": tool_call_id,
+                    "iteration_index": iteration_index,
+                },
+            )
         else:
             try:
                 raw_result = await tool.ainvoke(tool_args)
@@ -278,6 +415,16 @@ class InteractiveResearchAgent:
             except Exception as exc:
                 result_text = f"Error: {exc}"
                 trace_item["error"] = str(exc)
+                logger.warning(
+                    "interactive research agent tool call failed",
+                    extra={
+                        "run_id": str(run_id),
+                        "tool_name": tool_name,
+                        "tool_call_id": tool_call_id,
+                        "iteration_index": iteration_index,
+                        "exception": str(exc),
+                    },
+                )
 
         messages.append(ToolMessage(tool_call_id=tool_call_id, content=result_text))
         await self._append_tool_result_and_progress(
@@ -288,6 +435,17 @@ class InteractiveResearchAgent:
             start_message_id,
             trace_item["success"],
             result_text,
+        )
+        logger.info(
+            "interactive research agent tool call completed",
+            extra={
+                "run_id": str(run_id),
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
+                "iteration_index": iteration_index,
+                "success": trace_item["success"],
+                "result_length": len(result_text),
+            },
         )
         return trace_item
 
@@ -383,6 +541,10 @@ class InteractiveResearchAgent:
             question_content: LLM 生成的用户问题。
         """
         await self._notify_change(pause_for_user_question_record(run_id, question_content))
+        logger.info(
+            "interactive research agent paused for user question",
+            extra={"run_id": str(run_id), "question_length": len(question_content)},
+        )
 
     async def _append_assistant_text(self, run_id: UUID, content: str) -> None:
         """追加研究过程中的普通 assistant 文本。
