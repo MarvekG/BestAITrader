@@ -370,22 +370,8 @@ class SignalsProvider:
         sentiment = runtime.readers.sentiment
         risk = runtime.readers.risk
         capital_flow = runtime.readers.capital_flow
-        financial = runtime.readers.financial
         fundamental = runtime.readers.fundamental
         with runtime.db_session() as db:
-            financial_records = await financial.financial_records(db, runtime.stock_code)
-            balance_records = await financial.balance_sheet_records(db, runtime.stock_code)
-            cashflow_records = await financial.cashflow_statement_records(
-                db,
-                runtime.stock_code,
-                format_for_context=False,
-            )
-            financial_ctx = {
-                "financial_indicator": financial_records,
-                "balance_sheet": balance_records,
-                "cashflow_statement": cashflow_records,
-            }
-
             hot_rank = sentiment.hot_rank(db, runtime.stock_code)
             hot_rank_signal = _wrap_dict(sentiment, hot_rank)
 
@@ -399,7 +385,6 @@ class SignalsProvider:
                 "insider": _wrap_list(risk, insider),
                 "shareholder": _wrap_dict(risk, shareholder),
                 "shareholder_trend": _wrap_dict(risk, shareholder_trend),
-                "financial_warning": risk.analyze_financial_risks(financial_ctx),
             }
 
             dragon_tiger_effect = capital_flow.dragon_tiger_effect(db, runtime.stock_code)

@@ -10,12 +10,10 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "format_payload_values",
-    "get_schema_field_unit",
-    "get_schema_table_units",
+    "get_table_field_units",
 ]
 
 _table_field_unit_config: Dict[str, Any] | None = None
-_schema_field_unit_config: Dict[str, Any] | None = None
 
 
 def _load_table_field_unit_config() -> Dict[str, Any]:
@@ -35,25 +33,6 @@ def _load_table_field_unit_config() -> Dict[str, Any]:
         logger.error("Failed to load table_field_units.json: %s", exc)
         _table_field_unit_config = {}
     return _table_field_unit_config
-
-
-def _load_schema_field_unit_config() -> Dict[str, Any]:
-    """加载数据库 schema 字段原始单位配置。
-
-    Returns:
-        数据库 schema 字段原始单位配置。
-    """
-    global _schema_field_unit_config
-    if _schema_field_unit_config is not None:
-        return _schema_field_unit_config
-
-    config_path = Path(__file__).resolve().parent / "schema_field_units.json"
-    try:
-        _schema_field_unit_config = json.loads(config_path.read_text(encoding="utf-8"))
-    except Exception as exc:
-        logger.error("Failed to load schema_field_units.json: %s", exc)
-        _schema_field_unit_config = {}
-    return _schema_field_unit_config
 
 
 def _localized_unit(unit_key: Any, *, language: str | None = None) -> str:
@@ -242,13 +221,13 @@ def _source_unit_key(unit_key: Any, scale: float) -> Any:
     return unit_key
 
 
-def get_schema_field_unit(
+def _get_table_field_unit(
     table_name: str,
     field_name: str,
     *,
     language: str | None = None,
 ) -> str | None:
-    """读取数据库 schema 中应展示的字段原始单位。
+    """读取标准 payload 字段的原始单位。
 
     Args:
         table_name: 标准表名或虚拟上下文表名。
@@ -256,12 +235,8 @@ def get_schema_field_unit(
         language: 可选语言代码；为空时使用系统语言。
 
     Returns:
-        字段在数据库或标准 payload 中的原始单位；字段未配置单位时返回 None。
+        字段在标准 payload 中的原始单位；字段未配置单位时返回 None。
     """
-    schema_unit = _load_schema_field_unit_config().get(table_name, {}).get(field_name)
-    if isinstance(schema_unit, str):
-        return schema_unit
-
     config = _get_field_unit_config(table_name, field_name)
     if not config:
         return None
@@ -272,35 +247,31 @@ def get_schema_field_unit(
     return _localized_unit(_source_unit_key(unit_key, scale), language=language)
 
 
-def get_schema_table_units(table_name: str, *, language: str | None = None) -> dict[str, dict[str, str]]:
-    """读取数据库 schema 中已配置字段的原始单位。
+def get_table_field_units(table_name: str, *, language: str | None = None) -> dict[str, dict[str, str]]:
+    """读取标准 payload 中已配置字段的原始单位。
 
     Args:
         table_name: 标准表名或虚拟上下文表名。
         language: 可选语言代码；为空时使用系统语言。
 
     Returns:
-        以字段名为 key 的原始单位映射；未配置单位的表返回空字典。
+        以字段名为 key 的原始单位映射；未配置单位的 payload 返回空字典。
     """
     table_config = _load_table_field_unit_config().get(table_name, {})
     if not isinstance(table_config, dict):
         table_config = {}
 
     result = {}
-    schema_table_config = _load_schema_field_unit_config().get(table_name, {})
-    if isinstance(schema_table_config, dict):
-        result.update({field_name: {"unit": unit} for field_name, unit in schema_table_config.items() if isinstance(unit, str)})
-
     default_ref = table_config.get("$default_ref")
     if isinstance(default_ref, str):
-        default_unit = get_schema_field_unit(table_name, "$default", language=language)
+        default_unit = _get_table_field_unit(table_name, "$default", language=language)
         if default_unit:
             result["$default"] = {"unit": default_unit}
 
     for field_name in table_config:
         if field_name.startswith("$"):
             continue
-        unit = get_schema_field_unit(table_name, field_name, language=language)
+        unit = _get_table_field_unit(table_name, field_name, language=language)
         if unit:
             result[field_name] = {"unit": unit}
     return result

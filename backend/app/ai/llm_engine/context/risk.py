@@ -23,156 +23,6 @@ class RiskSource:
     def status_payload(data_status: str, **kwargs: Any) -> Dict[str, Any]:
         return status_payload(data_status, **kwargs)
 
-    def _analyze_financial_risks(self, fin_ctx: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        从财务上下文中提取风险预警信号。
-
-        Args:
-            fin_ctx: 财务上下文字典，包含最新财务指标、资产负债表和现金流量表片段。
-
-        Returns:
-            标准化后的风险预警上下文字典。
-        """
-        def pick(data: Dict[str, Any], *keys: str) -> Any:
-            for key in keys:
-                if key in data and data.get(key) is not None:
-                    return data.get(key)
-            return None
-
-        def latest_item(value: Any) -> Dict[str, Any]:
-            """从多期财务列表中取最新一期。
-
-            Args:
-                value: 财务上下文字段值。
-
-            Returns:
-                最新一期财务快照；缺失时返回空字典。
-            """
-            if isinstance(value, list) and value and isinstance(value[0], dict):
-                return value[0]
-            if isinstance(value, dict):
-                return value
-            return {}
-
-        latest_indicator = latest_item(fin_ctx.get("financial_indicator"))
-        latest_balance_sheet = latest_item(fin_ctx.get("balance_sheet"))
-        latest_cashflow = latest_item(fin_ctx.get("cashflow_statement"))
-
-        latest = {}
-        if isinstance(latest_indicator.get("data"), dict):
-            latest.update(latest_indicator["data"])
-        if isinstance(latest_balance_sheet.get("data"), dict):
-            latest.update(latest_balance_sheet["data"])
-        if isinstance(latest_cashflow.get("data"), dict):
-            latest.update(latest_cashflow["data"])
-
-        latest_meta = (
-            latest_indicator.get("meta")
-            or latest_balance_sheet.get("meta")
-            or latest_cashflow.get("meta")
-            or {}
-        )
-
-        if not latest:
-            return {
-                "data_status": "missing",
-                "status": "DATA_MISSING",
-                "data_scope": "latest_financial_snapshot",
-            }
-
-        # 1. 商誉风险 (Goodwill Risk)
-        goodwill = pick(latest, "goodwill", "商誉") or 0
-        total_assets = pick(latest, "total_assets", "资产总计") or 1  # 避免除零
-        goodwill_ratio = round(goodwill / total_assets * 100, 2)
-
-        # 2. 负债率 (Debt Ratio)
-        raw_debt_ratio = pick(
-            latest,
-            "debt_to_assets_ratio",   # 统一映射目标
-            "debt_to_assets",         # Tushare 原始字段 (兜底)
-            "debt_to_asset",
-            "al_ratio",
-            "资产负债率",
-        )
-        if raw_debt_ratio is not None:
-            debt_ratio = float(raw_debt_ratio)
-        else:
-            # 手动计算: 总负债 / 总资产 * 100
-            total_liab = pick(latest, "total_liabilities", "total_liab", "负债合计") or 0
-            debt_ratio = (total_liab / total_assets * 100) if total_assets and total_assets > 1 else 0
-
-        # 3. 经营现金流质量 (Earnings Quality - Cash Profit Ratio)
-        # 优先级: 现金流总量 > ocfps 反推 > ocf 比率判断
-        # Tushare fina_indicator 无直接净利润字段，优先读取已标准化的归母净利润字段。
-        net_profit_raw = pick(
-            latest,
-            "net_profit_attributable_to_parent",
-            "n_income_attr_p",                     # Tushare cashflow 表 (若有)
-            "net_profit",
-            "n_income",
-            "归属于母公司所有者的净利润",
-            "净利润",
-            "归母净利润",
-        )
-        # 经营性现金流总量: 经营活动产生的现金流量净额。
-        ocf_absolute = pick(
-            latest,
-            "net_cash_flow_from_operating_activities",
-            "n_cashflow_act",                           # Tushare cashflow 表
-            "n_cash_flows_oper",
-            "经营活动产生的现金流量净额",
-        )
-
-        cash_quality = 0
-        ocf_signal = "DATA_MISSING"
-
-        if ocf_absolute is not None and net_profit_raw:
-            # 方案 A: 用绝对值计算 (最准确)
-            net_profit_f = float(net_profit_raw)
-            cash_quality = round(float(ocf_absolute) / net_profit_f, 2) if net_profit_f != 0 else 0
-            ocf_signal = "AVAILABLE"
-        else:
-            # 方案 B: Tushare fina_indicator 只有 ocf_to_debt / ocfps 等衍生指标
-            # 用 ocf_to_debt (经营现金流/总债务) 当作方向信号
-            ocf_to_debt = pick(latest, "ocf_to_debt")
-            ocfps = pick(latest, "ocfps", "每股经营现金流")
-            total_share = pick(latest, "total_share", "capital", "实收资本(或股本)")
-
-            if ocf_to_debt is not None:
-                # ocf_to_debt < 0 说明现金流为负
-                cash_quality = round(float(ocf_to_debt), 4)
-                ocf_signal = "RATIO_PROXY"  # 非直接比率, 用债务比代替
-            elif ocfps is not None and total_share:
-                # 方案 C: ocfps × 总股本 反推总现金流
-                ocf_est = float(ocfps) * float(total_share) * 10000  # 总股本单位万股
-                net_profit_f = float(net_profit_raw) if net_profit_raw else 0
-                cash_quality = round(ocf_est / net_profit_f, 2) if net_profit_f != 0 else 0
-                ocf_signal = "ESTIMATED"   # 估算值
-
-        # 4. 存贷双高判断 (Double High Risk - 疑似资金占用/造假)
-        monetary_cap = float(pick(latest, "monetary_funds", "money_cap", "货币资金") or 0)
-        st_borrow = float(pick(latest, "short_term_borrowing", "st_borrow", "短期借款") or 0)
-        lt_borrow = float(pick(latest, "long_term_borrowing", "lt_borrow", "长期借款") or 0)
-        total_debt = st_borrow + lt_borrow
-        double_high = (
-            "YES"
-            if (monetary_cap / total_assets > 0.2 and total_debt / total_assets > 0.2)
-            else "NO"
-        )
-
-        payload = {
-            "data_status": "available",
-            "status": "AVAILABLE",
-            "data_scope": "latest_financial_snapshot",
-            "goodwill_ratio": goodwill_ratio,
-            "debt_ratio": round(debt_ratio, 2),
-            "cash_profit_ratio": cash_quality,
-            "ocf_signal": ocf_signal,   # 告知 AI 数据来源质量
-            "double_high_risk": double_high,
-            "latest_report_date": latest_meta.get("report_date") or latest_meta.get("报告期")
-        }
-        return format_payload_values("risk.financial_warning", payload)
-
     def _get_pledge(self, db: Session, stock_code: str) -> Dict[str, Any]:
         """获取质押信息，优先使用汇总数据，并辅以明细数据"""
         # 1. 获取最新的汇总数据 (Summary)
@@ -190,9 +40,17 @@ class RiskSource:
 
         res = {
             "pledgor": pledge_detail.pledgor_name if pledge_detail else "未知",
-            "ratio_total": summary.pledge_ratio if summary else (pledge_detail.pledge_ratio_to_total if pledge_detail else 0.0),
+            "ratio_total": (
+                summary.pledge_ratio
+                if summary
+                else (pledge_detail.pledge_ratio_to_total if pledge_detail else 0.0)
+            ),
             "ratio_holder": pledge_detail.pledge_ratio_to_holder if pledge_detail else None,
-            "start_date": str(pledge_detail.pledge_date) if pledge_detail else (str(summary.trade_date) if summary else "未知"),
+            "start_date": (
+                str(pledge_detail.pledge_date)
+                if pledge_detail
+                else (str(summary.trade_date) if summary else "未知")
+            ),
 
             # 统计信息
             "total_shares": summary.pledge_shares if summary else None,

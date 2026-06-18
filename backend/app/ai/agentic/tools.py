@@ -1,22 +1,41 @@
 import json
-from typing import List, Dict, Any, Optional
+import uuid
+from datetime import date, datetime
 from decimal import Decimal
+from typing import Any, Dict, List, Optional
+
 from langchain.tools import tool
+
 from app.ai.agentic.tooling.browser_tool import browse_web_page_html
 from app.ai.agentic.tooling.news_tool import search_news
 from app.ai.agentic.tooling.pdf_tool import parse_pdf_to_markdown
 from app.ai.agentic.tooling.python_sandbox import execute_python_in_sandbox
 from app.ai.agentic.tooling.stock_tools import StockTools, UnsupportedColumnsError
-from app.data.ingestors.manager import ingestor_manager
+from app.core.i18n import i18n_service
 from app.core.logger import get_logger
+from app.data.ingestors.manager import ingestor_manager
+from app.data.metadata.field_units import get_table_field_units
 from app.trading.trading_engine import TradingEngine
-from app.data.metadata.field_units import get_schema_field_unit, get_schema_table_units
-
-from datetime import date, datetime
-import uuid
 
 logger = get_logger(__name__)
 trading_engine = TradingEngine()
+
+
+def _translate_schema_info_key(value: Any) -> str:
+    """翻译 SQLAlchemy Column.info 中保存的 i18n key。
+
+    Args:
+        value: 单个 i18n key，或需要顺序拼接的 i18n key 列表。
+
+    Returns:
+        当前系统语言下的翻译文本；无有效 key 时返回空字符串。
+    """
+    if isinstance(value, str):
+        return i18n_service.t(value)
+    if isinstance(value, list):
+        return "".join(i18n_service.t(item) for item in value if isinstance(item, str))
+    return ""
+
 
 def _format_trade_execution_result(payload: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -102,8 +121,16 @@ def _resolve_latest_stock_price(stock_code: str) -> Dict[str, Any]:
     except (TypeError, ValueError):
         price = None
     if price is None or price <= 0:
-        return {"success": False, "latest_price": None, "market_time": market_data.get("update_time") if market_data else None}
-    return {"success": True, "latest_price": price, "market_time": market_data.get("update_time") if market_data else None}
+        return {
+            "success": False,
+            "latest_price": None,
+            "market_time": market_data.get("update_time") if market_data else None,
+        }
+    return {
+        "success": True,
+        "latest_price": price,
+        "market_time": market_data.get("update_time") if market_data else None,
+    }
 
 
 @tool
@@ -230,6 +257,7 @@ def _evaluate_pm_trade_gate(
         )
 
     return None
+
 
 STOCK_QUERY_HANDLERS = {
     "status": lambda stock_code, limit: StockTools.check_data_status(stock_code),
@@ -561,7 +589,7 @@ async def query_stock_data(
         if data_type not in STOCK_QUERY_HANDLERS:
             results["results"][data_type] = {"error": f"Unsupported data type: {data_type}"}
             continue
-        
+
         # 解析配置 (Parse configuration - Mandatory fields)
         if not isinstance(config_val, dict):
             results["results"][data_type] = {"error": "Config must be a dict containing start_time and end_time"}
@@ -596,7 +624,7 @@ async def query_stock_data(
                 "sentiment": "StockSentiment",
                 "lockup_release": "StockRelease",
             }
-            
+
             if data_type in model_map:
                 generic_query_kwargs = {"start_time": start_t, "end_time": end_t}
                 if columns:
@@ -646,7 +674,9 @@ def query_market_data(
         - extra_params: 可选扩展参数字典，如 limit_pool 使用 {"pool_type": "up"}
 
     注意: 所有子查询均强制要求 start_time 和 end_time 契约。
-    示例: [{"data_type": "index_daily", "identifier": "000001.SH", "start_time": "2024-03-01 00:00:00", "end_time": "2024-03-16 23:59:59"}]
+    示例:
+    [{"data_type": "index_daily", "identifier": "000001.SH",
+      "start_time": "2024-03-01 00:00:00", "end_time": "2024-03-16 23:59:59"}]
     """
     responses = []
     for query in queries:
@@ -656,7 +686,7 @@ def query_market_data(
         start_t = query.get("start_time")
         end_t = query.get("end_time")
         columns = _normalize_list_arg(query.get("columns"))
-        
+
         if not start_t or not end_t:
             responses.append({
                 "error": "start_time and end_time are required for each query",
@@ -694,7 +724,14 @@ def query_market_data(
                     **generic_query_kwargs,
                 )
                 serial_data = make_json_serializable(data)
-                logger.info(f"query_market_data: limit pool table '{model_name}', limit: {limit}, char length: {len(str(serial_data))}")
+                logger.info(
+                    "query_market_data: limit pool result",
+                    extra={
+                        "model_name": model_name,
+                        "limit": limit,
+                        "char_length": len(str(serial_data)),
+                    },
+                )
                 final_data = serial_data
             elif config.get("custom") == "futures":
                 futures_type = params.get("futures_type", "internal")
@@ -706,7 +743,15 @@ def query_market_data(
                     **generic_query_kwargs,
                 )
                 serial_data = make_json_serializable(data)
-                logger.info(f"query_market_data: futures table '{model_name}' for {identifier}, limit: {limit}, char length: {len(str(serial_data))}")
+                logger.info(
+                    "query_market_data: futures result",
+                    extra={
+                        "model_name": model_name,
+                        "identifier": identifier,
+                        "limit": limit,
+                        "char_length": len(str(serial_data)),
+                    },
+                )
                 final_data = serial_data
             else:
                 needs_identifier = config.get("needs_identifier", True)
@@ -745,7 +790,10 @@ def query_market_data(
                 "identifier": identifier,
             })
         except Exception as exc:
-            logger.exception("query_market_data failed: data_type=%s identifier=%s error=%s", data_type, identifier, exc)
+            logger.exception(
+                "query_market_data failed",
+                extra={"data_type": data_type, "identifier": identifier, "error": str(exc)},
+            )
             responses.append({
                 "error": str(exc),
                 "data_type": data_type,
@@ -1054,8 +1102,8 @@ async def get_database_schema() -> Dict[str, Any]:
         - `type`: 数据库类型 (如 INTEGER, FLOAT, DATE, JSONB)
         - `nullable`: 是否允许为空
         - `primary_key`: 是否为主键
-        - `doc`: 字段的说明文档（如有）
-        - `unit`: 字段展示单位（命中标准字段单位配置时返回）
+        - `display_name`: SQLAlchemy Column.info.name 对应的字段名称翻译
+        - `unit`: SQLAlchemy Column.info.unit 对应的字段单位翻译
 
     返回结果还包含 `field_units` 字典，用于展示 JSONB payload 或未展开指标字段的单位。
 
@@ -1070,7 +1118,7 @@ async def get_database_schema() -> Dict[str, Any]:
             name: obj for name, obj in vars(models).items()
             if isinstance(obj, type) and hasattr(obj, "__tablename__")
         }
-        
+
         all_schemas = {}
         all_field_units = {}
         for table_name, model in available_models.items():
@@ -1088,14 +1136,21 @@ async def get_database_schema() -> Dict[str, Any]:
                         "type": str(col_obj.type),
                         "nullable": col_obj.nullable,
                         "primary_key": col_obj.primary_key,
-                        "doc": getattr(column, "doc", "") or ""
+                        "display_name": _translate_schema_info_key(col_obj.info.get("name")),
                     }
-                    unit = get_schema_field_unit(unit_table_name, column.key)
+                    unit = _translate_schema_info_key(col_obj.info.get("unit"))
                     if unit:
                         column_schema["unit"] = unit
                     columns.append(column_schema)
             all_schemas[table_name] = columns
-            table_unit_metadata = get_schema_table_units(unit_table_name)
+            table_unit_metadata = {
+                column["name"]: {"unit": column["unit"]}
+                for column in columns
+                if "unit" in column
+            }
+            payload_unit_metadata = get_table_field_units(unit_table_name)
+            for field_name, metadata in payload_unit_metadata.items():
+                table_unit_metadata.setdefault(field_name, metadata)
             if table_unit_metadata:
                 all_field_units[table_name] = table_unit_metadata
 
@@ -1114,8 +1169,9 @@ async def query_and_calculate(
 ) -> Dict[str, Any]:
     """
     通用数据库查询与动态计算工具 (Generic DB Query and Dynamic Calculation Tool).
-    
-    **重要指令：在调用此工具前，除非你已经非常确定目标表的字段名称和类型，否则必须先调用 `get_database_schema` 获取表结构。严禁凭空猜测字段名。**
+
+    **重要指令：在调用此工具前，除非你已经非常确定目标表的字段名称和类型，
+    否则必须先调用 `get_database_schema` 获取表结构。严禁凭空猜测字段名。**
 
     该工具首先根据过滤条件从数据库拉取数据，然后在受限的 Python 沙箱中执行计算逻辑（具体限制条件参见 `execute_python_sandboxed` 说明）。
     **注意：该工具不返回原始行数据，仅返回沙箱执行报告。**
@@ -1123,7 +1179,8 @@ async def query_and_calculate(
     参数:
     - table_name: 字符串。目标 SQLAlchemy 模型名（如 'KlineData', 'StockBasic', 'StockValuationHistory'）。
     - filters: 列表。过滤条件字典的集合。格式示例:
-      `[{"column": "stock_code", "op": "==", "value": "000001.SZ"}, {"column": "date", "op": ">=", "value": "2024-01-01"}]`
+      `[{"column": "stock_code", "op": "==", "value": "000001.SZ"},
+      {"column": "date", "op": ">=", "value": "2024-01-01"}]`
       支持的操作符 (op):
       - `==`: 等于
       - `!=`: 不等于
@@ -1164,7 +1221,8 @@ async def query_and_calculate(
     - 最低限度必填: `scope`, `row_count`。
     - `scope` 的内部字段按任务类型调整，不强制固定键名。
     - 不限制数据输出形式；可以按任务需要输出额外字段。
-    - 数据计算结果能明确单位的，尽量在输出字段名或文本中直接带上单位，例如 `avg_close_元每股`、`volume_股`、`amount_元`、`return_pct`。
+    - 数据计算结果能明确单位的，尽量在输出字段名或文本中直接带上单位，
+      例如 `avg_close_元每股`、`volume_股`、`amount_元`、`return_pct`。
     使用这种结构可以让模型不查看全量 K 线、资金流或财务明细，也能知道计算范围、样本数量、
     以及按任务需要返回的计算结果。
 
@@ -1176,8 +1234,7 @@ async def query_and_calculate(
     """
     import app.models.data_storage as models
     from app.core.database import SessionLocal
-    from sqlalchemy import and_, or_
-    import json
+    from sqlalchemy import and_
 
     model = getattr(models, table_name, None)
     if not model:
@@ -1186,7 +1243,7 @@ async def query_and_calculate(
     try:
         with SessionLocal() as db:
             query = db.query(model)
-            
+
             # 构建过滤条件
             ops = {
                 "==": lambda col, val: col == val,
@@ -1204,19 +1261,19 @@ async def query_and_calculate(
                 col_name = f.get("column")
                 op = f.get("op")
                 val = f.get("value")
-                
+
                 if not hasattr(model, col_name):
                     return {"error": f"Column '{col_name}' not found in table '{table_name}'"}
-                
+
                 if op not in ops:
                     return {"error": f"Unsupported operator: {op}"}
-                
+
                 col_attr = getattr(model, col_name)
                 filter_clauses.append(ops[op](col_attr, val))
-            
+
             if filter_clauses:
                 query = query.filter(and_(*filter_clauses))
-            
+
             # 执行查询
             records = query.limit(limit).all()
             # 序列化结果供计算使用
@@ -1256,7 +1313,7 @@ async def execute_trading_order(
 ) -> Dict[str, Any]:
     """
     执行股票交易下单工具 (Execute stock trading order).
-    
+
     该工具由投资经理(Portfolio Manager)在做出决策后调用，用于将决策转化为模拟交易订单。
 
     参数:
@@ -1298,17 +1355,25 @@ async def execute_trading_order(
     normalized_operation = str(operation or "place").lower()
     normalized_order_type = str(order_type or "market").lower()
     if normalized_operation not in {"place", "cancel"}:
-        return _format_trade_execution_result({"error": f"Invalid operation: {operation}", "reason": "invalid_operation"})
+        return _format_trade_execution_result(
+            {"error": f"Invalid operation: {operation}", "reason": "invalid_operation"}
+        )
 
     if normalized_order_type not in {"market", "limit"}:
-        return _format_trade_execution_result({"error": f"Invalid order_type: {order_type}", "reason": "invalid_order_type"})
+        return _format_trade_execution_result(
+            {"error": f"Invalid order_type: {order_type}", "reason": "invalid_order_type"}
+        )
 
     if normalized_operation == "place":
         if stop_loss <= 0:
-            return _format_trade_execution_result({"error": f"Invalid stop_loss: {stop_loss}. stop_loss must be greater than 0."})
+            return _format_trade_execution_result(
+                {"error": f"Invalid stop_loss: {stop_loss}. stop_loss must be greater than 0."}
+            )
 
         if take_profit <= 0:
-            return _format_trade_execution_result({"error": f"Invalid take_profit: {take_profit}. take_profit must be greater than 0."})
+            return _format_trade_execution_result(
+                {"error": f"Invalid take_profit: {take_profit}. take_profit must be greater than 0."}
+            )
 
         if normalized_order_type == "limit" and (limit_price is None or limit_price <= 0):
             return _format_trade_execution_result({
@@ -1317,7 +1382,12 @@ async def execute_trading_order(
             })
 
     if normalized_operation == "cancel" and not order_id:
-        return _format_trade_execution_result({"error": "order_id is required for cancel operation", "reason": "missing_order_id"})
+        return _format_trade_execution_result(
+            {
+                "error": "order_id is required for cancel operation",
+                "reason": "missing_order_id",
+            }
+        )
 
     session_uuid = None
     try:
@@ -1332,11 +1402,11 @@ async def execute_trading_order(
             session_model = db.query(DbSession).filter(DbSession.session_id == session_uuid).first()
             if not session_model:
                 return _format_trade_execution_result({"error": f"Session {session_id} not found in database."})
-            
+
             user = db.query(User).filter(User.id == session_model.user_id).first()
             if not user or not user.account:
                 return _format_trade_execution_result({"error": "Associated User or Account not found."})
-            
+
             account = user.account
 
             if normalized_operation == "cancel":
@@ -1350,16 +1420,16 @@ async def execute_trading_order(
                 return _format_trade_execution_result(cancel_result)
 
             total_assets = float(account.total_assets or 0)
-            
+
             # 2. 获取最新价格
             price = 0.0
             latest_market = db.query(StockRealtimeMarket).filter(
                 StockRealtimeMarket.stock_code == stock_code
             ).order_by(desc(StockRealtimeMarket.timestamp)).first()
-            
+
             if latest_market:
                 price = float(latest_market.current_price)
-            
+
             if price <= 0:
                 # 尝试从 Kline 补全
                 from app.models.data_storage import KlineData
@@ -1370,13 +1440,15 @@ async def execute_trading_order(
                     price = float(latest_kline.close)
 
             if price <= 0:
-                return _format_trade_execution_result({"error": f"Could not determine a valid price for {stock_code}. Trade aborted."})
+                return _format_trade_execution_result(
+                    {"error": f"Could not determine a valid price for {stock_code}. Trade aborted."}
+                )
 
             order_price = float(limit_price) if normalized_order_type == "limit" else price
 
             # 3. 计算目标总股数
             target_total_shares = (total_assets * target_position) / order_price
-            
+
             # 4. 获取当前持仓
             pos = db.query(Position).filter(
                 Position.account_id == account.account_id,
@@ -1407,7 +1479,7 @@ async def execute_trading_order(
             # 5. 计算差额
             diff_shares = target_total_shares - current_total_shares
             suggested_shares = 0
-            
+
             # 6. 执行 A 股规则
             act = action.lower()
             if act == "buy" and diff_shares > 0:
@@ -1421,13 +1493,16 @@ async def execute_trading_order(
                     # 减仓：尽量取 100 倍数，不超可用
                     abs_diff = abs(diff_shares)
                     suggested_shares = min((int(abs_diff) // 100) * 100, current_available_shares)
-            
-            if suggested_shares <= 0 and not (act == "sell" and target_position == 0 and current_available_shares > 0):
+
+            can_sell_remaining_shares = (
+                act == "sell" and target_position == 0 and current_available_shares > 0
+            )
+            if suggested_shares <= 0 and not can_sell_remaining_shares:
                 # 构建更详细的拒绝理由
                 reason = "Rounding (less than 100 shares)" if abs(diff_shares) > 0 else "Target position already met"
                 if act == "sell" and current_available_shares == 0 and current_total_shares > 0:
                     reason = "No available shares (T+1 lock)"
-                
+
                 return {
                     **_format_trade_execution_result({
                         "success": False,
@@ -1473,7 +1548,7 @@ async def execute_trading_order(
                 order_type=normalized_order_type,
                 stop_loss=stop_loss,
             )
-            
+
             return _format_trade_execution_result(trade_result)
 
     except Exception as exc:

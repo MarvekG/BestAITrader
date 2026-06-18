@@ -172,9 +172,6 @@ class RiskReader(_WrapDictMixin, _WrapListMixin):
     def shareholder_trend(self, db: Session, stock_code: str) -> dict[str, Any]:
         return self.source._get_shareholder_trend(db, stock_code)
 
-    def analyze_financial_risks(self, fin_ctx: dict[str, Any]) -> dict[str, Any]:
-        return self.source._analyze_financial_risks(fin_ctx)
-
 
 @dataclass(slots=True)
 class FinancialReader(_WrapSnapshotMixin):

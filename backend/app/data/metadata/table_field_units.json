@@ -915,6 +915,54 @@
       "precision": 0
     }
   },
+  "risk.pledge": {
+    "ratio_total": {
+      "$ref": "percent"
+    },
+    "ratio_holder": {
+      "$ref": "percent"
+    },
+    "total_shares": {
+      "zh": {
+        "unit": [
+          "units.ten_thousand",
+          "units.shares"
+        ],
+        "scale": 1
+      },
+      "en": {
+        "unit": [
+          "units.million",
+          "units.shares"
+        ],
+        "scale": 0.01
+      },
+      "precision": 2
+    },
+    "market_value": {
+      "$ref": "ten_thousand_cny"
+    },
+    "pledge_count": {
+      "zh": {
+        "unit": "units.entries",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.entries",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "pledge_price": {
+      "$ref": "cny"
+    },
+    "current_price": {
+      "$ref": "cny"
+    },
+    "liquidate_price": {
+      "$ref": "cny"
+    }
+  },
   "events.earnings_countdown": {
     "days_countdown": {
       "zh": {
@@ -926,30 +974,6 @@
         "scale": 1
       },
       "precision": 0
-    }
-  },
-  "risk.financial_warning": {
-    "goodwill_ratio": {
-      "zh": {
-        "unit": "units.percent",
-        "scale": 1
-      },
-      "en": {
-        "unit": "units.percent",
-        "scale": 1
-      },
-      "precision": 2
-    },
-    "debt_ratio": {
-      "zh": {
-        "unit": "units.percent",
-        "scale": 1
-      },
-      "en": {
-        "unit": "units.percent",
-        "scale": 1
-      },
-      "precision": 2
     }
   },
   "risk.insider": {
@@ -1494,6 +1518,18 @@
     }
   },
   "technical.kline": {
+    "open": {
+      "$ref": "cny"
+    },
+    "high": {
+      "$ref": "cny"
+    },
+    "low": {
+      "$ref": "cny"
+    },
+    "close": {
+      "$ref": "cny"
+    },
     "volume": {
       "zh": {
         "unit": "units.lots",

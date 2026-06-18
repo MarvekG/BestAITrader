@@ -192,7 +192,12 @@
     "main_net_inflow_10d": "10日主力净流入",
     "main_net_inflow_rank_today": "今日主力净流入排名",
     "main_net_inflow_rank_5d": "5日主力净流入排名",
-    "main_net_inflow_rank_10d": "10日主力净流入排名"
+    "main_net_inflow_rank_10d": "10日主力净流入排名",
+    "amplitude": "振幅",
+    "volume_ratio": "量比",
+    "circulating_market_cap": "流通市值",
+    "speed_increase": "涨速",
+    "change_5min": "5分钟涨跌幅"
   },
   "errors": {
     "tushare_pledge_summary_requires_stock_code": "TuShare 质押汇总接口需要股票代码，不支持全量获取"
@@ -279,7 +284,11 @@
     "data_source": "数据来源",
     "id": "ID",
     "created_at": "创建时间",
-    "updated_at": "更新时间"
+    "updated_at": "更新时间",
+    "total_share": "总股本",
+    "float_share": "流通股本",
+    "free_share": "自由流通股本",
+    "peg": "PEG"
   },
   "northbound_data": {
     "date": "日期",
@@ -301,7 +310,19 @@
     "buy_amount": "买入额",
     "sell_amount": "卖出额",
     "price_change_percent": "涨跌幅",
-    "listing_reason": "上榜理由"
+    "listing_reason": "上榜理由",
+    "sequence_number": "序号",
+    "close_price": "收盘价",
+    "total_trade_amount": "成交总额",
+    "market_total_trade_amount": "市场成交总额",
+    "net_buy_ratio": "净买入占比",
+    "trade_amount_ratio": "成交额占比",
+    "turnover_rate": "换手率",
+    "floating_market_capitalization": "流通市值",
+    "post_1_day_price_change_percent": "后1日涨跌幅",
+    "post_2_day_price_change_percent": "后2日涨跌幅",
+    "post_5_day_price_change_percent": "后5日涨跌幅",
+    "post_10_day_price_change_percent": "后10日涨跌幅"
   },
   "stock_block_trade": {
     "stock_code": "股票代码",
@@ -317,7 +338,7 @@
   "sector_money_flow": {
     "trade_date": "交易日期",
     "sector_name": "板块名称",
-    "close_price": "收盘价",
+    "close_price": "板块最新指数",
     "change_percent": "涨跌幅",
     "net_inflow": "主力净流入",
     "net_inflow_rate": "主力净流入占比",
@@ -331,7 +352,8 @@
     "small_net_inflow_rate": "小单占比",
     "data_source": "数据源",
     "stock_code_required": "请先输入股票代码",
-    "sync_button": "同步板块资金流"
+    "sync_button": "同步板块资金流",
+    "main_net_inflow": "主力净流入"
   },
   "stock_pledge_risk": {
     "stock_code": "股票代码",
@@ -972,7 +994,14 @@
     "days": "天",
     "times": "次",
     "households": "户",
-    "percent": "%"
+    "percent": "%",
+    "rank": "名",
+    "score": "分",
+    "stocks": "只",
+    "sequence": "序号",
+    "ratio": "比例",
+    "entries": "笔",
+    "articles": "篇"
   },
   "trading": {
     "order_updated": "订单已更新",
@@ -1739,7 +1768,9 @@
     "open_times": "炸板次数",
     "limit_up_stats": "涨停统计",
     "limit_up_days": "连板天数",
-    "limit_up_reason": "涨停原因"
+    "limit_up_reason": "涨停原因",
+    "circ_mv": "流通市值",
+    "total_mv": "总市值"
   },
   "stock_limit_down_pool": {
     "update_date": "更新日期",
@@ -1757,7 +1788,9 @@
     "limit_down_days": "连板天数",
     "limit_down_reason": "跌停原因",
     "board_turnover": "板上成交额",
-    "dynamic_pe": "动态市盈率"
+    "dynamic_pe": "动态市盈率",
+    "circ_mv": "流通市值",
+    "total_mv": "总市值"
   },
   "stock_zhaban_pool": {
     "update_date": "更新日期",
@@ -1779,26 +1812,29 @@
     "prev_year_profit": "上年同期值",
     "forecast_content": "业绩变动说明",
     "growth_min": "预告幅度下限",
-    "growth_max": "预告幅度上限"
+    "growth_max": "预告幅度上限",
+    "circ_mv": "流通市值",
+    "total_mv": "总市值",
+    "swing": "振幅"
   },
   "stock_money_flow": {
     "trade_date": "交易日期",
     "stock_code": "股票代码",
     "close_price": "收盘价",
     "change_pct": "涨跌幅",
-    "net_inflow_small": "小单净流入(万)",
+    "net_inflow_small": "小单净流入",
     "net_inflow_ratio_small": "小单流入占比(%)",
-    "net_inflow_medium": "中单净流入(万)",
+    "net_inflow_medium": "中单净流入",
     "net_inflow_ratio_medium": "中单流入占比(%)",
-    "net_inflow_large": "大单净流入(万)",
+    "net_inflow_large": "大单净流入",
     "net_inflow_ratio_large": "大单流入占比(%)",
-    "net_inflow_huge": "特大单净流入(万)",
+    "net_inflow_huge": "特大单净流入",
     "net_inflow_ratio_huge": "超大单流入占比(%)",
-    "net_inflow_main": "主力净流入(万)",
+    "net_inflow_main": "主力净流入",
     "net_inflow_ratio_main": "主力流入占比(%)",
-    "net_inflow_main_3d": "3日主力净流入(万)",
-    "net_inflow_main_5d": "5日主力净流入(万)",
-    "net_inflow_main_10d": "10日主力净流入(万)"
+    "net_inflow_main_3d": "3日主力净流入",
+    "net_inflow_main_5d": "5日主力净流入",
+    "net_inflow_main_10d": "10日主力净流入"
   },
   "stock_shareholder_count": {
     "end_date": "披露截止日期",
@@ -1838,7 +1874,8 @@
     "release_shares": "解禁数量",
     "release_market_value": "解禁市值(万)",
     "ratio_to_total": "总股本比(%)",
-    "release_type": "解禁类型"
+    "release_type": "解禁类型",
+    "ratio_to_float": "占流通股比"
   },
   "stock_margin_data": {
     "trade_date": "交易日期",
@@ -1848,7 +1885,10 @@
     "short_balance": "融券余额",
     "short_volume": "融券余量",
     "margin_short_balance": "融资融券余额",
-    "data_source": "数据源"
+    "data_source": "数据源",
+    "margin_repay_amount": "融资偿还额",
+    "short_sell_volume": "融券卖出量",
+    "short_repay_volume": "融券偿还量"
   },
   "money_flow": {
     "net_inflow_main": "主力净流入",
@@ -3052,5 +3092,32 @@
         "expected_positions_mismatch": "预期 {expected} 个候选池内唯一推荐股票，实际得到 {actual} 个"
       }
     }
+  },
+  "stock_hot_rank": {
+    "rank": "当前排名",
+    "rank_change": "排名变化",
+    "hot_value": "热度值",
+    "current_rank": "人气总榜排名",
+    "new_fans": "新晋粉丝占比",
+    "irons_fans": "铁杆粉丝占比"
+  },
+  "stock_fund_holding": {
+    "hold_amount": "持股数",
+    "hold_market_value": "持股市值",
+    "hold_ratio_stock": "占流通股比",
+    "hold_ratio_fund": "占基金净值比"
+  },
+  "stock_seo": {
+    "issue_price": "发行价格",
+    "issue_volume": "发行数量",
+    "raise_amount": "募资总额"
+  },
+  "stock_sentiment": {
+    "sentiment_score": "情绪评分",
+    "confidence": "置信度",
+    "article_count": "文章数量",
+    "positive_count": "正面文章数量",
+    "negative_count": "负面文章数量",
+    "neutral_count": "中性文章数量"
   }
 }

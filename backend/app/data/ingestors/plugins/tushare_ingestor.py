@@ -2,7 +2,7 @@ import tushare as ts
 import asyncio
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any
 from app.data.ingestion.service import DataIngestionService
 from app.core.config import settings
 from app.data.ingestors.base_ingestor import BaseIngestor
@@ -444,7 +444,6 @@ class TushareIngestor(BaseIngestor):
                         continue
                     standardized_data[k] = v if pd.notnull(v) else None
                 standardized_data = format_payload_values('data.financial_indicator', standardized_data)
-
                 record = {
                     'stock_code': code,
                     'announcement_date': ann_date,
@@ -2423,7 +2422,6 @@ class TushareIngestor(BaseIngestor):
                     'data.stock_income_statement',
                     standardized_data,
                 )
-
                 if not standardized_data:
                     continue
 
@@ -2564,7 +2562,6 @@ class TushareIngestor(BaseIngestor):
                     'data.stock_balance_sheet',
                     standardized_data,
                 )
-
                 if not standardized_data:
                     continue
 
@@ -2705,7 +2702,6 @@ class TushareIngestor(BaseIngestor):
                     'data.stock_cashflow_statement',
                     standardized_data,
                 )
-
                 if not standardized_data:
                     continue
 

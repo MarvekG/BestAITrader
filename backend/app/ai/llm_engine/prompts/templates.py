@@ -780,11 +780,7 @@ SYSTEM_PROMPT_RISK_CONTROL_CN = f"""
 
 ### 3. 潜在治理/财务预警
 *   **监管问询**: [近期无违规或函件记录/列举关键函件内容]
-*   **财务异常**: 请务必审阅并引用 `financial_warning` 中的数据。分析是否存在以下风险点：
-    - **商誉减值**: 商誉占比 ...% (参考 `goodwill_ratio`, 若>20%需提示风险)
-    - **负债压力**: 资产负债率 ...% (参考 `debt_ratio`)
-    - **收益质量**: 经营现金流/净利润 ... (参考 `cash_profit_ratio`)
-    - **造假嫌疑**: 是否存在“存贷双高” (参考 `double_high_risk`)
+*   **财务异常**: 结合财报、资产负债、现金流和利润表现，判断商誉、杠杆、收益质量和“存贷双高”等风险。
 *   **风险详情**: [根据具体数值进行深度定性描述]
 
 ### 4. 周期、商品与回撤风险
@@ -1789,11 +1785,8 @@ Please strictly follow this Markdown format for the analysis report:
 
 ### 3. Potential Governance/Financial Warnings
 *   **Regulatory Inquiry**: [Any recent violations/letters]
-*   **Financial Anomalies**: Please review and cite `financial_warning` data:
-    - **Goodwill Risk**: Ratio ...% (Refer to `goodwill_ratio`, watch out if >20%)
-    - **Leverage Pressure**: Debt Ratio ...% (Refer to `debt_ratio`)
-    - **Earnings Quality**: Cash flow/Net Profit ... (Refer to `cash_profit_ratio`)
-    - **Suspicion of Fraud**: "Double High" (High Cash & High Debt) (Refer to `double_high_risk`)
+*   **Financial Anomalies**: Assess goodwill, leverage, earnings quality, and "Double High" risks
+    using financial statements, balance-sheet quality, cash flow, and profitability.
 *   **Risk Details**: [Provide qualitative analysis based on metrics]
 
 ### 4. Cyclical, Commodity & Drawdown Risks
