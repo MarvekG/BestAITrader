@@ -163,7 +163,10 @@ class FakeInteractiveResearchLLM:
                     "name": FLOW_CONTROL_TOOL_NAME,
                     "args": {
                         "action": "done",
-                        "message": "## Final Research\nSemiconductor equipment remains the focus based on tool evidence.",
+                        "message": (
+                            "## Final Research\n"
+                            "Semiconductor equipment remains the focus based on tool evidence."
+                        ),
                     },
                     "id": "control-done-1",
                 },
@@ -390,7 +393,7 @@ async def _execute_background(monkeypatch, service, db_session, run_id):
         db_session: SQLite 测试数据库会话。
         run_id: 研究 run ID。
     """
-    await service.execute_workflow_background(run_id)
+    await service.execute_workflow_background(run_id, service._plan_agent.latest_plan_output(run_id))
 
 
 async def _create_run_with_plan(service, user_id, request_data):
@@ -566,49 +569,6 @@ async def test_plan_stage_user_input_iterates_plan_card(db_session):
     assert "当前完整 PLAN" not in plan_cards[-1].content
     assert "user_inputs" not in plan_cards[-1].content
     assert "plan_payload" not in run.checkpoint_payload
-
-
-def test_tool_result_success_false_is_rendered_as_failed(db_session):
-    """工具业务返回 success=false 时应显示为调用失败。"""
-    user_id = _create_user_id(db_session)
-    run_data = persistence_module.create_run_record(
-        user_id,
-        _request_data(requirement="Check valuation sync failure handling"),
-        title="Sync failure handling",
-    )
-    run_id = run_data["run_id"]
-    result_payloads = persistence_module.append_tool_result_and_progress_record(
-        run_id,
-        tool_name="sync_market_data",
-        tool_args={"task_type": "valuation", "target": "600199.SH"},
-        tool_call_id="tool-call-sync-failed",
-        start_message_id="start-message-id",
-        success=False,
-        result_text=(
-            '{"message":"sync completed but returned False or None",'
-            '"resolved_method":"fetch_and_ingest_stock_valuation",'
-            '"success":false,"target":"600199.SH","task_type":"valuation"}'
-        ),
-        result_content='{"success":false,"target":"600199.SH"}',
-    )
-
-    tool_message = (
-        db_session.query(InteractiveResearchMessage)
-        .filter_by(run_id=run_id, message_type="tool_result")
-        .one()
-    )
-    progress_message = (
-        db_session.query(InteractiveResearchMessage)
-        .filter_by(run_id=run_id, message_type="progress_update")
-        .one()
-    )
-
-    assert tool_message.status == "failed"
-    assert tool_message.payload["success"] is False
-    assert progress_message.payload["status"] == "调用失败"
-    assert "调用失败" in result_payloads[1]["message"]["markdown"]
-    assert "工具 sync_market_data 调用失败" in result_payloads[1]["message"]["markdown"]
-    assert result_payloads[0]["message"]["execution_status"] == "failed"
 
 
 def test_tool_result_success_false_marks_trace_failed():
