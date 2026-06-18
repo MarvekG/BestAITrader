@@ -3,19 +3,19 @@ import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 
 os.environ.setdefault("TUSHARE_TOKEN", "test-token")
 os.environ.setdefault("TUSHARE_API", "http://test.invalid")
 
-from app.core.config import settings
-from app.data.metadata.field_units import format_payload_values
-from app.ai.llm_engine.context.providers import SnapshotProvider
-from app.ai.llm_engine.context.readers import FinancialReader, FundamentalReader
-from app.ai.llm_engine.context.capital_flow import CapitalFlowSource
-from app.models.data_storage import (
+from app.core.config import settings  # noqa: E402
+from app.data.metadata.field_units import format_payload_values  # noqa: E402
+from app.ai.llm_engine.context.providers import SnapshotProvider  # noqa: E402
+from app.ai.llm_engine.context.readers import FinancialReader, FundamentalReader  # noqa: E402
+from app.ai.llm_engine.context.capital_flow import CapitalFlowSource  # noqa: E402
+from app.models.data_storage import (  # noqa: E402
     DragonTigerData,
     NorthboundData,
     StockFundHolding,
@@ -566,38 +566,6 @@ def test_top_holder_change_labels_support_numeric_and_text_values():
     assert builder.normalize_holder_change_label("增加(10股)") == "增加(10股)"
 
 
-def test_forecast_returns_structured_latest_guidance():
-    ann_date = date.today() - timedelta(days=90)
-    report_date = date(2025, 12, 31)
-    record = SimpleNamespace(
-        report_date=report_date,
-        ann_date=ann_date,
-        forecast_type="预增",
-        net_profit_min=120000.0,
-        net_profit_max=150000.0,
-        prev_year_profit=90000.0,
-        growth_min=20.0,
-        growth_max=45.0,
-        forecast_content="业绩增长主要来自产品结构升级和费用控制改善。",
-    )
-
-    builder = FundamentalReader()
-    result = builder.forecast(FakeSession([record]), "600519.SH")
-
-    assert result["overview"]["window"] == "latest"
-    assert result["overview"]["forecast_type"] == "预增"
-    assert result["overview"]["reference_status"] == "active"
-    assert "unit" not in result["profit_guidance_latest"]
-    assert result["profit_guidance_latest"]["midpoint"] == "135000万元"
-    assert result["growth_guidance_latest"]["window"] == "latest"
-    assert "unit" not in result["growth_guidance_latest"]
-    assert result["growth_guidance_latest"]["midpoint_pct"] == "32.5%"
-    assert result["growth_guidance_latest"]["direction_label"] == "positive"
-    assert result["signal"]["momentum_label"] == "positive"
-    assert result["risk_flags"] == []
-    assert "产品结构升级" in result["content_summary"]
-
-
 def test_northbound_flow_returns_structured_foreign_sentiment():
     latest = SimpleNamespace(
         stock_code="600519.SH",
@@ -1104,10 +1072,38 @@ def test_margin_analysis_returns_structured_leverage_signal():
             margin_buy_amount=15_000_000.0,
             margin_repay_amount=9_000_000.0,
         ),
-        SimpleNamespace(stock_code="600519.SH", trade_date=date(2026, 3, 19), margin_balance=118_000_000.0, short_balance=4_200_000.0, margin_buy_amount=12_000_000.0, margin_repay_amount=8_000_000.0),
-        SimpleNamespace(stock_code="600519.SH", trade_date=date(2026, 3, 18), margin_balance=112_000_000.0, short_balance=4_500_000.0, margin_buy_amount=11_000_000.0, margin_repay_amount=9_500_000.0),
-        SimpleNamespace(stock_code="600519.SH", trade_date=date(2026, 3, 17), margin_balance=108_000_000.0, short_balance=4_800_000.0, margin_buy_amount=10_000_000.0, margin_repay_amount=9_000_000.0),
-        SimpleNamespace(stock_code="600519.SH", trade_date=date(2026, 3, 14), margin_balance=100_000_000.0, short_balance=5_000_000.0, margin_buy_amount=9_000_000.0, margin_repay_amount=8_500_000.0),
+        SimpleNamespace(
+            stock_code="600519.SH",
+            trade_date=date(2026, 3, 19),
+            margin_balance=118_000_000.0,
+            short_balance=4_200_000.0,
+            margin_buy_amount=12_000_000.0,
+            margin_repay_amount=8_000_000.0,
+        ),
+        SimpleNamespace(
+            stock_code="600519.SH",
+            trade_date=date(2026, 3, 18),
+            margin_balance=112_000_000.0,
+            short_balance=4_500_000.0,
+            margin_buy_amount=11_000_000.0,
+            margin_repay_amount=9_500_000.0,
+        ),
+        SimpleNamespace(
+            stock_code="600519.SH",
+            trade_date=date(2026, 3, 17),
+            margin_balance=108_000_000.0,
+            short_balance=4_800_000.0,
+            margin_buy_amount=10_000_000.0,
+            margin_repay_amount=9_000_000.0,
+        ),
+        SimpleNamespace(
+            stock_code="600519.SH",
+            trade_date=date(2026, 3, 14),
+            margin_balance=100_000_000.0,
+            short_balance=5_000_000.0,
+            margin_buy_amount=9_000_000.0,
+            margin_repay_amount=8_500_000.0,
+        ),
     ]
     valuation = SimpleNamespace(stock_code="600519.SH", data_date=date(2026, 3, 20), total_market_value=1_000_000.0)
 

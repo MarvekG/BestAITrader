@@ -8,7 +8,6 @@ from app.models.data_storage import (
     NorthboundData,
     DragonTigerData,
     StockRealtimeMarket,
-    StockValuationHistory,
     StockLimitUpPool,
     StockMoneyFlow,
     StockShareholder,
@@ -25,6 +24,43 @@ logger = get_logger(__name__)
 
 class DataStorageService:
     """数据存储服务，用于处理不同类型数据的存储逻辑"""
+
+    def get_stock_realtime_market(self, stock_code: str) -> Optional[Dict[str, Any]]:
+        """
+        获取指定股票最近一条实时行情，供交易撮合和前端推送使用。
+
+        Args:
+            stock_code: 标准股票代码，例如 ``000651.SZ``。
+
+        Returns:
+            最近一条实时行情字典；未找到记录或查询失败时返回 None。
+        """
+        if not stock_code:
+            return None
+
+        try:
+            with SessionLocal() as db:
+                record = db.query(StockRealtimeMarket).filter(
+                    StockRealtimeMarket.stock_code == stock_code
+                ).order_by(
+                    StockRealtimeMarket.timestamp.desc(),
+                    StockRealtimeMarket.updated_at.desc(),
+                    StockRealtimeMarket.created_at.desc(),
+                ).first()
+                if not record:
+                    return None
+
+                data = self._to_dict(record)
+                data["latest_price"] = data.get("current_price")
+                data["yesterday_close"] = data.get("prev_close")
+                data["update_time"] = data.get("timestamp") or data.get("updated_at")
+                data["total_market_value"] = data.get("total_market_cap")
+                data["circulating_market_value"] = data.get("circulating_market_cap")
+                data["pb"] = data.get("pb_ratio")
+                return data
+        except Exception as e:
+            logger.error("Failed to get realtime market data", extra={"stock_code": stock_code, "error": str(e)})
+            return None
 
     def save_stock_basic(self, data: Dict[str, Any]) -> bool:
         """存储股票基本信息
@@ -91,7 +127,13 @@ class DataStorageService:
             logger.error(f"Failed to save stock basic info {data.get('stock_code')}: {e}")
             return False
 
-    def save_kline_data(self, stock_code: str, data: List[Dict[str, Any]], freq: str = "D", data_source: str = "unknown") -> bool:
+    def save_kline_data(
+        self,
+        stock_code: str,
+        data: List[Dict[str, Any]],
+        freq: str = "D",
+        data_source: str = "unknown",
+    ) -> bool:
         """存储K线数据
 
         Args:
@@ -206,7 +248,8 @@ class DataStorageService:
 
                 board_name = industry_name
                 # Try to get board_code from data, or fallback?
-                # The model requires board_code. If not present, we can't save safely without violating unique constraint if we make one up.
+                # The model requires board_code. If not present, we can't save safely without violating unique
+                # constraint if we make one up.
                 # However, for now, let's assume data might have it or use simple hash/name.
                 board_code = data.get("board_code", data.get("code", board_name))
 
@@ -590,14 +633,24 @@ class DataStorageService:
                         "total_share": stock_basic.total_share,
                         "float_share": stock_basic.float_share,
                         "data_source": stock_basic.data_source,
-                        "last_updated": stock_basic.updated_at.strftime("%Y-%m-%d %H:%M:%S") if stock_basic.updated_at else None
+                        "last_updated": (
+                            stock_basic.updated_at.strftime("%Y-%m-%d %H:%M:%S")
+                            if stock_basic.updated_at
+                            else None
+                        )
                     }
                 return None
         except Exception as e:
             logger.error(f"Failed to get stock basic information for {stock_code}: {e}")
             return None
 
-    def get_kline_data(self, stock_code: str, start_date: str, end_date: str, freq: str = "D") -> Optional[List[Dict[str, Any]]]:
+    def get_kline_data(
+        self,
+        stock_code: str,
+        start_date: str,
+        end_date: str,
+        freq: str = "D",
+    ) -> Optional[List[Dict[str, Any]]]:
         """获取股票K线数据
 
         Args:
@@ -656,7 +709,12 @@ class DataStorageService:
             logger.error(f"Failed to get kline data for {stock_code}: {e}")
             return None
 
-    def get_latest_kline_data(self, stock_code: str, freq: str = "D", limit: int = 30) -> Optional[List[Dict[str, Any]]]:
+    def get_latest_kline_data(
+        self,
+        stock_code: str,
+        freq: str = "D",
+        limit: int = 30,
+    ) -> Optional[List[Dict[str, Any]]]:
         """获取股票最新K线数据
 
         Args:
