@@ -434,17 +434,27 @@ def start_research_run_record(run_id: UUID) -> Optional[Dict[str, Any]]:
             payload={"phase_instruction": phase_instructions()["research"]},
         )
         payload = _notification_payload(run, message, "research_started")
+        plan_user_inputs = []
+        for item in _load_plan_messages(db, run):
+            if item.get("role") == "user" and item.get("content"):
+                plan_user_inputs.append({"round": len(plan_user_inputs) + 1, "content": item.get("content") or ""})
         snapshot = {
             "user_id": run.user_id,
             "raw_requirement": run.raw_requirement,
             "max_iterations": _max_iterations_from_checkpoint(run),
             "queued_before": queued_messages,
+            "plan_user_inputs": plan_user_inputs,
         }
         db.commit()
         return {"snapshot": snapshot, "notification": payload}
 
 
-def append_tool_start_record(run_id: UUID, tool_name: str, tool_args: Dict[str, Any], tool_call_id: str) -> Dict[str, Any]:
+def append_tool_start_record(
+    run_id: UUID,
+    tool_name: str,
+    tool_args: Dict[str, Any],
+    tool_call_id: str,
+) -> Dict[str, Any]:
     """记录工具开始调用消息。
 
     Args:

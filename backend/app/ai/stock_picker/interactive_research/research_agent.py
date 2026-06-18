@@ -10,7 +10,13 @@ from app.ai.agentic.tool_output_summarizer import should_summarize_tool_output, 
 from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_providers.factory import build_chat_model, get_llm_provider
 from app.ai.stock_picker.interactive_research import constants as prompt_constants
-from app.ai.stock_picker.interactive_research.constants import research_agent_system_prompt
+from app.ai.stock_picker.interactive_research.constants import (
+    PLAN_USER_INPUTS_CONTEXT_HEADER_EN,
+    PLAN_USER_INPUTS_CONTEXT_HEADER_ZH,
+    PLAN_USER_INPUTS_CONTEXT_LINE_EN,
+    PLAN_USER_INPUTS_CONTEXT_LINE_ZH,
+    research_agent_system_prompt,
+)
 from app.ai.stock_picker.interactive_research.flow_control import (
     FLOW_CONTROL_TOOL_NAME,
     FlowControlDecision,
@@ -100,6 +106,7 @@ class InteractiveResearchAgent:
             run_snapshot["raw_requirement"],
             approved_plan,
             run_snapshot["queued_before"],
+            run_snapshot.get("plan_user_inputs", []),
         )
         tools = await self._load_tools(run_id, run_snapshot["user_id"])
         tool_map = {
@@ -173,7 +180,9 @@ class InteractiveResearchAgent:
                     call_kind="final_no_tools",
                     iteration_index=iteration_budget + 1 + retry_index,
                 )
-                final_response, invalid_tool_calls = self._llm_provider.sanitize_tool_call_response_for_replay(final_response)
+                final_response, invalid_tool_calls = self._llm_provider.sanitize_tool_call_response_for_replay(
+                    final_response
+                )
                 messages.append(final_response)
                 tool_calls = list(getattr(final_response, "tool_calls", []) or [])
                 flow_control_calls, evidence_tool_calls = _partition_tool_calls(tool_calls)
@@ -182,7 +191,9 @@ class InteractiveResearchAgent:
                     continue
                 if invalid_tool_calls:
                     messages.append(
-                        HumanMessage(content=self._llm_provider.build_invalid_tool_call_retry_message(invalid_tool_calls))
+                        HumanMessage(
+                            content=self._llm_provider.build_invalid_tool_call_retry_message(invalid_tool_calls)
+                        )
                     )
                     continue
                 decision = self._parse_flow_control_tool_or_retry(messages, flow_control_calls, final_only=True)
@@ -407,6 +418,7 @@ class InteractiveResearchAgent:
         raw_requirement: str,
         approved_plan: str,
         queued_messages: List[Dict[str, str]],
+        plan_user_inputs: List[Dict[str, Any]],
     ) -> List[Any]:
         """构造 LLM tool-calling 消息上下文。
 
@@ -414,6 +426,7 @@ class InteractiveResearchAgent:
             raw_requirement: 原始用户需求。
             approved_plan: 用户确认的研究计划正文。
             queued_messages: 本轮开始前并入上下文的排队用户输入。
+            plan_user_inputs: 计划阶段用户输入，按轮次传入研究上下文。
 
         Returns:
             LangChain 消息列表。
@@ -426,6 +439,8 @@ class InteractiveResearchAgent:
         messages: List[Any] = [SystemMessage(content=prompt)]
         if approved_plan:
             messages.append(SystemMessage(content=approved_plan))
+        if plan_user_inputs:
+            messages.append(SystemMessage(content=_format_plan_user_inputs(plan_user_inputs)))
         if queued_messages:
             self._append_queued_inputs_to_messages(messages, queued_messages)
         if len(messages) == 1:
@@ -679,6 +694,26 @@ def _compact_tool_result(result_text: str) -> str:
     """
     normalized = " ".join(str(result_text or "").split())
     return normalized or _t("messages.tool_empty_result")
+
+
+def _format_plan_user_inputs(plan_user_inputs: List[Dict[str, Any]]) -> str:
+    """格式化计划阶段用户输入，供研究阶段识别轮次。
+
+    Args:
+        plan_user_inputs: 计划阶段用户输入列表。
+
+    Returns:
+        带轮次标识的上下文文本。
+    """
+    if str(settings.SYSTEM_LANGUAGE).lower().startswith("zh"):
+        lines = [PLAN_USER_INPUTS_CONTEXT_HEADER_ZH]
+        line_template = PLAN_USER_INPUTS_CONTEXT_LINE_ZH
+    else:
+        lines = [PLAN_USER_INPUTS_CONTEXT_HEADER_EN]
+        line_template = PLAN_USER_INPUTS_CONTEXT_LINE_EN
+    for item in plan_user_inputs:
+        lines.append(line_template.format(round=item.get("round"), content=item.get("content") or ""))
+    return "\n".join(lines)
 
 
 def _research_continuation_instruction() -> str:

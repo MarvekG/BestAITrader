@@ -16,7 +16,12 @@ from app.ai.stock_picker.interactive_research.constants import (
     planning_stage_prompt,
 )
 from app.ai.stock_picker.interactive_research.flow_control import FLOW_CONTROL_TOOL_NAME
-from app.ai.stock_picker.interactive_research.persistence import load_plan_turn_record, persist_plan_card_record
+from app.ai.stock_picker.interactive_research.persistence import (
+    append_tool_result_and_progress_record,
+    append_tool_start_record,
+    load_plan_turn_record,
+    persist_plan_card_record,
+)
 from app.ai.stock_picker.interactive_research.tool_registry import InteractiveResearchToolRegistry, ToolLoaderFactory
 from app.core.config import settings
 from app.core.i18n import i18n_service
@@ -266,7 +271,7 @@ class PlanAgent:
                 return str(getattr(response, "content", "") or "").strip(), _merge_usage_records(usage_records)
 
             for tool_call in tool_calls:
-                await self._execute_tool_call(tool_map, messages, tool_call, iteration_index, llm)
+                await self._execute_tool_call(run_id, tool_map, messages, tool_call, iteration_index, llm)
 
         messages.append(HumanMessage(content=_plan_iteration_budget_instruction(iteration_budget)))
         final_response = await llm.ainvoke(messages)
@@ -305,6 +310,7 @@ class PlanAgent:
 
     async def _execute_tool_call(
         self,
+        run_id: UUID,
         tool_map: Dict[str, Any],
         messages: List[Any],
         tool_call: Dict[str, Any],
@@ -314,6 +320,7 @@ class PlanAgent:
         """执行计划阶段联网工具调用并把结果放回 LLM 上下文。
 
         Args:
+            run_id: 当前研究 run ID。
             tool_map: 工具名到 LangChain 工具对象的映射。
             messages: LLM 消息上下文。
             tool_call: LangChain tool call 载荷。
@@ -323,6 +330,8 @@ class PlanAgent:
         tool_name = str(tool_call.get("name") or "")
         tool_args = tool_call.get("args") if isinstance(tool_call.get("args"), dict) else {}
         tool_call_id = str(tool_call.get("id") or f"plan-{iteration_index}-{len(messages)}")
+        start_message_id = await self._append_tool_start(run_id, tool_name, tool_args, tool_call_id)
+        success = False
         tool = tool_map.get(tool_name)
         if tool is None:
             result_text = _t("errors.tool_not_allowed", tool_name=tool_name)
@@ -341,9 +350,71 @@ class PlanAgent:
                         stage="planning_tool_summary",
                         iteration_index=iteration_index,
                     )
+                success = True
             except Exception as exc:
                 result_text = f"Error: {exc}"
         messages.append(ToolMessage(tool_call_id=tool_call_id, content=result_text))
+        await self._append_tool_result_and_progress(
+            run_id,
+            tool_name,
+            tool_args,
+            tool_call_id,
+            start_message_id,
+            success,
+            result_text,
+        )
+
+    async def _append_tool_start(
+        self, run_id: UUID, tool_name: str, tool_args: Dict[str, Any], tool_call_id: str
+    ) -> str:
+        """记录计划阶段工具开始调用消息并推送。
+
+        Args:
+            run_id: 当前研究 run ID。
+            tool_name: 工具名称。
+            tool_args: 工具参数。
+            tool_call_id: LLM 工具调用 ID。
+
+        Returns:
+            新建 tool_start 消息 ID。
+        """
+        result = append_tool_start_record(run_id, tool_name, tool_args, tool_call_id)
+        await self._notify_change(result.get("notification"))
+        return str(result.get("message_id") or "")
+
+    async def _append_tool_result_and_progress(
+        self,
+        run_id: UUID,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        tool_call_id: str,
+        start_message_id: str,
+        success: bool,
+        result_text: str,
+    ) -> None:
+        """记录计划阶段工具结果和进度消息并推送。
+
+        Args:
+            run_id: 当前研究 run ID。
+            tool_name: 工具名称。
+            tool_args: 工具参数。
+            tool_call_id: LLM 工具调用 ID。
+            start_message_id: tool_start 消息 ID。
+            success: 工具是否调用成功。
+            result_text: 工具返回文本。
+        """
+        payloads = append_tool_result_and_progress_record(
+            run_id,
+            tool_name=tool_name,
+            tool_args=tool_args,
+            tool_call_id=tool_call_id,
+            start_message_id=start_message_id,
+            success=success,
+            result_text=result_text,
+            result_content=_compact_plan_tool_result(result_text),
+        )
+        for payload in payloads:
+            await self._notify_change(payload)
 
     def _record_llm_usage(
         self,
@@ -402,6 +473,19 @@ def _merge_usage_records(records: List[Dict[str, Any]]) -> Optional[Dict[str, An
             elif key not in merged:
                 merged[key] = value
     return merged or None
+
+
+def _compact_plan_tool_result(result_text: str) -> str:
+    """生成计划阶段消息流里展示的工具结果摘要。
+
+    Args:
+        result_text: 完整工具结果文本。
+
+    Returns:
+        面向聊天流的短摘要。
+    """
+    normalized = " ".join(str(result_text or "").split())
+    return normalized or _t("messages.tool_empty_result")
 
 
 def _plan_iteration_budget_instruction(iteration_budget: int) -> str:
