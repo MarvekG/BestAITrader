@@ -231,8 +231,8 @@ async def test_akshare_realtime_market_keeps_volume_in_shares():
 
 
 @pytest.mark.asyncio
-async def test_akshare_block_trade_keeps_source_display_units():
-    """AKShare 大宗交易已返回万股、万元和百分数，不应重复换算。"""
+async def test_akshare_block_trade_normalizes_source_units():
+    """AKShare 大宗交易原始股数、元和比例应换算为库表约定单位。"""
     ingestor = AkshareIngestor.__new__(AkshareIngestor)
     ingestor.source = "akshare"
     ingestor.ingestion_service = Mock()
@@ -242,9 +242,9 @@ async def test_akshare_block_trade_keeps_source_display_units():
                 "交易日期": "2026-06-18",
                 "证券代码": "000001",
                 "成交价": 10.5,
-                "折溢率": 1.25,
-                "成交量": 20.0,
-                "成交额": 210.0,
+                "折溢率": -0.053452,
+                "成交量": 302100,
+                "成交额": 1283900,
                 "买方营业部": "买方",
                 "卖方营业部": "卖方",
             }
@@ -260,14 +260,14 @@ async def test_akshare_block_trade_keeps_source_display_units():
 
     written_df = ingestor._run_in_executor.await_args_list[1].args[2]
     assert result["success"] is True
-    assert written_df.iloc[0]["volume"] == 20.0
-    assert written_df.iloc[0]["amount"] == 210.0
-    assert written_df.iloc[0]["premium_rate"] == 1.25
+    assert written_df.iloc[0]["volume"] == pytest.approx(30.21)
+    assert written_df.iloc[0]["amount"] == pytest.approx(128.39)
+    assert written_df.iloc[0]["premium_rate"] == pytest.approx(-5.3452)
 
 
 @pytest.mark.asyncio
-async def test_akshare_lockup_release_keeps_percentage_values():
-    """AKShare 解禁占比已是百分数，只转换解禁市值为万元。"""
+async def test_akshare_lockup_release_converts_ratio_to_percent():
+    """AKShare 解禁占比原始比例应换算为库表约定的百分数。"""
     ingestor = AkshareIngestor.__new__(AkshareIngestor)
     ingestor.source = "akshare"
     ingestor.ingestion_service = Mock()
@@ -279,8 +279,8 @@ async def test_akshare_lockup_release_keeps_percentage_values():
                 "实际解禁数量": 1_500_000,
                 "未解禁数量": 500_000,
                 "实际解禁数量市值": 30_000_000,
-                "占总市值比例": 0.8,
-                "占流通市值比例": 1.2,
+                "占总市值比例": 0.014691,
+                "占流通市值比例": 0.025,
                 "限售股类型": "首发原股东限售股份",
             }
         ]
@@ -293,8 +293,8 @@ async def test_akshare_lockup_release_keeps_percentage_values():
     assert result["success"] is True
     assert written_df.iloc[0]["release_shares"] == 1_500_000
     assert written_df.iloc[0]["release_market_value"] == 3000.0
-    assert written_df.iloc[0]["ratio_to_total"] == 0.8
-    assert written_df.iloc[0]["ratio_to_float"] == 1.2
+    assert written_df.iloc[0]["ratio_to_total"] == pytest.approx(1.4691)
+    assert written_df.iloc[0]["ratio_to_float"] == pytest.approx(2.5)
 
 
 class TestFailoverMechanism:
