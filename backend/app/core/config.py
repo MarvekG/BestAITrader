@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     AGENTIC_DEPENDENCY_INSTALL_MAX_REQUIREMENTS: int = 50
     ENABLE_RUNTIME_EXTENSIONS: bool = True
     ENABLE_OPENAPI_DOCS: bool = True
+    INTERACTIVE_RESEARCH_PLAN_MAX_ITERATIONS: int = 5
     BACKEND_CORS_ORIGINS: List[str] = []
 
     @field_validator("SECRET_KEY")

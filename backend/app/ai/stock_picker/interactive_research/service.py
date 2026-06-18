@@ -53,7 +53,11 @@ class InteractiveResearchService:
             llm_factory: 可选 LLM 工厂；测试可注入 fake LLM。
         """
         self._llm_factory = llm_factory
-        self._plan_agent = PlanAgent(llm_factory=llm_factory, notification_callback=self._push_realtime_update)
+        self._plan_agent = PlanAgent(
+            tool_loader_factory=tool_loader_factory,
+            llm_factory=llm_factory,
+            notification_callback=self._push_realtime_update,
+        )
         self._research_agent = InteractiveResearchAgent(
             tool_loader_factory=tool_loader_factory,
             llm_factory=llm_factory,

@@ -3,14 +3,21 @@ from __future__ import annotations
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from uuid import UUID
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
+from app.ai.agentic.tool_output_summarizer import should_summarize_tool_output, summarize_tool_output
+from app.ai.agentic.tools import make_json_serializable
+from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_providers.factory import build_chat_model
 from app.ai.stock_picker.interactive_research.constants import (
+    PLAN_ITERATION_BUDGET_INSTRUCTION_EN,
+    PLAN_ITERATION_BUDGET_INSTRUCTION_ZH,
     planning_initial_user_message,
     planning_stage_prompt,
 )
+from app.ai.stock_picker.interactive_research.flow_control import FLOW_CONTROL_TOOL_NAME
 from app.ai.stock_picker.interactive_research.persistence import load_plan_turn_record, persist_plan_card_record
+from app.ai.stock_picker.interactive_research.tool_registry import InteractiveResearchToolRegistry, ToolLoaderFactory
 from app.core.config import settings
 from app.core.i18n import i18n_service
 from app.crud.llm_usage_log import record_llm_usage
@@ -18,6 +25,11 @@ from app.crud.llm_usage_log import record_llm_usage
 
 LLMFactory = Callable[[], Any]
 PlanAgentNotificationCallback = Callable[[Dict[str, Any]], Awaitable[None]]
+PLAN_AGENT_TOOL_NAMES = {
+    "browse_web_page_html",
+    "parse_pdf_to_markdown",
+    "search_news",
+}
 
 
 def _t(key: str, **kwargs: Any) -> str:
@@ -43,15 +55,18 @@ class PlanAgent:
 
     def __init__(
         self,
+        tool_loader_factory: Optional[ToolLoaderFactory] = None,
         llm_factory: Optional[LLMFactory] = None,
         notification_callback: Optional[PlanAgentNotificationCallback] = None,
     ) -> None:
         """初始化计划阶段 Agent。
 
         Args:
+            tool_loader_factory: 可选工具注册表工厂；测试可注入 fake 工具。
             llm_factory: 可选 LLM 工厂；测试可注入 fake LLM。
             notification_callback: 计划卡写入后的实时通知回调。
         """
+        self._tool_loader_factory = tool_loader_factory
         self._llm_factory = llm_factory
         self._notification_callback = notification_callback
         self._plan_messages: Dict[UUID, List[Any]] = {}
@@ -96,7 +111,8 @@ class PlanAgent:
             llm_input,
             persisted_messages=turn_record["persisted_messages"],
         )
-        plan_message, usage_record = await self._invoke_plan_markdown(run_id, messages)
+        tools = await self._load_tools(run_id)
+        plan_message, usage_record = await self._invoke_plan_markdown(run_id, messages, tools)
 
         latest_turn_record = load_plan_turn_record(run_id)
         if latest_turn_record is None:
@@ -220,30 +236,144 @@ class PlanAgent:
         return build_chat_model(model=settings.LLM_MODEL, temperature=0.2)
 
     async def _invoke_plan_markdown(
-        self, run_id: UUID, messages: List[Any]
+        self, run_id: UUID, messages: List[Any], tools: List[Any]
     ) -> Tuple[str, Optional[Dict[str, Any]]]:
         """调用计划阶段 LLM 生成 Markdown 研究计划。
 
         Args:
             run_id: 当前研究 run ID。
             messages: 计划阶段 LLM 消息上下文。
+            tools: 可供计划阶段使用的联网工具列表。
 
         Returns:
             计划 Agent 输出的 Markdown 正文和 usage 记录。
         """
         llm = self._build_llm()
-        response = await llm.ainvoke(messages)
-        usage_record = record_llm_usage(
+        llm_with_tools = llm.bind_tools(tools) if tools else llm
+        tool_map = {str(getattr(tool, "name", "")): tool for tool in tools if getattr(tool, "name", "")}
+        usage_records: List[Dict[str, Any]] = []
+
+        iteration_budget = max(1, int(settings.INTERACTIVE_RESEARCH_PLAN_MAX_ITERATIONS))
+        for iteration_index in range(1, iteration_budget + 1):
+            response = await llm_with_tools.ainvoke(messages)
+            usage_record = self._record_llm_usage(run_id, response, iteration_index, call_kind="plan_markdown")
+            if usage_record:
+                usage_records.append(usage_record)
+            messages.append(response)
+
+            tool_calls = list(getattr(response, "tool_calls", []) or [])
+            if not tool_calls:
+                return str(getattr(response, "content", "") or "").strip(), _merge_usage_records(usage_records)
+
+            for tool_call in tool_calls:
+                await self._execute_tool_call(tool_map, messages, tool_call, iteration_index, llm)
+
+        messages.append(HumanMessage(content=_plan_iteration_budget_instruction(iteration_budget)))
+        final_response = await llm.ainvoke(messages)
+        usage_record = self._record_llm_usage(
+            run_id,
+            final_response,
+            iteration_budget + 1,
+            call_kind="plan_final_no_tools",
+        )
+        if usage_record:
+            usage_records.append(usage_record)
+        return str(getattr(final_response, "content", "") or "").strip(), _merge_usage_records(usage_records)
+
+    async def _load_tools(self, run_id: UUID) -> List[Any]:
+        """加载计划阶段允许使用的联网工具。
+
+        Args:
+            run_id: 当前研究 run ID。
+
+        Returns:
+            过滤后的 LangChain 工具列表。
+        """
+        state = {"run_id": str(run_id), "agent_state": "interactive_stock_research_plan"}
+        registry = (
+            self._tool_loader_factory(state)
+            if self._tool_loader_factory
+            else InteractiveResearchToolRegistry(state=state)
+        )
+        tools = await registry.aload_tools()
+        return [
+            tool
+            for tool in tools
+            if str(getattr(tool, "name", "") or "") in PLAN_AGENT_TOOL_NAMES
+            and str(getattr(tool, "name", "") or "") != FLOW_CONTROL_TOOL_NAME
+        ]
+
+    async def _execute_tool_call(
+        self,
+        tool_map: Dict[str, Any],
+        messages: List[Any],
+        tool_call: Dict[str, Any],
+        iteration_index: int,
+        llm: Any,
+    ) -> None:
+        """执行计划阶段联网工具调用并把结果放回 LLM 上下文。
+
+        Args:
+            tool_map: 工具名到 LangChain 工具对象的映射。
+            messages: LLM 消息上下文。
+            tool_call: LangChain tool call 载荷。
+            iteration_index: 当前迭代序号。
+            llm: 当前计划主 LLM，用于复用工具结果压缩链路。
+        """
+        tool_name = str(tool_call.get("name") or "")
+        tool_args = tool_call.get("args") if isinstance(tool_call.get("args"), dict) else {}
+        tool_call_id = str(tool_call.get("id") or f"plan-{iteration_index}-{len(messages)}")
+        tool = tool_map.get(tool_name)
+        if tool is None:
+            result_text = _t("errors.tool_not_allowed", tool_name=tool_name)
+        else:
+            try:
+                raw_result = await tool.ainvoke(tool_args)
+                result_text = stable_json_dumps(make_json_serializable(raw_result))
+                if should_summarize_tool_output(tool_name, result_text):
+                    result_text = await summarize_tool_output(
+                        llm,
+                        role_name="interactive_stock_research_plan",
+                        tool_name=tool_name,
+                        content=result_text,
+                        tool_args=tool_args,
+                        workflow="interactive_stock_research",
+                        stage="planning_tool_summary",
+                        iteration_index=iteration_index,
+                    )
+            except Exception as exc:
+                result_text = f"Error: {exc}"
+        messages.append(ToolMessage(tool_call_id=tool_call_id, content=result_text))
+
+    def _record_llm_usage(
+        self,
+        run_id: UUID,
+        response: Any,
+        iteration_index: int,
+        *,
+        call_kind: str,
+    ) -> Optional[Dict[str, Any]]:
+        """记录计划阶段单次 LLM usage。
+
+        Args:
+            run_id: 当前研究 run ID。
+            response: LLM 返回对象。
+            iteration_index: 调用迭代序号。
+            call_kind: LLM 调用类型。
+
+        Returns:
+            record_llm_usage 生成的 usage 记录。
+        """
+        return record_llm_usage(
             response,
             settings.LLM_MODEL,
             "interactive_stock_research",
             session_id=run_id,
             workflow="interactive_stock_research",
             stage="planning",
-            call_kind="plan_markdown",
-            iteration_index=1,
+            call_kind=call_kind,
+            iteration_index=iteration_index,
         )
-        return str(getattr(response, "content", "") or "").strip(), usage_record
 
     async def _notify_change(self, payload: Optional[Dict[str, Any]]) -> None:
         """推送已持久化计划卡的实时通知。
@@ -253,3 +383,39 @@ class PlanAgent:
         """
         if self._notification_callback is not None and payload is not None:
             await self._notification_callback(payload)
+
+
+def _merge_usage_records(records: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """合并计划阶段多轮 LLM usage，供计划卡一次性落库。
+
+    Args:
+        records: 多次 record_llm_usage 返回的 usage 记录。
+
+    Returns:
+        合并后的 usage；没有有效记录时返回 None。
+    """
+    merged: Dict[str, Any] = {}
+    for record in records:
+        for key, value in record.items():
+            if isinstance(value, int):
+                merged[key] = int(merged.get(key) or 0) + value
+            elif key not in merged:
+                merged[key] = value
+    return merged or None
+
+
+def _plan_iteration_budget_instruction(iteration_budget: int) -> str:
+    """生成计划阶段工具预算耗尽后的收束提示。
+
+    Args:
+        iteration_budget: 已允许的最大工具循环轮数。
+
+    Returns:
+        要求 LLM 不再调用工具、直接输出计划卡的提示。
+    """
+    template = (
+        PLAN_ITERATION_BUDGET_INSTRUCTION_EN
+        if str(settings.SYSTEM_LANGUAGE).lower().startswith("en")
+        else PLAN_ITERATION_BUDGET_INSTRUCTION_ZH
+    )
+    return template.format(iteration_budget=iteration_budget)
