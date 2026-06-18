@@ -14,6 +14,7 @@ from app.core.request_context import set_request_id
 
 # Get logger
 logger = get_logger(__name__)
+access_logger = get_logger("app.access")
 
 SENSITIVE_QUERY_KEYS = {
     "access_token",
@@ -94,7 +95,7 @@ async def lifespan(app: Any):
     # 止据/止赏任务已自禁用，由 AI 自主决策是否卖出
     # Stop-loss/take-profit task disabled, AI makes sell decisions autonomously
     logger.info("Stop-loss and take-profit checking task has been removed, AI makes decisions autonomously")
-    
+
     # Start data refresh scheduler
     try:
         from app.data.refresh_scheduler import refresh_scheduler
@@ -102,7 +103,7 @@ async def lifespan(app: Any):
         logger.info("Data refresh scheduler started")
     except Exception as e:
         logger.error(f"Failed to start data refresh scheduler: {e}")
-    
+
     # Cleanup zombie tasks
     try:
         from app.tasks.task_manager import task_manager
@@ -164,7 +165,7 @@ async def lifespan(app: Any):
         logger.info("Data refresh scheduler stopped")
     except Exception as e:
         logger.error(f"Failed to stop data refresh scheduler: {e}")
-    
+
     # Stop async system scheduler before closing shared resources
     try:
         from app.tasks.async_scheduler import async_task_scheduler
@@ -172,11 +173,11 @@ async def lifespan(app: Any):
         logger.info("Async task scheduler stopped")
     except Exception as e:
         logger.error(f"Failed to stop async task scheduler: {e}")
-    
+
     # 止据/止赏任务已自禁用，无需停止
     # Stop-loss/take-profit task disabled, no need to stop
     logger.info("Stop-loss and take-profit checking task has been removed, no longer stopping")
-    
+
     # Cancel in-process async background tasks
     try:
         from app.tasks.async_task_runner import async_task_runner
@@ -200,12 +201,13 @@ async def lifespan(app: Any):
     except Exception as e:
         logger.error(f"Failed to close Memory service HTTP client: {e}")
 
+
 async def access_log_middleware(request, call_next):
     started_at = perf_counter()
     request_id = get_or_create_request_id(request.headers.get("x-request-id"))
     request.state.request_id = request_id
     token = set_request_id(request_id)
-    logger.info(
+    access_logger.info(
         "http request started",
         extra={
             "method": request.method,
@@ -218,7 +220,7 @@ async def access_log_middleware(request, call_next):
     try:
         response = await call_next(request)
     except Exception:
-        logger.exception(
+        access_logger.exception(
             "http request failed",
             extra={
                 "method": request.method,
@@ -232,7 +234,7 @@ async def access_log_middleware(request, call_next):
         clear_current_user_id()
         raise
     response.headers["x-request-id"] = request_id
-    logger.info(
+    access_logger.info(
         "http request completed",
         extra={
             "method": request.method,
@@ -246,6 +248,7 @@ async def access_log_middleware(request, call_next):
     clear_request_id(token)
     clear_current_user_id()
     return response
+
 
 def root():
     return {"message": "天枢智投 API"}

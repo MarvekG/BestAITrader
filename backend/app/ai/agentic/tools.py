@@ -1100,8 +1100,6 @@ async def get_database_schema() -> Dict[str, Any]:
     - Value: 列定义列表 (List of Column Definitions)，每列包含：
         - `name`: 字段名称
         - `type`: 数据库类型 (如 INTEGER, FLOAT, DATE, JSONB)
-        - `nullable`: 是否允许为空
-        - `primary_key`: 是否为主键
         - `display_name`: SQLAlchemy Column.info.name 对应的字段名称翻译
         - `unit`: SQLAlchemy Column.info.unit 对应的字段单位翻译
 
@@ -1134,8 +1132,6 @@ async def get_database_schema() -> Dict[str, Any]:
                     column_schema = {
                         "name": column.key,
                         "type": str(col_obj.type),
-                        "nullable": col_obj.nullable,
-                        "primary_key": col_obj.primary_key,
                         "display_name": _translate_schema_info_key(col_obj.info.get("name")),
                     }
                     unit = _translate_schema_info_key(col_obj.info.get("unit"))

@@ -66,6 +66,13 @@
             ],
             "propagate": false
         },
+        "app.access": {
+            "level": "INFO",
+            "handlers": [
+                "backend_file"
+            ],
+            "propagate": false
+        },
         "trading_system": {
             "level": "INFO",
             "handlers": [
