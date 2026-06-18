@@ -610,8 +610,8 @@ async def test_plan_agent_can_use_online_tool_before_writing_plan(db_session):
 
 
 @pytest.mark.asyncio
-async def test_research_agent_receives_planning_user_inputs_by_round(db_session, monkeypatch):
-    """研究阶段输入应包含计划阶段多轮用户输入及轮次。"""
+async def test_research_agent_receives_planning_conversation_in_order(db_session, monkeypatch):
+    """研究阶段输入应包含计划阶段用户输入和计划卡顺序记录。"""
     user_id = _create_user_id(db_session)
     service, fake_llm, _ = _service_with_fake_runner()
     run = await _create_run_with_plan(service, user_id, _request_data())
@@ -628,10 +628,13 @@ async def test_research_agent_receives_planning_user_inputs_by_round(db_session,
     await _execute_background(monkeypatch, service, db_session, run.run_id)
 
     first_research_context = "\n".join(fake_llm.research_message_snapshots[0])
-    assert "第 1 轮" in first_research_context
+    assert "第 1 轮用户输入" in first_research_context
     assert "Find A-share opportunities with policy catalysts" in first_research_context
-    assert "第 2 轮" in first_research_context
+    assert "第 1 版计划卡" in first_research_context
+    assert "Plan updated: exclude banks and favor AI hardware." in first_research_context
+    assert "第 2 轮用户输入" in first_research_context
     assert "Second planning round: exclude banks" in first_research_context
+    assert "第 2 版计划卡" in first_research_context
 
 
 def test_tool_result_success_false_marks_trace_failed():

@@ -48,12 +48,17 @@ PLAN_ITERATION_BUDGET_INSTRUCTION_EN = (
     "The planning stage has used its {iteration_budget}-iteration online tool budget. "
     "Do not call tools again; output the complete Markdown research plan now."
 )
-PLAN_USER_INPUTS_CONTEXT_HEADER_ZH = "计划阶段用户输入记录（按轮次，研究阶段必须结合这些约束和修订）："
-PLAN_USER_INPUTS_CONTEXT_LINE_ZH = "第 {round} 轮: {content}"
-PLAN_USER_INPUTS_CONTEXT_HEADER_EN = (
-    "Planning-stage user inputs by round. The research stage must honor these constraints and revisions:"
+PLAN_CONVERSATION_CONTEXT_HEADER_ZH = (
+    "计划阶段对话记录（按顺序，仅含用户输入和计划卡；最终确认计划优先，以下用于理解修订语义）："
 )
-PLAN_USER_INPUTS_CONTEXT_LINE_EN = "Round {round}: {content}"
+PLAN_CONVERSATION_USER_LINE_ZH = "第 {round} 轮用户输入: {content}"
+PLAN_CONVERSATION_PLAN_LINE_ZH = "第 {round} 版计划卡: {content}"
+PLAN_CONVERSATION_CONTEXT_HEADER_EN = (
+    "Planning-stage conversation in order. Includes only user inputs and plan cards; "
+    "the final approved plan has priority, and this record is for interpreting revisions:"
+)
+PLAN_CONVERSATION_USER_LINE_EN = "Round {round} user input: {content}"
+PLAN_CONVERSATION_PLAN_LINE_EN = "Plan card version {round}: {content}"
 
 FLOW_CONTROL_TOOL_ACTION_DESCRIPTION = "下一步流程动作：continue 继续研究，ask 暂停并向用户提问，done 输出最终答案。"
 FLOW_CONTROL_TOOL_MESSAGE_DESCRIPTION = "展示给用户的进展、问题或最终 Markdown 答案。"
