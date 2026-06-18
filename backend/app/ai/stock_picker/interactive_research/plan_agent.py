@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from app.ai.agentic.tool_output_summarizer import should_summarize_tool_output, summarize_tool_output
 from app.ai.agentic.tools import make_json_serializable
 from app.ai.json_utils import stable_json_dumps
-from app.ai.llm_providers.factory import build_chat_model
+from app.ai.llm_providers.factory import build_chat_model, get_llm_provider
 from app.ai.stock_picker.interactive_research.constants import (
     PLAN_ITERATION_BUDGET_INSTRUCTION_EN,
     PLAN_ITERATION_BUDGET_INSTRUCTION_ZH,
@@ -76,6 +76,7 @@ class PlanAgent:
         self._notification_callback = notification_callback
         self._plan_messages: Dict[UUID, List[Any]] = {}
         self._latest_plan_outputs: Dict[UUID, str] = {}
+        self._llm_provider = get_llm_provider()
 
     async def execute(
         self,
@@ -264,14 +265,19 @@ class PlanAgent:
             usage_record = self._record_llm_usage(run_id, response, iteration_index, call_kind="plan_markdown")
             if usage_record:
                 usage_records.append(usage_record)
+            response, invalid_tool_calls = self._llm_provider.sanitize_tool_call_response_for_replay(response)
             messages.append(response)
 
             tool_calls = list(getattr(response, "tool_calls", []) or [])
-            if not tool_calls:
+            if not tool_calls and not invalid_tool_calls:
                 return str(getattr(response, "content", "") or "").strip(), _merge_usage_records(usage_records)
 
             for tool_call in tool_calls:
                 await self._execute_tool_call(run_id, tool_map, messages, tool_call, iteration_index, llm)
+            if invalid_tool_calls:
+                messages.append(
+                    HumanMessage(content=self._llm_provider.build_invalid_tool_call_retry_message(invalid_tool_calls))
+                )
 
         messages.append(HumanMessage(content=_plan_iteration_budget_instruction(iteration_budget)))
         final_response = await llm.ainvoke(messages)
@@ -283,6 +289,7 @@ class PlanAgent:
         )
         if usage_record:
             usage_records.append(usage_record)
+        final_response, _ = self._llm_provider.sanitize_tool_call_response_for_replay(final_response)
         return str(getattr(final_response, "content", "") or "").strip(), _merge_usage_records(usage_records)
 
     async def _load_tools(self, run_id: UUID) -> List[Any]:

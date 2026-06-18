@@ -544,10 +544,24 @@ class InteractiveResearchAgent:
             decision = flow_control_decision_from_tool_args(flow_control_calls[-1].get("args"))
             if final_only and decision.status != "done":
                 raise ValueError(f"Final response must use action=done, got {decision.status}")
+            for tool_call in flow_control_calls:
+                messages.append(
+                    ToolMessage(
+                        tool_call_id=str(tool_call.get("id") or ""),
+                        content=stable_json_dumps({"action": decision.status}),
+                    )
+                )
             return decision
         except ValueError as exc:
             if _flow_control_retry_count(messages) >= MAX_FLOW_CONTROL_RETRIES:
                 raise ValueError(f"LLM flow-control tool call invalid after retry: {exc}") from exc
+            for tool_call in flow_control_calls:
+                messages.append(
+                    ToolMessage(
+                        tool_call_id=str(tool_call.get("id") or ""),
+                        content=stable_json_dumps({"error": str(exc)}),
+                    )
+                )
             messages.append(HumanMessage(content=_build_flow_control_retry_message(exc, final_only=final_only)))
             return None
 
