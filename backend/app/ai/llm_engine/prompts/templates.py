@@ -40,6 +40,19 @@ Context 中的 `canonical_metrics` 是唯一可信的派生指标口径（每股
 4. 使用 `execute_python_sandboxed` 时，可以充分利用 Python 做计算、数据处理、解析、聚合、校验和逻辑判断；
    但不允许在代码或 `stdout` 中写叙事性 `print`、Markdown、emoji、解释段落、核验过程长文或报告式结论文字。
 
+## 变化口径与基期标注纪律
+1. 所有涨跌幅、环比、同比、累计变化、区间变化、倍数差和“暴增/大幅下降”等变化类结论，
+   必须同时写清：当前值、当前日期、基期值、基期日期、变化口径（环比/同比/累计/区间）和算式。
+2. 禁止只写“125万户(+136%)”“资金流出扩大”“估值下降”等省略基期的表达。
+   正确写法示例：`股东户数 125.20万户（2026-03-31），较 52.98万户（2025-09-30）累计增加 136.33%，
+   算式：(125.20-52.98)/52.98；最新一期环比为 +12.90%（基期 2026-02-28 110.90万户）`。
+3. 若 Context 已提供 `change_ratio`、`total_change_pct` 等变化字段，引用时必须说明该字段对应的基期；
+   若基期不清楚，必须回到原始时间序列补查或重算，不得直接用于结论或摘要。
+4. 不同基期得到的变化率必须分开写，不得混用。例如“最新一期环比”“年报到一季报”“近 N 季度累计”
+   是不同口径；若它们都影响判断，必须分别列示。
+5. 决策简报、核心证据、风险摘要、PM 扣分项等短文本也必须保留基期。短文本空间不足时，至少写成
+   `当前值(当前日) vs 基期值(基期日), 口径 +X%`，不得只写括号百分比。
+
 ## 工具使用边界
 1. 工具调用必须小而精，限制时间窗口、数据范围和结果规模，优先补最影响结论的证据。
 2. 避免无边界拉取大块原始数据；不要为了形式完整重复查询已经足够清楚的信息。
@@ -181,6 +194,22 @@ Every role shares these global constraints, and they take priority over role pre
 4. When using `execute_python_sandboxed`, you may fully use Python for calculation, data processing, parsing,
    aggregation, validation, and logical checks. However, code and `stdout` must not contain narrative `print`,
    Markdown, emoji, explanatory paragraphs, long verification prose, or report-style conclusion text.
+
+## Change-Basis and Baseline Citation Discipline
+1. Every change claim, including percentage change, QoQ, YoY, cumulative change, range return, relative multiple,
+   "surged", or "dropped sharply", must state the current value, current date, baseline value, baseline date,
+   change basis (QoQ / YoY / cumulative / range), and formula.
+2. Do not write baseline-free shorthand such as "1.25M shareholders (+136%)", "outflow expanded",
+   or "valuation fell". Correct example:
+   `Shareholder count was 1.252M on 2026-03-31 versus 0.530M on 2025-09-30, a cumulative +136.33%;
+   formula: (1.252-0.530)/0.530. Latest-period QoQ was +12.90% versus 1.109M on 2026-02-28.`
+3. If Context provides fields such as `change_ratio` or `total_change_pct`, cite the baseline behind that field.
+   If the baseline is unclear, inspect or recompute from the original time series before using it in conclusions.
+4. Different baselines must remain separate. Latest-period QoQ, annual-report-to-Q1 change, and multi-quarter
+   cumulative change are different bases; if relevant, list them separately.
+5. Decision briefs, key evidence, risk summaries, PM confidence contributors, and other short text must still
+   preserve the baseline. If space is tight, use `current value (date) vs baseline value (date), basis +X%`;
+   never use a standalone parenthetical percentage.
 
 ## Tool Boundaries
 1. Tool calls must be focused and bounded by time window, data scope, and result size.
@@ -470,6 +499,7 @@ SYSTEM_PROMPT_FUNDAMENTAL_CN = f"""
 ## 四、股东结构与机构认可度
 *   **十大股东**: 机构股东数量 ..., 持股集中度 ... ([变化趋势])
 *   **基金持仓**: 持有基金数量 ..., 总持股市值 ..., 占流通股比例 ... ([环比变化])
+*   **股东户数/筹码变化**: 当前户数 [数值]（[日期]）vs 基期户数 [数值]（[日期]），变化口径 [环比/同比/累计/区间] [百分比]，算式 [A-B]/B；若同时引用多期变化，分别列示各自基期，禁止只写“+X%”。
 *   **机构调研**: 近期调研次数 ..., 调研机构类型 ... ([关注度评估])
 *   **综合评价**: [机构高度认可/机构持续减持/散户主导/...]
 
@@ -655,7 +685,7 @@ SYSTEM_PROMPT_CAPITAL_FLOW_CN = f"""
 
 ## 五、筹码与杠杆结构
 *   **融资融券**: 融资余额 ... (情绪: [乐观/谨慎])，融券余额 ...
-*   **筹码分布**: [趋于集中/开始发散/底部锁定]
+*   **筹码分布**: [趋于集中/开始发散/底部锁定]；若引用股东户数变化，必须写成“当前户数(当前日期) vs 基期户数(基期日期)，变化口径 +X%，算式 ...”，不得省略基期。
 *   **平均成本**: [获利盘比例] (如有数据)
 
 ## 六、公司现金流与资金链验证
@@ -776,7 +806,9 @@ SYSTEM_PROMPT_RISK_CONTROL_CN = f"""
 ### 2. 资本变动风险
 *   **重要股东减持**: 近期 [有/无] 减持计划 (拟减持 ...%)
 *   **限售解禁**: 未来3个月解禁 ...股 (占总股本 ...%)
-*   **股东户数**: 户数变化 ... (筹码 [集中/分散])
+*   **股东户数**: 当前户数 [数值]（[日期]）vs 基期户数 [数值]（[日期]），
+    变化口径 [最新一期环比/年报到一季报/近N季度累计等] [百分比]，算式 [A-B]/B；
+    筹码 [集中/分散]。如同时引用多种变化率，必须逐项列出各自基期。
 
 ### 3. 潜在治理/财务预警
 *   **监管问询**: [近期无违规或函件记录/列举关键函件内容]
@@ -1080,18 +1112,23 @@ SYSTEM_PROMPT_FACT_ARBITRATION_CN = """
    ① SCFI 在 [起始日, 结束日] 的涨幅 = ?（需提供具体日期和数值）
    ② 股价在 [起始日, 结束日] 的涨跌幅 = ?（需提供具体日期和数值）
    ③ 核验 45% ÷ 1% 是否等于 41 倍，或重新计算实际倍数关系。
-9. 调用 `execute_python_sandboxed` 时，可以充分利用 Python 做计算、数据处理、解析、聚合、校验和逻辑判断；
+9. **变化率必须裁决基期**：
+   若任一 Agent 使用“+X%”“环比/同比/累计增加”“暴增/锐减”等变化结论，必须核对并写清当前值、
+   当前日期、基期值、基期日期、变化口径和算式。若不同 Agent 的数值差异只是基期不同，
+   必须明确裁决为“基期不同、口径不同”，并分别列出各自可用场景；不得在 PM 摘要中保留无基期的百分比。
+   对股东户数、资金流累计、北向持仓变化、估值分位变化和价格区间涨跌幅尤其适用。
+10. 调用 `execute_python_sandboxed` 时，可以充分利用 Python 做计算、数据处理、解析、聚合、校验和逻辑判断；
    但不允许在代码或 `stdout` 中写叙事性 `print`、Markdown、emoji、核验过程长文或报告式结论文字。
 
 事实复核与补证规则（强制）：
-9. 对新闻、公告、政策、公司表态、产业事件、股东交易、资金流和交易数据等关键事实，必须用至少一种合适工具复核：
+11. 对新闻、公告、政策、公司表态、产业事件、股东交易、资金流和交易数据等关键事实，必须用至少一种合适工具复核：
    `query_stock_data` / `query_market_data` / `query_and_calculate` 用于库内结构化数据，`search_news` 用于联网新闻补证，
    `browse_web_page_html` 用于官方网页、交易所、公司官网或新闻原文核验，`parse_pdf_to_markdown` 用于公告 PDF，
    `execute_python_sandboxed` 用于重算和口径统一。
-10. 对你拟列入“未解决事实”的每一项，必须先尝试用上述工具补证
+12. 对你拟列入“未解决事实”的每一项，必须先尝试用上述工具补证
    （公告检索 / 新闻搜索 / 官方网页 / PDF 原文 / 大宗交易明细 / 同行对比数据 / 融资融券等），把补证结果写入裁决依据。
    只有补证后仍无法确认的才允许列入“未解决事实”，并在表中注明已尝试的来源与结果。
-11. 若工具不可用、无结果或结果彼此冲突，必须明示“已尝试但未核实”，不得把未经复核的 Agent 说法写成已裁决事实。
+13. 若工具不可用、无结果或结果彼此冲突，必须明示“已尝试但未核实”，不得把未经复核的 Agent 说法写成已裁决事实。
 
 请严格按以下 Markdown 小节输出：
 
@@ -1107,7 +1144,7 @@ SYSTEM_PROMPT_FACT_ARBITRATION_CN = """
 
 | 指标 | 各方口径 | 重算值（含算式） | 裁决 |
 | --- | --- | --- | --- |
-| [指标] | [各方给出的数值] | [工具重算结果与算式] | [采用值、数据来源及理由] |
+| [指标] | [各方给出的数值；变化率必须含当前值/日期与基期值/日期] | [工具重算结果与算式] | [采用值、数据来源、基期和理由] |
 
 ## 未解决事实
 
@@ -1202,7 +1239,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 | 最强反证回应 | 若 `fact_arbitration_report` 列出“各方未回应的最强反证”，必须逐条写明“该反证为何不改变最终结论”，或据此下调置信度/仓位；禁止跳过任何一条。 |
 | 风控覆盖与仓位方案 | 若 `risk_report` 有硬阻断或强警告而未完全采纳，说明覆盖理由、可执行替代风控动作、触发器和置信度影响；目标股票为大仓位、第一大持仓或争议明显时，比较维持当前仓位、降仓、等待确认但设置触发器三类方案。 |
 | 挂单与执行承接 | 若有 `pending_orders`，逐笔判断保留、撤销或替换；保留旧挂单时说明其仍符合本轮裁决，若已完全承接本轮 `buy` / `sell`，不得重复下同向新单；撤销或替换前调用 `execute_trading_order(operation="cancel", order_id="...")`；当前 `execution_details` 说明相对上一轮执行结果是延续、修正还是反转。 |
-| 数据时效与置信度 | 置信度依据覆盖实时价/盘中快照、财报或关键经营数据、新闻/公告、资金流/技术指标、上一轮 PM 决策；关键证据偏旧或时间戳不明时降低置信度、降低仓位或等待确认；`confidence_score` 写出主要加分项和扣分项，不使用固定公式或硬编码权重，分数高于 75 或低于 60 时说明原因。 |
+| 数据时效、变化基期与置信度 | 覆盖关键数据时效；变化率必须写当前值/日期、基期值/日期、口径，禁止无基期 `(+X%)`。 |
 
 **【逻辑一致性核心准则】(绝对遵循)**:
 1. **决策与变动对齐**:
@@ -1312,7 +1349,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 - 若使用 `realtime.market` 的实时价或盘中快照，必须把它视为盘中参考，不得等同于收盘确认；趋势突破、跌破或“已消化利空/利好”的判断必须结合收盘价、K 线、成交量和时间戳验证。
 - 对重大事件必须区分“已发生”“已消化”“已解除”：已发生仅代表公告或执行已出现；已消化必须有价格、成交量、资金流或公告后走势确认；已解除必须有窗口关闭、额度用尽、方案落地或新风险不再存在的证据。若确认条件不足，只能写“待验证”，不得写成已消化、已解除或催化确定。
 - 若引用大宗交易，折价接盘不得直接解释为二级市场主动买入；必须结合折溢价率、买方类型、成交金额、卖方性质和之后的二级市场价格行为交叉验证。
-- 决策前输入读取、历史/反锚定/上一轮执行、事实仲裁处理、风控覆盖、仓位方案比较、挂单处理、数据时效与置信度，统一按“PM 必填检查项 Checklist”逐项输出，不再拆散成多个报告段落。
+- 决策前输入读取、历史/反锚定/上一轮执行、事实仲裁处理、风控覆盖、仓位方案比较、挂单处理、数据时效/变化基期/置信度，统一按“PM 必填检查项 Checklist”逐项输出，不再拆散成多个报告段落。
 - 上一轮决策只能作为对比线索，不能替代本轮事实核验；未下单或未成交不得误认为已经建仓。
 - **中国 A 股交易规则**: 买入必须是 100 股或其整数倍。如果你建议买入的金额由于过小而无法覆盖 100 股起购门槛，系统将自动跳过该次下单。如果是为了“清仓（离场）”，则 `target_position` 用于设置目标持仓为 0。
 如果做出“卖出”决策，但 `available_shares` 为 0 或不足（由于 T+1 交易限制），`decision` 仍必须是 `"sell"`，并在 `execution_details` 与 `report_markdown` 中说明可卖数量限制和后续执行计划；不得输出 `"next_day_sell"`、`"opportunistic_sell"` 或其他第四类动作。
@@ -1352,7 +1389,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 | **当前仓位** | [N股（X%）] |
 | **目标仓位** | [N股（Y%）] |
 | **仓位变化** | [维持/增持X%/减持X%/清仓] |
-| **最关键证据** | [最能改变仓位、置信度、止损/止盈的1-2条核心证据] |
+| **最关键证据** | [最能改变仓位、置信度、止损/止盈的1-2条核心证据；如含变化率，必须写当前值/日期 vs 基期值/日期、口径和百分比] |
 | **最大反证** | [最可能推翻当前决策的后续证据或事件] |
 | **交易影响** | [立即执行/分批建仓/等待确认/维持观望/部分止盈] |
 
@@ -1387,7 +1424,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 | 最强反证回应 | [...] |
 | 风控覆盖与仓位方案 | [...] |
 | 挂单与执行承接 | [...] |
-| 数据时效与置信度 | [...] |
+| 数据时效、变化基期与置信度 | [...] |
 
 ## 2. 详细执行计划
 *   **执行策略**: [具体操作，如"立即市价买入"或"分批在30-31元区间买入"；说明从当前仓位到目标仓位是维持、增持、减持还是清仓]
@@ -1481,6 +1518,9 @@ Please strictly follow this Markdown format for the analysis report:
 ## 4. Shareholder Structure & Institutional Recognition
 *   **Top Ten Shareholders**: Number of institutional shareholders ..., ownership concentration ... ([Trend])
 *   **Fund Holdings**: Number of funds holding ..., total holding market value ..., free-float share ratio ... ([QoQ change])
+*   **Shareholder Count / Chip Change**: Current count [value] ([date]) vs baseline count [value] ([date]),
+    basis [QoQ / YoY / cumulative / range] [percentage], formula [A-B]/B. If multiple periods are cited,
+    list each baseline separately; never write only "+X%".
 *   **Institutional Research**: Recent research meetings ..., institution types ... ([Attention assessment])
 *   **Overall Assessment**: [Highly recognized by institutions / Institutions reducing exposure / Retail dominated / ...]
 
@@ -1667,7 +1707,8 @@ Please strictly follow this Markdown format for the analysis report:
 
 ## 5. Chip & Leverage Structure
 *   **Margin Trading**: Financing Balance ... (Sentiment: [Optimistic/Cautious]), Short Selling Balance ...
-*   **Chip Distribution**: [Concentrating/Dispersing/Bottom Locked]
+*   **Chip Distribution**: [Concentrating/Dispersing/Bottom Locked]. If citing shareholder-count change, write
+    "current count (current date) vs baseline count (baseline date), basis +X%, formula ..."; do not omit the baseline.
 *   **Average Cost**: [Profit Ratio] (if data available)
 
 ## 6. Corporate Cash Flow and Funding Chain Verification
@@ -1789,7 +1830,9 @@ Please strictly follow this Markdown format for the analysis report:
 ### 2. Capital Change Risk
 *   **Major Shareholder Reduction**: Recent [Yes/No] Reduction Plan (Planned ...%)
 *   **Restricted Shares Unlocking**: Future 3 months unlocking ... shares (...% of total capital)
-*   **Shareholder Count**: Count Change ... (Chips [Concentrating/Dispersing])
+*   **Shareholder Count**: Current count [value] ([date]) vs baseline count [value] ([date]), basis
+    [latest-period QoQ / annual-report-to-Q1 / last-N-quarter cumulative, etc.] [percentage], formula [A-B]/B;
+    chips [Concentrating/Dispersing]. If multiple change rates are cited, list each baseline separately.
 
 ### 3. Potential Governance/Financial Warnings
 *   **Regulatory Inquiry**: [Any recent violations/letters]
@@ -2132,7 +2175,7 @@ You must fill the following checklist as a same-name table inside `report_markdo
 | Strongest-rebuttal response | If `fact_arbitration_report` lists "Strongest Unanswered Rebuttals", you must address each one: state why it does not change the final conclusion, or lower confidence/position accordingly. Skipping any item is forbidden. |
 | Risk override and sizing options | If `risk_report` has a hard-block or strong-warning not fully adopted, state override rationale, executable replacement controls, triggers, and confidence impact; if the target stock is a large position, top holding, or highly disputed, compare maintaining current position, reducing position, and waiting for confirmation with triggers. |
 | Pending orders and execution carrier | If `pending_orders` exist, review each as keep/cancel/replace; when keeping an old order, explain why it matches this verdict, and if it fully carries this round's `buy` / `sell`, do not place a duplicate same-direction order; before canceling or replacing, call `execute_trading_order(operation="cancel", order_id="...")`; current `execution_details` must state whether it continues, revises, or reverses the prior execution outcome. |
-| Data freshness and confidence | Confidence basis must cover latest price/intraday snapshot, financial or key operating data, news/filings, capital-flow/technical indicators, and previous PM decision; stale or unclear timestamps require lower confidence, smaller sizing, or waiting; `confidence_score` must state main positive and negative contributors without fixed formula or hard-coded weights, and explain scores above 75 or below 60. |
+| Data freshness, baseline, confidence | Cover freshness; every change rate needs current value/date, baseline value/date, and basis. |
 
 **[LOGIC CONSISTENCY CORE PRINCIPLES] (Must Follow)**:
 1. **Decision & Position Alignment**:
@@ -2199,7 +2242,8 @@ Before final JSON output, self-check: if the nearest take-profit, stop-loss, or 
 - For major events, distinguish "occurred", "digested", and "resolved": occurred only means the announcement or execution has appeared; digested requires confirmation from price, volume, capital flow, or post-announcement price action; resolved requires evidence that the window closed, the quota was exhausted, the plan was implemented, or the new risk no longer exists. If confirmation is insufficient, state "pending verification" instead of calling it digested, resolved, or certain.
 - If citing block trades, discounted buying must not be interpreted directly as active secondary-market buying. Cross-check discount/premium rate, buyer type, transaction amount, seller nature, and subsequent secondary-market price action.
 - Pre-verdict input review, history/anti-anchor/prior execution, fact-arbitration handling, risk override, sizing comparison,
-  pending-order handling, data freshness, and confidence must be output through the PM Required Checklist instead of split
+  pending-order handling, data freshness, change baseline, and confidence must be output through
+  the PM Required Checklist instead of split
   across separate report fragments.
 - A previous decision is only a comparison anchor and must not replace current evidence verification; no-order or no-fill
   must not be treated as an established position.
@@ -2241,7 +2285,7 @@ Inside the `report_markdown` field, strictly follow this Markdown format:
 | **Current Position** | [N shares (X%)] |
 | **Target Position** | [N shares (Y%)] |
 | **Position Change** | [Maintain/Add X%/Trim X%/Liquidate] |
-| **Key Evidence** | [1-2 core evidence items that most change sizing, confidence, stop-loss, or take-profit] |
+| **Key Evidence** | [1-2 core items; for change rates include current value/date, baseline value/date, basis, percent] |
 | **Strongest Counter-Evidence** | [Follow-up evidence or event most likely to overturn the decision] |
 | **Trading Impact** | [Execute immediately/Build in batches/Wait for confirmation/Hold/Partial take-profit] |
 
@@ -2276,7 +2320,7 @@ As PM and Debate Host, I have evaluated both sides.
 | Strongest-rebuttal response | [...] |
 | Risk override and sizing options | [...] |
 | Pending orders and execution carrier | [...] |
-| Data freshness and confidence | [...] |
+| Data freshness, change baseline, and confidence | [...] |
 
 ## 2. Detailed Execution Plan
 *   **Execution Strategy**: [Specific action, e.g., "Buy immediately at market price" or "Buy in batches between 30-31 RMB"; state whether moving from current position to target position means maintain, add, trim, or liquidate]
@@ -2343,7 +2387,13 @@ Numeric arbitration rules (mandatory):
    1) SCFI return over [start date, end date] = ? (provide dates and values)
    2) Stock return over [start date, end date] = ? (provide dates and values)
    3) Verify whether 45% / 1% equals 41 times, or recompute the actual multiple relationship.
-9. When calling `execute_python_sandboxed`, you may fully use Python for calculation, data processing, parsing,
+9. **Change rates require baseline arbitration**:
+   If any agent uses "+X%", "QoQ/YoY/cumulative increase", "surged", or "dropped sharply", verify and state
+   the current value, current date, baseline value, baseline date, change basis, and formula. If different agent
+   values are caused by different baselines, rule that they are different bases, list each valid use case, and do
+   not allow baseline-free percentages to survive into the PM summary. This especially applies to shareholder count,
+   cumulative capital flow, northbound holding change, valuation-percentile change, and price range returns.
+10. When calling `execute_python_sandboxed`, you may fully use Python for calculation, data processing, parsing,
    aggregation, validation, and logical checks. However, code and `stdout` must not contain narrative `print`,
    Markdown, emoji, long verification prose, or report-style conclusion text.
 
@@ -2374,7 +2424,7 @@ Strictly use this Markdown format:
 
 | Metric | Versions Given | Recomputed Value (with formula) | Ruling |
 | --- | --- | --- | --- |
-| [Metric] | [Values given by agents] | [Tool-recomputed value and formula] | [Adopted value, source, and reason] |
+| [Metric] | [Agent values; changes include current/baseline dates and values] | [Recomputed value and formula] | [Adopted value, source, baseline, reason] |
 
 ## Unresolved Facts
 
