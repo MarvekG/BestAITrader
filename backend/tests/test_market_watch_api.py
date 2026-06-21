@@ -39,8 +39,8 @@ def test_market_watch_settings_returns_defaults(client, auth_headers) -> None:
     assert payload["recent_debate_lookback_hours"] == 24
     assert payload["data_sources"] == []
     assert payload["news_sources"] == []
-    assert payload["trading_frequency"] == "中长线持有 (Position Trading)"
-    assert payload["trading_strategy"] == "价值投资 (Value Investing)"
+    assert "trading_frequency" not in payload
+    assert "trading_strategy" not in payload
 
 
 def test_market_watch_settings_update_persists_runtime_values(client, auth_headers, db_session) -> None:
@@ -60,8 +60,6 @@ def test_market_watch_settings_update_persists_runtime_values(client, auth_heade
             "news_sources": ["news.example.com/latest"],
             "recent_debate_dedup_enabled": False,
             "recent_debate_lookback_hours": 36,
-            "trading_frequency": "日内交易 (Day Trading)",
-            "trading_strategy": "趋势追踪 (Trend Following)",
         },
     )
     get_response = client.get("/api/v1/market-watch/settings", headers=auth_headers)
@@ -80,8 +78,8 @@ def test_market_watch_settings_update_persists_runtime_values(client, auth_heade
     ]
     assert payload["recent_debate_dedup_enabled"] is False
     assert payload["recent_debate_lookback_hours"] == 36
-    assert payload["trading_frequency"] == "日内交易 (Day Trading)"
-    assert payload["trading_strategy"] == "趋势追踪 (Trend Following)"
+    assert "trading_frequency" not in payload
+    assert "trading_strategy" not in payload
     setting = (
         db_session.query(SystemSetting)
         .filter(SystemSetting.key == "market_watch.settings", SystemSetting.user_id == payload["user_id"])

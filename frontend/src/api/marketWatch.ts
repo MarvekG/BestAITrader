@@ -35,8 +35,6 @@ export interface MarketWatchSettings {
   cooldown_break_confidence: number;
   data_sources: MarketWatchSourceConfig[];
   news_sources: MarketWatchSourceConfig[];
-  trading_frequency: string;
-  trading_strategy: string;
   created_at?: string | null;
   updated_at?: string | null;
 }

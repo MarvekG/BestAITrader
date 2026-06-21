@@ -863,28 +863,6 @@ export const MarketWatchPage: React.FC = () => {
           >
             <InputNumber min={0} max={1} step={0.01} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item
-            name="trading_frequency"
-            label={settingLabel(t('market_watch.settings_fields.trading_frequency'), t('market_watch.help.trading_frequency'))}
-            rules={[{ required: true }]}
-          >
-            <Select>
-              <Select.Option value={t('warehouse.freq_day_trading')}>{t('warehouse.freq_day_trading')}</Select.Option>
-              <Select.Option value={t('warehouse.freq_swing_trading')}>{t('warehouse.freq_swing_trading')}</Select.Option>
-              <Select.Option value={t('warehouse.freq_position_trading')}>{t('warehouse.freq_position_trading')}</Select.Option>
-            </Select>
-          </Form.Item>
-          <Form.Item
-            name="trading_strategy"
-            label={settingLabel(t('market_watch.settings_fields.trading_strategy'), t('market_watch.help.trading_strategy'))}
-            rules={[{ required: true }]}
-          >
-            <Select>
-              <Select.Option value={t('warehouse.strategy_value')}>{t('warehouse.strategy_value')}</Select.Option>
-              <Select.Option value={t('warehouse.strategy_growth')}>{t('warehouse.strategy_growth')}</Select.Option>
-              <Select.Option value={t('warehouse.strategy_trend')}>{t('warehouse.strategy_trend')}</Select.Option>
-            </Select>
-          </Form.Item>
         </Form>
       </Drawer>
 
