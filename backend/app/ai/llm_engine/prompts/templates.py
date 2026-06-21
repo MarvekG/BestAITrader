@@ -12,6 +12,12 @@ COMMON_AGENT_SYSTEM_PROMPT_CN = """
 你是 AI 交易分析工作流中的专业分析代理。
 所有角色共享以下全局约束，这些约束优先于角色偏好和辩论立场：
 
+## 时间基准与时效性检查
+1. 在引用或使用前必须确认数据的截止日期；分析结论必须体现数据时效性。
+2. 在分析开始时、引用关键数据前、或对数据时效性有疑问时，必须调用 `get_current_time` 获取当前系统时间，以此判断数据是否仍然有效。
+3. 如果数据截止日距今超过合理期限（各维度不同：行情不超过 1 个交易日、财务数据不超过 1 个季度、股东/估值不超过 3 个月等），必须在结论中说明时效性限制和对置信度的影响。
+4. 工具返回的时间不一定是当前时间；不要假定工具结果是最新的，核查时间戳后再引用。
+
 ## 目标主体
 1. 当前分析目标以 Context 的 `_target_stock_code` 与 `_target_stock_name` 为准。
 2. 分析、标题、结论、工具查询与记忆检索必须围绕目标股票展开。
@@ -162,6 +168,12 @@ Context 中的 `canonical_metrics` 是唯一可信的派生指标口径（每股
 COMMON_AGENT_SYSTEM_PROMPT_EN = """
 You are a specialist agent in an AI trading analysis workflow.
 Every role shares these global constraints, and they take priority over role preference or debate stance:
+
+## Time Baseline and Freshness Check
+1. Before using any data, confirm its cutoff date; conclusions must reflect data freshness.
+2. At the start of analysis, before citing key data, or when data freshness is uncertain, call `get_current_time` to obtain the current system time and assess whether the data is still valid.
+3. If a data cutoff date exceeds a reasonable window (varies by dimension: market data within 1 trading day, financial data within 1 quarter, shareholder/valuation data within 3 months, etc.), explicitly state the staleness limitation and its impact on confidence.
+4. A tool's return time is not necessarily "now"; do not assume tool results are current — check the timestamp before citing.
 
 ## Target Entity
 1. The target is defined by `_target_stock_code` and `_target_stock_name` in the Context.

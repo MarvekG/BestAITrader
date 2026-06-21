@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +19,28 @@ from app.trading.trading_engine import TradingEngine
 
 logger = get_logger(__name__)
 trading_engine = TradingEngine()
+
+
+@tool
+async def get_current_time() -> Dict[str, Any]:
+    """
+    获取当前系统时间 (Get current system time).
+
+    返回当前 UTC 时间和本地时间，包含 ISO 8601 格式、时间戳和时区信息。
+    适用于需要时间基准的分析、计算或记录场景。
+
+    Returns:
+        当前时间信息字典，包含 utc_iso、local_iso、timestamp、timezone、weekday。
+    """
+    now_utc = datetime.now(timezone.utc)
+    now_local = datetime.now()
+    return {
+        "utc_iso": now_utc.isoformat(),
+        "local_iso": now_local.isoformat(),
+        "timestamp": now_utc.timestamp(),
+        "timezone": str(now_local.astimezone().tzinfo),
+        "weekday": now_local.strftime("%A"),
+    }
 
 
 def _translate_schema_info_key(value: Any) -> str:
@@ -1558,6 +1580,7 @@ def get_all_tools() -> List[Any]:
     以少数统一入口暴露查询与同步能力，减少 tool schema 和 token 消耗。
     """
     return [
+        get_current_time,
         query_stock_data,
         query_market_data,
         sync_market_data,
@@ -1579,6 +1602,7 @@ def get_stock_analysis_tools() -> List[Any]:
         仅包含网页、新闻、PDF 和 Python 沙箱能力的工具列表。
     """
     return [
+        get_current_time,
         execute_python_sandboxed,
         browse_web_page_html,
         parse_pdf_to_markdown,
