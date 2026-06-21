@@ -625,9 +625,19 @@ def _load_recent_debate_launches(*, user_id: int, now: datetime, lookback_hours:
             .order_by(MarketWatchEvent.created_at.desc())
             .all()
         )
+        failed_session_ids = {
+            str(session_id)
+            for session_id, in db.query(AnalysisSession.session_id).filter(
+                AnalysisSession.user_id == user_id,
+                AnalysisSession.status == "failed",
+                AnalysisSession.created_at >= cutoff,
+            )
+        }
 
     launches: list[dict[str, Any]] = []
     for event in events:
+        if event.debate_session_id in failed_session_ids:
+            continue
         decision = event.watch_ai_decision if isinstance(event.watch_ai_decision, dict) else {}
         if not decision:
             continue
@@ -896,6 +906,7 @@ async def _audit_debate_skip(
         user_id=user_id,
         event_type="debate_skipped",
         status="skipped",
+        reason=reason,
         watch_ai_decision=decision.model_dump(mode="json"),
         debate_parameters=decision.debate_parameters.model_dump(mode="json") if decision.debate_parameters else None,
     )
@@ -1011,6 +1022,7 @@ async def _persist_event(
     user_id: int,
     event_type: str,
     status: str,
+    reason: str | None = None,
     watch_ai_decision: dict[str, Any] | list[dict[str, Any]] | None = None,
     debate_parameters: dict[str, Any] | None = None,
     debate_session_id: str | None = None,
@@ -1022,6 +1034,7 @@ async def _persist_event(
             user_id=user_id,
             event_type=event_type,
             status=status,
+            reason=reason,
             watch_ai_decision=watch_ai_decision,
             debate_parameters=debate_parameters,
             debate_session_id=debate_session_id,
@@ -1036,6 +1049,7 @@ async def _persist_event(
             "user_id": event.user_id,
             "event_type": event.event_type,
             "status": event.status,
+            "reason": event.reason,
             "watch_ai_decision": event.watch_ai_decision,
             "debate_parameters": event.debate_parameters,
             "debate_session_id": event.debate_session_id,

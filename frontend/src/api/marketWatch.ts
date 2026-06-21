@@ -84,6 +84,7 @@ export interface MarketWatchEvent {
   user_id: number;
   event_type: MarketWatchEventType;
   status: MarketWatchEventStatus;
+  reason?: string | null;
   watch_ai_decision?: WatchAiDecision | WatchAiDecision[] | null;
   debate_parameters?: Record<string, unknown> | null;
   debate_session_id?: string | null;

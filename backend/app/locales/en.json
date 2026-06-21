@@ -1223,6 +1223,7 @@
       "time": "Time",
       "event": "Event",
       "status": "Status",
+      "reason": "Reason",
       "stock": "Stock",
       "ai_decision": "AI Decision"
     },

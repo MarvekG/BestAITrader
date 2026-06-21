@@ -224,6 +224,7 @@ def test_market_watch_event_schema_keeps_audit_payload_small_and_structured() ->
         user_id=7,
         event_type="debate_skipped",
         status="skipped",
+        reason="cooldown",
         target_stock_code="600519",
         target_stock_name="贵州茅台",
         summary="冷却命中，跳过自动启动",
@@ -233,6 +234,7 @@ def test_market_watch_event_schema_keeps_audit_payload_small_and_structured() ->
     payload = event.model_dump()
 
     assert payload["event_type"] == "debate_skipped"
+    assert payload["reason"] == "cooldown"
     assert "news_fingerprints" not in payload
     assert "target_stock_code" not in payload
     assert "target_stock_name" not in payload

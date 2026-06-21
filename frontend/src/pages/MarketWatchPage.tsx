@@ -570,6 +570,12 @@ export const MarketWatchPage: React.FC = () => {
       width: 100,
       render: (value: string) => <Tag color={eventStatusColor[value] || 'default'}>{value}</Tag>,
     },
+    {
+      title: t('market_watch.columns.reason'),
+      dataIndex: 'reason',
+      width: 180,
+      render: (value?: string | null) => value || '-',
+    },
   ];
 
   const latestWatchAiDecision = React.useMemo(() => {

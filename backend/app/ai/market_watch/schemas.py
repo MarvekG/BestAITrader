@@ -439,6 +439,7 @@ class MarketWatchEventSchema(BaseModel):
         "pm_discipline_error",
     ]
     status: Literal["success", "skipped", "failed"]
+    reason: str | None = None
     watch_ai_decision: dict[str, Any] | list[dict[str, Any]] | None = None
     debate_parameters: dict | None = None
     debate_session_id: str | None = None
