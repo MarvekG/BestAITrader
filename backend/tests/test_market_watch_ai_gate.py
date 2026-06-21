@@ -51,8 +51,8 @@ def test_build_watch_ai_prompt_forbids_guessing() -> None:
     assert "直接输出合法 JSON array" in prompt
     assert "禁止输出 markdown" in prompt
     assert "JSON array" in prompt
-    assert "trading_frequency_code" in prompt
-    assert "trading_strategy_code" in prompt
+    assert "warehouse_stocks[].trading_frequency_code" in prompt
+    assert "warehouse_stocks[].trading_strategy_code" in prompt
     assert "recent_debate_launches" in prompt
     assert "24 小时" in prompt
     assert '["day", "swing", "position"]' in prompt
@@ -214,8 +214,12 @@ async def test_watch_ai_gate_sends_prompt_and_payload_to_llm() -> None:
 def test_build_watch_ai_messages_separates_database_context_from_source_documents() -> None:
     messages = build_watch_ai_messages({
         "user_id": 7,
-        "settings": {"trading_frequency_code": "position"},
-        "warehouse_stocks": [{"stock_code": "000001"}],
+        "settings": {},
+        "warehouse_stocks": [{
+            "stock_code": "000001",
+            "trading_frequency_code": "position",
+            "trading_strategy_code": "value",
+        }],
         "account_summary": {"total_assets": 1000.0},
         "positions": [{"stock_code": "000001", "market_value": 500.0}],
         "data_documents": [{"id": "data-1", "markdown": "data"}],

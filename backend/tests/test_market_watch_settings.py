@@ -34,7 +34,6 @@ def test_merge_market_watch_settings_keeps_existing_values_for_partial_update() 
     assert merged.cooldown_minutes == 60
     assert merged.recent_debate_dedup_enabled is True
     assert merged.recent_debate_lookback_hours == 24
-    assert merged.trading_frequency == "中长线持有 (Position Trading)"
     assert merged.data_sources[0].url == "https://example.com/quotes"
     assert merged.news_sources[0].url == "https://news.example.com/feed"
 
@@ -49,7 +48,11 @@ def test_market_watch_settings_normalizes_source_url_selector_specs() -> None:
     )
 
     assert [source.model_dump() for source in update.data_sources or []] == [
-        {"url": "https://example.com/quotes", "content_selectors": ["body > div.main", "#news-list"], "cleanup_patterns": []},
+        {
+            "url": "https://example.com/quotes",
+            "content_selectors": ["body > div.main", "#news-list"],
+            "cleanup_patterns": [],
+        },
         {"url": "https://example.com/full", "content_selectors": [], "cleanup_patterns": []},
     ]
     assert [source.model_dump() for source in update.news_sources or []] == [
@@ -122,9 +125,6 @@ def test_market_watch_settings_reject_invalid_runtime_config() -> None:
         MarketWatchSettingsUpdate(recent_debate_lookback_hours=0)
 
     with pytest.raises(ValidationError):
-        MarketWatchSettingsUpdate(trading_frequency="")
-
-    with pytest.raises(ValidationError):
         MarketWatchSettingsUpdate(data_sources=["ftp://example.com/feed"])
 
     with pytest.raises(ValidationError):
@@ -138,6 +138,7 @@ def test_market_watch_settings_reject_invalid_runtime_config() -> None:
 
     with pytest.raises(ValidationError):
         MarketWatchSettingsUpdate(data_sources=[{"url": "https://example.com/feed", "cleanup_patterns": ["["]}])
+
 
 def test_market_watch_settings_can_disable_recent_debate_deduplication() -> None:
     existing = MarketWatchSettingsResponse(user_id=7)
@@ -173,8 +174,6 @@ def test_market_watch_settings_default_scan_window_matches_a_share_session() -> 
     assert settings.scan_interval_seconds == 300
     assert settings.scan_non_trading_days is False
     assert settings.recent_debate_lookback_hours == 24
-    assert settings.trading_frequency == "中长线持有 (Position Trading)"
-    assert settings.trading_strategy == "价值投资 (Value Investing)"
     assert settings.data_sources == []
     assert settings.news_sources == []
 
@@ -194,8 +193,6 @@ def test_market_watch_settings_persist_in_system_settings_table(test_db) -> None
             recent_debate_lookback_hours=48,
             data_sources=[{"url": "https://example.com/data", "cleanup_patterns": [r"(?m)^REMOVE ME$"]}],
             news_sources=["news.example.com/latest"],
-            trading_frequency="日内交易 (Day Trading)",
-            trading_strategy="趋势追踪 (Trend Following)",
         ),
     )
 
@@ -217,9 +214,8 @@ def test_market_watch_settings_persist_in_system_settings_table(test_db) -> None
     assert row.value["news_sources"] == [
         {"url": "https://news.example.com/latest", "content_selectors": [], "cleanup_patterns": []}
     ]
-    assert row.value["trading_frequency"] == "日内交易 (Day Trading)"
-    assert row.value["trading_strategy"] == "趋势追踪 (Trend Following)"
-    assert loaded.trading_frequency == "日内交易 (Day Trading)"
+    assert "trading_frequency" not in row.value
+    assert "trading_strategy" not in row.value
     assert loaded.news_sources[0].url == "https://news.example.com/latest"
 
 

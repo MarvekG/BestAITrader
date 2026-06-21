@@ -5,7 +5,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
@@ -137,7 +136,7 @@ async def test_default_llm_client_leaves_watch_ai_content_for_gate_parser(monkey
 
     assert result == raw_content
     assert captured_kwargs["role"] == "market_watch"
-    assert captured_kwargs["max_tokens"] == 4096
+    assert captured_kwargs["max_tokens"] == 16384
     assert captured_kwargs["model"] == "backend"
     assert "extra_body" not in captured_kwargs
 
@@ -157,10 +156,7 @@ def test_market_watch_llm_usage_observability_uses_dedicated_lane() -> None:
 def test_build_watch_ai_payload_sorts_stock_lists_for_cache_stability() -> None:
     payload = market_watch_service._build_watch_ai_payload(
         user_id=100,
-        settings={
-            "trading_frequency": "中长线持有 (Position Trading)",
-            "trading_strategy": "价值投资 (Value Investing)",
-        },
+        settings={},
         items=[
             {"stock_code": "300750", "stock_name": "宁德时代"},
             {"stock_code": "000001", "stock_name": "平安银行"},
@@ -215,7 +211,14 @@ def _create_user(db_session, user_id: int = 100, *, configure_sources: bool = Tr
     return user
 
 
-def _add_stock(db_session, user_id: int, stock_code: str, stock_name: str = "Alpha Tech") -> None:
+def _add_stock(
+    db_session,
+    user_id: int,
+    stock_code: str,
+    stock_name: str = "Alpha Tech",
+    auto_analysis_trading_frequency: str = "中长线持有 (Position Trading)",
+    auto_analysis_trading_strategy: str = "价值投资 (Value Investing)",
+) -> None:
     db_session.add(
         StockBasic(
             stock_code=stock_code,
@@ -224,7 +227,15 @@ def _add_stock(db_session, user_id: int, stock_code: str, stock_name: str = "Alp
             market="SZ",
         )
     )
-    db_session.add(StockWarehouse(user_id=user_id, stock_code=stock_code, is_active=True))
+    db_session.add(
+        StockWarehouse(
+            user_id=user_id,
+            stock_code=stock_code,
+            is_active=True,
+            auto_analysis_trading_frequency=auto_analysis_trading_frequency,
+            auto_analysis_trading_strategy=auto_analysis_trading_strategy,
+        )
+    )
     db_session.commit()
 
 
@@ -557,13 +568,6 @@ async def test_scan_sends_source_documents_and_stock_context_to_watch_ai(db_sess
     user = _create_user(db_session)
     _add_stock(db_session, user.id, "000001")
     _add_quote(db_session, "000001")
-    upsert_market_watch_settings(
-        user.id,
-        MarketWatchSettingsUpdate(
-            trading_frequency="日内交易 (Day Trading)",
-            trading_strategy="趋势追踪 (Trend Following)",
-        ),
-    )
     gate = FakeWatchAiGate(_ignore_decision())
     caplog.set_level(logging.DEBUG, logger="app.ai.market_watch.service")
 
@@ -577,13 +581,15 @@ async def test_scan_sends_source_documents_and_stock_context_to_watch_ai(db_sess
     assert len(gate.payloads) == 1
     payload = gate.payloads[0]
     assert payload["warehouse_stocks"][0]["stock_code"] == "000001"
+    assert payload["warehouse_stocks"][0]["trading_frequency_code"] == "position"
+    assert payload["warehouse_stocks"][0]["trading_strategy_code"] == "value"
     assert payload["news_documents"][0]["id"] == "news-1"
     assert "news_items" not in payload
     assert payload["account_summary"]["user_id"] == user.id
-    assert payload["settings"]["trading_frequency"] == "日内交易 (Day Trading)"
-    assert payload["settings"]["trading_strategy"] == "趋势追踪 (Trend Following)"
-    assert payload["settings"]["trading_frequency_code"] == "day"
-    assert payload["settings"]["trading_strategy_code"] == "trend"
+    assert "trading_frequency" not in payload["settings"]
+    assert "trading_strategy" not in payload["settings"]
+    assert "trading_frequency_code" not in payload["settings"]
+    assert "trading_strategy_code" not in payload["settings"]
     assert "Market watch Watch AI full input" in caplog.text
     assert "ai_input=" in caplog.text
     assert "Alpha Tech" in caplog.text
@@ -1085,15 +1091,14 @@ async def test_scan_marks_created_task_and_session_failed_when_scheduler_is_miss
 @pytest.mark.asyncio
 async def test_scan_successful_launch_writes_audit_and_returns_session_and_task_ids(db_session) -> None:
     user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
-    upsert_market_watch_settings(
+    _add_stock(
+        db_session,
         user.id,
-        MarketWatchSettingsUpdate(
-            trading_frequency="日内交易 (Day Trading)",
-            trading_strategy="趋势追踪 (Trend Following)",
-        ),
+        "000001",
+        auto_analysis_trading_frequency="日内交易 (Day Trading)",
+        auto_analysis_trading_strategy="趋势追踪 (Trend Following)",
     )
+    _add_quote(db_session, "000001")
     launcher_calls: list[dict[str, Any]] = []
 
     result = await scan_market_watch(

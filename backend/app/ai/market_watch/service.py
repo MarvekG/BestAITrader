@@ -21,12 +21,10 @@ from app.ai.market_watch.audit import is_in_cooldown as audit_is_in_cooldown
 from app.ai.market_watch.audit import publish_market_watch_event_payload
 from app.ai.market_watch.audit import publish_market_watch_documents_payload
 from app.ai.market_watch.schemas import (
-    DebateParameters,
     MarketWatchMarkdownDocument,
     MarketWatchSettingsResponse,
     MarketWatchSourceConfig,
     MarketWatchSourceType,
-    WatchAiDecision,
     parse_market_watch_time,
     trading_frequency_label,
     trading_frequency_to_code,
@@ -47,7 +45,7 @@ from app.tasks.task_manager import task_manager
 
 
 logger = get_logger(__name__)
-WATCH_AI_MAX_TOKENS = 4096
+WATCH_AI_MAX_TOKENS = 16384
 SHANGHAI_TZ = ZoneInfo("Asia/Shanghai")
 
 
@@ -293,7 +291,7 @@ async def scan_market_watch(
                 debate_launch=debate_launch,
             )
 
-        _apply_configured_debate_preferences(ai_decision, settings)
+        _apply_stock_debate_preferences(ai_decision, scan_context["items"])
         logger.info(
             "Market watch Watch AI decision received",
             extra={
@@ -428,7 +426,7 @@ def _load_scan_context(user_id: int, settings: Any) -> dict[str, Any]:
 
         items = [
             _build_stock_item(
-                stock_code=stock.stock_code,
+                stock=stock,
                 basic=basics.get(stock.stock_code),
                 position=positions.get(stock.stock_code),
                 account=account,
@@ -515,16 +513,18 @@ async def _publish_source_documents(
 
 def _build_stock_item(
     *,
-    stock_code: str,
+    stock: StockWarehouse,
     basic: StockBasic | None,
     position: Position | None,
     account: Account | None,
 ) -> dict[str, Any]:
     return {
-        "stock_code": stock_code,
+        "stock_code": stock.stock_code,
         "stock_name": basic.name if basic else None,
         "industry": basic.industry if basic else None,
         "market": basic.market if basic else None,
+        "trading_frequency_code": trading_frequency_to_code(stock.auto_analysis_trading_frequency),
+        "trading_strategy_code": trading_strategy_to_code(stock.auto_analysis_trading_strategy),
         "quote_status": "missing",
         "quote": None,
         "has_position": position is not None,
@@ -589,12 +589,9 @@ def _build_watch_ai_payload(
     Returns:
         可直接传给 Watch AI 的结构化上下文。
     """
-    settings_with_codes = dict(settings)
-    settings_with_codes["trading_frequency_code"] = trading_frequency_to_code(settings.get("trading_frequency"))
-    settings_with_codes["trading_strategy_code"] = trading_strategy_to_code(settings.get("trading_strategy"))
     return {
         "user_id": user_id,
-        "settings": settings_with_codes,
+        "settings": settings,
         "warehouse_stocks": _sort_watch_ai_stock_items(items),
         "data_documents": data_documents,
         "news_documents": news_documents,
@@ -870,22 +867,23 @@ def _find_existing_stock_task(stock_code: str) -> bool:
     return False
 
 
-def _apply_configured_debate_preferences(
+def _apply_stock_debate_preferences(
     decision: Any,
-    settings: MarketWatchSettingsResponse,
+    stock_items: list[dict[str, Any]],
 ) -> None:
-    """
-    Force launched debate parameters to match the configured watch preferences.
+    """将盯盘 AI 决策中的辩论偏好对齐到股票自动分析配置。
 
     Args:
-        decision: Watch AI decision that may include debate parameters.
-        settings: Current market watch settings.
+        decision: 盯盘 AI 返回的决策列表。
+        stock_items: 本轮传给盯盘 AI 的股票上下文，包含自动分析偏好。
     """
+    stock_preferences = {str(item.get("stock_code")): item for item in stock_items}
     for item in decision:
         if item.debate_parameters is None:
             continue
-        item.debate_parameters.trading_frequency = trading_frequency_to_code(settings.trading_frequency)
-        item.debate_parameters.trading_strategy = trading_strategy_to_code(settings.trading_strategy)
+        preferences = stock_preferences.get(item.stock_code, {})
+        item.debate_parameters.trading_frequency = preferences.get("trading_frequency_code") or "position"
+        item.debate_parameters.trading_strategy = preferences.get("trading_strategy_code") or "value"
 
 
 async def _audit_debate_skip(

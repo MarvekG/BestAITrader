@@ -35,15 +35,21 @@ def build_watch_ai_prompt(*, recent_debate_dedup_enabled: bool = True, recent_de
     schema = json.dumps(WATCH_AI_DECISIONS_ADAPTER.json_schema(), ensure_ascii=False)
     recent_launch_window_hours = recent_debate_lookback_hours
     recent_debate_dedup_rule = (
-        f"""先查看 `recent_debate_launches`，并使用其中的 `created_at` 判断历史辩论发生时间。如果同一股票在过去 {recent_launch_window_hours} 小时内已经因为相同触发事件、相同公告/新闻事实、或实质相同的证据摘要启动过辩论，本轮不要再次输出 `start_debate`；应输出 `monitor` 或 `ignore`，并在 `trigger_reason` 中简要说明“{recent_launch_window_hours} 小时内相同事件已启动过辩论”。
+        f"""先查看 `recent_debate_launches`，并使用其中的 `created_at` 判断历史辩论发生时间。
+如果同一股票在过去 {recent_launch_window_hours} 小时内已经因为相同触发事件、相同公告/新闻事实、或实质相同的证据摘要启动过辩论，
+本轮不要再次输出 `start_debate`；应输出 `monitor` 或 `ignore`，并在 `trigger_reason` 中简要说明“{recent_launch_window_hours} 小时内相同事件已启动过辩论”。
 
-判断本轮证据是否属于新增时，应先核对 `recent_debate_launches` 是否已经覆盖相同或实质相同的事实组合、事件主题或证据摘要；如果已经覆盖，不得将其称为“本轮新增”，也不得仅换一种表述再次 `start_debate`。数值相同只是辅助线索，不是判断重复与否的必要条件。
+判断本轮证据是否属于新增时，应先核对 `recent_debate_launches` 是否已经覆盖相同或实质相同的事实组合、事件主题或证据摘要；
+如果已经覆盖，不得将其称为“本轮新增”，也不得仅换一种表述再次 `start_debate`。数值相同只是辅助线索，不是判断重复与否的必要条件。
 
 只有当本轮出现新的触发事件、明显新增事实、或与历史记录不同的证据链时，才允许再次输出 `start_debate`。新的证据必须在业务事实上晚于或不同于最近一次同股票辩论，而不是仅因为当前扫描时间更晚。
 
-反例：如果 `recent_debate_launches` 显示某股票已因某项资金流、行情、公告或新闻事实组合启动辩论，后续扫描再次看到实质相同的事实组合或事件主题时，必须输出 `monitor`，不得写“本轮新增”，也不得仅因扫描时间更晚而再次 `start_debate`。"""
+反例：如果 `recent_debate_launches` 显示某股票已因某项资金流、行情、公告或新闻事实组合启动辩论，
+后续扫描再次看到实质相同的事实组合或事件主题时，必须输出 `monitor`，不得写“本轮新增”，也不得仅因扫描时间更晚而再次 `start_debate`。"""
         if recent_debate_dedup_enabled
-        else """近期辩论判重已关闭。仍可阅读 `recent_debate_launches` 了解历史上下文，但不得使用 `recent_debate_launches` 阻止 `start_debate`，也不得因为近期已有辩论而降低本轮触发级别。此时应仅按本轮输入证据和信号分级规则判断是否需要启动辩论。"""
+        else """近期辩论判重已关闭。仍可阅读 `recent_debate_launches` 了解历史上下文，
+但不得使用 `recent_debate_launches` 阻止 `start_debate`，也不得因为近期已有辩论而降低本轮触发级别。
+此时应仅按本轮输入证据和信号分级规则判断是否需要启动辩论。"""
     )
     return f"""# 角色定义
 你是「盯盘触发 AI」，轻量级信号筛选层。你的唯一职责是：根据每只仓库股票、持仓、账户上下文，以及用户配置网页源转换得到的 Markdown 文档，逐只股票判断是否需要启动「深度交易分析工作流」（start_debate）。
@@ -205,7 +211,8 @@ def build_watch_ai_prompt(*, recent_debate_dedup_enabled: bool = True, recent_de
 - `value` = 价值投资 / Value Investing
 - `trend` = 趋势追踪 / Trend Following
 
-如果输入 `settings.trading_frequency_code` 和 `settings.trading_strategy_code` 存在，必须原样使用这两个短代码。
+每只股票的交易偏好来自 `warehouse_stocks[].trading_frequency_code` 和
+`warehouse_stocks[].trading_strategy_code`。生成该股票的 `debate_parameters` 时必须原样使用这两个短代码。
 如果只看到中文或英文长文本，按上面的映射表转换。无法可靠映射时使用默认值：`position` 和 `value`。
 
 ---

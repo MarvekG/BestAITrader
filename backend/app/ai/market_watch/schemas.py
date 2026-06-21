@@ -134,7 +134,9 @@ class MarketWatchSourceConfig(BaseModel):
             if not selector:
                 continue
             if len(selector) > MAX_MARKET_WATCH_SOURCE_SELECTOR_LENGTH:
-                raise ValueError(f"source selectors must be at most {MAX_MARKET_WATCH_SOURCE_SELECTOR_LENGTH} characters")
+                raise ValueError(
+                    f"source selectors must be at most {MAX_MARKET_WATCH_SOURCE_SELECTOR_LENGTH} characters"
+                )
             selectors.append(selector)
         return selectors
 
@@ -327,8 +329,6 @@ class MarketWatchSettingsResponse(BaseModel):
     cooldown_break_confidence: float = Field(0.85, ge=0, le=1)
     data_sources: list[MarketWatchSourceConfig] = Field(default_factory=list, max_length=MAX_MARKET_WATCH_SOURCE_URLS)
     news_sources: list[MarketWatchSourceConfig] = Field(default_factory=list, max_length=MAX_MARKET_WATCH_SOURCE_URLS)
-    trading_frequency: str = Field(DEFAULT_MARKET_WATCH_TRADING_FREQUENCY, min_length=1, max_length=50)
-    trading_strategy: str = Field(DEFAULT_MARKET_WATCH_TRADING_STRATEGY, min_length=1, max_length=50)
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -345,6 +345,7 @@ class MarketWatchSettingsResponse(BaseModel):
     def _normalize_sources(cls, value: Any) -> list[MarketWatchSourceConfig]:
         return normalize_market_watch_sources(value)
 
+
 class MarketWatchSettingsUpdate(BaseModel):
     """Partial update payload for market watch settings."""
 
@@ -360,8 +361,6 @@ class MarketWatchSettingsUpdate(BaseModel):
     cooldown_break_confidence: float | None = Field(None, ge=0, le=1)
     data_sources: list[MarketWatchSourceConfig] | None = Field(None, max_length=MAX_MARKET_WATCH_SOURCE_URLS)
     news_sources: list[MarketWatchSourceConfig] | None = Field(None, max_length=MAX_MARKET_WATCH_SOURCE_URLS)
-    trading_frequency: str | None = Field(None, min_length=1, max_length=50)
-    trading_strategy: str | None = Field(None, min_length=1, max_length=50)
 
     @model_validator(mode="after")
     def _validate_scan_time_window(self) -> "MarketWatchSettingsUpdate":
@@ -380,6 +379,7 @@ class MarketWatchSettingsUpdate(BaseModel):
         if not normalized:
             raise ValueError("source URLs must include at least one URL")
         return normalized
+
 
 class MarketWatchMarkdownDocument(BaseModel):
     """Rendered Markdown document fetched from a configured market-watch source URL."""
