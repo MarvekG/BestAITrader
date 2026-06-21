@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 
 from app.ai.market_watch.schemas import WatchAiDecision
 from app.core.logger import get_logger
@@ -15,10 +15,17 @@ logger = get_logger(__name__)
 
 
 class LlmClient(Protocol):
-    """Minimal JSON-completion interface used by the Watch AI gate."""
+    """盯盘 AI 网关使用的最小 JSON 补全接口。"""
 
     async def complete_json(self, messages: list[dict[str, str]]) -> Any:
-        """Return parsed JSON from an LLM provider."""
+        """从 LLM 提供方返回 JSON 内容。
+
+        Args:
+            messages: OpenAI Chat Completions 兼容消息列表。
+
+        Returns:
+            LLM 返回的 JSON 字符串或已解析 JSON 对象。
+        """
 
 
 def build_watch_ai_prompt(*, recent_debate_dedup_enabled: bool = True, recent_debate_lookback_hours: int = 24) -> str:
@@ -245,13 +252,13 @@ def _strip_json_code_fence(text: str) -> str:
 
 def parse_watch_ai_decision(payload: str | list[dict[str, Any]]) -> list[WatchAiDecision]:
     """
-    Parse and validate Watch AI JSON output.
+    解析并校验盯盘 AI 的 JSON 输出。
 
     Args:
-        payload: JSON string or already parsed JSON object.
+        payload: JSON 字符串或已解析 JSON 对象。
 
     Returns:
-        Validated Watch AI decisions.
+        通过 schema 校验的盯盘 AI 决策列表。
     """
     if isinstance(payload, str):
         try:
@@ -289,24 +296,62 @@ def should_launch_debate(decision: WatchAiDecision, min_confidence: float = 0.75
 
 
 class WatchAiGate:
-    """Small adapter for Watch AI calls."""
+    """盯盘 AI 调用的轻量适配器。"""
 
     def __init__(self, llm_client: LlmClient):
         self.llm_client = llm_client
 
     async def decide(self, payload: dict[str, Any]) -> list[WatchAiDecision]:
         """
-        Ask Watch AI for a structured decision.
+        请求盯盘 AI 返回结构化决策。
 
         Args:
-            payload: Structured Watch AI input assembled by the scan service.
+            payload: 扫描服务组装的结构化盯盘 AI 输入。
 
         Returns:
-            Validated Watch AI decisions.
+            通过 schema 校验的盯盘 AI 决策列表。
         """
         messages = build_watch_ai_messages(payload)
         result = await self.llm_client.complete_json(messages)
-        return parse_watch_ai_decision(result)
+        try:
+            return parse_watch_ai_decision(result)
+        except (json.JSONDecodeError, ValidationError) as exc:
+            logger.warning(
+                "Retrying Watch AI response repair after invalid JSON",
+                extra={"error": str(exc)},
+            )
+            repaired_result = await self.llm_client.complete_json(build_watch_ai_repair_messages(messages, result, exc))
+            return parse_watch_ai_decision(repaired_result)
+
+
+def build_watch_ai_repair_messages(
+    original_messages: list[dict[str, str]],
+    invalid_payload: Any,
+    error: Exception,
+) -> list[dict[str, str]]:
+    """
+    构建要求模型修正上一轮非法 JSON 的重试消息。
+
+    Args:
+        original_messages: 首次盯盘 AI 请求使用的消息列表。
+        invalid_payload: 首次请求返回的非法响应。
+        error: 本地解析或 schema 校验失败异常。
+
+    Returns:
+        带有错误说明和原始响应的重试消息列表。
+    """
+    if isinstance(invalid_payload, str):
+        raw_payload = invalid_payload
+    else:
+        raw_payload = json.dumps(invalid_payload, ensure_ascii=False, default=str)
+    repair_instruction = (
+        "上一轮回复不是可解析且符合 schema 的 JSON array。"
+        "请只基于原始输入重新输出一份合法 JSON array，不要输出 markdown、代码围栏、解释文字或尾随逗号。"
+        "所有字符串内部的双引号必须转义为 \\\"。\n"
+        f"解析/校验错误: {error}\n"
+        f"上一轮原始回复:\n{raw_payload}"
+    )
+    return [*original_messages, {"role": "user", "content": repair_instruction}]
 
 
 def build_watch_ai_messages(payload: dict[str, Any]) -> list[dict[str, str]]:
