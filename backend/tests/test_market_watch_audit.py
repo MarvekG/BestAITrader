@@ -36,15 +36,19 @@ def _add_event(
     event_type: str = "scan",
     status: str = "success",
     debate_session_id: str | None = None,
+    task_id: str | None = None,
     watch_ai_decision: dict | list[dict] | None = None,
     debate_parameters: dict | None = None,
+    reason: str | None = None,
     created_at: datetime | None = None,
 ) -> MarketWatchEvent:
     event = MarketWatchEvent(
         user_id=user_id,
         event_type=event_type,
         status=status,
+        reason=reason,
         debate_session_id=debate_session_id,
+        task_id=task_id,
         watch_ai_decision=watch_ai_decision,
         debate_parameters=debate_parameters,
         created_at=created_at or datetime.now(),
@@ -60,12 +64,14 @@ def _add_debate_session(
     user_id: int,
     stock_code: str,
     created_at: datetime | None = None,
+    status: str = "active",
 ) -> AnalysisSession:
     session = AnalysisSession(
         user_id=user_id,
         stock_code=stock_code,
         trading_frequency="日内交易 (Day Trading)",
         trading_strategy="趋势追踪 (Trend Following)",
+        status=status,
         created_at=created_at or datetime.now(),
         updated_at=created_at or datetime.now(),
     )
@@ -127,6 +133,29 @@ def test_is_in_cooldown_ignores_failed_or_old_launches(test_db) -> None:
         status="success",
         debate_session_id=str(old_session.session_id),
         created_at=datetime.now() - timedelta(minutes=90),
+    )
+
+    assert is_in_cooldown(user_id=1, stock_code="600519", cooldown_minutes=60) is False
+
+
+def test_is_in_cooldown_ignores_failed_debate_session(test_db) -> None:
+    session_factory = test_db
+    db = session_factory()
+    _create_user(db)
+    failed_session = _add_debate_session(
+        db,
+        user_id=1,
+        stock_code="600519",
+        status="failed",
+        created_at=datetime.now() - timedelta(minutes=10),
+    )
+    _add_event(
+        db,
+        user_id=1,
+        event_type="debate_launched",
+        status="success",
+        debate_session_id=str(failed_session.session_id),
+        created_at=datetime.now() - timedelta(minutes=10),
     )
 
     assert is_in_cooldown(user_id=1, stock_code="600519", cooldown_minutes=60) is False
@@ -195,6 +224,7 @@ async def test_publish_market_watch_event_pushes_latest_ai_decision(test_db, mon
         user_id=1,
         event_type="debate_skipped",
         status="skipped",
+        reason="cooldown",
         watch_ai_decision={
             "stock_code": "600519",
             "action": "monitor",
@@ -213,6 +243,7 @@ async def test_publish_market_watch_event_pushes_latest_ai_decision(test_db, mon
     assert '"event_type": "debate_skipped"' in payload
     assert '"user_id": 1' in payload
     decoded = json.loads(payload)
+    assert decoded["reason"] == "cooldown"
     assert decoded["watch_ai_decision"]["stock_code"] == "600519"
     assert decoded["watch_ai_decision"]["action"] == "monitor"
     assert decoded["debate_parameters"]["trading_frequency"] == "day"

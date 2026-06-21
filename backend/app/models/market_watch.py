@@ -18,6 +18,7 @@ class MarketWatchEvent(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
     event_type = Column(String(50), nullable=False, index=True)
     status = Column(String(20), nullable=False, index=True)
+    reason = Column(String(100), nullable=True)
     watch_ai_decision = Column(JSON, nullable=True)
     debate_parameters = Column(JSON, nullable=True)
     debate_session_id = Column(String(36), nullable=True)

@@ -183,6 +183,7 @@ def test_market_watch_events_returns_current_user_events(client, auth_headers, d
         user_id=user_id,
         event_type="scan",
         status="success",
+        reason="cooldown",
         created_at=datetime.now(),
     )
     db_session.add(event)
@@ -194,6 +195,7 @@ def test_market_watch_events_returns_current_user_events(client, auth_headers, d
     payload = response.json()
     assert len(payload) == 1
     assert payload[0]["event_type"] == "scan"
+    assert payload[0]["reason"] == "cooldown"
     assert "target_stock_code" not in payload[0]
     assert "target_stock_name" not in payload[0]
     assert "summary" not in payload[0]

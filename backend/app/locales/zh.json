@@ -1223,6 +1223,7 @@
       "time": "时间",
       "event": "事件",
       "status": "状态",
+      "reason": "原因",
       "stock": "股票",
       "ai_decision": "AI 判断"
     },

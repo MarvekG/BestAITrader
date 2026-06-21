@@ -8,6 +8,7 @@ def test_market_watch_event_model_columns_exist() -> None:
     assert "event_id" in columns
     assert "user_id" in columns
     assert "event_type" in columns
+    assert "reason" in columns
     assert "news_fingerprints" not in columns
     assert "target_stock_code" not in columns
     assert "target_stock_name" not in columns

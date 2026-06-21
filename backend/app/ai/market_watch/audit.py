@@ -40,6 +40,7 @@ def is_in_cooldown(user_id: int, stock_code: str, cooldown_minutes: int) -> bool
                 .filter(
                     AnalysisSession.user_id == user_id,
                     AnalysisSession.stock_code == stock_code,
+                    AnalysisSession.status != "failed",
                     AnalysisSession.created_at >= cutoff,
                 )
                 .all()
@@ -133,6 +134,7 @@ async def publish_market_watch_event(event: MarketWatchEvent) -> int:
             "user_id": event.user_id,
             "event_type": event.event_type,
             "status": event.status,
+            "reason": event.reason,
             "watch_ai_decision": event.watch_ai_decision,
             "debate_parameters": event.debate_parameters,
             "debate_session_id": event.debate_session_id,

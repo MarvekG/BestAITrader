@@ -354,13 +354,31 @@ def _add_recent_launch_event(
     trigger_reason: str | None = None,
     evidence_summary: str | None = None,
     created_at: datetime | None = None,
+    event_type: str = "debate_launched",
+    status: str = "success",
+    session_status: str = "active",
 ) -> None:
+    """
+    写入一条盯盘辩论事件，供近期启动判重测试使用。
+
+    Args:
+        db_session: 测试数据库会话。
+        user_id: 当前测试用户 ID。
+        stock_code: 事件关联股票代码。
+        trigger_reason: 盯盘 AI 触发原因。
+        evidence_summary: 盯盘 AI 证据摘要。
+        created_at: 事件创建时间。
+        event_type: 盯盘审计事件类型。
+        status: 盯盘审计事件状态。
+        session_status: 关联辩论会话状态。
+    """
     event_created_at = created_at or (datetime.now() - timedelta(minutes=5))
     session = Session(
         user_id=user_id,
         stock_code=stock_code,
         trading_frequency="日内交易 (Day Trading)",
         trading_strategy="趋势追踪 (Trend Following)",
+        status=session_status,
         created_at=event_created_at,
         updated_at=event_created_at,
     )
@@ -376,8 +394,8 @@ def _add_recent_launch_event(
     db_session.add(
         MarketWatchEvent(
             user_id=user_id,
-            event_type="debate_launched",
-            status="success",
+            event_type=event_type,
+            status=status,
             watch_ai_decision=watch_ai_decision,
             debate_session_id=str(session.session_id),
             created_at=event_created_at,
@@ -633,6 +651,75 @@ async def test_scan_sends_recent_successful_debate_launches_to_watch_ai(db_sessi
     assert recent_launches[0]["debate_session_id"]
 
 
+def test_recent_debate_launches_exclude_skipped_and_non_success_events(db_session) -> None:
+    user = _create_user(db_session)
+    _add_recent_launch_event(
+        db_session,
+        user.id,
+        stock_code="000001",
+        trigger_reason="成功启动事件",
+        evidence_summary="已真实启动辩论",
+        created_at=datetime(2026, 5, 14, 9, 30),
+    )
+    _add_recent_launch_event(
+        db_session,
+        user.id,
+        stock_code="000001",
+        trigger_reason="跳过事件",
+        evidence_summary="没有启动辩论",
+        created_at=datetime(2026, 5, 14, 9, 40),
+        event_type="debate_skipped",
+        status="skipped",
+    )
+    _add_recent_launch_event(
+        db_session,
+        user.id,
+        stock_code="000001",
+        trigger_reason="失败事件",
+        evidence_summary="启动未成功",
+        created_at=datetime(2026, 5, 14, 9, 50),
+        status="failed",
+    )
+
+    launches = market_watch_service._load_recent_debate_launches(
+        user_id=user.id,
+        now=datetime(2026, 5, 14, 10, 0),
+        lookback_hours=24,
+    )
+
+    assert len(launches) == 1
+    assert launches[0]["trigger_reason"] == "成功启动事件"
+
+
+def test_recent_debate_launches_exclude_failed_debate_session(db_session) -> None:
+    user = _create_user(db_session)
+    _add_recent_launch_event(
+        db_session,
+        user.id,
+        stock_code="000001",
+        trigger_reason="成功流程事件",
+        evidence_summary="辩论流程仍有效",
+        created_at=datetime(2026, 5, 14, 9, 20),
+    )
+    _add_recent_launch_event(
+        db_session,
+        user.id,
+        stock_code="000001",
+        trigger_reason="会话失败事件",
+        evidence_summary="辩论会话失败",
+        created_at=datetime(2026, 5, 14, 9, 30),
+        session_status="failed",
+    )
+    launches = market_watch_service._load_recent_debate_launches(
+        user_id=user.id,
+        now=datetime(2026, 5, 14, 10, 0),
+        lookback_hours=24,
+    )
+
+    assert len(launches) == 1
+    assert launches[0]["trigger_reason"] == "成功流程事件"
+
+
 @pytest.mark.asyncio
 async def test_recent_debate_launch_window_uses_runtime_setting(db_session) -> None:
     user = _create_user(db_session)
@@ -857,7 +944,8 @@ async def test_scan_skips_launch_when_auto_launch_disabled_by_settings(db_sessio
     assert settings_result["debate_launch"]["status"] == "skipped"
     assert settings_result["debate_launch"]["reason"] == "auto_launch_disabled"
     assert launcher_calls == []
-    assert db_session.query(MarketWatchEvent).filter(MarketWatchEvent.event_type == "debate_skipped").count() == 1
+    skipped_event = db_session.query(MarketWatchEvent).filter(MarketWatchEvent.event_type == "debate_skipped").one()
+    assert skipped_event.reason == "auto_launch_disabled"
 
 
 @pytest.mark.asyncio
@@ -964,6 +1052,7 @@ async def test_scan_skips_launch_when_watch_ai_targets_unwatched_stock(db_sessio
     assert launcher_calls == []
     assert db_session.query(Session).count() == 0
     event = db_session.query(MarketWatchEvent).filter(MarketWatchEvent.event_type == "debate_skipped").one()
+    assert event.reason == "invalid_target_stock"
     assert event.watch_ai_decision["stock_code"] == "999999"
 
 
