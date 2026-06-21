@@ -133,6 +133,9 @@ export const DashboardLayout: React.FC = () => {
     const taskId = data?.task_id;
     if (data && taskId) {
       const rawStatus = data.status;
+      if (rawStatus !== 'completed' && rawStatus !== 'success' && rawStatus !== 'failed' && rawStatus !== 'error') {
+        return;
+      }
       const status = (rawStatus === 'completed' || rawStatus === 'success') ? 'completed' : 'failed';
       const error = data.error_message || data.error;
       apiHistory.updateResponse(taskId, status, data, error);

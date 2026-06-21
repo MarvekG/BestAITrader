@@ -3,10 +3,73 @@ import { App } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { TaskCompletedMessage, WebSocketMessage } from '../services/websocket';
 import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
+import { tasksApi } from '../api/tasks';
+
+const runningTaskStatuses = new Set(['pending', 'running', 'started']);
+const completedTaskStatuses = new Set(['completed', 'success']);
+const failedTaskStatuses = new Set(['failed', 'error', 'cancelled']);
+const taskStatusPollIntervalMs = 60000;
 
 export const GlobalTaskNotifications: React.FC = () => {
   const { t } = useTranslation();
   const { message, notification } = App.useApp();
+  const taskPollTimersRef = React.useRef<Map<string, number>>(new Map());
+
+  const clearTaskPollTimer = React.useCallback((taskId?: string) => {
+    if (!taskId) {
+      return;
+    }
+
+    const timer = taskPollTimersRef.current.get(taskId);
+    if (timer !== undefined) {
+      window.clearInterval(timer);
+      taskPollTimersRef.current.delete(taskId);
+    }
+  }, []);
+
+  const startTaskStatusPolling = React.useCallback((taskId?: string, taskName?: string) => {
+    if (!taskId || taskPollTimersRef.current.has(taskId)) {
+      return;
+    }
+
+    const timer = window.setInterval(async () => {
+      try {
+        const task = await tasksApi.getTask(taskId);
+        if (runningTaskStatuses.has(task.status)) {
+          return;
+        }
+
+        clearTaskPollTimer(taskId);
+        message.destroy(taskId);
+
+        if (completedTaskStatuses.has(task.status)) {
+          notification.success({
+            message: t('common.task_completed'),
+            description: `${task.task_name || taskName || t('common.task')} (ID: ${taskId})`,
+            duration: 5,
+          });
+          return;
+        }
+
+        if (failedTaskStatuses.has(task.status)) {
+          notification.error({
+            message: t('common.task_failed'),
+            description: `${task.task_name || taskName || t('common.task')} (ID: ${taskId})\n${t('common.error')}: ${task.error_message || t('common.error')}`,
+            duration: 5,
+          });
+        }
+      } catch (error) {
+        console.error('Failed to poll task status:', error);
+      }
+    }, taskStatusPollIntervalMs);
+
+    taskPollTimersRef.current.set(taskId, timer);
+  }, [clearTaskPollTimer, message, notification, t]);
+
+  React.useEffect(() => () => {
+    taskPollTimersRef.current.forEach((timer) => window.clearInterval(timer));
+    taskPollTimersRef.current.clear();
+  }, []);
 
   useWebSocketSubscription('task_completed', (msg: WebSocketMessage) => {
       const data = (msg as TaskCompletedMessage).data;
@@ -18,7 +81,7 @@ export const GlobalTaskNotifications: React.FC = () => {
       const taskId = data.task_id;
       const status = data.status;
 
-      if (status === 'running') {
+      if (status && runningTaskStatuses.has(status)) {
         const result = data.result || {};
         const progress = result.progress;
         const total = result.total;
@@ -32,14 +95,16 @@ export const GlobalTaskNotifications: React.FC = () => {
           key: taskId || taskName,
           duration: 0,
         });
+        startTaskStatusPolling(taskId, taskName);
         return;
       }
 
       if (taskId) {
+        clearTaskPollTimer(taskId);
         message.destroy(taskId);
       }
 
-      if (status === 'completed' || status === 'success') {
+      if (status && completedTaskStatuses.has(status)) {
         notification.success({
           message: t('common.task_completed'),
           description: `${taskName} (ID: ${taskId || '-'})`,
@@ -48,7 +113,7 @@ export const GlobalTaskNotifications: React.FC = () => {
         return;
       }
 
-      if (status === 'failed' || status === 'error') {
+      if (status && failedTaskStatuses.has(status)) {
         const errorMessage = data.error_message || data.error || t('common.error');
         notification.error({
           message: t('common.task_failed'),
