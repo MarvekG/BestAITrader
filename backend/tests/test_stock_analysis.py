@@ -177,6 +177,7 @@ def test_stock_analysis_tool_boundary_excludes_memory_and_trade_tools() -> None:
     base_tool_names = {tool.name for tool in get_stock_analysis_tools()}
 
     assert base_tool_names == {
+        "get_current_time",
         "execute_python_sandboxed",
         "browse_web_page_html",
         "parse_pdf_to_markdown",

@@ -62,6 +62,7 @@ def _build_system_prompt(stock_code: str | None, stock_name: str | None) -> str:
         f"当前时间: {_format_prompt_current_time()}。\n"
         f"{target_context}"
         "你可以自主调用工具和skills。\n"
+        "在引用工具返回的数据前，必须调用 `get_current_time` 获取当前系统时间以判断数据的时效性和有效性；数据过旧时必须说明时效性限制。\n"
         "必须以事实为准绳: 所有判断都要回到可核验的数据、公告、新闻、工具结果或明确来源；"
         "不得把传闻、臆测、经验或模型直觉当成事实。\n"
         "如果信息不足，必须说明缺口和不确定性，不得编造。\n"
