@@ -25,6 +25,16 @@ class FakeLlmClient:
         return self.response
 
 
+class SequentialFakeLlmClient:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.messages = []
+
+    async def complete_json(self, messages):
+        self.messages.append(messages)
+        return self.responses.pop(0)
+
+
 def _start_debate_payload():
     return [{
         "stock_code": "600519",
@@ -209,6 +219,28 @@ async def test_watch_ai_gate_sends_prompt_and_payload_to_llm() -> None:
     assert client.messages[2]["content"].startswith("SOURCE_DOCUMENT_CONTEXT\n")
     assert '"news_documents"' in client.messages[2]["content"]
     assert '"news_items"' not in client.messages[2]["content"]
+
+
+@pytest.mark.asyncio
+async def test_watch_ai_gate_retries_invalid_json_response() -> None:
+    bad_response = (
+        '[{"stock_code":"600519","stock_name":"贵州茅台","action":"monitor","confidence":0.6,'
+        '"urgency":"medium","trigger_reason":"核心事件"市值首超"已覆盖",'
+        '"evidence_summary":"证据","debate_parameters":null}]'
+    )
+    client = SequentialFakeLlmClient([bad_response, _start_debate_payload()])
+    gate = WatchAiGate(client)
+
+    decisions = await gate.decide({
+        "warehouse_stocks": [{"stock_code": "600519", "stock_name": "贵州茅台"}],
+        "news_documents": [{"title": "新闻快讯"}],
+    })
+
+    assert len(decisions) == 1
+    assert decisions[0].action == "start_debate"
+    assert len(client.messages) == 2
+    assert "上一轮回复不是可解析" in client.messages[1][-1]["content"]
+    assert "所有字符串内部的双引号必须转义" in client.messages[1][-1]["content"]
 
 
 def test_build_watch_ai_messages_separates_database_context_from_source_documents() -> None:
