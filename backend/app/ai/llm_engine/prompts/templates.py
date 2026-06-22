@@ -104,26 +104,14 @@ Context 中的 `canonical_metrics` 是唯一可信的派生指标口径（每股
 1. 当前 Context、实时工具返回和已核验证据优先于历史 Memory。
    历史记忆只能作为辅助经验，不得替代当前事实、实时行情、公告、财务数据或工具核验结果。
    不得用召回记忆改写、替换或覆盖当前事实；若两者冲突，必须保留当前事实，并把记忆标记为过时、不适用或需要进一步核验。
-2. 只有当历史经验能显著降低当前不确定性时才检索记忆，不要把记忆检索当作固定动作。
+2. 强制召回：若当前角色可使用记忆工具，每轮分析必须多次调用 `recall_memory`，覆盖与本轮最相关的多个主题，不得以“纪律优先”“证据已充分”或“历史经验不适用”为由静默跳过。
 3. 写入记忆时，只记录本轮形成的可复用规则、触发条件、
    失败模式、执行纪律或证据权重，不记录一次性噪声。
 4. 如果历史记忆或上下文中提供的相关历史经验对本轮结论有实质影响，最终报告用自然语言说明其影响和取舍即可。
    不需要逐条罗列所有召回结果。
    若记忆与当前事实冲突，必须以当前事实为准，并说明记忆被降权、过时或不适用。
-5. 设计 `recall_memory` query 时使用“真实股票名 + 股票代码 + 要复用的经验主题 + 2-5 个关键变量/动作/触发器”：
-   必须同时包含 Context 中的 `_target_stock_name` 与 `_target_stock_code`，
-   例如“中远海控(601919.SH) PM裁决 HOLD 仓位 止损 加仓触发”、
-   “中远海控(601919.SH) 运价反弹 SCFI 加仓纪律 失效条件”、
-   “601919.SH 周期价值陷阱 基金撤退 盈利恶化 风控阈值”；
-   不要写成“当前目标股票”，因为记忆系统需要具体主体来做 entity resolution。
-   时间意图和问题类型不是必填项；只有在区分当前/历史、事实/原因、支持/冲突或演进关系时才补充。
-   避免“查一下历史经验”这类宽泛 query。
-6. 设计 `write_memory` 内容时，必须让未来系统能复用和审计：写清真实股票名和股票代码、交易频率、交易策略、场景、关键证据、
-   决策/结论、触发器、失效条件、阈值、常见误判、执行纪律和后续验证点；若交易频率或交易策略无法确认，必须在正文中说明缺失；不要写普通背景、重复事实或流水账。
-   单条 Memory 正文建议包含 [MEMORY_TOPIC: ...]、对象:、交易频率:、交易策略:、场景:、经验:、触发条件:、未来动作:、失效边界:、证据:。对象必须同时包含真实股票名和股票代码。
-   示例：“中远海控(601919.SH) PM裁决经验: 盈利同比-49.75%但SCFI两周+13.47%时，不因单一运价反弹追涨；
-   若SCFI连续3周站稳2200且Q2净利降幅收窄至20%以内才加仓，若SCFI跌破1900或价格跌破13.80则减仓，
-   硬止损12.50。误判风险: 高股息是后视镜数据。”
+5. `recall_memory` 的调用方法（query 结构、主题示例、entity resolution 要求等）以工具自身说明为准，不在此重复。
+6. `write_memory` 的调用方法（内容要素、单条主题、示例结构等）以工具自身说明为准，不在此重复。
 7. `write_memory` 为异步生效，不要先写入再立刻依赖回读。
 
 ## 记忆协议
@@ -136,8 +124,8 @@ Context 中的 `canonical_metrics` 是唯一可信的派生指标口径（每股
    - [MEMORY_TOPIC: strategy_fit] strategy_fit：如果经验的适用频率、策略或市场环境存在明显边界，记录经验适用的交易频率、交易策略和市场环境，例如日内/波段/中长线、价值/趋势/事件驱动、市场风格和经验过时风险。
    - [MEMORY_TOPIC: process_improvement] process_improvement：如果能提炼出未来 Debate、PM 或 Risk 的流程检查项，记录 Debate、PM 和 Risk 流程下次应改什么，例如哪个 Agent 要补证、PM 如何调仓位/置信度、Risk 要检查哪些否决条件。
 4. 写入协议：一条 Memory 只写一个主主题；不同主题必须分次调用 `write_memory`，不要把多个主题揉成一条 Memory。复盘写入必须包含后验市场结果或信号验证证据；Debate 内部写入不能伪造未来后验结果。如果只是当前事实判断，不应写入 Memory。
-5. 召回协议：不按 Agent 角色固定召回主题，也不要求每轮检查所有主题。由 LLM 根据当前不确定性、证据缺口、交易频率、交易策略和市场环境，自主决定是否召回以及召回哪些主题。召回 query 必须同时包含真实股票名和股票代码、主题、策略频率和 2-5 个当前关键变量，不要写成“查一下历史经验”。[MEMORY_TOPIC: decision_outcome] 仅在需要对比历史类似 PM 决策结果、后验收益、回撤或结论正确性时召回。
-6. 采纳协议：如果记忆经验显著影响本轮判断、仓位、止损、置信度或执行计划，在最终报告中用自然语言说明影响；如果没有实质影响，可以不展开。常见降权原因包括交易频率不匹配、策略不同、市场环境变化、证据状态不同、经验过时或当前事实不支持。如果没有调用记忆工具，也没有使用上下文中的历史经验，最终报告可简要写明“本轮未使用历史 Memory 经验”。
+5. 召回协议：若当前角色可使用记忆工具，每轮必须多次调用 `recall_memory` 覆盖与本轮最相关的多个主题，不得静默跳过。调用方法以 `recall_memory` 工具说明为准。
+6. 采纳协议：如果记忆经验显著影响本轮判断、仓位、止损、置信度或执行计划，在最终报告中用自然语言说明影响；如果没有实质影响，可以不展开。常见降权原因包括交易频率不匹配、策略不同、市场环境变化、证据状态不同、经验过时或当前事实不支持。
 7. 固定主题写入与自主写入并存。允许新增高价值模式时自主追加 `write_memory`，但必须写清触发条件、关键证据、未来动作和失效边界。
 
 ## 投资哲学总约束
@@ -278,32 +266,14 @@ When the current role can use memory tools, follow these memory boundaries:
    It must not replace current facts, live market data, filings, financial data, or tool verification.
    Do not use recalled Memory to rewrite, replace, or override current facts; when they conflict,
    keep current facts unchanged and mark the Memory as stale, non-applicable, or requiring verification.
-2. Retrieve memory only when prior experience can materially reduce current uncertainty. Do not use memory mechanically.
+2. Mandatory recall: if the current role can use memory tools, each round MUST call `recall_memory` multiple times to cover the topics most relevant to this round. Do not silently skip recall on the grounds of "discipline first", "evidence already sufficient", or "history does not apply".
 3. Write memory only for reusable rules, triggers, failure modes, execution discipline,
    or evidence-weighting lessons formed in this round.
 4. If historical memory or relevant historical experience materially affects this round, explain its impact and trade-off in natural language.
     Do not list every recalled item mechanically.
     If memory conflicts with current facts, current facts must prevail, and the memory should be treated as stale, inapplicable, or lower-weight.
-5. For `recall_memory` queries, use
-   "real stock name + stock code + reusable experience theme + 2-5 key variables/actions/triggers":
-   include both `_target_stock_name` and `_target_stock_code` from Context, such as
-   "COSCO SHIPPING Holdings (601919.SH) PM verdict HOLD sizing stop-loss add trigger",
-   "COSCO SHIPPING Holdings (601919.SH) freight-rate rebound SCFI add discipline invalidation",
-   or "601919.SH cyclical value trap fund outflow earnings deterioration risk threshold".
-   Do not write the literal placeholder "current target stock", because memory needs a concrete subject for entity resolution.
-   Time intent and question type are optional; add them only when you need to distinguish current vs. historical,
-   facts vs. reasons, support/conflict evidence, or evolution.
-   Avoid broad queries such as "look up historical experience".
-6. For `write_memory`, write content that future runs can reuse and audit: include both the real stock name and stock code,
-   trading frequency, trading strategy, setup, key evidence, decision/conclusion, triggers, invalidation conditions, thresholds,
-   common misread, execution discipline, and next verification point. If trading frequency or strategy cannot be confirmed,
-   state the missing field in the content. Do not store generic background, repeated facts, or logs.
-   Each Memory body should contain [MEMORY_TOPIC: ...], Object:, Trading frequency:, Trading strategy:, Scenario:, Lesson:,
-   Trigger conditions:, Future action:, Invalidation boundary:, and Evidence:. Object must include both the real stock name and stock code.
-   Example: "COSCO SHIPPING Holdings (601919.SH) PM verdict lesson: when earnings are -49.75% YoY but SCFI is
-   +13.47% in two weeks, do not chase a single freight-rate rebound; add only if SCFI holds above 2200 for
-   three weeks and Q2 earnings decline narrows within 20%, reduce if SCFI falls below 1900 or price breaks 13.80,
-   hard stop 12.50. Misread risk: high dividend yield is backward-looking."
+5. How to call `recall_memory` (query structure, topic examples, entity-resolution requirements, etc.) is defined by the tool's own description; it is not repeated here.
+6. How to call `write_memory` (content elements, single-topic rule, example structure, etc.) is defined by the tool's own description; it is not repeated here.
 7. `write_memory` is asynchronous. Do not write first and then rely on immediate read-back.
 
 ## Memory Protocol
@@ -316,8 +286,8 @@ When the current role can use memory tools, follow these memory boundaries:
    - [MEMORY_TOPIC: strategy_fit] strategy_fit: if the lesson has clear frequency, strategy, or market-regime boundaries, record trading frequency, strategy, and market-regime fit, such as intraday/swing/position, value/trend/event-driven, market style, and stale-memory risk.
    - [MEMORY_TOPIC: process_improvement] process_improvement: if future Debate, PM, or Risk checklist items can be extracted, record what Debate, PM, and Risk should change next time, such as which Agent must verify evidence, how PM should adjust sizing/confidence, and which veto checks Risk must run.
 4. Write protocol: one Memory must carry one primary topic only. Different topics must use separate `write_memory` calls; do not mix multiple topics into one Memory. Review writes must include later market outcome or signal-validation evidence. Debate-time writes must not fabricate later outcomes. If the content is only a current fact judgment, do not write it to Memory.
-5. Recall protocol: do not fix recall topics by Agent role, and do not check every topic mechanically in every round. The LLM decides whether to recall and which topics to recall based on current uncertainty, evidence gaps, trading frequency, strategy, and market regime. Recall queries must include both the real stock name and stock code, topic, strategy/frequency, and 2-5 current key variables; do not write broad queries such as “look up historical experience”. Recall [MEMORY_TOPIC: decision_outcome] only when comparing historical similar PM decisions, later returns, drawdowns, or correctness.
-6. Adoption protocol: If memory materially changes judgment, sizing, stop-loss, confidence, or execution plan, explain the impact in natural language. If memory has no material impact, do not expand it mechanically. Common down-weight reasons include frequency mismatch, different strategy, changed market regime, different evidence state, stale experience, or lack of support from current facts. If no memory tool was called and no historical experience from context was used, you may briefly write “No historical Memory experience was used in this round.”
+5. Recall protocol: if the current role can use memory tools, each round MUST call `recall_memory` multiple times to cover the topics most relevant to this round; do not silently skip. How to call it is defined by the `recall_memory` tool description.
+6. Adoption protocol: If memory materially changes judgment, sizing, stop-loss, confidence, or execution plan, explain the impact in natural language. If memory has no material impact, do not expand it mechanically. Common down-weight reasons include frequency mismatch, different strategy, changed market regime, different evidence state, stale experience, or lack of support from current facts.
 7. Fixed-topic writes and autonomous writes coexist. When a new high-value pattern appears, autonomous `write_memory` is allowed, but it must include trigger conditions, key evidence, future action, and invalidation boundary.
 
 ## Investment Philosophy Constraints
