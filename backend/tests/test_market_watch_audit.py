@@ -174,7 +174,20 @@ def test_cleanup_old_events_deletes_records_older_than_90_days(test_db) -> None:
     assert db.query(MarketWatchEvent).first().event_id == recent.event_id
 
 
-def test_query_market_watch_events_defaults_to_recent_90_days_and_limit(test_db) -> None:
+def test_query_market_watch_events_uses_configured_retention(test_db, monkeypatch) -> None:
+    session_factory = test_db
+    db = session_factory()
+    _create_user(db)
+    monkeypatch.setattr(audit.settings, "MARKET_WATCH_EVENT_RETENTION_DAYS", 30)
+    _add_event(db, user_id=1, event_type="scan", created_at=datetime.now() - timedelta(days=31))
+    matched = _add_event(db, user_id=1, event_type="scan", created_at=datetime.now() - timedelta(days=29))
+
+    events = query_market_watch_events(user_id=1)
+
+    assert [event.event_id for event in events] == [matched.event_id]
+
+
+def test_query_market_watch_events_defaults_to_recent_configured_days_and_limit(test_db) -> None:
     session_factory = test_db
     db = session_factory()
     _create_user(db)

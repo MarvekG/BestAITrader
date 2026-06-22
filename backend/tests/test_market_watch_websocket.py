@@ -147,6 +147,6 @@ async def test_market_watch_audit_cleanup_once_deletes_old_events(client, auth_h
 
     cleanup_result = await run_audit_cleanup()
 
-    assert cleanup_result == {"deleted": 1}
+    assert cleanup_result == {"deleted": 1, "retention_days": 30}
     event_ids = {event.event_id for event in db_session.query(MarketWatchEvent).all()}
     assert event_ids == {recent_event.event_id}

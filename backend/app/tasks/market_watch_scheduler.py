@@ -7,11 +7,11 @@ from typing import Any
 import pytz
 from sqlalchemy.orm import Session
 
-from app.ai.market_watch.audit import DEFAULT_EVENT_RETENTION_DAYS
 from app.ai.market_watch.audit import cleanup_old_events
 from app.ai.market_watch.schemas import MIN_MARKET_WATCH_SCAN_INTERVAL_SECONDS
 from app.ai.market_watch.service import scan_market_watch
 from app.ai.market_watch.settings import get_market_watch_settings
+from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.logger import get_logger
 from app.tasks.scheduled_task_registry import ScheduledTask
@@ -59,11 +59,20 @@ def get_scheduled_tasks() -> ScheduledTaskSnapshot:
 
 
 async def run_audit_cleanup() -> dict[str, int]:
-    """Delete market watch audit events older than the retention window."""
-    deleted_count = cleanup_old_events(retention_days=DEFAULT_EVENT_RETENTION_DAYS)
+    """
+    删除超过配置保留窗口的盯盘审计事件。
+
+    Returns:
+        删除数量和实际使用的保留天数。
+    """
+    retention_days = settings.MARKET_WATCH_EVENT_RETENTION_DAYS
+    deleted_count = cleanup_old_events(retention_days=retention_days)
     if deleted_count:
-        logger.info("Deleted %s old market watch audit events", deleted_count)
-    return {"deleted": deleted_count}
+        logger.info(
+            "deleted old market watch audit events",
+            extra={"deleted": deleted_count, "retention_days": retention_days},
+        )
+    return {"deleted": deleted_count, "retention_days": retention_days}
 
 
 async def run_due_scans() -> dict[str, Any]:

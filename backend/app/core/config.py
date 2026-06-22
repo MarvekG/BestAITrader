@@ -77,7 +77,28 @@ class Settings(BaseSettings):
                 "Use a unique value (recommend 12+ characters)."
             )
         return value
+
+    @field_validator("MARKET_WATCH_EVENT_RETENTION_DAYS")
+    @classmethod
+    def _validate_market_watch_event_retention_days(cls, value: int) -> int:
+        """
+        校验盯盘事件保留天数，避免误配置导致过度删除或无限膨胀。
+
+        Args:
+            value: 环境变量或默认配置解析后的保留天数。
+
+        Returns:
+            校验通过的保留天数。
+
+        Raises:
+            ValueError: 保留天数不在允许范围内。
+        """
+        if value < 1 or value > 365:
+            raise ValueError("MARKET_WATCH_EVENT_RETENTION_DAYS must be between 1 and 365")
+        return value
+
     MARKET_WATCH_RECENT_DEBATE_LAUNCH_LOOKBACK_HOURS: int = 24
+    MARKET_WATCH_EVENT_RETENTION_DAYS: int = 30
 
     # Core Indices Config
     CORE_INDICES: List[str] = [

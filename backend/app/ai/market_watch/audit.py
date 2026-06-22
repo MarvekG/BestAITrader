@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import json
 from typing import Any
 
+from app.core.config import settings
 from app.core import database as database_module
 from app.core.redis_client import redis_client
 from app.models.market_watch import MarketWatchEvent
@@ -66,15 +67,18 @@ def is_in_cooldown(user_id: int, stock_code: str, cooldown_minutes: int) -> bool
     return event is not None
 
 
-def cleanup_old_events(retention_days: int = DEFAULT_EVENT_RETENTION_DAYS) -> int:
+def cleanup_old_events(retention_days: int) -> int:
     """
-    Delete audit events older than the retention window.
+    删除超过保留窗口的盯盘审计事件。
 
     Args:
-        retention_days: Number of recent days to retain.
+        retention_days: 保留最近多少天的事件。
 
     Returns:
-        Number of deleted rows.
+        删除的事件行数。
+
+    Raises:
+        ValueError: 保留天数小于或等于 0。
     """
     if retention_days <= 0:
         raise ValueError("retention_days must be greater than 0")
@@ -94,21 +98,24 @@ def query_market_watch_events(
     since: datetime | None = None,
 ) -> list[MarketWatchEvent]:
     """
-    Query recent market watch audit events.
+    查询用户最近的盯盘审计事件。
 
     Args:
-        user_id: Current user ID.
-        limit: Maximum row count.
-        event_type: Optional event type filter.
-        since: Optional lower bound; defaults to the 90-day retention window.
+        user_id: 当前用户 ID。
+        limit: 最大返回行数。
+        event_type: 可选事件类型过滤条件。
+        since: 可选时间下界；为空时使用配置的保留窗口。
 
     Returns:
-        Events ordered newest first.
+        按创建时间倒序排列的事件列表。
+
+    Raises:
+        ValueError: 返回数量超出允许范围。
     """
     if limit < 1 or limit > MAX_EVENT_LIMIT:
         raise ValueError("limit must be between 1 and 200")
 
-    lower_bound = since or (datetime.now() - timedelta(days=DEFAULT_EVENT_RETENTION_DAYS))
+    lower_bound = since or (datetime.now() - timedelta(days=settings.MARKET_WATCH_EVENT_RETENTION_DAYS))
     with database_module.SessionLocal() as db:
         query = db.query(MarketWatchEvent).filter(
             MarketWatchEvent.user_id == user_id,
@@ -145,7 +152,7 @@ def query_market_watch_decisions(
     if page_size < 1 or page_size > MAX_DECISION_PAGE_SIZE:
         raise ValueError("page_size must be between 1 and 50")
 
-    lower_bound = datetime.now() - timedelta(days=DEFAULT_EVENT_RETENTION_DAYS)
+    lower_bound = datetime.now() - timedelta(days=settings.MARKET_WATCH_EVENT_RETENTION_DAYS)
     with database_module.SessionLocal() as db:
         query = db.query(MarketWatchEvent).filter(
             MarketWatchEvent.user_id == user_id,
