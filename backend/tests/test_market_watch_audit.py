@@ -10,6 +10,7 @@ from app.ai.market_watch.audit import (
     cleanup_old_events,
     is_in_cooldown,
     publish_market_watch_event,
+    query_market_watch_decisions,
     query_market_watch_events,
 )
 from app.models.market_watch import MarketWatchEvent
@@ -212,6 +213,55 @@ def test_query_market_watch_events_rejects_invalid_limit(test_db) -> None:
 
     with pytest.raises(ValueError, match="limit must be between 1 and 200"):
         query_market_watch_events(user_id=1, limit=201)
+
+
+def test_query_market_watch_decisions_returns_paginated_ai_rounds(test_db) -> None:
+    session_factory = test_db
+    db = session_factory()
+    _create_user(db)
+    _create_user(db, user_id=2)
+    oldest = _add_event(
+        db,
+        user_id=1,
+        event_type="ai_decision",
+        watch_ai_decision={"stock_code": "000001"},
+        created_at=datetime.now() - timedelta(minutes=3),
+    )
+    middle = _add_event(
+        db,
+        user_id=1,
+        event_type="ai_decision",
+        watch_ai_decision={"stock_code": "000002"},
+        created_at=datetime.now() - timedelta(minutes=2),
+    )
+    newest = _add_event(
+        db,
+        user_id=1,
+        event_type="ai_decision",
+        watch_ai_decision={"stock_code": "000003"},
+        created_at=datetime.now() - timedelta(minutes=1),
+    )
+    _add_event(db, user_id=1, event_type="scan")
+    _add_event(db, user_id=2, event_type="ai_decision")
+
+    first_page, total = query_market_watch_decisions(user_id=1, page=1, page_size=2)
+    second_page, second_total = query_market_watch_decisions(user_id=1, page=2, page_size=2)
+
+    assert total == 3
+    assert second_total == 3
+    assert [event.event_id for event in first_page] == [newest.event_id, middle.event_id]
+    assert [event.event_id for event in second_page] == [oldest.event_id]
+
+
+def test_query_market_watch_decisions_rejects_invalid_pagination(test_db) -> None:
+    session_factory = test_db
+    db = session_factory()
+    _create_user(db)
+
+    with pytest.raises(ValueError, match="page must be greater than or equal to 1"):
+        query_market_watch_decisions(user_id=1, page=0)
+    with pytest.raises(ValueError, match="page_size must be between 1 and 50"):
+        query_market_watch_decisions(user_id=1, page_size=51)
 
 
 @pytest.mark.asyncio

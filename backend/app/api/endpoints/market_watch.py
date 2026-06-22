@@ -15,9 +15,11 @@ from app.core.websocket_ticket import (
 from app.ai.market_watch.audit import (
     MARKET_WATCH_DOCUMENTS_CHANNEL,
     MARKET_WATCH_EVENTS_CHANNEL,
+    query_market_watch_decisions,
     query_market_watch_events,
 )
 from app.ai.market_watch.schemas import (
+    MarketWatchDecisionPage,
     MarketWatchEventSchema,
     MarketWatchMarkdownDocument,
     MarketWatchSettingsResponse,
@@ -117,6 +119,36 @@ def read_market_watch_events(
         limit=limit,
         event_type=event_type,
         since=since,
+    )
+
+
+@router.get("/decisions", response_model=MarketWatchDecisionPage)
+def read_market_watch_decisions(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(5, ge=1, le=50),
+    current_user: User = Depends(get_current_user),
+) -> MarketWatchDecisionPage:
+    """
+    分页返回当前用户的 AI 决策轮次。
+
+    Args:
+        page: 页码，从 1 开始。
+        page_size: 每页返回的决策轮次数量。
+        current_user: 当前已认证用户。
+
+    Returns:
+        当前页决策事件、总轮次数和分页参数。
+    """
+    items, total = query_market_watch_decisions(
+        user_id=current_user.id,
+        page=page,
+        page_size=page_size,
+    )
+    return MarketWatchDecisionPage(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
     )
 
 
