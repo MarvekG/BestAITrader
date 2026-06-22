@@ -1210,6 +1210,7 @@
     "final_url": "Final URL",
     "decision_result": "AI Decision Results",
     "decision_updated_at": "Updated: {{time}}",
+    "decision_rounds_total": "{{total}} rounds",
     "no_ai_decision": "No AI decision results",
     "confidence": "Confidence",
     "trigger_reason": "Trigger Reason",

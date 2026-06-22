@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 
 from app.ai.market_watch.schemas import DEFAULT_MARKET_WATCH_SCAN_INTERVAL_SECONDS, MarketWatchMarkdownDocument
@@ -199,3 +199,39 @@ def test_market_watch_events_returns_current_user_events(client, auth_headers, d
     assert "target_stock_code" not in payload[0]
     assert "target_stock_name" not in payload[0]
     assert "summary" not in payload[0]
+
+
+def test_market_watch_decisions_returns_paginated_current_user_rounds(client, auth_headers, db_session) -> None:
+    settings_response = client.get("/api/v1/market-watch/settings", headers=auth_headers)
+    user_id = settings_response.json()["user_id"]
+    for index in range(3):
+        db_session.add(
+            MarketWatchEvent(
+                user_id=user_id,
+                event_type="ai_decision",
+                status="success",
+                watch_ai_decision={"stock_code": f"00000{index + 1}"},
+                created_at=datetime.now() + timedelta(seconds=index),
+            )
+        )
+    db_session.add(
+        MarketWatchEvent(
+            user_id=user_id,
+            event_type="scan",
+            status="success",
+            created_at=datetime.now() + timedelta(seconds=4),
+        )
+    )
+    db_session.commit()
+
+    response = client.get(
+        "/api/v1/market-watch/decisions?page=2&page_size=2",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 3
+    assert payload["page"] == 2
+    assert payload["page_size"] == 2
+    assert [item["watch_ai_decision"]["stock_code"] for item in payload["items"]] == ["000001"]

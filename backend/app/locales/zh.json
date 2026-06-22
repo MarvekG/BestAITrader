@@ -1210,6 +1210,7 @@
     "final_url": "最终 URL",
     "decision_result": "AI 决策结果",
     "decision_updated_at": "更新：{{time}}",
+    "decision_rounds_total": "共 {{total}} 轮",
     "no_ai_decision": "暂无 AI 决策结果",
     "confidence": "置信度",
     "trigger_reason": "触发原因",

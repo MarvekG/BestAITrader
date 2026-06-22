@@ -14,6 +14,8 @@ MARKET_WATCH_DOCUMENTS_CHANNEL = "market_watch_documents"
 DEFAULT_EVENT_RETENTION_DAYS = 90
 DEFAULT_EVENT_LIMIT = 50
 MAX_EVENT_LIMIT = 200
+DEFAULT_DECISION_PAGE_SIZE = 5
+MAX_DECISION_PAGE_SIZE = 50
 
 
 def is_in_cooldown(user_id: int, stock_code: str, cooldown_minutes: int) -> bool:
@@ -116,6 +118,48 @@ def query_market_watch_events(
             query = query.filter(MarketWatchEvent.event_type == event_type)
 
         return query.order_by(MarketWatchEvent.created_at.desc()).limit(limit).all()
+
+
+def query_market_watch_decisions(
+    *,
+    user_id: int,
+    page: int = 1,
+    page_size: int = DEFAULT_DECISION_PAGE_SIZE,
+) -> tuple[list[MarketWatchEvent], int]:
+    """
+    分页查询用户的 AI 决策轮次。
+
+    Args:
+        user_id: 当前用户 ID。
+        page: 页码，从 1 开始。
+        page_size: 每页返回的决策轮次数量。
+
+    Returns:
+        按时间倒序排列的决策事件列表和符合条件的总轮次数。
+
+    Raises:
+        ValueError: 页码或每页数量超出允许范围。
+    """
+    if page < 1:
+        raise ValueError("page must be greater than or equal to 1")
+    if page_size < 1 or page_size > MAX_DECISION_PAGE_SIZE:
+        raise ValueError("page_size must be between 1 and 50")
+
+    lower_bound = datetime.now() - timedelta(days=DEFAULT_EVENT_RETENTION_DAYS)
+    with database_module.SessionLocal() as db:
+        query = db.query(MarketWatchEvent).filter(
+            MarketWatchEvent.user_id == user_id,
+            MarketWatchEvent.event_type == "ai_decision",
+            MarketWatchEvent.created_at >= lower_bound,
+        )
+        total = query.count()
+        items = (
+            query.order_by(MarketWatchEvent.created_at.desc(), MarketWatchEvent.event_id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+    return items, total
 
 
 async def publish_market_watch_event(event: MarketWatchEvent) -> int:

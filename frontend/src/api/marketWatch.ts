@@ -125,6 +125,18 @@ export interface MarketWatchEventsQuery {
   since?: string;
 }
 
+export interface MarketWatchDecisionPage {
+  items: MarketWatchEvent[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface MarketWatchDecisionsQuery {
+  page?: number;
+  page_size?: number;
+}
+
 export type MarketWatchWsMessage = {
   type: 'market_watch_event';
   event: MarketWatchEvent;
@@ -154,5 +166,9 @@ export const marketWatchApi = {
 
   getEvents: async (params: MarketWatchEventsQuery = {}) => {
     return apiClient.get<MarketWatchEvent[]>('/market-watch/events', { params });
+  },
+
+  getDecisions: async (params: MarketWatchDecisionsQuery = {}) => {
+    return apiClient.get<MarketWatchDecisionPage>('/market-watch/decisions', { params });
   },
 };

@@ -12,6 +12,7 @@ import {
   Input,
   InputNumber,
   List,
+  Pagination,
   Row,
   Select,
   Space,
@@ -68,6 +69,7 @@ const eventStatusColor: Record<string, string> = {
   failed: 'red',
 };
 const MAX_SOURCE_DOCUMENT_ROUNDS = 5;
+const DECISION_PAGE_SIZE = 5;
 const sourceDocumentMarkdownStyle: React.CSSProperties = {
   maxHeight: 260,
   overflowY: 'auto',
@@ -266,6 +268,10 @@ export const MarketWatchPage: React.FC = () => {
   const [sourcePreviewDocument, setSourcePreviewDocument] = React.useState<MarketWatchMarkdownDocument | null>(null);
   const [events, setEvents] = React.useState<MarketWatchEvent[]>([]);
   const [eventsLoading, setEventsLoading] = React.useState(false);
+  const [decisionEvents, setDecisionEvents] = React.useState<MarketWatchEvent[]>([]);
+  const [decisionPage, setDecisionPage] = React.useState(1);
+  const [decisionTotal, setDecisionTotal] = React.useState(0);
+  const [decisionsLoading, setDecisionsLoading] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [savingSettings, setSavingSettings] = React.useState(false);
   const [sourcePreviewOpen, setSourcePreviewOpen] = React.useState(false);
@@ -289,6 +295,23 @@ export const MarketWatchPage: React.FC = () => {
     }
   }, [message, t]);
 
+  const loadDecisions = React.useCallback(async (page: number) => {
+    setDecisionsLoading(true);
+    try {
+      const result = await marketWatchApi.getDecisions({
+        page,
+        page_size: DECISION_PAGE_SIZE,
+      });
+      setDecisionEvents(result.items);
+      setDecisionPage(result.page);
+      setDecisionTotal(result.total);
+    } catch (error) {
+      message.error(formatErrorMessage(error) || t('market_watch.load_failed'));
+    } finally {
+      setDecisionsLoading(false);
+    }
+  }, [message, t]);
+
   const loadSettings = React.useCallback(async () => {
     try {
       const nextSettings = await marketWatchApi.getSettings();
@@ -302,13 +325,20 @@ export const MarketWatchPage: React.FC = () => {
   const loadDashboard = React.useCallback(async () => {
     setEventsLoading(true);
     try {
-      const [nextSettings, latestEvents] = await Promise.all([
+      const [nextSettings, latestEvents, decisionResult] = await Promise.all([
         marketWatchApi.getSettings(),
         marketWatchApi.getEvents(),
+        marketWatchApi.getDecisions({
+          page: 1,
+          page_size: DECISION_PAGE_SIZE,
+        }),
       ]);
       setSettings(nextSettings);
       settingsForm.setFieldsValue(settingsToFormValues(nextSettings));
       setEvents(latestEvents);
+      setDecisionEvents(decisionResult.items);
+      setDecisionPage(decisionResult.page);
+      setDecisionTotal(decisionResult.total);
     } catch (error) {
       message.error(formatErrorMessage(error) || t('market_watch.load_failed'));
     } finally {
@@ -350,6 +380,9 @@ export const MarketWatchPage: React.FC = () => {
               return;
             }
             setEvents((currentEvents) => [payload.event, ...currentEvents].slice(0, 50));
+            if (payload.event.event_type === 'ai_decision') {
+              void loadDecisions(1);
+            }
           } catch {
             // Ignore malformed real-time messages; historical events remain queryable.
           }
@@ -383,7 +416,7 @@ export const MarketWatchPage: React.FC = () => {
       }
       socketRef.current?.close();
     };
-  }, [loadEvents]);
+  }, [loadDecisions, loadEvents]);
 
   const handleSaveSettings = async () => {
     try {
@@ -578,20 +611,6 @@ export const MarketWatchPage: React.FC = () => {
     },
   ];
 
-  const latestWatchAiDecision = React.useMemo(() => {
-    for (const event of events) {
-      if (event.event_type !== 'ai_decision') {
-        continue;
-      }
-      const decisions = normalizeWatchAiDecisions(event.watch_ai_decision);
-      if (decisions.length > 0) {
-        return { event, decisions };
-      }
-    }
-
-    return null;
-  }, [events]);
-
   return (
     <Space direction="vertical" size="large" style={{ width: '100%' }}>
       <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
@@ -683,68 +702,94 @@ export const MarketWatchPage: React.FC = () => {
             title={t('market_watch.decision_result')}
             style={marketWatchCardStyle}
             styles={{ body: marketWatchCardBodyStyle }}
-            extra={
-              latestWatchAiDecision ? (
-                <Text type="secondary">
-                  {t('market_watch.decision_updated_at', {
-                    time: formatDateTime(latestWatchAiDecision.event.created_at),
-                  })}
-                </Text>
-              ) : null
-            }
             data-testid="watch-ai-decision-card"
           >
             <div style={marketWatchScrollablePanelStyle}>
-              {latestWatchAiDecision ? (
-                <List
-                  dataSource={latestWatchAiDecision.decisions}
-                  renderItem={(decision) => (
-                    <List.Item>
-                      <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                        <Space size={[8, 4]} wrap>
-                          <Text strong>
-                            {decision.stockName} ({decision.stockCode})
-                          </Text>
-                          <Tag color={watchAiActionColor[decision.action] || 'default'}>
-                            {t(`market_watch.ai_actions.${decision.action}`, {
-                              defaultValue: decision.action,
-                            })}
-                          </Tag>
-                          <Tag color={watchAiUrgencyColor[decision.urgency] || 'default'}>
-                            {t(`market_watch.urgencies.${decision.urgency}`, {
-                              defaultValue: decision.urgency,
-                            })}
-                          </Tag>
-                          <Text type="secondary">
-                            {t('market_watch.confidence')}: {formatConfidence(decision.confidence)}
-                          </Text>
-                        </Space>
-                        <Descriptions column={1} size="small" colon={false}>
-                          <Descriptions.Item label={t('market_watch.trigger_reason')}>
-                            <Text style={{ whiteSpace: 'normal' }}>{decision.triggerReason}</Text>
-                          </Descriptions.Item>
-                          <Descriptions.Item label={t('market_watch.evidence_summary')}>
-                            <Text style={{ whiteSpace: 'normal' }}>{decision.evidenceSummary}</Text>
-                          </Descriptions.Item>
-                        </Descriptions>
-                        {decision.debateParameters ? (
-                          <Space size={[8, 4]} wrap>
-                            <Tag>
-                              {t('market_watch.debate_fields.frequency')}:&nbsp;
-                              {decision.debateParameters.trading_frequency}
-                            </Tag>
-                            <Tag>
-                              {t('market_watch.debate_fields.strategy')}:&nbsp;
-                              {decision.debateParameters.trading_strategy}
-                            </Tag>
+              {decisionEvents.length > 0 ? (
+                <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                  <List
+                    loading={decisionsLoading}
+                    dataSource={decisionEvents}
+                    rowKey={(event) => event.event_id || event.created_at || ''}
+                    renderItem={(event) => {
+                      const decisions = normalizeWatchAiDecisions(event.watch_ai_decision);
+                      return (
+                        <List.Item>
+                          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                            <Text type="secondary">
+                              {t('market_watch.decision_updated_at', {
+                                time: formatDateTime(event.created_at),
+                              })}
+                            </Text>
+                            <List
+                              dataSource={decisions}
+                              rowKey={(decision) => `${event.event_id}-${decision.stockCode}`}
+                              renderItem={(decision) => (
+                                <List.Item>
+                                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                                    <Space size={[8, 4]} wrap>
+                                      <Text strong>
+                                        {decision.stockName} ({decision.stockCode})
+                                      </Text>
+                                      <Tag color={watchAiActionColor[decision.action] || 'default'}>
+                                        {t(`market_watch.ai_actions.${decision.action}`, {
+                                          defaultValue: decision.action,
+                                        })}
+                                      </Tag>
+                                      <Tag color={watchAiUrgencyColor[decision.urgency] || 'default'}>
+                                        {t(`market_watch.urgencies.${decision.urgency}`, {
+                                          defaultValue: decision.urgency,
+                                        })}
+                                      </Tag>
+                                      <Text type="secondary">
+                                        {t('market_watch.confidence')}: {formatConfidence(decision.confidence)}
+                                      </Text>
+                                    </Space>
+                                    <Descriptions column={1} size="small" colon={false}>
+                                      <Descriptions.Item label={t('market_watch.trigger_reason')}>
+                                        <Text style={{ whiteSpace: 'normal' }}>{decision.triggerReason}</Text>
+                                      </Descriptions.Item>
+                                      <Descriptions.Item label={t('market_watch.evidence_summary')}>
+                                        <Text style={{ whiteSpace: 'normal' }}>{decision.evidenceSummary}</Text>
+                                      </Descriptions.Item>
+                                    </Descriptions>
+                                    {decision.debateParameters ? (
+                                      <Space size={[8, 4]} wrap>
+                                        <Tag>
+                                          {t('market_watch.debate_fields.frequency')}:&nbsp;
+                                          {decision.debateParameters.trading_frequency}
+                                        </Tag>
+                                        <Tag>
+                                          {t('market_watch.debate_fields.strategy')}:&nbsp;
+                                          {decision.debateParameters.trading_strategy}
+                                        </Tag>
+                                      </Space>
+                                    ) : null}
+                                  </Space>
+                                </List.Item>
+                              )}
+                            />
                           </Space>
-                        ) : null}
-                      </Space>
-                    </List.Item>
-                  )}
-                />
+                        </List.Item>
+                      );
+                    }}
+                  />
+                  <Pagination
+                    current={decisionPage}
+                    pageSize={DECISION_PAGE_SIZE}
+                    total={decisionTotal}
+                    showSizeChanger={false}
+                    showTotal={(total) => t('market_watch.decision_rounds_total', { total })}
+                    onChange={(page) => {
+                      void loadDecisions(page);
+                    }}
+                  />
+                </Space>
               ) : (
-                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('market_watch.no_ai_decision')} />
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={t('market_watch.no_ai_decision')}
+                />
               )}
             </div>
           </Card>
