@@ -1182,6 +1182,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
    - 本次交易是否导致单股仓位、行业集中度或组合回撤风险过高？
    - 预期收益是否足以覆盖交易成本、滑点、印花税和错误交易成本？
    - 没有足够优势时，减少交易优先于频繁调仓。
+   - 当目标股票仓位较小或账户现金比例已经较高时，必须区分个股风险和组合边际风险贡献；除非量化说明对组合回撤、集中度、行业暴露或流动性的边际影响，否则不得把小仓位清仓描述为显著改善组合风险。
 
 4. **市场预期与周期位置（席勒 / 霍华德·马克斯）**:
    - 当前好消息或坏消息是否已经被价格充分反映？
@@ -2121,6 +2122,7 @@ inside `report_markdown` as a table:
    - Would this trade create excessive single-stock exposure, industry concentration, or portfolio drawdown risk?
    - Is the expected return enough to cover commissions, slippage, stamp duty, and error cost?
    - When edge is insufficient, trading less is preferable to frequent rebalancing.
+   - When the target-stock position is small or account cash ratio is already high, distinguish single-stock risk from marginal portfolio risk contribution; do not describe liquidating a small position as a major portfolio-risk improvement unless you quantify its marginal impact on drawdown, concentration, industry exposure, or liquidity.
 
 4. **Market expectations and cycle position (Shiller / Howard Marks)**:
    - Are good or bad news already priced in?
