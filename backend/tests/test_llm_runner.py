@@ -165,3 +165,81 @@ async def test_run_analysis_task_passes_trigger_reason_to_initial_state(db_sessi
         "trigger_reason": "Strong anomaly and news context",
         "evidence_summary": "Quote anomaly and news are aligned.",
     }
+
+
+@pytest.mark.asyncio
+async def test_run_analysis_task_passes_discipline_trigger_to_initial_state(db_session, monkeypatch, test_db) -> None:
+    """后台分析任务应把持仓纪律触发信息传入工作流初始上下文。
+
+    Args:
+        db_session: 测试数据库会话。
+        monkeypatch: pytest monkeypatch 工具。
+        test_db: 测试数据库会话工厂。
+    """
+    import app.api.endpoints.debate_ws as debate_ws_module
+    import app.ai.llm_engine.runner as runner_module
+
+    user = User(
+        username="runner_discipline_user",
+        email="runner_discipline_user@example.com",
+        password_hash="hashed",
+    )
+    db_session.add(user)
+    db_session.flush()
+    session_id = uuid4()
+    db_session.add(
+        SessionModel(
+            session_id=session_id,
+            user_id=user.id,
+            stock_code="000001.SZ",
+            trading_frequency="daily",
+            trading_strategy="value",
+        )
+    )
+    db_session.commit()
+    captured = {}
+
+    class _FakeWorkflow:
+        async def ainvoke(self, initial_state):
+            """记录传入工作流的初始状态。
+
+            Args:
+                initial_state: 传入工作流的初始状态。
+
+            Returns:
+                带空错误列表的工作流状态。
+            """
+            captured["initial_state"] = initial_state
+            return {**initial_state, "errors": []}
+
+    async def _fake_send_debate_status(*_args, **_kwargs):
+        """跳过 WebSocket 状态推送。
+
+        Args:
+            *_args: 原状态推送调用的位置参数。
+            **_kwargs: 原状态推送调用的关键字参数。
+        """
+        return None
+
+    discipline_trigger = {
+        "trigger_type": "stop_loss",
+        "threshold": "9.5000",
+        "latest_price": "9.40",
+        "source_pm_session_id": str(uuid4()),
+        "source": "position_discipline",
+    }
+    monkeypatch.setattr(runner_module, "SessionLocal", test_db)
+    monkeypatch.setattr(runner_module, "task_manager", _FakeTaskManager())
+    monkeypatch.setattr(runner_module, "create_analyst_workflow", lambda: _FakeWorkflow())
+    monkeypatch.setattr(debate_ws_module, "send_debate_status", _fake_send_debate_status)
+
+    await run_analysis_task(
+        task_id="task-runner-discipline-trigger",
+        stock_code="000001.SZ",
+        trading_frequency="daily",
+        trading_strategy="value",
+        session_id=str(session_id),
+        discipline_trigger=discipline_trigger,
+    )
+
+    assert captured["initial_state"]["static_context"]["discipline_trigger"] == discipline_trigger

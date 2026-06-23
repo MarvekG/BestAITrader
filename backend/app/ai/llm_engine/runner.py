@@ -62,6 +62,7 @@ def _build_initial_state(
     session_id: Optional[str],
     trigger_reason: Optional[str] = None,
     evidence_summary: Optional[str] = None,
+    discipline_trigger: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """构建 AI 分析工作流初始状态。
 
@@ -72,6 +73,7 @@ def _build_initial_state(
         session_id: 会话 ID 字符串。
         trigger_reason: 盯盘自动启动辩论时传入的触发原因。
         evidence_summary: 盯盘自动启动辩论时传入的证据摘要。
+        discipline_trigger: 持仓纪律扫描触发复议时传入的结构化触发上下文。
 
     Returns:
         可传入 LangGraph 工作流的初始状态。
@@ -86,6 +88,8 @@ def _build_initial_state(
         if evidence_summary:
             trigger_context["evidence_summary"] = evidence_summary
         static_context["market_watch_trigger"] = trigger_context
+    if discipline_trigger:
+        static_context["discipline_trigger"] = discipline_trigger
 
     return {
         "stock_code": stock_code,
@@ -115,6 +119,7 @@ async def run_analysis_task(
     session_id: Optional[str] = None,
     trigger_reason: Optional[str] = None,
     evidence_summary: Optional[str] = None,
+    discipline_trigger: Optional[dict[str, Any]] = None,
 ):
     """运行后台 AI 分析任务并维护任务状态。
 
@@ -126,6 +131,7 @@ async def run_analysis_task(
         session_id: 会话 ID；存在时用于绑定用户上下文并持久化报告。
         trigger_reason: 盯盘自动启动辩论时传入的触发原因。
         evidence_summary: 盯盘自动启动辩论时传入的证据摘要。
+        discipline_trigger: 持仓纪律扫描触发复议时传入的结构化触发上下文。
     """
     request_token = set_request_id(task_id)
     user_token = None
@@ -153,6 +159,7 @@ async def run_analysis_task(
             session_id,
             trigger_reason,
             evidence_summary,
+            discipline_trigger,
         )
 
         # Run the graph (Long running async call, NO DB session held here)

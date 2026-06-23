@@ -98,6 +98,17 @@ async def test_discipline_scan_skips_duplicate_latest_stock_trigger(db_session, 
     assert second["debate_launches"][0]["status"] == "skipped"
     assert second["debate_launches"][0]["reason"] == "duplicate_discipline_trigger"
     assert len(launcher_calls) == 1
+    expected_trigger = {
+        "trigger_type": "stop_loss",
+        "threshold": "9.5000",
+        "latest_price": "9.40",
+        "source_pm_session_id": str(pm_session_id),
+        "source": "position_discipline",
+    }
+    assert launcher_calls[0]["discipline_trigger"] == expected_trigger
+
+    task = db_session.query(AsyncTask).one()
+    assert task.parameters["discipline_trigger"] == expected_trigger
 
     setting = (
         db_session.query(SystemSetting)

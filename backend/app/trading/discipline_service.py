@@ -180,12 +180,20 @@ async def _handle_position_discipline_trigger(
     if not settings.auto_launch_debate:
         return {"status": "skipped", "reason": "auto_launch_disabled", "stock_code": item["stock_code"]}
 
+    discipline_trigger = {
+        "trigger_type": item["trigger"],
+        "threshold": str(item["threshold"]),
+        "latest_price": str(item["latest_price"]) if item["latest_price"] is not None else None,
+        "source_pm_session_id": str(item["pm_session_id"]) if item["pm_session_id"] is not None else None,
+        "source": "position_discipline",
+    }
     launch = await _create_and_schedule_position_discipline_debate(
         user_id=user_id,
         decision=decision,
         debate_launcher=debate_launcher,
         background_tasks=background_tasks,
         session_source=PM_DISCIPLINE_SESSION_SOURCES.get(item["trigger"], "market_watch"),
+        discipline_trigger=discipline_trigger,
     )
     if launch.get("status") == "failed":
         return {"stock_code": item["stock_code"], **launch}
@@ -228,6 +236,7 @@ async def _create_and_schedule_position_discipline_debate(
     debate_launcher: Any | None,
     background_tasks: BackgroundTasks | None,
     session_source: str,
+    discipline_trigger: dict[str, Any],
 ) -> dict[str, Any]:
     """创建止损止盈复议会话和任务，并调度后台分析。
 
@@ -237,6 +246,7 @@ async def _create_and_schedule_position_discipline_debate(
         debate_launcher: 测试或调度器注入的任务启动器。
         background_tasks: API 手动扫描时使用的后台任务。
         session_source: 新建会话来源。
+        discipline_trigger: 持仓纪律扫描生成的结构化触发上下文。
 
     Returns:
         新建会话 ID 和任务 ID。
@@ -262,6 +272,7 @@ async def _create_and_schedule_position_discipline_debate(
             "stock_code": stock_code,
             "trading_frequency": trading_frequency,
             "trading_strategy": trading_strategy,
+            "discipline_trigger": discipline_trigger,
         }
         task_info = task_manager.submit_task(
             db=db,
@@ -281,6 +292,7 @@ async def _create_and_schedule_position_discipline_debate(
         "trading_strategy": trading_strategy,
         "trigger_reason": decision.trigger_reason,
         "evidence_summary": decision.evidence_summary,
+        "discipline_trigger": discipline_trigger,
     }
     try:
         await _schedule_position_discipline_debate_task(
