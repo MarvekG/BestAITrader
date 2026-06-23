@@ -965,6 +965,8 @@ async def test_scan_breaks_cooldown_for_high_confidence_decision_with_news_evide
     assert result["debate_launch"]["status"] == "launched"
     assert result["debate_launch"]["cooldown_broken"] is True
     assert len(launcher_calls) == 1
+    task = db_session.query(AsyncTask).filter(AsyncTask.task_id == result["debate_launch"]["task_id"]).one()
+    assert task.user_id == user.id
 
 
 @pytest.mark.asyncio
