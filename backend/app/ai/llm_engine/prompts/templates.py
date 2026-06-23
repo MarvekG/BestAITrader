@@ -1243,7 +1243,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 `stop_loss`、`take_profit`、`holding_horizon_days` 三个结构化字段（写入持仓监控，由盘中扫描判定触发）；
 `report_markdown` 文本中的其他纪律、触发条件不会被系统自动执行，只能作为下一轮辩论的参考。
 在输出最终 JSON 前必须自检：如果正文中的最近止盈/止损/复议价格与结构化 `stop_loss` / `take_profit` 不一致，必须调整结构化字段或删除正文中的不可执行触发承诺。
-若本轮由 `stop_loss` 触发复议，报告必须写明触发阈值、最新价、结构化 `stop_loss` 是否等于触发阈值；若最终卖出或清仓，结构化 `stop_loss` 默认记录本轮触发阈值，不得改成未触发的旧硬止损价或未来参考价，除非明确说明这是新的持仓监控线。
+若本轮由 `stop_loss` 触发复议，报告必须写明触发阈值、最新价、结构化 `stop_loss` 是否等于触发阈值；触发本身不得作为机械清仓的充分理由，必须基于最新证据比较继续持有、分步减仓、一次性清仓的风险收益；若最终卖出或清仓，结构化 `stop_loss` 默认记录本轮触发阈值，不得改成未触发的旧硬止损价或未来参考价，除非明确说明这是新的持仓监控线。
 
 **数据原则**: 严格基于 Context 与你主动补充后获得的已验证工具结果进行分析，**严禁编造**任何数值、指标或事件。如果关键数据在 Context 中缺失，应先按证据补全要求小范围补证；补证后仍缺失，才明确说明“数据缺失”。
 **可直接使用的关键输入**:
@@ -2182,7 +2182,7 @@ the system", "reflected in the position system", "set", "registered", or any equ
 intraday scan). Other disciplines or trigger conditions written in `report_markdown` are NOT executed
 automatically; they only inform the next debate.
 Before final JSON output, self-check: if the nearest take-profit, stop-loss, or review price in the text conflicts with structured `stop_loss` / `take_profit`, adjust the structured field or remove the unexecutable text commitment.
-If this round was triggered by `stop_loss`, the report must state the trigger threshold, latest price, and whether structured `stop_loss` equals the trigger threshold. For a final sell or liquidation, structured `stop_loss` should by default record this trigger threshold; do not replace it with an untriggered old hard stop or future reference price unless you explicitly state it is the new position-monitoring line.
+If this round was triggered by `stop_loss`, the report must state the trigger threshold, latest price, and whether structured `stop_loss` equals the trigger threshold. The trigger itself is not sufficient reason for mechanical liquidation; compare the risk/reward of holding, staged trimming, and one-shot liquidation using updated evidence. For a final sell or liquidation, structured `stop_loss` should by default record this trigger threshold; do not replace it with an untriggered old hard stop or future reference price unless you explicitly state it is the new position-monitoring line.
 
 **Data Principle**: Strictly analyze based on the Context plus verified tool results you actively obtain. **Do not fabricate** any values, indicators, or events. If key data is missing from the Context, first fill the gap narrowly; only state "Data Missing" after the follow-up effort still fails.
 **Direct Inputs You Should Use**:
