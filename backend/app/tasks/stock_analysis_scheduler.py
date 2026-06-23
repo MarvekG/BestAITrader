@@ -295,6 +295,7 @@ async def _launch_analysis(
                     "user_id": stock.user_id,
                 },
                 allow_concurrent=False,
+                user_id=stock.user_id,
             )
             if not task_info.get("new_task", True):
                 return None
