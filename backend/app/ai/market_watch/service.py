@@ -948,6 +948,7 @@ async def _create_and_schedule_debate(
             task_type="ai_analysis",
             parameters=task_parameters,
             allow_concurrent=False,
+            user_id=user_id,
         )
         task_id = task_info["task_id"]
 
