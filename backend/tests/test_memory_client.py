@@ -65,7 +65,7 @@ async def test_recall_returns_memoflux_data_with_session(monkeypatch):
     mock_post.assert_awaited_once_with(
         "/v1/recall",
         {"session": "user:7:stock:workspace:atlas", "query": "Atlas rollout 最新历史记录是什么？"},
-        timeout_seconds=30.0,
+        timeout_seconds=90.0,
         operation="recall",
     )
     assert result == {
@@ -427,7 +427,11 @@ def test_record_error_uses_stable_http_status_message():
     request = httpx.Request("POST", "http://memoflux/v1/recall")
     response = httpx.Response(503, request=request, json={"detail": "backend warming up"})
 
-    client._record_error("recall", "/v1/recall", httpx.HTTPStatusError("raw upstream text", request=request, response=response))
+    client._record_error(
+        "recall",
+        "/v1/recall",
+        httpx.HTTPStatusError("raw upstream text", request=request, response=response),
+    )
 
     assert client.get_last_error("recall") == {
         "operation": "recall",

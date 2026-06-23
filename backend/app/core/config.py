@@ -123,7 +123,7 @@ class Settings(BaseSettings):
     # Memory Service Config
     MEMORY_SERVICE_ENABLED: bool = True
     MEMORY_SERVICE_BASE_URL: str = "http://memo:8020"
-    MEMORY_SERVICE_TIMEOUT_SECONDS: float = 10.0
+    MEMORY_SERVICE_TIMEOUT_SECONDS: float = 90.0
 
     # Webfetch Service Config
     WEBFETCH_BASE_URL: str = "http://webfetch:8010"
