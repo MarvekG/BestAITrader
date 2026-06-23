@@ -1131,6 +1131,13 @@
     "stock_analysis_history_view": "View",
     "stock_analysis_history_empty": "No research analysis history yet",
     "stock_analysis_refresh_history": "Refresh History",
+    "stock_analysis_clear_history": "Clear History",
+    "stock_analysis_delete_confirm_title": "Delete this research history?",
+    "stock_analysis_delete_confirm_desc": "This action cannot be undone. The research analysis result will be deleted.",
+    "stock_analysis_deleted_msg": "Research history deleted",
+    "stock_analysis_clear_confirm_title": "Clear research history?",
+    "stock_analysis_clear_confirm_desc": "This action cannot be undone. All research analysis history records will be deleted.",
+    "stock_analysis_cleared_msg": "Cleared {{count}} research history records",
     "stock_search_failed": "Failed to search stocks"
   },
   "layout": {

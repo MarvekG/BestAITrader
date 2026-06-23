@@ -96,3 +96,73 @@ def test_submitted_api_task_records_current_user(client, db_session):
     assert response.status_code == 200
     task = db_session.query(AsyncTask).filter(AsyncTask.task_id == response.json()["task_id"]).one()
     assert task.user_id == owner.id
+
+
+def test_delete_task_removes_only_current_user_task(client, db_session):
+    owner, owner_headers = _create_authenticated_user(client, db_session)
+    other, _ = _create_authenticated_user(client, db_session)
+    db_session.add_all(
+        [
+            AsyncTask(
+                task_id="owner-delete-task",
+                user_id=owner.id,
+                task_name="Owner Task",
+                task_type="stock_analysis",
+                status="completed",
+            ),
+            AsyncTask(
+                task_id="other-delete-task",
+                user_id=other.id,
+                task_name="Other Task",
+                task_type="stock_analysis",
+                status="completed",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    own_response = client.delete("/api/v1/tasks/owner-delete-task", headers=owner_headers)
+    other_response = client.delete("/api/v1/tasks/other-delete-task", headers=owner_headers)
+
+    assert own_response.status_code == 204
+    assert other_response.status_code == 404
+    assert db_session.query(AsyncTask).filter(AsyncTask.task_id == "owner-delete-task").first() is None
+    assert db_session.query(AsyncTask).filter(AsyncTask.task_id == "other-delete-task").first() is not None
+
+
+def test_clear_tasks_removes_only_current_user_matching_type(client, db_session):
+    owner, owner_headers = _create_authenticated_user(client, db_session)
+    other, _ = _create_authenticated_user(client, db_session)
+    db_session.add_all(
+        [
+            AsyncTask(
+                task_id="owner-stock-analysis-task",
+                user_id=owner.id,
+                task_name="Owner Stock Analysis Task",
+                task_type="stock_analysis",
+                status="completed",
+            ),
+            AsyncTask(
+                task_id="owner-db-sync-task",
+                user_id=owner.id,
+                task_name="Owner DB Sync Task",
+                task_type="db_sync",
+                status="completed",
+            ),
+            AsyncTask(
+                task_id="other-stock-analysis-task",
+                user_id=other.id,
+                task_name="Other Stock Analysis Task",
+                task_type="stock_analysis",
+                status="completed",
+            ),
+        ]
+    )
+    db_session.commit()
+
+    response = client.delete("/api/v1/tasks/clear?task_type=stock_analysis", headers=owner_headers)
+
+    remaining_task_ids = {task.task_id for task in db_session.query(AsyncTask).all()}
+    assert response.status_code == 200
+    assert response.json()["deleted_count"] == 1
+    assert remaining_task_ids == {"owner-db-sync-task", "other-stock-analysis-task"}

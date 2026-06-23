@@ -26,4 +26,10 @@ export const tasksApi = {
   }): Promise<{ total: number; items: AsyncTaskRecord[]; limit: number; skip: number }> => {
     return apiClient.get('/tasks', { params });
   },
+  deleteTask: async (taskId: string): Promise<void> => {
+    await apiClient.delete(`/tasks/${encodeURIComponent(taskId)}`);
+  },
+  clearTasks: async (params: { task_type: string }): Promise<{ deleted_count: number }> => {
+    return apiClient.delete('/tasks/clear', { params });
+  },
 };

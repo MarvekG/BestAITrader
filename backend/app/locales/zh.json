@@ -1131,6 +1131,13 @@
     "stock_analysis_history_view": "查看",
     "stock_analysis_history_empty": "暂无历史投研分析",
     "stock_analysis_refresh_history": "刷新历史",
+    "stock_analysis_clear_history": "清空历史",
+    "stock_analysis_delete_confirm_title": "删除这条投研历史？",
+    "stock_analysis_delete_confirm_desc": "此操作无法撤销，该投研分析结果将被删除。",
+    "stock_analysis_deleted_msg": "投研历史已删除",
+    "stock_analysis_clear_confirm_title": "清空投研历史？",
+    "stock_analysis_clear_confirm_desc": "此操作无法撤销，将删除所有历史投研分析记录。",
+    "stock_analysis_cleared_msg": "已清空 {{count}} 条投研历史",
     "stock_search_failed": "搜索股票失败"
   },
   "layout": {

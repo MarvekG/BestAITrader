@@ -134,7 +134,7 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
   );
   const { setActiveSession } = useSessionStore();
   const navigate = useNavigate();
-  const { message } = AntdApp.useApp();
+  const { message, modal } = AntdApp.useApp();
 
   const fetchSessions = useCallback(async (page: number, pageSize: number) => {
     setLoading(true);
@@ -208,7 +208,7 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
   };
 
   const handleDelete = async (sessionId: string) => {
-    Modal.confirm({
+    modal.confirm({
       title: t('session.delete_confirm_title'),
       content: t('session.delete_confirm_desc'),
       okText: t('common.confirm'),
@@ -230,7 +230,7 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
   const handleBatchDelete = () => {
     if (selectedRowKeys.length === 0) return;
 
-    Modal.confirm({
+    modal.confirm({
       title: t('session.batch_delete_confirm_title'),
       content: t('session.batch_delete_confirm_desc', { count: selectedRowKeys.length }),
       okText: t('common.confirm'),
@@ -253,7 +253,7 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
   const handleBatchArchive = () => {
     if (selectedRowKeys.length === 0) return;
 
-    Modal.confirm({
+    modal.confirm({
       title: t('session.batch_archive_confirm_title'),
       content: t('session.batch_archive_confirm_desc', { count: selectedRowKeys.length }),
       okText: t('common.confirm'),
@@ -457,7 +457,7 @@ export const StockResearchAnalysisPanel: React.FC<StockResearchAnalysisPanelProp
   const [analysisHistoryTotal, setAnalysisHistoryTotal] = useState(0);
   const [analysisHistoryPage, setAnalysisHistoryPage] = useState(1);
   const [analysisHistoryPageSize, setAnalysisHistoryPageSize] = useState(STOCK_ANALYSIS_HISTORY_PAGE_SIZE);
-  const { message } = AntdApp.useApp();
+  const { message, modal } = AntdApp.useApp();
 
   const loadAnalysisHistory = useCallback(async (page: number, pageSize: number, preferredTaskId?: string) => {
     setLoadingLatestAnalysis(true);
@@ -562,6 +562,50 @@ export const StockResearchAnalysisPanel: React.FC<StockResearchAnalysisPanelProp
     }
   };
 
+  const handleDeleteAnalysisHistory = (task: AsyncTaskRecord) => {
+    modal.confirm({
+      title: t('session.stock_analysis_delete_confirm_title'),
+      content: t('session.stock_analysis_delete_confirm_desc'),
+      okText: t('common.confirm'),
+      cancelText: t('common.cancel'),
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          await tasksApi.deleteTask(task.task_id);
+          message.success(t('session.stock_analysis_deleted_msg'));
+          if (currentAnalysisTask?.task_id === task.task_id) {
+            setCurrentAnalysisTask(null);
+          }
+          await loadAnalysisHistory(1, analysisHistoryPageSize);
+        } catch (error) {
+          const errorMessage = getApiErrorMessage(error, t('common.error'));
+          message.error(errorMessage);
+        }
+      },
+    });
+  };
+
+  const handleClearAnalysisHistory = () => {
+    modal.confirm({
+      title: t('session.stock_analysis_clear_confirm_title'),
+      content: t('session.stock_analysis_clear_confirm_desc'),
+      okText: t('common.confirm'),
+      cancelText: t('common.cancel'),
+      okType: 'danger',
+      onOk: async () => {
+        try {
+          const response = await tasksApi.clearTasks({ task_type: STOCK_ANALYSIS_TASK_TYPE });
+          message.success(t('session.stock_analysis_cleared_msg', { count: response.deleted_count }));
+          setCurrentAnalysisTask(null);
+          await loadAnalysisHistory(1, analysisHistoryPageSize);
+        } catch (error) {
+          const errorMessage = getApiErrorMessage(error, t('common.error'));
+          message.error(errorMessage);
+        }
+      },
+    });
+  };
+
   const analysisResult = getStockAnalysisResult(currentAnalysisTask);
   const analysisStatusColor = useMemo(() => {
     if (!currentAnalysisTask) return 'default';
@@ -600,11 +644,23 @@ export const StockResearchAnalysisPanel: React.FC<StockResearchAnalysisPanelProp
     },
     {
       title: t('session.col_actions'),
-      width: 90,
+      width: 140,
       render: (_: unknown, record: AsyncTaskRecord) => (
-        <Button size="small" onClick={() => setCurrentAnalysisTask(record)}>
-          {t('session.stock_analysis_history_view')}
-        </Button>
+        <Space size={4}>
+          <Button size="small" onClick={() => setCurrentAnalysisTask(record)}>
+            {t('session.stock_analysis_history_view')}
+          </Button>
+          <Button
+            danger
+            size="small"
+            icon={<DeleteOutlined />}
+            onClick={(event) => {
+              event.stopPropagation();
+              handleDeleteAnalysisHistory(record);
+            }}
+            title={t('common.delete')}
+          />
+        </Space>
       ),
     },
   ];
@@ -655,13 +711,23 @@ export const StockResearchAnalysisPanel: React.FC<StockResearchAnalysisPanelProp
         size="small"
         title={t('session.stock_analysis_history')}
         extra={
-          <Button
-            icon={<FolderOpenOutlined />}
-            onClick={() => loadAnalysisHistory(analysisHistoryPage, analysisHistoryPageSize, currentAnalysisTask?.task_id)}
-            loading={loadingLatestAnalysis}
-          >
-            {t('session.stock_analysis_refresh_history')}
-          </Button>
+          <Space size={8}>
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              onClick={handleClearAnalysisHistory}
+              disabled={analysisHistoryTotal === 0}
+            >
+              {t('session.stock_analysis_clear_history')}
+            </Button>
+            <Button
+              icon={<FolderOpenOutlined />}
+              onClick={() => loadAnalysisHistory(analysisHistoryPage, analysisHistoryPageSize, currentAnalysisTask?.task_id)}
+              loading={loadingLatestAnalysis}
+            >
+              {t('session.stock_analysis_refresh_history')}
+            </Button>
+          </Space>
         }
       >
         <Table
