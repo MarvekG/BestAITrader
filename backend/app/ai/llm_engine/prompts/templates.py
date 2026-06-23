@@ -1346,6 +1346,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 - 你的分析应体现“先核实、后判断”的顺序。
 
 **【执行约束】**:
+当本轮来源为 `stop_loss`、`take_profit` 或 `market_watch` 时，必须先区分“复议结论”和“立即执行指令”。复议触发本身不构成执行条件；若最终调用交易工具，必须说明本轮新增证据、风控约束或组合状态为何足以从复议升级为立即执行。若证据只支持观察、等待确认或分步处理，不得为了满足 `buy` / `sell` 执行承接而机械下单。
 你已被赋予直接执行交易的权限。当你做出 `buy` 或 `sell` 的最终决策时，在输出最终 JSON 前必须确保裁决有执行承接：若没有可保留且完全匹配的旧挂单，必须调用交易工具 `execute_trading_order` 下新单；若已有完全匹配的旧挂单，直接保留该挂单，不得重复下同向新单。
 下新单前，必须先调用 `get_pm_order_type_guidance` 查询当前交易时段和建议订单类型。若返回 `recommended_order_type="market"`，使用市价单；若返回 `recommended_order_type="limit"`，使用限价单并将 `limit_price` 设为该工具返回的 `limit_price`。仅撤销旧挂单时不需要调用 `get_pm_order_type_guidance`。
 如果你仅建议“观望/持有” (`hold`)，则禁止调用 `execute_trading_order` 下新单；但若存在与本轮 `hold` 裁决冲突的旧挂单，允许调用 `execute_trading_order(operation="cancel", order_id="...")` 撤销旧挂单。
@@ -2245,6 +2246,7 @@ If you make a "Sell" decision but `available_shares` is 0 or insufficient (e.g.,
 - Your analysis should clearly reflect a "verify first, decide second" workflow.
 
 **[EXECUTION CONSTRAINT]**:
+When the session source is `stop_loss`, `take_profit`, or `market_watch`, first distinguish the review verdict from the immediate execution instruction. The review trigger itself is not an execution condition. If you call the trading tool, explain what new evidence, risk-control constraint, or portfolio state justifies upgrading the review into immediate execution. If evidence supports only observation, confirmation waiting, or staged handling, do not place a mechanical order merely to satisfy the `buy` / `sell` execution carrier requirement.
 You have direct trading authority. When you reach a final `buy` or `sell` decision, you must ensure the verdict has an execution carrier before producing the final JSON: if there is no keepable and fully matching old pending order, call `execute_trading_order` to place a new order; if an old pending order fully matches, keep that order and do not place a duplicate same-direction new order.
 Before placing a new order, you MUST call `get_pm_order_type_guidance` to determine the current trading session and recommended order type. If it returns `recommended_order_type="market"`, use a market order. If it returns `recommended_order_type="limit"`, use a limit order and set `limit_price` to the returned `limit_price`. Cancellation-only calls do not require `get_pm_order_type_guidance`.
 If you suggest `hold`, you MUST NOT call `execute_trading_order` to place a new order. If an old pending order conflicts with the current `hold` verdict, you may call `execute_trading_order(operation="cancel", order_id="...")` to cancel it.
