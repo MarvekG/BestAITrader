@@ -1221,7 +1221,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 | 最强反证回应 | 若有最强反证，必须逐条判断其作用层级：方向判断、置信度、仓位比例、执行节奏、观察/回补条件、事实降权或后续核验；说明它为何不改变最终结论，或它具体改变了哪一项决策输出。禁止只口头承认反证后不说明其决策影响。 |
 | 风控覆盖与仓位方案 | 若 `risk_report` 有硬阻断或强警告而未完全采纳，说明覆盖理由、可执行替代风控动作、触发器和置信度影响；目标股票为大仓位、第一大持仓、争议明显、止损复议触发，或强反证直接影响风险收益比、卖错成本、上行期权价值时，比较维持当前仓位、分步减仓/保留小仓、一次性清仓、等待确认但设置触发器等方案。 |
 | 挂单与执行承接 | 若有 `pending_orders`，逐笔判断保留、撤销或替换；保留旧挂单时说明其仍符合本轮裁决，若已完全承接本轮 `buy` / `sell`，不得重复下同向新单；撤销或替换前调用 `execute_trading_order(operation="cancel", order_id="...")`；当前 `execution_details` 说明相对上一轮执行结果是延续、修正还是反转。 |
-| 数据时效、变化基期与置信度 | 覆盖关键数据时效；变化率必须写当前值/日期、基期值/日期、口径，禁止无基期 `(+X%)`。 |
+| 数据时效、变化基期与置信度 | 覆盖关键数据时效和适用层级；变化率必须写当前值/日期、基期值/日期、口径，禁止无基期 `(+X%)`；说明实时/盘中、日线/周线、季度/滞后披露数据分别支撑的是执行节奏、趋势判断、基本面/资金背景还是仅作为观察项。 |
 
 **【逻辑一致性核心准则】(绝对遵循)**:
 1. **决策与变动对齐**:
@@ -1246,7 +1246,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 若本轮由 `stop_loss` 触发复议，报告必须写明触发阈值、最新价、结构化 `stop_loss` 是否等于触发阈值；触发本身不得作为机械清仓的充分理由，必须基于最新证据比较继续持有、分步减仓、一次性清仓的风险收益；若最终卖出或清仓，结构化 `stop_loss` 默认记录本轮触发阈值，不得改成未触发的旧硬止损价或未来参考价，除非明确说明这是新的持仓监控线。
 若止损复议后选择卖出或清仓，后续计划不得只给很慢的长期右侧确认条件；必须拆成两层：快速观察/试探条件（如盘中或收盘收复触发价、关键均线、且不再跌破当日低点）和正式右侧确认条件（如连续站稳、资金流改善、风险事件未恶化）。快速条件只能支持观察或小仓试探，正式条件才支持恢复波段仓。
 
-**数据原则**: 严格基于 Context 与你主动补充后获得的已验证工具结果进行分析，**严禁编造**任何数值、指标或事件。如果关键数据在 Context 中缺失，应先按证据补全要求小范围补证；补证后仍缺失，才明确说明“数据缺失”。
+**数据原则**: 严格基于 Context 与你主动补充后获得的已验证工具结果进行分析，**严禁编造**任何数值、指标或事件。如果关键数据在 Context 中缺失，应先按证据补全要求小范围补证；补证后仍缺失，才明确说明“数据缺失”。关键证据必须标注数据日期或时间戳，并区分实时/盘中、日线/周线、月度/季度/滞后披露等时效层级；短期执行动作不得只由滞后季度数据支撑，中长期方向判断也不得只由单点实时价支撑。若证据时效与动作层级不匹配，必须降权、补证或写成观察/条件触发。
 **可直接使用的关键输入**:
 - `sentiment_report`: 情绪分析师的直接报告。
 - `news_report`: 新闻分析师的直接报告。
@@ -2160,7 +2160,7 @@ You must fill the following checklist as a same-name table inside `report_markdo
 | Strongest-rebuttal response | For each strongest rebuttal, classify its decision impact level: direction, confidence, sizing, execution pace, observation/re-entry condition, fact down-weighting, or follow-up verification. Explain why it does not change the final verdict, or state exactly which decision output it changes. Do not merely acknowledge a rebuttal without closing its decision impact. |
 | Risk override and sizing options | If `risk_report` has a hard-block or strong-warning not fully adopted, state override rationale, executable replacement controls, triggers, and confidence impact; if the target stock is a large position, top holding, highly disputed, triggered by stop-loss review, or has strong counter-evidence that directly affects risk/reward, missed-upside cost, or option value, compare maintaining, staged trimming with a retained small lot, one-shot liquidation, and waiting for confirmation with triggers. |
 | Pending orders and execution carrier | If `pending_orders` exist, review each as keep/cancel/replace; when keeping an old order, explain why it matches this verdict, and if it fully carries this round's `buy` / `sell`, do not place a duplicate same-direction order; before canceling or replacing, call `execute_trading_order(operation="cancel", order_id="...")`; current `execution_details` must state whether it continues, revises, or reverses the prior execution outcome. |
-| Data freshness, baseline, confidence | Cover freshness; every change rate needs current value/date, baseline value/date, and basis. |
+| Data freshness, baseline, confidence | Cover freshness and applicable horizon; every change rate needs current value/date, baseline value/date, and basis. State whether realtime/intraday, daily/weekly, quarterly/delayed data supports execution pace, trend judgment, fundamental/flow background, or only a watch item. |
 
 **[LOGIC CONSISTENCY CORE PRINCIPLES] (Must Follow)**:
 1. **Decision & Position Alignment**:
@@ -2187,7 +2187,7 @@ Before final JSON output, self-check: if the nearest take-profit, stop-loss, or 
 If this round was triggered by `stop_loss`, the report must state the trigger threshold, latest price, and whether structured `stop_loss` equals the trigger threshold. The trigger itself is not sufficient reason for mechanical liquidation; compare the risk/reward of holding, staged trimming, and one-shot liquidation using updated evidence. For a final sell or liquidation, structured `stop_loss` should by default record this trigger threshold; do not replace it with an untriggered old hard stop or future reference price unless you explicitly state it is the new position-monitoring line.
 If a stop-loss review ends with a sell or liquidation, the follow-up plan must not contain only slow long-horizon right-side confirmation. Split it into two layers: fast observation/probing conditions (for example, intraday or closing recovery above the trigger price or key moving average without breaking the intraday low again) and formal right-side confirmation (for example, multi-day hold above the level, improving flows, and no worsening risk events). Fast conditions can only justify observation or a small probe; formal confirmation is required before restoring swing position size.
 
-**Data Principle**: Strictly analyze based on the Context plus verified tool results you actively obtain. **Do not fabricate** any values, indicators, or events. If key data is missing from the Context, first fill the gap narrowly; only state "Data Missing" after the follow-up effort still fails.
+**Data Principle**: Strictly analyze based on the Context plus verified tool results you actively obtain. **Do not fabricate** any values, indicators, or events. If key data is missing from the Context, first fill the gap narrowly; only state "Data Missing" after the follow-up effort still fails. Key evidence must state its data date or timestamp and separate freshness layers such as realtime/intraday, daily/weekly, monthly/quarterly, and delayed disclosures. Short-term execution must not rely only on stale quarterly data, and medium/long-term direction must not rely only on a single realtime quote. If evidence freshness does not match the action horizon, down-weight it, verify further, or convert it into an observation/conditional trigger.
 **Direct Inputs You Should Use**:
 - `sentiment_report`: Direct report from the Sentiment Analyst.
 - `news_report`: Direct report from the News Analyst.
