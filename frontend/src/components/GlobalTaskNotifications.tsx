@@ -1,5 +1,6 @@
 import React from 'react';
 import { App } from 'antd';
+import axios from 'axios';
 import { useTranslation } from 'react-i18next';
 import { TaskCompletedMessage, WebSocketMessage } from '../services/websocket';
 import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
@@ -59,6 +60,17 @@ export const GlobalTaskNotifications: React.FC = () => {
           });
         }
       } catch (error) {
+        if (axios.isAxiosError(error) && error.response?.status === 404) {
+          clearTaskPollTimer(taskId);
+          message.destroy(taskId);
+          notification.error({
+            message: t('common.task_failed'),
+            description: `${taskName || t('common.task')} (ID: ${taskId})\n${t('common.error')}: ${t('common.error')}`,
+            duration: 5,
+          });
+          return;
+        }
+
         console.error('Failed to poll task status:', error);
       }
     }, taskStatusPollIntervalMs);

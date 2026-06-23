@@ -1,6 +1,11 @@
 from datetime import datetime
 
+import pytest
+
+from app.models.async_task import AsyncTask
 from app.models.stock_warehouse import StockWarehouse
+from app.models.user import User
+from app.tasks import stock_analysis_scheduler
 from app.tasks.stock_analysis_scheduler import is_due_for_auto_analysis
 
 
@@ -90,3 +95,44 @@ def test_auto_analysis_weekly_and_monthly_frequency():
     assert is_due_for_auto_analysis(weekly, datetime(2026, 5, 18, 9, 35)) is True
     assert is_due_for_auto_analysis(monthly, datetime(2026, 5, 18, 10, 0)) is False
     assert is_due_for_auto_analysis(monthly, datetime(2026, 6, 1, 9, 35)) is True
+
+
+@pytest.mark.asyncio
+async def test_auto_analysis_task_records_owner_user_id(db_session, monkeypatch):
+    user = User(username="auto_analysis_owner", email="auto_analysis_owner@example.com", password_hash="hash")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    stock = _warehouse_stock(auto_analysis_run_immediately=True, user_id=user.id)
+    db_session.add(stock)
+    db_session.commit()
+    db_session.refresh(stock)
+
+    class _SessionContext:
+        def __enter__(self):
+            return db_session
+
+        def __exit__(self, exc_type, exc, tb):
+            del exc_type, exc, tb
+
+    async def _noop_sync(_stock_code):
+        return True
+
+    async def _noop_analysis(**_kwargs):
+        return None
+
+    def _create_task(coro, *, name=None):
+        del name
+        coro.close()
+        return None
+
+    monkeypatch.setattr(stock_analysis_scheduler, "SessionLocal", lambda: _SessionContext())
+    monkeypatch.setattr(stock_analysis_scheduler, "_sync_stock_data_before_analysis", _noop_sync)
+    monkeypatch.setattr(stock_analysis_scheduler, "run_analysis_task", _noop_analysis)
+    monkeypatch.setattr(stock_analysis_scheduler.asyncio, "create_task", _create_task)
+
+    launch_info = await stock_analysis_scheduler._launch_analysis(stock.id, datetime(2026, 5, 11, 9, 40))
+
+    task = db_session.query(AsyncTask).filter(AsyncTask.task_id == launch_info["task_id"]).one()
+    assert task.user_id == stock.user_id
