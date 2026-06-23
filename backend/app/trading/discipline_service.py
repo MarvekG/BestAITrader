@@ -154,13 +154,14 @@ async def _handle_position_discipline_trigger(
         trigger_reason=f"{label}: threshold {item['threshold']}, latest price {latest_price}",
         evidence_summary=(
             f"PM position discipline triggered deterministically from session {pm_session_id}. "
-            "This review debate must decide whether to sell or rebalance."
+            "This is a system-monitored risk review trigger; decide whether to hold, trim, sell, or rebalance "
+            "based on updated evidence."
         ),
         debate_parameters=DebateParameters(
             trading_frequency=trading_frequency_to_code(trading_frequency),
             trading_strategy=trading_strategy_to_code(trading_strategy),
             debate_focus=[label],
-            risk_notes=[f"{label} triggered; do not ignore it as advisory-only discipline"],
+            risk_notes=[f"{label} triggered; do not ignore it, but it does not force automatic liquidation"],
         ),
     )
     if _is_duplicate_discipline_trigger(user_id=user_id, item=item):
