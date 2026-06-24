@@ -128,7 +128,7 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
   const [sessionsTotal, setSessionsTotal] = useState(0);
   const [sessionsPage, setSessionsPage] = useState(1);
   const [sessionsPageSize, setSessionsPageSize] = useState(10);
-  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(false);
+  const [autoRefreshEnabled, setAutoRefreshEnabled] = useState(true);
   const [autoRefreshIntervalSeconds, setAutoRefreshIntervalSeconds] = useState(
     DEFAULT_DEBATE_SESSION_AUTO_REFRESH_SECONDS,
   );
