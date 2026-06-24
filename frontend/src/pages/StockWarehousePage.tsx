@@ -16,6 +16,7 @@ import {
   Tabs,
   Tag,
   TimePicker,
+  Typography,
 } from 'antd';
 import {
   DatabaseOutlined,
@@ -62,6 +63,8 @@ type AutoConfigValues = {
   auto_analysis_run_immediately?: boolean;
 };
 
+const { Text } = Typography;
+
 const getApiErrorDetail = (error: unknown) => (error as ApiError)?.response?.data?.detail;
 
 export const StockWarehousePage: React.FC = () => {
@@ -107,6 +110,37 @@ export const StockWarehousePage: React.FC = () => {
       nextSearchParams.set('tab', key);
     }
     setSearchParams(nextSearchParams);
+  };
+
+  const handleCopyText = async (value?: string | null) => {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      message.success(t('common.copy_success'));
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : t('common.error'));
+    }
+  };
+
+  const renderCopyableText = (value?: string | null) => {
+    const displayValue = value || '-';
+    return (
+      <Text
+        title={displayValue}
+        role="button"
+        tabIndex={0}
+        style={{ cursor: value ? 'pointer' : 'default' }}
+        onClick={() => void handleCopyText(value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            void handleCopyText(value);
+          }
+        }}
+      >
+        {displayValue}
+      </Text>
+    );
   };
 
   const fetchStocks = useCallback(async () => {
@@ -481,8 +515,8 @@ export const StockWarehousePage: React.FC = () => {
   });
 
   const columns = [
-    { title: t('stock_basic.stock_code'), dataIndex: 'stock_code', width: 100 },
-    { title: t('stock_basic.name'), dataIndex: 'stock_name', width: 120 },
+    { title: t('stock_basic.stock_code'), dataIndex: 'stock_code', width: 100, render: renderCopyableText },
+    { title: t('stock_basic.name'), dataIndex: 'stock_name', width: 120, render: renderCopyableText },
     { title: t('stock_basic.industry'), dataIndex: 'industry', width: 100},
     { title: t('stock_basic.market'), dataIndex: 'market', render: (v: string) => <Tag color="blue">{v}</Tag> },
     {
