@@ -196,6 +196,16 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
     navigate(`/dashboard?session_id=${encodeURIComponent(session.session_id)}`);
   };
 
+  const handleCopySessionId = async (sessionId: string) => {
+    try {
+      await navigator.clipboard.writeText(sessionId);
+      message.success(t('common.copy_success'));
+    } catch (error) {
+      const errorMessage = getApiErrorMessage(error, t('common.error'));
+      message.error(errorMessage);
+    }
+  };
+
   const handleArchive = async (sessionId: string) => {
     try {
       await sessionApi.archive(sessionId);
@@ -273,7 +283,30 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
   };
 
   const columns = [
-    { title: t('session.col_id'), dataIndex: 'session_id', width: 80, ellipsis: true },
+    {
+      title: t('session.col_id'),
+      dataIndex: 'session_id',
+      width: 120,
+      ellipsis: true,
+      render: (sessionId: string) => (
+        <Text
+          ellipsis
+          title={sessionId}
+          role="button"
+          tabIndex={0}
+          style={{ cursor: 'pointer', maxWidth: 100 }}
+          onClick={() => void handleCopySessionId(sessionId)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              void handleCopySessionId(sessionId);
+            }
+          }}
+        >
+          {sessionId}
+        </Text>
+      ),
+    },
     {
       title: t('session.col_stock'),
       dataIndex: 'stock_name',
