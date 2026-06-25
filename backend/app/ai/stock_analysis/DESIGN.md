@@ -159,7 +159,7 @@ export interface StockAnalysisRequest {
       "success": true
     }
   ],
-  "model": "backend",
+  "model": "openai-compatible",
   "completed_at": "2026-05-26T10:00:00"
 }
 ```

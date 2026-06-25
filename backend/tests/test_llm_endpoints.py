@@ -71,7 +71,7 @@ class _FakeTestingLLM:
                 ],
             )
 
-        if self.model == "backend-thinking":
+        if self.model == "openai-compatible-thinking":
             return AIMessage(content="", additional_kwargs={"reasoning_content": "fake reasoning"})
         additional_kwargs = {}
         return AIMessage(content=f"{self.model} ok", additional_kwargs=additional_kwargs)
@@ -103,8 +103,8 @@ async def test_llm_probe_runs_all_probe_steps():
         patch("app.api.endpoints.llm.build_chat_model", side_effect=_fake_build_chat_model),
         patch("app.api.endpoints.llm._get_real_ai_tools", return_value=[_FakePythonTool()]),
         patch("app.api.endpoints.llm.get_mcp_tools", new=AsyncMock(return_value=[])),
-        patch("app.api.endpoints.llm.settings.LLM_MODEL", "backend"),
-        patch("app.api.endpoints.llm.settings.LLM_THINKING_MODEL", "backend-thinking"),
+        patch("app.api.endpoints.llm.settings.LLM_MODEL", "openai-compatible"),
+        patch("app.api.endpoints.llm.settings.LLM_THINKING_MODEL", "openai-compatible-thinking"),
     ):
         result = await run_llm_probe()
 
@@ -113,13 +113,16 @@ async def test_llm_probe_runs_all_probe_steps():
     assert set(result["checks"]) == {"thinking_mode", "non_thinking_mode", "tool_call", "skills_call"}
     assert result["checks"]["thinking_mode"]["has_reasoning_content"] is True
     assert result["checks"]["thinking_mode"]["reasoning_content_preview"] == "fake reasoning"
-    assert result["checks"]["non_thinking_mode"]["model"] == "backend"
+    assert result["checks"]["non_thinking_mode"]["model"] == "openai-compatible"
     assert result["checks"]["tool_call"]["tool_calls"][0]["name"] == "execute_python_sandboxed"
     assert result["checks"]["skills_call"]["tool_calls"][0]["name"] == "list_skills"
     assert all(call.get("extra_body") is None for call in build_calls)
     assert all(call.get("temperature") == 1 for call in build_calls)
-    assert [call.get("model") for call in build_calls[:2]] == ["backend-thinking", "backend"]
-    thinking_call = next(call for call in build_calls if call.get("model") == "backend-thinking")
+    assert [call.get("model") for call in build_calls[:2]] == [
+        "openai-compatible-thinking",
+        "openai-compatible",
+    ]
+    thinking_call = next(call for call in build_calls if call.get("model") == "openai-compatible-thinking")
     assert thinking_call["max_tokens"] == 512
 
 

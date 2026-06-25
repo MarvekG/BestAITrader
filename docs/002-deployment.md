@@ -26,8 +26,8 @@ git submodule update --init --recursive
 
 - 初始超级用户密码：至少 12 位。
 - LLM API Base URL、API Key、供应商真实模型名：要求兼容 OpenAI `chat/completions` 接口。
-- LiteLLM provider/model 写法：例如 DeepSeek 可填 `deepseek/deepseek-v4-flash`；后端仍使用固定别名 `backend`、
-  `backend-thinking` 和 `memory`。
+- LiteLLM provider/model 写法：例如 DeepSeek 可填 `deepseek/deepseek-v4-flash`；系统默认暴露固定别名
+  `gpt-4o-mini`、`openai-compatible` 和 `openai-compatible-thinking`。
 - Tushare Token：用于 A 股数据接入，建议确认已有足够接口权限。
 - Tavily API Key：用于搜索。
 - NewsAPI API Key：用于新闻检索。
@@ -53,7 +53,7 @@ python3 deploy.py
    Tushare 默认用低门槛 `daily` 日线接口校验；如果返回频率超限，脚本会视为 Token 已被服务端识别但当前暂时限流，并允许继续。
 3. 生成 `backend/.env`、`memo/.env`、`litellm/config.yaml`。
 4. 执行 `docker compose pull`、`docker compose up -d`、`docker compose ps`。
-5. 检查 backend、sandbox、webfetch 和 memo 健康状态，并用生成的 LiteLLM master key 调用 `backend` 模型别名。
+5. 检查 backend、sandbox、webfetch 和 memo 健康状态，并用生成的 LiteLLM master key 调用 `openai-compatible` 模型别名。
 
 已有本地配置时，脚本会先询问是否覆盖。确认要覆盖也可以直接运行：
 

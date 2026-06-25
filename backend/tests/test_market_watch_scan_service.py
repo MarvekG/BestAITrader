@@ -137,7 +137,7 @@ async def test_default_llm_client_leaves_watch_ai_content_for_gate_parser(monkey
     assert result == raw_content
     assert captured_kwargs["role"] == "market_watch"
     assert captured_kwargs["max_tokens"] == 16384
-    assert captured_kwargs["model"] == "backend"
+    assert captured_kwargs["model"] == "openai-compatible"
     assert "extra_body" not in captured_kwargs
 
 
