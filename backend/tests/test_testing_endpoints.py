@@ -26,6 +26,7 @@ async def test_testing_catalog_includes_skills_probe():
     fixed_tools = result["fixed_tools"]
     assert any(item["name"] == "skills" and item["test_route"] == "/testing/skills" for item in fixed_tools)
     assert any(item["name"] == "pdf_tool" and item["test_route"] == "/testing/pdf_tool" for item in fixed_tools)
+    assert all(item["name"] != "tavily" for item in fixed_tools)
     assert all(item["name"] != "llm" for item in fixed_tools)
 
 
@@ -355,9 +356,14 @@ async def test_memory_preview_testing_endpoint_returns_error_when_disabled():
 
 @pytest.mark.asyncio
 async def test_memory_read_testing_endpoint_surfaces_backend_error():
-    with patch("app.api.endpoints.testing.memory_client.recall", AsyncMock(return_value={})), \
-         patch("app.api.endpoints.testing.memory_client.get_last_error", return_value={"message": "memory backend timeout"}), \
-         patch.object(type(memory_client), "enabled", new_callable=PropertyMock, return_value=True):
+    with (
+        patch("app.api.endpoints.testing.memory_client.recall", AsyncMock(return_value={})),
+        patch(
+            "app.api.endpoints.testing.memory_client.get_last_error",
+            return_value={"message": "memory backend timeout"},
+        ),
+        patch.object(type(memory_client), "enabled", new_callable=PropertyMock, return_value=True),
+    ):
         result = await run_memory_read_endpoint()
 
     assert result["status"] == "error"
@@ -366,9 +372,14 @@ async def test_memory_read_testing_endpoint_surfaces_backend_error():
 
 @pytest.mark.asyncio
 async def test_memory_preview_testing_endpoint_surfaces_backend_error():
-    with patch("app.api.endpoints.testing.memory_client.preview_memories", AsyncMock(return_value={})), \
-         patch("app.api.endpoints.testing.memory_client.get_last_error", return_value={"message": "memory backend timeout"}), \
-         patch.object(type(memory_client), "enabled", new_callable=PropertyMock, return_value=True):
+    with (
+        patch("app.api.endpoints.testing.memory_client.preview_memories", AsyncMock(return_value={})),
+        patch(
+            "app.api.endpoints.testing.memory_client.get_last_error",
+            return_value={"message": "memory backend timeout"},
+        ),
+        patch.object(type(memory_client), "enabled", new_callable=PropertyMock, return_value=True),
+    ):
         result = await run_memory_preview_endpoint(
             user_id=None,
             stock_code=None,

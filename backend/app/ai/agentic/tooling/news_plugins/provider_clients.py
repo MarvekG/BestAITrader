@@ -58,7 +58,7 @@ async def request_with_key_failover(
                 extra={"status_code": response.status_code},
             )
             break
-        logger.warning(
+        logger.info(
             "%s request returned non-200 status. Trying next API key.",
             service_name,
             extra={"status_code": response.status_code},

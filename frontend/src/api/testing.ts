@@ -92,9 +92,6 @@ export const testingApi = {
   testTushare: async (): Promise<TestResult> => {
     return apiClient.get('/testing/tushare');
   },
-  testTavily: async (): Promise<TestResult> => {
-    return apiClient.get('/testing/tavily');
-  },
   testPythonSandbox: async (): Promise<TestResult> => {
     return apiClient.get('/testing/python_sandbox');
   },

@@ -7,7 +7,7 @@ from sqlalchemy import text
 
 from app.ai.agentic import tools
 from app.ai.agentic.skills_loader import skill_tools
-from app.ai.agentic.tooling.news_plugins import get_news_plugins, invoke_news_plugin
+from app.ai.agentic.tooling.news_plugins import get_news_plugins
 from app.ai.memory_client import memory_client
 from app.core.database import SessionLocal
 from app.core.i18n import i18n_service
@@ -23,7 +23,6 @@ FIXED_TEST_TOOLS: List[Dict[str, Any]] = [
     {"name": "redis", "title_key": "settings.redis_test_title", "route_slug": "redis"},
     {"name": "db", "title_key": "settings.db_test_title", "route_slug": "db"},
     {"name": "tushare", "title_key": "settings.tushare_test_title", "route_slug": "tushare"},
-    {"name": "tavily", "title_key": "settings.tavily_test_title", "route_slug": "tavily"},
     {"name": "python_sandbox", "title_key": "settings.python_sandbox_test_title", "route_slug": "python_sandbox"},
     {"name": "skills", "title_key": "settings.skills_test_title", "route_slug": "skills"},
     {"name": "db_schema", "title_key": "settings.db_schema_test_title", "route_slug": "db_schema"},
@@ -295,28 +294,6 @@ async def test_tushare():
             return {"status": "error", "message": i18n_service.t("testing.tushare_empty")}
     except Exception as e:
         return {"status": "error", "message": i18n_service.t("testing.tushare_failed").format(error=str(e))}
-
-
-@router.get("/tavily", response_model=Dict[str, Any])
-async def test_tavily():
-    try:
-        from app.core.config import settings
-
-        if not settings.TAVILY_API_KEY:
-            return {"status": "error", "message": i18n_service.t("testing.tavily_no_token")}
-
-        start_time = time.time()
-        results = await invoke_news_plugin(source="tavily", keyword="AI", limit=1)
-        elapsed = int((time.time() - start_time) * 1000)
-        logger.info(f"{results=}")
-
-        if results is not None:
-            return {"status": "success", "message": i18n_service.t("testing.tavily_success"), "elapsed_ms": elapsed}
-        else:
-            return {"status": "error", "message": i18n_service.t("testing.tavily_empty")}
-    except Exception as e:
-        logger.exception(f"Test Tavily failed: {e}")
-        return {"status": "error", "message": i18n_service.t("testing.tavily_failed").format(error=str(e))}
 
 
 @router.get("/python_sandbox", response_model=Dict[str, Any])
@@ -626,7 +603,11 @@ async def test_memory_recall_audits(
                 str(last_error.get("message") or "Memory recall audit preview request failed"),
                 fallback_key="memory_preview",
             )
-        return _error_response("memory_recall_audits", "Empty or invalid recall audit preview response", fallback_key="memory_preview")
+        return _error_response(
+            "memory_recall_audits",
+            "Empty or invalid recall audit preview response",
+            fallback_key="memory_preview",
+        )
     except Exception as e:
         logger.exception("Test memory recall audit preview failed: %s", e)
         return _error_response("memory_recall_audits", str(e), fallback_key="memory_preview")
