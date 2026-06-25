@@ -8,7 +8,7 @@ def test_build_chat_completion_kwargs_uses_litellm_shape() -> None:
     provider = LiteLLMProvider()
 
     kwargs = provider.build_chat_completion_kwargs(
-        model="backend",
+        model="openai-compatible",
         messages=[{"role": "user", "content": "hello"}],
         temperature=0.2,
         max_tokens=128,
@@ -17,7 +17,7 @@ def test_build_chat_completion_kwargs_uses_litellm_shape() -> None:
     )
 
     assert kwargs == {
-        "model": "backend",
+        "model": "openai-compatible",
         "messages": [{"role": "user", "content": "hello"}],
         "temperature": 0.2,
         "max_tokens": 128,
@@ -30,12 +30,12 @@ def test_build_chat_completion_kwargs_does_not_inject_thinking_default() -> None
     provider = LiteLLMProvider()
 
     kwargs = provider.build_chat_completion_kwargs(
-        model="backend",
+        model="openai-compatible",
         messages=[{"role": "user", "content": "hello"}],
     )
 
     assert kwargs == {
-        "model": "backend",
+        "model": "openai-compatible",
         "messages": [{"role": "user", "content": "hello"}],
     }
 
@@ -44,7 +44,7 @@ def test_build_chat_model_uses_configured_timeout_and_retries() -> None:
     provider = LiteLLMProvider()
 
     llm = provider.build_chat_model(
-        model="backend",
+        model="openai-compatible",
         api_key="sk-test",
         base_url="http://litellm:4000/v1",
     )
@@ -55,7 +55,7 @@ def test_build_chat_model_uses_configured_timeout_and_retries() -> None:
 
 def test_litellm_chat_model_preserves_reasoning_content_from_response() -> None:
     llm = LiteLLMChatOpenAI(
-        model="backend",
+        model="openai-compatible",
         api_key="sk-test",
         base_url="http://litellm:4000/v1",
     )
@@ -65,7 +65,7 @@ def test_litellm_chat_model_preserves_reasoning_content_from_response() -> None:
             "id": "chatcmpl-test",
             "object": "chat.completion",
             "created": 1,
-            "model": "backend",
+            "model": "openai-compatible",
             "choices": [
                 {
                     "index": 0,
@@ -86,7 +86,7 @@ def test_litellm_chat_model_preserves_reasoning_content_from_response() -> None:
 
 def test_litellm_chat_model_replays_reasoning_content_in_request_payload() -> None:
     llm = LiteLLMChatOpenAI(
-        model="backend",
+        model="openai-compatible",
         api_key="sk-test",
         base_url="http://litellm:4000/v1",
     )

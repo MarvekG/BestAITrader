@@ -36,8 +36,8 @@ class Settings(BaseSettings):
     LLM_PROVIDER: str = "litellm"
     LLM_BASE_URL: str = "http://litellm:4000/v1"
     LLM_API_KEY: str = "sk-litellm-gateway-key"
-    LLM_MODEL: str = "backend"
-    LLM_THINKING_MODEL: str = "backend-thinking"
+    LLM_MODEL: str = "openai-compatible"
+    LLM_THINKING_MODEL: str = "openai-compatible-thinking"
     LLM_TIMEOUT_SECONDS: float = 240.0
     LLM_MAX_RETRIES: int = 3
     DEBATE_AGENT_PARALLEL_ENABLED: bool = True
