@@ -366,6 +366,42 @@ async def test_pm_agent_requests_save_tool_before_accepting_final_output():
     assert "save_pm_decision" in feedback
 
 
+@pytest.mark.asyncio
+async def test_pm_agent_save_decision_tool_injects_session_id(monkeypatch):
+    """PM 专属 save_pm_decision 包装工具应注入 session_id 并调用核心 tool 的 ainvoke。"""
+    session_id = str(uuid4())
+    captured = {}
+
+    async def fake_ainvoke(args):
+        captured.update(args)
+        return {"success": True, "decision": args}
+
+    monkeypatch.setattr(
+        "app.ai.llm_engine.agents.governance.save_pm_decision_core",
+        SimpleNamespace(ainvoke=fake_ainvoke),
+    )
+
+    agent = PortfolioManagerAgent(state={"session_id": session_id})
+    wrapped_tool = next(tool for tool in agent.tools if tool.name == "save_pm_decision")
+    result = await wrapped_tool.ainvoke({
+        "target_position": 0,
+        "confidence_score": 70,
+        "stop_loss": 0,
+        "take_profit": 0,
+        "holding_horizon_days": 0,
+    })
+
+    assert result["success"] is True
+    assert captured == {
+        "session_id": session_id,
+        "target_position": 0,
+        "confidence_score": 70,
+        "stop_loss": 0,
+        "take_profit": 0,
+        "holding_horizon_days": 0,
+    }
+
+
 class _PersistQuery:
     def __init__(self, session_obj):
         self.session_obj = session_obj

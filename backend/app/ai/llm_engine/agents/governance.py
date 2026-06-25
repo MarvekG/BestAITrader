@@ -92,14 +92,14 @@ class PortfolioManagerAgent(BaseAgent):
             - take_profit: 止盈或目标价格；无持仓或不适用时可留空。
             - holding_horizon_days: 预期持有或复议周期天数；不适用时可留空。
             """
-            return await save_pm_decision_core(
-                session_id=self.session_id,
-                target_position=target_position,
-                confidence_score=confidence_score,
-                stop_loss=stop_loss,
-                take_profit=take_profit,
-                holding_horizon_days=holding_horizon_days,
-            )
+            return await save_pm_decision_core.ainvoke({
+                "session_id": self.session_id,
+                "target_position": target_position,
+                "confidence_score": confidence_score,
+                "stop_loss": stop_loss,
+                "take_profit": take_profit,
+                "holding_horizon_days": holding_horizon_days,
+            })
 
         tools.append(get_pm_order_type_guidance)
         tools.append(save_pm_decision)
