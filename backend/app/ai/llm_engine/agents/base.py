@@ -233,6 +233,37 @@ class BaseAgent(ABC):
             "without requesting additional external information."
         )
 
+    def _get_min_iterations(self) -> int:
+        """获取接受最终报告前所需的最少迭代轮次。
+
+        Returns:
+            最少迭代轮次，范围为 1 到最大迭代次数。
+        """
+        return max(1, min(settings.DEBATE_AGENT_MIN_ITERATIONS, MAX_LLM_ITERATIONS))
+
+    def _build_min_iterations_feedback(self, iteration_index: int, min_iterations: int) -> str:
+        """构建迭代轮次不足时追加给 LLM 的补证反馈。
+
+        Args:
+            iteration_index: 当前迭代轮次。
+            min_iterations: 接受最终报告前要求的最少迭代轮次。
+
+        Returns:
+            要求继续补证的双语提示。
+        """
+        return (
+            f"你的最终报告暂不能接受：当前仅完成 {iteration_index} 轮迭代，"
+            f"系统要求至少运行 {min_iterations} 轮。"
+            "请围绕最影响仓位、置信度、止损止盈或事实仲裁的关键不确定性，"
+            "继续核验或补充推理；不要机械重复已有查询。之后再输出最终 Markdown 报告。\n"
+            f"Your final report cannot be accepted yet: only {iteration_index} LLM iteration(s) were completed, "
+            f"while the system requires at least {min_iterations}. "
+            "Use tool calls to verify the uncertainty most relevant to sizing, confidence, "
+            "stop/take-profit, or fact arbitration, or continue focused reasoning if no tool is needed. "
+            "Do not repeat existing queries mechanically. "
+            "After verification, produce the final Markdown report."
+        )
+
     def _build_common_system_prompt(self, skills_catalog_prompt: str = "") -> str:
         common_prompt = templates.get_common_agent_system_prompt()
         if not skills_catalog_prompt:
@@ -366,6 +397,7 @@ class BaseAgent(ABC):
         execution_error: Exception | None = None
 
         reached_iteration_limit = True
+        min_iterations = self._get_min_iterations()
 
         # 工具调用循环 (Tool-calling loop)
         for i in range(MAX_LLM_ITERATIONS):
@@ -381,8 +413,18 @@ class BaseAgent(ABC):
                 messages.append(response)
 
                 if not response.tool_calls and not invalid_tool_calls:
-                    reached_iteration_limit = False
                     final_text = (response.content or "").strip()
+                    if i + 1 < min_iterations:
+                        logger.warning(
+                            f"[{self.role_name}] Final text rejected: insufficient LLM iterations "
+                            f"({i + 1}/{min_iterations}). Requesting focused verification."
+                        )
+                        messages.append(HumanMessage(content=self._build_min_iterations_feedback(
+                            i + 1,
+                            min_iterations,
+                        )))
+                        continue
+
                     if output_model is str:
                         report_shape = self._measure_markdown_report_shape(final_text)
                         shape_feedback = self._report_shape_feedback(report_shape)
@@ -411,6 +453,7 @@ class BaseAgent(ABC):
                         )
                         messages.append(HumanMessage(content=role_feedback))
                         continue
+                    reached_iteration_limit = False
                     logger.info(f"[{self.role_name}] No more tool calls at iteration {i+1}.")
                     break
 

@@ -89,15 +89,11 @@ Context 中的 `canonical_metrics` 是唯一可信的派生指标口径（每股
 3. 若缺少订单金额、收入确认、毛利率、利润贡献或可验证进度，应明确写出证据缺口，并在最终判断中降低该催化剂权重。
 4. 长期催化剂可以作为上行期权，但缺少收入和利润映射时，不得抵消当前盈利质量恶化、资金流出、减持、质押或价格破位等当前风险。
 
-## 执行计划要求
-1. 在正式分析、补证、工具调用或结论前，必须先输出 plan，列出本轮将核验的关键维度、
-   需要补充的证据、需要计算的指标，以及最终判断将如何形成。
-2. 输出 plan 后，必须再按照 plan 执行分析、工具调用、补证、计算和结论收敛；
-   不得跳过计划直接给结论。
-3. 若执行过程中发现证据缺口、数据冲突或原计划不适用，必须明确说明偏差，
-   更新或调整 plan 后继续执行。
-4. plan 应服务于角色要求的报告格式；在报告标题和日期后优先呈现，
-   不得替代最终分析报告。
+## 证据补全纪律
+1. 最终报告必须体现关键证据、核验来源和结论边界。
+2. 在形成最终结论前，先判断哪些事实最影响仓位、置信度、止损止盈或复议触发，并优先补齐这些证据。
+3. 若执行过程中发现证据缺口、数据冲突或关键口径不清，必须明确说明偏差、补证结果和仍然不可确认的部分。
+4. 不要为了增加工具次数机械重复查询；工具调用应服务于缩小关键不确定性。
 
 ## 记忆使用边界
 1. 只有角色专属提示词明确要求或允许使用记忆工具时，才可调用 `recall_memory` 或 `write_memory`；若角色提示词禁止记忆工具，必须以角色提示词为准。
@@ -227,16 +223,11 @@ Every role shares these global constraints, and they take priority over role pre
 3. If order amount, revenue recognition, margin, profit contribution, or verifiable progress is missing, state the evidence gap and down-weight that catalyst in the final judgment.
 4. Long-term catalysts may be treated as upside options, but without revenue/profit mapping they must not offset current risks such as earnings-quality deterioration, capital outflow, shareholder reduction, pledge pressure, or price breakdown.
 
-## Plan-First Execution Requirement
-1. Before formal analysis, evidence gathering, tool calls, or final conclusions, output a plan first.
-   The plan must list the key dimensions to verify, evidence to supplement, calculations to perform,
-   and how the final judgment will be formed.
-2. After outputting the plan, execute according to the plan: perform analysis, tool calls,
-   evidence completion, calculations, and conclusion synthesis. Do not skip straight to conclusions.
-3. If evidence gaps, data conflicts, or plan mismatches appear during execution,
-   explicitly state the deviation, update or adjust the plan, and continue.
-4. The plan must support the role-specific report format. Present it after the report title/date when possible,
-   and do not let it replace the final analysis report.
+## Evidence Completion Discipline
+1. The final report must show key evidence, verification sources, and conclusion boundaries.
+2. Before forming the final conclusion, identify which facts most affect sizing, confidence, stop/take-profit, or review triggers, and prioritize completing that evidence.
+3. If evidence gaps, data conflicts, or unclear key definitions appear, explicitly state the gap, verification result, and what remains unconfirmed.
+4. Do not repeat queries mechanically just to increase tool count; tool calls should reduce material uncertainty.
 
 ## Memory Boundaries
 1. Use `recall_memory` or `write_memory` only when the role-specific prompt explicitly permits or requires memory tools. If the role-specific prompt forbids memory tools, that instruction wins.
