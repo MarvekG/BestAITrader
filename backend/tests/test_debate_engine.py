@@ -42,7 +42,6 @@ MOCK_CONTEXT = {
         "northbound_trend": {},
         "financial_trend": {},
         "insider_activity": {},
-        "interactive_qa": {},
         "seo_history": {},
     },
     "signals": {
@@ -94,7 +93,7 @@ def test_save_pm_decision_record_persists_minimal_fields(db_session):
     db_session.add(session_obj)
     db_session.commit()
 
-    with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)), \
+    with patch("app.ai.llm_engine.pm_decision_service.SessionLocal", return_value=_SessionLocalContext(db_session)), \
             patch("app.ai.llm_engine.pm_decision_service.sync_pm_discipline_to_position"):
         first = save_pm_decision_record(
             session_id=session_obj.session_id,
@@ -368,17 +367,17 @@ async def test_pm_agent_requests_save_tool_before_accepting_final_output():
 
 @pytest.mark.asyncio
 async def test_pm_agent_save_decision_tool_injects_session_id(monkeypatch):
-    """PM 专属 save_pm_decision 包装工具应注入 session_id 并调用核心 tool 的 ainvoke。"""
+    """PM 专属 save_pm_decision 工具应注入 session_id 并调用保存服务。"""
     session_id = str(uuid4())
     captured = {}
 
-    async def fake_ainvoke(args):
-        captured.update(args)
-        return {"success": True, "decision": args}
+    def fake_save_pm_decision_record(**kwargs):
+        captured.update(kwargs)
+        return kwargs
 
     monkeypatch.setattr(
-        "app.ai.llm_engine.agents.governance.save_pm_decision_core",
-        SimpleNamespace(ainvoke=fake_ainvoke),
+        "app.ai.llm_engine.agents.governance.save_pm_decision_record",
+        fake_save_pm_decision_record,
     )
 
     agent = PortfolioManagerAgent(state={"session_id": session_id})

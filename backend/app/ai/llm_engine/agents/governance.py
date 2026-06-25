@@ -6,8 +6,8 @@ from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER
 from app.ai.agentic.tools import (
     execute_trading_order as execute_trading_order_core,
     get_pm_order_type_guidance,
-    save_pm_decision as save_pm_decision_core,
 )
+from app.ai.llm_engine.pm_decision_service import save_pm_decision_record
 
 
 class PortfolioManagerAgent(BaseAgent):
@@ -92,14 +92,26 @@ class PortfolioManagerAgent(BaseAgent):
             - take_profit: 止盈或目标价格；无持仓或不适用时可留空。
             - holding_horizon_days: 预期持有或复议周期天数；不适用时可留空。
             """
-            return await save_pm_decision_core.ainvoke({
-                "session_id": self.session_id,
-                "target_position": target_position,
-                "confidence_score": confidence_score,
-                "stop_loss": stop_loss,
-                "take_profit": take_profit,
-                "holding_horizon_days": holding_horizon_days,
-            })
+            try:
+                record = save_pm_decision_record(
+                    session_id=self.session_id,
+                    target_position=target_position,
+                    confidence_score=confidence_score,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    holding_horizon_days=holding_horizon_days,
+                )
+                return {
+                    "success": True,
+                    "message": "PM structured decision saved.",
+                    "decision": record,
+                }
+            except Exception as exc:
+                return {
+                    "success": False,
+                    "message": str(exc),
+                    "reason": "pm_decision_save_failed",
+                }
 
         tools.append(get_pm_order_type_guidance)
         tools.append(save_pm_decision)

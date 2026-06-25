@@ -98,53 +98,6 @@ def _format_trade_execution_result(payload: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-@tool
-async def save_pm_decision(
-    session_id: str = "",
-    target_position: float = 0.0,
-    confidence_score: float = 0.0,
-    stop_loss: float | None = None,
-    take_profit: float | None = None,
-    holding_horizon_days: int | None = None,
-) -> Dict[str, Any]:
-    """保存 PM 最小结构化决策字段。
-
-    Args:
-        session_id: 当前 Debate 会话 ID。
-        target_position: 操作完成后的目标仓位比例，范围 0 到 1。
-        confidence_score: PM 对本次决策的置信度，范围 0 到 100。
-        stop_loss: 止损或复议价格；无持仓或不适用时可留空。
-        take_profit: 止盈或目标价格；无持仓或不适用时可留空。
-        holding_horizon_days: 预期持有或复议周期天数；不适用时可留空。
-
-    Returns:
-        保存结果与已归一化的结构化决策字段。
-    """
-    try:
-        from app.ai.llm_engine.pm_decision_service import save_pm_decision_record
-
-        record = save_pm_decision_record(
-            session_id=session_id,
-            target_position=target_position,
-            confidence_score=confidence_score,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
-            holding_horizon_days=holding_horizon_days,
-        )
-        return {
-            "success": True,
-            "message": "PM structured decision saved.",
-            "decision": record,
-        }
-    except Exception as exc:
-        logger.exception("Failed to save PM structured decision")
-        return {
-            "success": False,
-            "message": str(exc),
-            "reason": "pm_decision_save_failed",
-        }
-
-
 def _build_trade_gate_rejection(reason: str, message: str, details: Dict[str, Any]) -> Dict[str, Any]:
     """构建 PM 交易决策门禁拒绝结果。
 
