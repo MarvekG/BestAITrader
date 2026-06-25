@@ -11,10 +11,13 @@ def test_newsapi_source_is_registered():
 
 
 class _FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self._payload = payload
+        self.status_code = status_code
 
     def raise_for_status(self):
+        if self.status_code >= 400:
+            raise Exception(f"HTTP {self.status_code}")
         return None
 
     def json(self):
@@ -83,6 +86,25 @@ async def test_search_passes_date_params_to_request(monkeypatch):
     assert captured_params["params"].get("to") == "2026-05-09"
     assert captured_params["params"].get("q") == "test"
     assert captured_params["params"].get("pageSize") == 5
+
+
+@pytest.mark.asyncio
+async def test_search_tries_next_key_when_response_is_not_200(monkeypatch):
+    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.newsapi.settings.NEWS_API_KEY", "bad-key, good-key")
+    used_keys = []
+
+    class _FailoverClient(_FakeAsyncClient):
+        async def get(self, url, params=None):
+            used_keys.append(params["apiKey"])
+            if params["apiKey"] == "bad-key":
+                return _FakeResponse({"status": "error"}, status_code=401)
+            return _FakeResponse({"status": "ok", "articles": []})
+
+    with patch("app.ai.agentic.tooling.news_plugins.newsapi.httpx.AsyncClient", _FailoverClient):
+        results = await newsapi.search("test", limit=1, from_date="2026-05-01", to_date="2026-05-09")
+
+    assert results == []
+    assert used_keys == ["bad-key", "good-key"]
 
 
 @pytest.mark.asyncio

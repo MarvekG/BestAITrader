@@ -29,6 +29,8 @@ import httpx
 from app.core.config import settings
 from app.core.logger import get_logger
 
+from app.ai.agentic.tooling.news_plugins.provider_clients import request_with_key_failover
+
 logger = get_logger(__name__)
 
 NAME = "NewsAPI 全球新闻搜索"
@@ -63,8 +65,7 @@ async def search(
     Returns:
         Normalized NewsAPI search results.
     """
-    api_key = settings.NEWS_API_KEY
-    if not api_key:
+    if not settings.NEWS_API_KEY:
         logger.warning("NEWS_API_KEY is not configured.")
         return []
 
@@ -72,7 +73,6 @@ async def search(
     week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
 
     params = {
-        "apiKey": api_key,
         "q": keyword,
         "sortBy": "publishedAt",
         "language": "zh",
@@ -85,8 +85,13 @@ async def search(
     for attempt in range(max_retries):
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-                response = await client.get("https://newsapi.org/v2/everything", params=params)
-                response.raise_for_status()
+                async def request_once(api_key: str) -> httpx.Response:
+                    request_params = {**params, "apiKey": api_key}
+                    return await client.get("https://newsapi.org/v2/everything", params=request_params)
+
+                response = await request_with_key_failover("NewsAPI", settings.NEWS_API_KEY, request_once)
+                if response is None:
+                    return []
                 data = response.json()
 
                 if data.get("status") != "ok":
