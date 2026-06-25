@@ -1,3 +1,4 @@
+import json
 import time
 from collections.abc import Sequence
 from typing import Annotated, Any, Dict, List
@@ -404,13 +405,18 @@ async def test_query_calc():
         res = await tools.query_and_calculate.ainvoke({
             "table_name": "StockBasic",
             "filters": [{"column": "stock_code", "op": "==", "value": "600519.SH"}],
-            "compute_code": "result = len(data)",
+            "compute_code": "print(json.dumps({'result': len(data)}, ensure_ascii=False))",
             "limit": 1
         })
         logger.info(f"Test Query Calc result: {res}")
         elapsed = int((time.time() - start_time) * 1000)
         # 校验：返回计算结果 (Validation: Result contains the calculated value)
-        if res is not None and "result" in str(res):
+        stdout = str(res.get("stdout") or "") if isinstance(res, dict) else ""
+        try:
+            calc_output = json.loads(stdout.strip()) if stdout.strip() else {}
+        except json.JSONDecodeError:
+            calc_output = {}
+        if isinstance(res, dict) and res.get("success") and calc_output.get("result") == 1:
             return {"status": "success", "message": i18n_service.t("testing.query_calc_success"), "elapsed_ms": elapsed}
         return {
             "status": "error",
