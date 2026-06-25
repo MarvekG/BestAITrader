@@ -262,7 +262,6 @@ export const SettingsPage: React.FC = () => {
   const [testRedisLoading, setTestRedisLoading] = useState(false);
   const [testDbLoading, setTestDbLoading] = useState(false);
   const [testTushareLoading, setTestTushareLoading] = useState(false);
-  const [testTavilyLoading, setTestTavilyLoading] = useState(false);
   const [testPythonSandboxLoading, setTestPythonSandboxLoading] = useState(false);
   const [testSkillsLoading, setTestSkillsLoading] = useState(false);
   const [testDbSchemaLoading, setTestDbSchemaLoading] = useState(false);
@@ -381,22 +380,6 @@ export const SettingsPage: React.FC = () => {
       message.error(getApiErrorMessage(error, t('settings.test_failed')));
     } finally {
       setTestTushareLoading(false);
-    }
-  };
-
-  const handleTestTavily = async () => {
-    setTestTavilyLoading(true);
-    try {
-      const res = await testingApi.testTavily();
-      if (res.status === 'success') {
-        message.success(`${res.message} (${res.elapsed_ms}ms)`);
-      } else {
-        message.error(res.message);
-      }
-    } catch (error) {
-      message.error(getApiErrorMessage(error, t('settings.test_failed')));
-    } finally {
-      setTestTavilyLoading(false);
     }
   };
 
@@ -1499,7 +1482,6 @@ export const SettingsPage: React.FC = () => {
       handleTestRedis(),
       handleTestDb(),
       handleTestTuShare(),
-      handleTestTavily(),
       handleTestPythonSandbox(),
       handleTestSkills(),
       handleTestDbSchema(),
@@ -2445,7 +2427,7 @@ export const SettingsPage: React.FC = () => {
                     onClick={handleTestAll}
                     loading={
                       testRedisLoading || testDbLoading ||
-                      testTushareLoading || testTavilyLoading || testPythonSandboxLoading ||
+                      testTushareLoading || testPythonSandboxLoading ||
                       testSkillsLoading ||
                       testDbSchemaLoading ||
                       testQueryCalcLoading ||
@@ -2477,13 +2459,6 @@ export const SettingsPage: React.FC = () => {
                   <Col span={4}>
                     <Card size="small" title={t('settings.tushare_test_title')}>
                       <Button type="default" onClick={handleTestTuShare} loading={testTushareLoading} block>
-                        {t('settings.execute_test')}
-                      </Button>
-                    </Card>
-                  </Col>
-                  <Col span={4}>
-                    <Card size="small" title={t('settings.tavily_test_title')}>
-                      <Button type="default" onClick={handleTestTavily} loading={testTavilyLoading} block>
                         {t('settings.execute_test')}
                       </Button>
                     </Card>
