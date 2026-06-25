@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { App as AntdApp, Avatar, Button, Card, Dropdown, Empty, Space, Spin, Steps, Tag, Typography } from 'antd';
+import { App as AntdApp, Avatar, Button, Card, Descriptions, Dropdown, Empty, Space, Spin, Steps, Tag, Typography } from 'antd';
 import { useSessionStore } from '../../store/useSessionStore';
-import { DebateThread, debateApi } from '../../api/debate';
+import { DebateThread, PMDecisionRecord, debateApi } from '../../api/debate';
 import { sessionApi, Session } from '../../api/session';
 import { AuditOutlined, BarChartOutlined, MessageOutlined, FileSearchOutlined, RobotOutlined, ReloadOutlined, ExportOutlined, DownOutlined, CopyOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -23,6 +23,7 @@ interface AuditMessage {
   timestamp: string;
   agent_role?: string;
   stage?: string;
+  pmDecision?: PMDecisionRecord;
 }
 
 export interface DecisionAuditLogProps {
@@ -58,6 +59,9 @@ const getStepMessagesFor = (allMessages: AuditMessage[], stepIndex: number) => {
   }
 };
 
+const formatPercent = (value: number) => `${(value * 100).toFixed(0)}%`;
+const formatPrice = (value?: number | null) => (value && value > 0 ? `¥${value.toFixed(2)}` : 'N/A');
+
 export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, isActive = true }) => {
   const { t } = useTranslation();
   const { message } = AntdApp.useApp();
@@ -86,7 +90,10 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
         }
       }
 
-      const threads = await debateApi.getHistory(effectiveSessionId);
+      const [threads, pmDecisions] = await Promise.all([
+        debateApi.getHistory(effectiveSessionId),
+        debateApi.getDecisions(effectiveSessionId),
+      ]);
 
       const auditMessages: AuditMessage[] = threads.map((msg: DebateThread) => ({
         id: msg.id || Math.random().toString(),
@@ -99,6 +106,25 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
         timestamp: msg.timestamp,
         stage: msg.stage || 'unknown',
       }));
+
+      const pmMessages = auditMessages.filter(msg => msg.stage === 'portfolio_management');
+      pmMessages.forEach((msg, index) => {
+        msg.pmDecision = (pmDecisions || [])[index];
+      });
+      for (const decision of pmDecisions || []) {
+        if (pmMessages.some(msg => msg.pmDecision?.id === decision.id)) continue;
+        auditMessages.push({
+          id: decision.id,
+          session_id: decision.session_id,
+          round_number: 0,
+          speaker_role: decision.agent_role || 'portfolio_manager',
+          agent_role: decision.agent_role || 'portfolio_manager',
+          content: decision.reasoning || '',
+          timestamp: decision.created_at,
+          stage: 'portfolio_management',
+          pmDecision: decision,
+        });
+      }
 
       setMessages(auditMessages);
 
@@ -143,6 +169,14 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
 
       if (msg.content) {
         mdContent += `${msg.content}\n\n`;
+      }
+      if (msg.pmDecision) {
+        mdContent += `### ${t('debate.decision_tab')}\n\n`;
+        mdContent += `- **${t('debate.confidence')}:** ${formatPercent(msg.pmDecision.confidence)}\n`;
+        mdContent += `- **${t('debate.target_position')}:** ${formatPercent(msg.pmDecision.target_position)}\n`;
+        mdContent += `- **${t('debate.stop_loss')}:** ${formatPrice(msg.pmDecision.stop_loss)}\n`;
+        mdContent += `- **${t('debate.take_profit')}:** ${formatPrice(msg.pmDecision.take_profit)}\n`;
+        mdContent += `- **${t('debate.analysis.holding_period')}:** ${msg.pmDecision.holding_horizon_days || 'N/A'}\n\n`;
       }
 
       mdContent += `---\n\n`;
@@ -227,6 +261,14 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
     if (msg.content) {
       mdContent += `${msg.content}\n\n`;
     }
+    if (msg.pmDecision) {
+      mdContent += `### ${t('debate.decision_tab')}\n\n`;
+      mdContent += `- **${t('debate.confidence')}:** ${formatPercent(msg.pmDecision.confidence)}\n`;
+      mdContent += `- **${t('debate.target_position')}:** ${formatPercent(msg.pmDecision.target_position)}\n`;
+      mdContent += `- **${t('debate.stop_loss')}:** ${formatPrice(msg.pmDecision.stop_loss)}\n`;
+      mdContent += `- **${t('debate.take_profit')}:** ${formatPrice(msg.pmDecision.take_profit)}\n`;
+      mdContent += `- **${t('debate.analysis.holding_period')}:** ${msg.pmDecision.holding_horizon_days || 'N/A'}\n\n`;
+    }
 
     navigator.clipboard.writeText(mdContent)
       .then(() => {
@@ -269,6 +311,32 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
             {msg.content || t('brain.no_content')}
           </ReactMarkdown>
         </div>
+
+        {msg.pmDecision && (
+          <div className="mt-4 p-3 bg-gray-900 rounded border border-blue-900/30">
+            <Text strong style={{ color: '#1677ff' }}>
+              <AuditOutlined style={{ marginRight: 8 }} />
+              {t('debate.decision_tab')}
+            </Text>
+            <Descriptions column={2} size="small" bordered style={{ marginTop: 12 }}>
+              <Descriptions.Item label={t('debate.confidence')}>
+                {formatPercent(msg.pmDecision.confidence)}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('debate.target_position')}>
+                {formatPercent(msg.pmDecision.target_position)}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('debate.stop_loss')}>
+                {formatPrice(msg.pmDecision.stop_loss)}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('debate.take_profit')}>
+                {formatPrice(msg.pmDecision.take_profit)}
+              </Descriptions.Item>
+              <Descriptions.Item label={t('debate.analysis.holding_period')} span={2}>
+                {msg.pmDecision.holding_horizon_days ? `${msg.pmDecision.holding_horizon_days}D` : 'N/A'}
+              </Descriptions.Item>
+            </Descriptions>
+          </div>
+        )}
 
         {msg.prompt_input && (
           <details className="mt-2 border-t border-gray-700 pt-2">
