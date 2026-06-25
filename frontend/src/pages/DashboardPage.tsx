@@ -368,7 +368,15 @@ export const DashboardPage: React.FC = () => {
                 {
                   key: '1',
                   label: messageCount > 0 ? `${t('dashboard.live_debate')} (${messageCount})` : t('dashboard.live_debate'),
-                  children: <div style={{ minHeight: 'calc(100vh - 300px)' }}><DebateArena messages={debateMessages} loading={loading} /></div>
+                  children: (
+                    <div style={{ minHeight: 'calc(100vh - 300px)' }}>
+                      <DebateArena
+                        messages={debateMessages}
+                        sessionId={activeSession.session_id}
+                        loading={loading}
+                      />
+                    </div>
+                  )
                 },
                 { key: '2', label: t('dashboard.decision_audit'), children: <div style={{ minHeight: 'calc(100vh - 300px)' }}><DecisionAuditLog isActive={activeDashboardTab === '2'} /></div> }
               ]}

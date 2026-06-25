@@ -28,10 +28,11 @@ export interface DebateMessage {
 
 interface DebateArenaProps {
   messages: DebateMessage[];
+  sessionId?: string;
   loading?: boolean;
 }
 
-export const DebateArena: React.FC<DebateArenaProps> = ({ messages = [], loading = false }) => {
+export const DebateArena: React.FC<DebateArenaProps> = ({ messages = [], sessionId, loading = false }) => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('debate');
   const [decisions, setDecisions] = useState<PMDecisionRecord[]>([]);
@@ -46,13 +47,12 @@ export const DebateArena: React.FC<DebateArenaProps> = ({ messages = [], loading
 
   useEffect(() => {
     const fetchDecisions = async () => {
-      if (activeTab !== 'decision' || messages.length === 0) return;
-      const sessionId = messages[0]?.session_id;
-      if (!sessionId) return;
+      const effectiveSessionId = sessionId || messages[0]?.session_id;
+      if (activeTab !== 'decision' || !effectiveSessionId) return;
 
       setDecisionsLoading(true);
       try {
-        const decisions = await debateApi.getDecisions(sessionId);
+        const decisions = await debateApi.getDecisions(effectiveSessionId);
         setDecisions(decisions || []);
       } catch (error) {
         console.error('Failed to fetch decisions:', error);
@@ -62,7 +62,7 @@ export const DebateArena: React.FC<DebateArenaProps> = ({ messages = [], loading
     };
 
     fetchDecisions();
-  }, [activeTab, messages]);
+  }, [activeTab, messages, sessionId]);
 
   const renderDecisionContent = () => {
     if (decisionsLoading) {
