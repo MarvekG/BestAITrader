@@ -12,8 +12,6 @@ export interface DebateThread {
   speaker_role?: string; // Legacy
   content?: string; // Legacy
   reasoning: string;
-  reasoning_chain?: Record<string, unknown>;
-  analysis?: Record<string, unknown>;
   prompt_input?: string;
   timestamp: string; // Map from created_at
   created_at?: string;

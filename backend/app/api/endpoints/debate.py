@@ -194,7 +194,6 @@ async def get_debate_history(
             "timestamp": msg.created_at.isoformat(),
             "round_number": msg.round_number,
             "stage": msg.stage,
-            "analysis": msg.analysis
         } for msg in debate_messages]
 
         return debate_history
@@ -229,7 +228,6 @@ async def get_debate_threads(
             "agent_role": msg.agent_role,
             "speaker_role": msg.agent_role,
             "content": msg.reasoning or "",
-            "reasoning_chain": msg.analysis,
             "prompt_input": msg.prompt_input or "",  # 添加推理输入字段
             "timestamp": msg.created_at.isoformat(),
             "stage": msg.stage

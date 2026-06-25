@@ -115,3 +115,34 @@ class PortfolioManagerAgent(BaseAgent):
 
     def get_output_model(self):
         return str
+
+    async def get_final_output_feedback(self, final_content: str) -> str | None:
+        """确保 PM 最终报告前已保存本轮结构化纪律字段。
+
+        Args:
+            final_content: PM 最终 Markdown 报告。
+
+        Returns:
+            已保存时返回 None；未保存时返回要求继续调用工具的反馈。
+
+        Raises:
+            ValueError: 缺少会话 ID 时抛出。
+        """
+        if not self.session_id:
+            raise ValueError("PM structured decision requires session_id")
+
+        from app.ai.llm_engine.pm_decision_service import get_pm_decision_for_session
+        from app.core.database import SessionLocal
+
+        with SessionLocal() as db:
+            pm_record = get_pm_decision_for_session(db, self.session_id)
+        if pm_record:
+            return None
+        return (
+            "你的最终 Markdown 报告暂不能接受：本轮 PM 结构化纪律字段尚未保存。"
+            "你必须先调用 `save_pm_decision` 工具，写入 `target_position`、`confidence_score`、"
+            "`stop_loss`、`take_profit`、`holding_horizon_days`，然后再输出最终 Markdown 报告。"
+            "不要改用 JSON 最终输出。\n"
+            "Your final Markdown report cannot be accepted yet because the PM structured discipline fields "
+            "have not been saved. Call the `save_pm_decision` tool first, then provide the final Markdown report."
+        )

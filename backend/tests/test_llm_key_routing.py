@@ -8,7 +8,6 @@ from langchain_core.messages import AIMessage
 from app.ai.agentic.tool_output_summarizer import summarize_tool_output
 from app.ai.experience import workflow
 from app.ai.llm_engine.agents.base import BaseAgent
-from app.ai.llm_engine.models import AnalystOutput
 from app.ai.stock_picker.service import RankedCandidate, StockPickerService
 
 
@@ -50,7 +49,7 @@ class DummyAgent(BaseAgent):
         return "dummy prompt"
 
     def get_output_model(self):
-        return AnalystOutput
+        return str
 
 
 def _valid_stock_research_payload() -> str:
@@ -196,7 +195,11 @@ async def test_stock_picker_research_uses_litellm_backend_model_and_usage_lane(m
     monkeypatch.setattr(stock_picker_service_module, "get_llm_provider", lambda: provider)
     monkeypatch.setattr(stock_picker_service_module, "get_all_tools", lambda: [FakeTool()])
     monkeypatch.setattr(stock_picker_service_module, "get_skills_loader_tools", lambda: [])
-    monkeypatch.setattr(stock_picker_service_module, "record_llm_usage", lambda *args, **kwargs: usage_calls.append(kwargs))
+    monkeypatch.setattr(
+        stock_picker_service_module,
+        "record_llm_usage",
+        lambda *args, **kwargs: usage_calls.append(kwargs),
+    )
 
     payload = await StockPickerService()._request_llm_research(ranked, "balanced", 1)
 

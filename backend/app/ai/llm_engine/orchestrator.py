@@ -252,8 +252,6 @@ async def persist_agent_report(
     from app.models.debate_message import DebateMessage
     from app.api.endpoints.debate_ws import send_debate_message
 
-    from pydantic import BaseModel
-
     with SessionLocal() as db:
         try:
             from app.models.session import Session as SessionModel
@@ -264,47 +262,7 @@ async def persist_agent_report(
                 logger.warning(f"Session {session_id} not found, probably deleted. Aborting persistence.")
                 return
 
-            # 提取结构化数据
-            decision_val = ""
-            confidence_val = 0.0
-            reasoning_val = ""
-            analysis_dict = {}
-
-            if isinstance(report_content, str):
-                reasoning_val = report_content
-                analysis_dict = {"markdown": report_content}
-            elif isinstance(report_content, BaseModel):
-                # 如果是 Pydantic 模型
-                analysis_dict = report_content.model_dump()
-                # 尝试提取公共字段
-                if hasattr(report_content, "decision"):
-                    decision_val = str(getattr(report_content, "decision"))
-                if hasattr(report_content, "action"):
-                    decision_val = str(getattr(report_content, "action"))
-
-                if hasattr(report_content, "confidence_score"):
-                    confidence_val = float(getattr(report_content, "confidence_score")) / 100.0
-                elif hasattr(report_content, "confidence"):
-                    confidence_val = float(getattr(report_content, "confidence"))
-
-                # 结构化模型若含 Markdown 字段，优先存储完整 Markdown 报告。
-                if hasattr(report_content, "report_markdown"):
-                    reasoning_val = getattr(report_content, "report_markdown")
-                elif hasattr(report_content, "markdown_content"):
-                    reasoning_val = getattr(report_content, "markdown_content")
-                else:
-                    reasoning_val = str(report_content)
-            else:
-                reasoning_val = str(report_content)
-                analysis_dict = {"data": report_content}
-
-            if agent_role == AGENT_ROLE_PORTFOLIO_MANAGER:
-                from app.ai.llm_engine.pm_decision_service import get_pm_decision_for_session
-
-                pm_record = get_pm_decision_for_session(db, session_id)
-                if pm_record:
-                    analysis_dict = pm_record.to_dict()
-                    confidence_val = float(pm_record.confidence_score or 0) / 100.0
+            reasoning_val = report_content if isinstance(report_content, str) else str(report_content)
 
             # 创建数据库记录
             debate_msg = DebateMessage(
@@ -313,11 +271,8 @@ async def persist_agent_report(
                 round_number=round_number,
                 agent_name=agent_name,
                 agent_role=agent_role,
-                decision=decision_val,
-                confidence=confidence_val,
                 reasoning=reasoning_val,
                 prompt_input=prompt_input,
-                analysis=analysis_dict
             )
 
             db.add(debate_msg)
@@ -1350,9 +1305,6 @@ async def portfolio_management(state: AnalystState) -> Dict[str, Any]:
         with SessionLocal() as db:
             pm_record = get_pm_decision_for_session(db, session_id)
             decision_data = pm_record.to_dict() if pm_record else {}
-        if not decision_data:
-            logger.error("PM structured decision was not saved by tool", extra={"session_id": str(session_id)})
-            return {"errors": ["PM Error: structured decision was not saved by save_pm_decision"]}
 
         return {"pm_decision": decision_data}
     except Exception as e:

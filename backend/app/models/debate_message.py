@@ -41,11 +41,10 @@ class DebateMessage(Base):
 
     # 关系
     session = relationship("Session", back_populates="debate_messages")
-    
-    
+
     def to_dict(self, exclude_prompt=False):
         """转换为字典
-        
+
         Args:
             exclude_prompt: 是否排除 prompt_input 字段（用于 WebSocket 推送，减少消息大小）
         """
@@ -57,14 +56,12 @@ class DebateMessage(Base):
             "agent_name": self.agent_name,
             "agent_role": self.agent_role,
             "decision": self.decision,
-            "confidence": self.confidence,
             "reasoning": self.reasoning,
-            "analysis": self.analysis,
             "created_at": self.created_at.isoformat() if self.created_at else None
         }
-        
+
         # 只在不排除时包含 prompt_input（WebSocket 推送时排除以减少消息大小）
         if not exclude_prompt:
             result["prompt_input"] = self.prompt_input
-            
+
         return result

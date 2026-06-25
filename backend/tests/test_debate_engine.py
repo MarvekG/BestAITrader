@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.ai.llm_engine.agents.governance import PortfolioManagerAgent
 from app.ai.llm_engine.orchestrator import (
     create_analyst_workflow,
     _build_portfolio_field_descriptions,
@@ -334,24 +335,35 @@ async def test_portfolio_management_returns_saved_pm_decision(initial_state):
 
 
 @pytest.mark.asyncio
-async def test_portfolio_management_fails_when_pm_decision_not_saved(initial_state):
-    """PM 未调用工具保存结构化字段时，工作流应失败而不是静默完成。"""
+async def test_portfolio_management_reports_pm_agent_errors(initial_state):
+    """PM Agent 抛出不可恢复错误时，工作流应失败而不是静默完成。"""
     initial_state["static_context"] = _expected_static_context()
 
     with patch("app.ai.llm_engine.orchestrator.PortfolioManagerAgent") as mock_pm_agent, \
             patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock), \
-            patch("app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session", return_value=None), \
-            patch("app.core.database.SessionLocal"), \
             patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={}), \
             patch("app.ai.llm_engine.orchestrator._get_same_stock_history", return_value={}), \
             patch("app.ai.llm_engine.orchestrator._get_pending_orders_for_pm", return_value=[]):
         agent = mock_pm_agent.return_value
         agent.last_prompt = "pm prompt"
-        agent.run = AsyncMock(return_value="# PM Decision")
+        agent.run = AsyncMock(side_effect=ValueError("PM structured decision requires session_id"))
 
         result = await portfolio_management(initial_state)
 
-    assert result == {"errors": ["PM Error: structured decision was not saved by save_pm_decision"]}
+    assert result == {"errors": ["PM Error: PM structured decision requires session_id"]}
+
+
+@pytest.mark.asyncio
+async def test_pm_agent_requests_save_tool_before_accepting_final_output():
+    """PM Agent 接受最终 Markdown 前会要求模型先调用 save_pm_decision。"""
+    agent = PortfolioManagerAgent(state={"session_id": str(uuid4())})
+
+    with patch("app.core.database.SessionLocal"), \
+            patch("app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session", return_value=None):
+        feedback = await agent.get_final_output_feedback("# PM Decision")
+
+    assert feedback is not None
+    assert "save_pm_decision" in feedback
 
 
 class _PersistQuery:
@@ -434,8 +446,4 @@ async def test_persist_agent_report_saves_pm_markdown_and_saved_decision_snapsho
     assert len(fake_db.added) == 1
     saved_message = fake_db.added[0]
     assert saved_message.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER
-    assert saved_message.confidence == 0.75
     assert saved_message.reasoning == "# Hold"
-    assert saved_message.analysis["target_position"] == 0.3
-    assert saved_message.analysis["take_profit"] == 12.0
-    assert saved_message.analysis["holding_horizon_days"] == 20

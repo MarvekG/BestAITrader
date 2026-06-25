@@ -78,15 +78,8 @@ def _extract_original_conclusion(message: DebateMessage) -> str:
     Returns:
         优先级最高的结论文本；没有可读文本时返回空字符串。
     """
-    analysis = message.analysis if isinstance(message.analysis, dict) else {}
-    for key in ("report_markdown", "markdown", "summary", "analysis"):
-        value = analysis.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
     if message.reasoning and str(message.reasoning).strip():
         return str(message.reasoning).strip()
-    if analysis:
-        return json.dumps(analysis, ensure_ascii=False)
     return ""
 
 
@@ -1106,9 +1099,6 @@ class ExperienceService:
         grouped_positions: dict[str, list[str]] = defaultdict(list)
         debate_timeline: List[Dict[str, Any]] = []
         for message in debate_messages:
-            grouped_positions[message.agent_role].append(
-                str(message.decision or "").lower() or "unknown"
-            )
             debate_timeline.append(
                 {
                     "message_id": str(message.message_id),
@@ -1178,24 +1168,16 @@ class ExperienceService:
         }
 
         for message in debate_messages:
-            analysis = message.analysis if isinstance(message.analysis, dict) else {}
             payload = {
                 "message_id": str(message.message_id),
                 "stage": message.stage,
                 "round_number": message.round_number,
                 "agent_name": message.agent_name,
                 "agent_role": message.agent_role,
-                "decision": str(message.decision or "").lower() or None,
-                "confidence": _normalize_confidence(message.confidence),
                 "reasoning": message.reasoning or "",
-                "analysis": analysis,
                 "prompt_input": message.prompt_input or "",
                 "created_at": safe_isoformat(message.created_at),
             }
-            if not state["portfolio_info"] and isinstance(analysis.get("portfolio_info"), dict):
-                state["portfolio_info"] = analysis.get("portfolio_info") or {}
-            if not state["market_context"] and isinstance(analysis.get("context"), dict):
-                state["market_context"] = analysis.get("context") or {}
 
             if message.agent_role == "sentiment" and not state["sentiment_message"]:
                 state["sentiment_message"] = payload
@@ -1223,7 +1205,6 @@ class ExperienceService:
             "stage": pm_message.stage,
             "created_at": safe_isoformat(pm_message.created_at),
             "prompt_input": pm_message.prompt_input or "",
-            "analysis": pm_message.analysis if isinstance(pm_message.analysis, dict) else {},
             "context_from_db": pm_context_payload or {},
             "supporting_messages_from_db": {
                 "sentiment_message": debate_state.get("sentiment_message") or {},

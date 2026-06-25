@@ -54,7 +54,7 @@ def parse_args() -> argparse.Namespace:
 
 args = parse_args()
 
-from app.core.config import settings
+from app.core.config import settings  # noqa: E402
 
 if args.database_url:
     settings.DATABASE_URL = args.database_url
@@ -63,10 +63,10 @@ if args.memory_base_url:
     settings.MEMORY_SERVICE_ENABLED = True
 settings.MEMORY_SERVICE_TIMEOUT_SECONDS = max(1.0, float(args.memory_timeout_seconds))
 
-from app.core.database import SessionLocal
-from app.ai.memory_client import memory_client
-from app.models.debate_message import DebateMessage
-from app.models.session import Session as SessionModel
+from app.core.database import SessionLocal  # noqa: E402
+from app.ai.memory_client import memory_client  # noqa: E402
+from app.models.debate_message import DebateMessage  # noqa: E402
+from app.models.session import Session as SessionModel  # noqa: E402
 
 
 def _build_debate_content(
@@ -82,24 +82,11 @@ def _build_debate_content(
         f"Round: {debate_msg.round_number}",
         f"Agent: {debate_msg.agent_name} ({debate_msg.agent_role})",
     ]
-    if debate_msg.decision:
-        content_parts.append(f"Decision: {debate_msg.decision}")
-    if debate_msg.confidence is not None:
-        content_parts.append(f"Confidence: {debate_msg.confidence:.4f}")
-
     reasoning_text = str(debate_msg.reasoning or "").strip()
     if reasoning_text:
         content_parts.append("")
         content_parts.append("Reasoning:")
         content_parts.append(reasoning_text[:14000])
-
-    analysis = debate_msg.analysis if isinstance(debate_msg.analysis, dict) else None
-    if analysis:
-        import json
-
-        content_parts.append("")
-        content_parts.append("Structured analysis:")
-        content_parts.append(json.dumps(analysis, ensure_ascii=False, sort_keys=True)[:4000])
 
     return "\n".join(content_parts).strip()
 

@@ -726,7 +726,6 @@ async def test_persist_agent_report_saves_pm_report():
     assert len(fake_db.added) == 1
     assert fake_db.added[0].agent_role == AGENT_ROLE_PORTFOLIO_MANAGER
     assert fake_db.added[0].reasoning == "# PM report"
-    assert fake_db.added[0].analysis["target_position"] == 0.4
     assert fake_db.added[0].prompt_input == "pm prompt"
 
 

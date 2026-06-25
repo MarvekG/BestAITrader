@@ -7,7 +7,6 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from app.ai.json_utils import stable_json_dumps
 from app.ai.agentic.tool_output_summarizer import (
-    SUMMARY_THRESHOLD,
     should_summarize_tool_output,
     summarize_tool_output,
 )
@@ -102,6 +101,17 @@ class BaseAgent(ABC):
         tools.extend(build_memory_tools(state=self.state))
         tools.extend(get_skills_loader_tools())
         return tools
+
+    async def get_final_output_feedback(self, final_content: str) -> Optional[str]:
+        """在接受最终输出前获取角色级补充指令。
+
+        Args:
+            final_content: LLM 即将作为最终报告返回的 Markdown 文本。
+
+        Returns:
+            若当前输出可接受则返回 None；否则返回需要追加给 LLM 的反馈文本。
+        """
+        return None
 
     @abstractmethod
     async def get_system_prompt(
@@ -393,6 +403,14 @@ class BaseAgent(ABC):
                             "and avoid repeating parts that are already complete."
                         )))
                         continue
+                    role_feedback = await self.get_final_output_feedback(final_text)
+                    if role_feedback:
+                        logger.warning(
+                            f"[{self.role_name}] Final text rejected by role validator. "
+                            "Requesting the LLM to continue."
+                        )
+                        messages.append(HumanMessage(content=role_feedback))
+                        continue
                     logger.info(f"[{self.role_name}] No more tool calls at iteration {i+1}.")
                     break
 
@@ -488,6 +506,9 @@ class BaseAgent(ABC):
             shape_feedback = self._report_shape_feedback(report_shape)
             if shape_feedback:
                 raise ValueError(f"Incomplete report output: {shape_feedback}")
+            role_feedback = await self.get_final_output_feedback(final_content)
+            if role_feedback:
+                raise ValueError(role_feedback)
             return final_content
         else:
             parser = PydanticOutputParser(pydantic_object=output_model)
