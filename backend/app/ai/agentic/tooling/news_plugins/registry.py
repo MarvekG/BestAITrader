@@ -14,6 +14,8 @@ from .paths import NEWS_PLUGIN_DIR, NEWS_PLUGIN_EXTERNAL_DIR
 
 logger = get_logger(__name__)
 
+RESERVED_NEWS_PLUGIN_MODULE_NAMES = {"base", "manager", "paths", "provider_clients", "registry"}
+
 
 @dataclass(frozen=True)
 class NewsPlugin:
@@ -38,17 +40,16 @@ def _validate_list(value: Any) -> tuple[str, ...]:
 
 
 def _iter_plugin_modules(plugin_dir: Path, package_name: str) -> list[tuple[Path, str, str, str]]:
-    reserved_modules = {"base", "manager", "paths", "registry"}
     module_specs: list[tuple[Path, str, str, str]] = []
 
     for path in sorted(plugin_dir.glob("*.py")):
-        if path.name == "__init__.py" or path.stem in reserved_modules:
+        if path.name == "__init__.py" or path.stem in RESERVED_NEWS_PLUGIN_MODULE_NAMES:
             continue
         module_specs.append((path, path.stem, "builtin", f"{package_name}.{path.stem}"))
 
     if NEWS_PLUGIN_EXTERNAL_DIR.is_dir():
         for path in sorted(NEWS_PLUGIN_EXTERNAL_DIR.glob("*.py")):
-            if path.name == "__init__.py" or path.stem in reserved_modules:
+            if path.name == "__init__.py" or path.stem in RESERVED_NEWS_PLUGIN_MODULE_NAMES:
                 continue
             module_specs.append((path, path.stem, "external", f"runtime_news_plugin_{path.stem}"))
 

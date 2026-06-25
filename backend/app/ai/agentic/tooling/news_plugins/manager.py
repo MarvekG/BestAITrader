@@ -17,12 +17,11 @@ from app.ai.agentic.tooling.news_plugins import get_news_plugins
 from app.ai.agentic.tooling.news_plugins.paths import (
     NEWS_PLUGIN_EXTERNAL_DIR,
 )
-from app.ai.agentic.tooling.news_plugins.registry import NewsPlugin
+from app.ai.agentic.tooling.news_plugins.registry import NewsPlugin, RESERVED_NEWS_PLUGIN_MODULE_NAMES
 from app.core.i18n import i18n_service
 from app.core.logger import get_logger
 
 NEWS_PLUGIN_MODULE_NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
-RESERVED_NEWS_PLUGIN_MODULE_NAMES = {"__init__", "base", "manager", "paths", "registry"}
 logger = get_logger(__name__)
 
 
@@ -53,7 +52,7 @@ def normalize_news_plugin_module_name(value: str) -> str:
     module_name = value.removesuffix(".py").strip().lower()
     if not NEWS_PLUGIN_MODULE_NAME_PATTERN.fullmatch(module_name):
         raise ValueError(_t("invalid_module_name"))
-    if module_name in RESERVED_NEWS_PLUGIN_MODULE_NAMES:
+    if module_name == "__init__" or module_name in RESERVED_NEWS_PLUGIN_MODULE_NAMES:
         raise ValueError(_t("reserved_module_name", module_name=module_name))
     return module_name
 
