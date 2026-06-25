@@ -394,7 +394,7 @@ export const StockWarehousePage: React.FC = () => {
       auto_analysis_time: parseAutoAnalysisTime(record.auto_analysis_time),
       auto_analysis_trading_frequency: record.auto_analysis_trading_frequency || t('warehouse.freq_position_trading'),
       auto_analysis_trading_strategy: record.auto_analysis_trading_strategy || t('warehouse.strategy_value'),
-      auto_analysis_run_immediately: Boolean(record.auto_analysis_run_immediately),
+      auto_analysis_run_immediately: false,
     });
     setIsAutoConfigModalOpen(true);
   };
@@ -411,6 +411,7 @@ export const StockWarehousePage: React.FC = () => {
         auto_analysis_trading_strategy: values.auto_analysis_trading_strategy,
         auto_analysis_run_immediately: Boolean(values.auto_analysis_run_immediately),
       });
+      autoConfigForm.setFieldValue('auto_analysis_run_immediately', false);
       message.success(t('common.success'));
       setIsAutoConfigModalOpen(false);
       setSelectedStockForAutoConfig(null);
