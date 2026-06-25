@@ -48,7 +48,6 @@ MOCK_CONTEXT = {
         "northbound_trend": {"trend": "up"},
         "financial_trend": {"items": [1, 2, 3]},
         "insider_activity": {"records": []},
-        "interactive_qa": {"items": []},
         "seo_history": {"items": []},
     },
     "signals": {

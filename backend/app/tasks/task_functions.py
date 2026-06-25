@@ -22,7 +22,6 @@ def get_sync_date_range(task_type: str = "normal") -> tuple[str, str]:
     - kline_base_info: 最近 365 天 (Last 365 days, for base info kline sync)
     - event_long: 前后 180 天 (Next and previous 180 days, for dividends, etc.)
     - margin: 最近 15 天 (Last 15 days, for margin and flow data)
-    - survey: 最近 180 天 (Last 180 days, for institutional survey data)
     """
     now = datetime.now()
     if task_type == "event_long":
@@ -33,9 +32,6 @@ def get_sync_date_range(task_type: str = "normal") -> tuple[str, str]:
         end_date = now.strftime("%Y-%m-%d")
     elif task_type == "kline_base_info":
         start_date = (now - timedelta(days=365)).strftime("%Y-%m-%d")
-        end_date = now.strftime("%Y-%m-%d")
-    elif task_type == "survey":
-        start_date = (now - timedelta(days=180)).strftime("%Y-%m-%d")
         end_date = now.strftime("%Y-%m-%d")
     else:  # normal
         start_date = (now - timedelta(days=3)).strftime("%Y-%m-%d")
@@ -104,13 +100,10 @@ async def sync_stock_data_func(
 
     normal_start_date, normal_end_date = resolve_date_range("normal")
     margin_start_date, margin_end_date = resolve_date_range("margin")
-    survey_start_date, survey_end_date = resolve_date_range("survey")
-
     logger.info(
         f"Starting sync task for stock_code: {stock_code}, task_id: {task_id}, "
         f"normal_range=({normal_start_date}, {normal_end_date}), "
-        f"margin_range=({margin_start_date}, {margin_end_date}), "
-        f"survey_range=({survey_start_date}, {survey_end_date})"
+        f"margin_range=({margin_start_date}, {margin_end_date})"
     )
 
     from app.core.i18n import i18n_service
@@ -126,7 +119,6 @@ async def sync_stock_data_func(
         {"name": i18n_service.t("market.data_manager.dragon_tiger"), "func": lambda: ingestor_manager.fetch_and_ingest_dragon_tiger(start_date=normal_start_date, end_date=normal_end_date)},  # Assuming incremental
 
         # Phase 2
-        {"name": i18n_service.t("market.data_manager.stock_interactive_qa"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_interactive_qa(stock_code, start_date=survey_start_date, end_date=survey_end_date)},
         {"name": i18n_service.t("market.data_manager.stock_limit_pool"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_limit_up_pool(date=normal_end_date)},
         {"name": i18n_service.t("market.data_manager.stock_money_flow"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_money_flow(stock_code)},
         {"name": i18n_service.t("market.data_manager.stock_shareholder_count"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_shareholder_count(stock_code)},
@@ -276,7 +268,6 @@ async def sync_bulk_tables_func(
         'realtime':                {'method': ingestor_manager.fetch_and_ingest_realtime_market,            'mode': 'per_stock', 'needs_scope': True},
         # --- Expanded Info ---
         'industry':                {'method': ingestor_manager.fetch_and_ingest_board_industry,             'mode': 'bulk'},
-        'stock_interactive_qa':    {'method': ingestor_manager.fetch_and_ingest_stock_interactive_qa,      'mode': 'per_stock', 'needs_scope': True},
         # --- Trading Money Flows & Players ---
         'northbound':              {'method': ingestor_manager.fetch_and_ingest_northbound,                 'mode': 'per_stock', 'needs_scope': True},
         'dragontiger':             {'method': ingestor_manager.fetch_and_ingest_dragon_tiger,               'mode': 'bulk'},
@@ -314,8 +305,6 @@ async def sync_bulk_tables_func(
         elif table_key == 'stock_block_trade':
             kwargs.update({'start_date': default_start, 'end_date': default_end})
         elif table_key in {'income_statement', 'balance_sheet', 'cashflow_statement'}:
-            kwargs.update({'start_date': default_start, 'end_date': default_end})
-        elif table_key == 'stock_interactive_qa':
             kwargs.update({'start_date': default_start, 'end_date': default_end})
         elif table_key == 'index_daily':
             kwargs.update({'start_date': default_start, 'end_date': default_end})
@@ -967,42 +956,6 @@ async def calculate_indicators_func(
 
     except Exception as e:
         logger.error(f"Calculate indicators task failed: {e}", exc_info=True)
-        return {"status": "failed", "error": str(e)}
-
-
-async def sync_stock_interactive_qa_func(
-    stock_code: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    task_name: str = "Interactive QA Sync",
-    allow_concurrent: bool = False
-) -> Dict[str, Any]:
-    """
-    同步互动问答数据任务
-    """
-    from app.data.ingestors.manager import ingestor_manager
-
-    logger.info(f"Starting interactive QA sync for {stock_code}, range: {start_date}-{end_date}")
-
-    try:
-        if not start_date or not end_date:
-            d_start, d_end = get_sync_date_range("survey")
-            start_date = start_date or d_start
-            end_date = end_date or d_end
-
-        success = await ingestor_manager.fetch_and_ingest_stock_interactive_qa(
-            stock_code,
-            start_date=start_date,
-            end_date=end_date,
-        )
-
-        return {
-            "status": "success" if success else "failed",
-            "stock_code": stock_code,
-            "message": "Sync success" if success else "Sync failed or no data"
-        }
-    except Exception as e:
-        logger.error(f"Interactive QA sync failed for {stock_code}: {e}", exc_info=True)
         return {"status": "failed", "error": str(e)}
 
 

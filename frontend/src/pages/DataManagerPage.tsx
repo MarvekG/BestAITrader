@@ -7,7 +7,6 @@ import { TaskCompletedMessage, WebSocketMessage } from '../services/websocket';
 import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
 import { getApiErrorMessage } from '../utils/errorUtils';
 import dayjs from 'dayjs';
-import ReactMarkdown from 'react-markdown';
 
 const { Text } = Typography;
 
@@ -27,7 +26,6 @@ export const DataManagerPage: React.FC = () => {
     const [dragonTigerSyncing, setDragonTigerSyncing] = useState(false);
     const [realtimeSyncing, setRealtimeSyncing] = useState(false);
     const [industrySyncing, setIndustrySyncing] = useState(false);
-    const [interactiveQASyncing, setInteractiveQASyncing] = useState(false);
     const [moneyFlowSyncing, setMoneyFlowSyncing] = useState(false);
     const [shareholderSyncing, setShareholderSyncing] = useState(false);
     const [pledgeSyncing, setPledgeSyncing] = useState(false);
@@ -96,9 +94,6 @@ export const DataManagerPage: React.FC = () => {
     const [data, setData] = useState<{ total: number; items: any[] }>({ total: 0, items: [] });
     const [pagination, setPagination] = useState({ current: 1, pageSize: 20 });
     const { current: paginationCurrent, pageSize: paginationPageSize } = pagination;
-    const [newsDetail, setNewsDetail] = useState<any>(null);
-    const [isNewsModalVisible, setIsNewsModalVisible] = useState(false);
-    const [modalTitle, setModalTitle] = useState<string>('');
     // Fetch data sources on mount
     useEffect(() => {
         fetchDataSources();
@@ -259,7 +254,6 @@ export const DataManagerPage: React.FC = () => {
             'industry': 'industry_data', // Hypothesized
             'northbound': 'northbound_data',
             'dragontiger': 'dragon_tiger_data',
-            'stock_interactive_qa': 'stock_interactive_qa',
             'stock_limit_up_pool': 'stock_limit_up_pool',
             'stock_limit_down_pool': 'stock_limit_down_pool',
             'stock_zhaban_pool': 'stock_zhaban_pool',
@@ -306,8 +300,6 @@ export const DataManagerPage: React.FC = () => {
                     sort_by: 'change_percent',
                     order: 'desc'
                 });
-            } else if (tab === 'stock_interactive_qa') {
-                res = await marketApi.getDbData(tab, { stock_code: code, skip, limit: size, sort_by: 'answer_time', order: 'desc' });
             } else {
                 const actualTab = tab;
 
@@ -584,22 +576,6 @@ export const DataManagerPage: React.FC = () => {
         }
     };
 
-    const handleInteractiveQASync = async () => {
-        if (!stockCode) {
-            message.warning(t('common.please_select_stock'));
-            return;
-        }
-        setInteractiveQASyncing(true);
-        try {
-            const res = await marketApi.syncInteractiveQA(stockCode);
-            message.success(res.message);
-        } catch (error) {
-            message.error(getApiErrorMessage(error, 'Interactive QA sync failed'));
-        } finally {
-            setInteractiveQASyncing(false);
-        }
-    };
-
     const handleValuationSync = async () => {
         setValuationSyncing(true);
         try {
@@ -832,34 +808,6 @@ export const DataManagerPage: React.FC = () => {
             { title: t('stock_valuation_history.total_market_value'), dataIndex: ['stock_valuation_history.total_market_value'], key: 'stock_valuation_history.total_market_value', render: (v: number) => v != null ? formatNumber(v) : '-' },
         ],
         financial: [] as any[], // Will be generated dynamically
-        stock_interactive_qa: [
-            { title: t('stock_interactive_qa.stock_code'), dataIndex: ['stock_interactive_qa.stock_code'], key: 'stock_code', width: 100, fixed: 'left' as const },
-            { title: t('stock_interactive_qa.answer_time'), dataIndex: ['stock_interactive_qa.answer_time'], key: 'answer_time', width: 160, render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD HH:mm:ss') : '-' },
-            { title: t('stock_interactive_qa.trade_date'), dataIndex: ['stock_interactive_qa.trade_date'], key: 'trade_date', width: 120, render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD') : '-' },
-            { title: t('stock_interactive_qa.data_source'), dataIndex: ['stock_interactive_qa.data_source'], key: 'data_source', width: 140, render: (s: string) => <Tag color="blue">{s}</Tag> },
-            {
-                title: t('common.action'),
-                key: 'action',
-                width: 90,
-                fixed: 'right',
-                render: (_: any, record: any) => (
-                    <Button
-                        type="link"
-                        size="small"
-                        onClick={() => {
-                            const stock = record['stock_interactive_qa.stock_code'];
-                            const question = record['stock_interactive_qa.question'] || '-';
-                            const answer = record['stock_interactive_qa.answer'] || '-';
-                            setModalTitle(`${stock} - ${t('market.data_manager.stock_interactive_qa')}`);
-                            setNewsDetail(`### ${t('stock_interactive_qa.question')}\n\n${question}\n\n### ${t('stock_interactive_qa.answer')}\n\n${answer}`);
-                            setIsNewsModalVisible(true);
-                        }}
-                    >
-                        {t('common.view')}
-                    </Button>
-                )
-            }
-        ],
         northbound: [
             { title: t('northbound_data.date'), dataIndex: ['northbound_data.date'], key: 'northbound_data.date' },
             { title: t('northbound_data.stock_code'), dataIndex: ['northbound_data.stock_code'], key: 'northbound_data.stock_code' },
@@ -1563,19 +1511,6 @@ export const DataManagerPage: React.FC = () => {
                                 </Tooltip>
                             </Space>
                         )}
-                        {activeTab === 'stock_interactive_qa' && (
-                            <Tooltip title={!stockCode ? t('common.please_select_stock') : t('market.data_manager.sync_interactive_qa')}>
-                                <Button
-                                    type="primary"
-                                    icon={<SyncOutlined spin={interactiveQASyncing} />}
-                                    onClick={handleInteractiveQASync}
-                                    loading={interactiveQASyncing}
-                                    disabled={!stockCode}
-                                >
-                                    {t('market.data_manager.sync_interactive_qa')} {stockCode ? `[${stockCode}]` : ''}
-                                </Button>
-                            </Tooltip>
-                        )}
                         {activeTab === 'stock_top_holders' && (
                             <Tooltip title={!stockCode ? t('common.please_select_stock') : t('market.data_manager.sync_top_holders')}>
                                 <Button
@@ -1633,10 +1568,6 @@ export const DataManagerPage: React.FC = () => {
                             {
                                 key: 'industry',
                                 label: <span><DatabaseOutlined />{t('market.data_manager.industry')}</span>,
-                            },
-                            {
-                                key: 'stock_interactive_qa',
-                                label: <span><QuestionCircleOutlined />{t('market.data_manager.stock_interactive_qa')}</span>,
                             },
                             {
                                 key: 'northbound',
@@ -1705,7 +1636,7 @@ export const DataManagerPage: React.FC = () => {
                     <Table
                         dataSource={data.items}
                         columns={columnsMap[activeTab] || []}
-                        rowKey={(record) => record['stock_interactive_qa.id'] || record['stock_zhaban_pool.id'] || record['stock_limit_up_pool.id'] || record['stock_limit_down_pool.id'] || record['stock_basic.stock_code'] || record['kline_data.date'] || record.id || `${record['stock_zhaban_pool.stock_code'] || record.stock_code}-${record['stock_zhaban_pool.update_date'] || record.date || record.report_date || record.trade_date || record.publish_date || Math.random()}`}
+                        rowKey={(record) => record['stock_zhaban_pool.id'] || record['stock_limit_up_pool.id'] || record['stock_limit_down_pool.id'] || record['stock_basic.stock_code'] || record['kline_data.date'] || record.id || `${record['stock_zhaban_pool.stock_code'] || record.stock_code}-${record['stock_zhaban_pool.update_date'] || record.date || record.report_date || record.trade_date || record.publish_date || Math.random()}`}
                         loading={loading}
                         pagination={{
                             current: pagination.current,
@@ -1717,31 +1648,13 @@ export const DataManagerPage: React.FC = () => {
                         }}
                         size="middle"
                         scroll={{
-                            x: ['stock_interactive_qa', 'stock_zhaban_pool'].includes(activeTab) && data.items.length > 0 ?
+                            x: activeTab === 'stock_zhaban_pool' && data.items.length > 0 ?
                                 'max-content' :
                                 1200
                         }}
                     />
                 </Card>
             </Space >
-
-
-            <Modal
-                title={modalTitle || t('common.view')}
-                open={isNewsModalVisible}
-                onOk={() => setIsNewsModalVisible(false)}
-                onCancel={() => setIsNewsModalVisible(false)}
-                width={900}
-                footer={null}
-            >
-                <div style={{ maxHeight: '70vh', overflow: 'auto', padding: '15px' }}>
-                    {newsDetail ? (
-                        <ReactMarkdown>{newsDetail}</ReactMarkdown>
-                    ) : (
-                        <Text type="secondary">{t('market.data_manager.no_content_available')}</Text>
-                    )}
-                </div>
-            </Modal>
 
             {/* Data Source Switch Modal */}
             <Modal
@@ -1977,7 +1890,6 @@ export const DataManagerPage: React.FC = () => {
                             <Card size="small" title={t('common.realtime_quote')}>
                                 <Space direction="vertical">
                                     <Checkbox value="realtime">{t('market.data_manager.realtime')}</Checkbox>
-                                    <Checkbox value="stock_interactive_qa">{t('market.data_manager.stock_interactive_qa')}</Checkbox>
                                 </Space>
                             </Card>
                             <Card size="small" title={t('common.money_flow')}>

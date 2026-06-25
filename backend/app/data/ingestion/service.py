@@ -14,8 +14,7 @@ from app.models.data_storage import (
     StockLimitUpPool, StockLimitDownPool, StockZhabanPool, StockMoneyFlow, StockShareholder, StockPledge, StockPledgeSummary,
     StockInsider, StockRelease, StockMargin, IndexDaily,
     StockBlockTrade, SectorMoneyFlow,
-    StockTopHolders,
-    StockInteractiveQA
+    StockTopHolders
 )
 
 
@@ -52,7 +51,6 @@ class DataIngestionService:
             'sector_money_flow': SectorMoneyFlow,
             'stock_pledge_summary': StockPledgeSummary,
             'stock_top_holders': StockTopHolders,
-            'stock_interactive_qa': StockInteractiveQA,
             # 兼容带 schema 的名称 (虽然 SQLAlchemy metadata.tables 可能不带 schema)
             'data.common_data': CommonData,
             'data.kline_data': KlineData,
@@ -72,8 +70,7 @@ class DataIngestionService:
             'data.stock_margin_data': StockMargin,
             'data.index_daily': IndexDaily,
             'data.stock_pledge_summary': StockPledgeSummary,
-            'data.stock_top_holders': StockTopHolders,
-            'data.stock_interactive_qa': StockInteractiveQA
+            'data.stock_top_holders': StockTopHolders
         }
         # 确保表存在
         if self.engine.dialect.name.startswith("postgresql"):

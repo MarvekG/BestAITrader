@@ -149,10 +149,6 @@ class SentimentReader(_WrapDictMixin, _WrapListMixin):
     def hot_rank(self, db: Session, stock_code: str) -> dict[str, Any]:
         return self.source._get_hot_rank(db, stock_code)
 
-    def recent_interactive_qa(self, db: Session, stock_code: str) -> list[dict[str, Any]]:
-        return self.source._get_recent_interactive_qa(db, stock_code)
-
-
 @dataclass(slots=True)
 class RiskReader(_WrapDictMixin, _WrapListMixin):
     source: RiskSource = field(default_factory=RiskSource)

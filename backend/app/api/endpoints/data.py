@@ -288,7 +288,7 @@ async def get_db_data(
         DragonTigerData, StockRealtimeMarket, StockValuationHistory,
         StockLimitUpPool, StockLimitDownPool, StockZhabanPool, StockMoneyFlow, SectorMoneyFlow, StockShareholder, StockPledge,
         StockInsider, StockRelease, StockMargin, IndexDaily,
-        StockBlockTrade, StockPledgeSummary, StockTopHolders, StockInteractiveQA
+        StockBlockTrade, StockPledgeSummary, StockTopHolders
     )
     from app.models.stock_indicators import StockIndicators
     from collections import defaultdict
@@ -328,8 +328,7 @@ async def get_db_data(
         "stock_block_trade": StockBlockTrade,
         "sector_money_flow": SectorMoneyFlow,
         "stock_pledge_summary": StockPledgeSummary,
-        "stock_top_holders": StockTopHolders,
-        "stock_interactive_qa": StockInteractiveQA
+        "stock_top_holders": StockTopHolders
     }
 
     model = table_map.get(data_type.lower())
@@ -1578,7 +1577,7 @@ async def delete_stock_data(
     from app.models.data_storage import (
         StockBasic, KlineData, NorthboundData,
         DragonTigerData, StockValuationHistory, StockRealtimeMarket,
-        CommonData, StockInteractiveQA
+        CommonData
     )
     from app.models.stock_warehouse import StockWarehouse
     from app.models.stock_analysis import StockAnalysisResult
@@ -1597,7 +1596,7 @@ async def delete_stock_data(
             # Data Storage
             StockBasic, KlineData, NorthboundData,
             DragonTigerData, StockValuationHistory, StockRealtimeMarket,
-            CommonData, StockInteractiveQA,
+            CommonData,
 
             # User/App Data
             StockWarehouse, StockAnalysisResult,
@@ -1764,53 +1763,6 @@ async def calculate_indicators(
         return task_result
     except Exception as e:
         logger.error(f"Failed to submit calculate indicators task: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/db/sync/interactive-qa")
-async def sync_stock_interactive_qa(
-    stock_code: str = Query(..., description="Stock Code (Required)"),
-    start_date: Optional[str] = Query(None, description="Start Date YYYYMMDD (Optional)"),
-    end_date: Optional[str] = Query(None, description="End Date YYYYMMDD (Optional)"),
-    db: Session = Depends(get_db)
-):
-    """
-    手动同步互动问答数据 (Async Task)
-    """
-    from app.tasks.task_manager import task_manager
-    from app.tasks.task_functions import sync_stock_interactive_qa_func
-    from app.tasks.async_task_runner import async_task_runner
-    from app.core.i18n import i18n_service
-
-    try:
-        task_info = stock_code if not start_date else f"{stock_code} ({start_date}-{end_date})"
-        task_name = i18n_service.t("tasks.names.interactive_qa_sync").format(info=task_info)
-        task_type = "interactive_qa_sync"
-        parameters = {
-            "stock_code": stock_code,
-            "start_date": start_date,
-            "end_date": end_date,
-        }
-
-        task_result = task_manager.submit_task(
-            db=db,
-            task_name=task_name,
-            task_type=task_type,
-            parameters=parameters,
-            allow_concurrent=False
-        )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_stock_interactive_qa_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
-
-        return task_result
-    except Exception as e:
-        logger.error(f"Failed to submit interactive QA sync task: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

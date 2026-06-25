@@ -659,7 +659,7 @@ SYSTEM_PROMPT_CAPITAL_FLOW_CN = f"""
 SYSTEM_PROMPT_SENTIMENT_CN = f"""
 你是**高级市场情绪与热度分析专家**，擅长捕捉 A 股市场的资金动态、心态博弈及情绪反转。
 你将获得：
-1. **raw_context**: 仅包含少量静态种子信息，例如 `hot_rank`（个股人气/飙升榜）、`interactive_qa`（互动问答）、`market`（个股最新价格快照）、`index_reference`（市场指数参考）与 `kline`（近期K线片段）。
+1. **raw_context**: 仅包含少量静态种子信息，例如 `hot_rank`（个股人气/飙升榜）、`market`（个股最新价格快照）、`index_reference`（市场指数参考）与 `kline`（近期K线片段）。
 2. **实时搜索能力**: 你必须主动补充最新市场情绪相关新闻、热点扩散、风险偏好与资金偏好变化。
 
 **记忆工具规则**:
@@ -1729,7 +1729,7 @@ Please strictly follow this Markdown format for the analysis report:
 SYSTEM_PROMPT_SENTIMENT_EN = f"""
 You are a **Senior Market Sentiment & Heat Analysis Expert**, specializing in capturing A-share market capital dynamics, psychological games, and sentiment reversals.
 You will receive:
-1. **raw_context**: Containing only a small amount of static seed information, such as `hot_rank` (stock popularity / rising rank), `interactive_qa`, `market` (latest stock price snapshot), `index_reference` (market index reference), and `kline` (recent K-line slice).
+1. **raw_context**: Containing only a small amount of static seed information, such as `hot_rank` (stock popularity / rising rank), `market` (latest stock price snapshot), `index_reference` (market index reference), and `kline` (recent K-line slice).
 2. **Real-time search capability**: You must actively use search tools to capture the latest market mood, theme diffusion, risk appetite, and capital preference changes.
 
 **Memory Tool Rules**:
@@ -2514,7 +2514,6 @@ SYSTEM_PROMPT_NEWS_ANALYST_CN = """
 ## **数据输入**
 - **_target_stock_name / _target_stock_code**: 目标股票标识，用于围绕目标主体发起补充研究。
 - **company / basic / industry_rank**: 少量公司与行业背景，用于生成更准确的搜索关键词。
-- **interactive_qa**: 包含近期互动问答原文，可用于补充管理层表态、投资者核心关切与公司口径变化。
 - **实时补充结果**: 你必须主动补充目标股票及相关市场情绪的最新深度新闻、公告和背景信息。
 
 ## **输出报告规范 (多维度深度版)**
@@ -2579,7 +2578,6 @@ Your final output must be a combined domestic-plus-international conclusion, and
 ## **Data Input**
 - **_target_stock_name / _target_stock_code**: Target stock identifiers used to anchor follow-up research.
 - **company / basic / industry_rank**: Minimal company and industry background used to form better search queries.
-- **interactive_qa**: Contains recent investor Q&A records that help capture management statements, investor concerns, and changes in company tone.
 - **Real-time Supplementary Results**: You must actively obtain the latest in-depth news, announcements, and market-mood signals through follow-up evidence gathering.
 
 ## **Output Report Standards (Multi-dimensional Deep Edition)**

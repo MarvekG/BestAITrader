@@ -281,19 +281,6 @@ class IngestorManager(BaseIngestor):
 
     # Optional methods
 
-    async def fetch_and_ingest_stock_interactive_qa(
-        self,
-        stock_code: str,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None
-    ) -> bool:
-        return await self._execute_with_failover(
-            'fetch_and_ingest_stock_interactive_qa',
-            stock_code,
-            start_date=start_date,
-            end_date=end_date,
-        )
-
     async def fetch_and_ingest_stock_limit_up_pool(self, date: Optional[str] = None) -> bool:
         return await self._execute_with_failover('fetch_and_ingest_stock_limit_up_pool', date)
 
@@ -470,7 +457,7 @@ class IngestorManager(BaseIngestor):
         return True
 
     async def sync_all_corporate_events(self) -> bool:
-        """同步公司重大事件 (股东、质押、内幕、互动问答)"""
+        """同步公司重大事件 (股东、质押、内幕、解禁)"""
         logger.info("Starting Sync All: Corporate Events")
         stock_codes = self._get_all_stock_codes()
         for i, code in enumerate(stock_codes):
@@ -478,7 +465,6 @@ class IngestorManager(BaseIngestor):
             await self.fetch_and_ingest_stock_pledge_risk(code)
             await self.fetch_and_ingest_stock_insider_trading(code)
             await self.fetch_and_ingest_stock_lockup_release(code)
-            await self.fetch_and_ingest_stock_interactive_qa(code)
             if (i + 1) % 50 == 0:
                 logger.info(f"Corporate events progress: {i + 1}/{len(stock_codes)} stocks")
         return True

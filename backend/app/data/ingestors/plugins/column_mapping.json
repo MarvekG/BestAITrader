@@ -34,25 +34,6 @@
         "org_name": "institution"
       }
     },
-    "data.stock_interactive_qa": {
-      "tushare_sh": {
-        "ts_code": "stock_code",
-        "name": "_unused_company_name",
-        "trade_date": "trade_date",
-        "q": "question",
-        "a": "answer",
-        "pub_time": "answer_time"
-      },
-      "tushare_sz": {
-        "ts_code": "stock_code",
-        "name": "_unused_company_name",
-        "trade_date": "trade_date",
-        "q": "question",
-        "a": "answer",
-        "pub_time": "answer_time",
-        "industry": "_unused_industry"
-      }
-    },
     "data.stock_income_statement": {
       "tushare_income_statement": {
         "ts_code": "stock_code",

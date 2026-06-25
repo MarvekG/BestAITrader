@@ -314,13 +314,11 @@ class HistoryProvider:
         technical = runtime.readers.technical
         capital_flow = runtime.readers.capital_flow
         fundamental = runtime.readers.fundamental
-        sentiment = runtime.readers.sentiment
         with runtime.db_session() as db:
             kline_items = technical.recent_klines(db, runtime.stock_code, days=30)
             money_flow_trend_items = capital_flow.money_flow_trend(db, runtime.stock_code)
             northbound_trend = capital_flow.northbound_trend(db, runtime.stock_code)
             insider_activity = fundamental.insider_activity(db, runtime.stock_code)
-            interactive_qa_items = sentiment.recent_interactive_qa(db, runtime.stock_code)
             seo_history = fundamental.seo_history(db, runtime.stock_code)
             kline = _compact_series_payload(
                 kline_items,
@@ -336,19 +334,12 @@ class HistoryProvider:
                     kline,
                     money_flow_trend,
                     northbound_trend,
-                    interactive_qa_items,
                     seo_history,
                 ),
                 "kline": kline,
                 "money_flow_trend": money_flow_trend,
                 "northbound_trend": northbound_trend,
                 "insider_activity": _wrap_dict(fundamental, insider_activity),
-                "interactive_qa": _wrap_list(
-                    sentiment,
-                    interactive_qa_items,
-                    empty_status="available",
-                    include_count=True,
-                ),
                 "seo_history": _wrap_dict(fundamental, seo_history),
             }
             return AIContextLayer(self.name, payload)

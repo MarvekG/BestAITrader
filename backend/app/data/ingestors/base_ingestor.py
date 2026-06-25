@@ -388,15 +388,6 @@ class BaseIngestor(ABC):
 
     # --- 以下为更多特定数据接口，可选实现或默认返回 False ---
 
-    async def fetch_and_ingest_stock_interactive_qa(
-        self,
-        stock_code: str,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None
-    ) -> bool:
-        """同步互动问答数据"""
-        return False
-
     async def fetch_and_ingest_stock_limit_up_pool(self, date: Optional[str] = None) -> bool:
         """采集涨停池"""
         return False

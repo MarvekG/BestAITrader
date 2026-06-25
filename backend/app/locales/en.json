@@ -662,7 +662,6 @@
       "global_futures_daily": "Global Futures Daily",
       "internal_futures_realtime": "Internal Futures Realtime",
       "internal_futures_daily": "Internal Futures Daily",
-      "stock_interactive_qa": "Interactive Q&A",
       "stock_limit_pool": "Limit Up Pool",
       "stock_limit_down_pool": "Limit Down Pool",
       "stock_money_flow": "Money Flow",
@@ -681,7 +680,6 @@
       "sync_zhaban_pool": "Sync Zhaban Pool [{{date}}]",
       "sync_shareholders": "Sync Shareholders",
       "sync_pledge": "Sync Pledge Risk",
-      "sync_interactive_qa": "Sync Interactive Q&A",
       "clear_data": "Clear Data",
       "confirm_clear": "Confirm Clear",
       "warning_undone": "WARNING: This action cannot be undone.",
@@ -1990,7 +1988,6 @@
     "already_in_progress": "Task already in progress, Task ID: {task_id}",
     "names": {
       "stock_basic_sync": "Stock Basic Sync ({info})",
-      "interactive_qa_sync": "Interactive Q&A Sync ({info})",
       "dragon_tiger_sync": "Dragon Tiger Sync ({dates})",
       "limit_up_pool_sync": "Limit Up Pool Sync ({date})",
       "limit_down_pool_sync": "Limit Down Pool Sync ({date})",
@@ -2131,23 +2128,6 @@
     "all_status": "All Status",
     "refresh": "Refresh",
     "total_records": "Total {{count}} records"
-  },
-  "stock_interactive_qa": {
-    "stock_code": "Stock Code",
-    "platform": "Platform",
-    "platform_cninfo": "CNINFO IRM",
-    "platform_sseinfo": "SSE e-Interaction",
-    "question": "Question",
-    "answer": "Answer",
-    "questioner": "Questioner",
-    "answerer": "Responder",
-    "question_time": "Question Time",
-    "answer_time": "Answer Time",
-    "trade_date": "Trade Date",
-    "question_source": "Question Source",
-    "answer_source": "Answer Source",
-    "industry": "Industry",
-    "data_source": "Data Source"
   },
   "etf_realtime": {
     "stock_code": "Code",
