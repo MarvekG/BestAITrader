@@ -13,6 +13,7 @@ from app.api.endpoints.testing import (
     test_memory_preview as run_memory_preview_endpoint,
     test_memory_read as run_memory_read_endpoint,
     test_memory_recall_audits as run_memory_recall_audits_endpoint,
+    test_query_calc as run_query_calc_endpoint,
     test_skills as run_skills_endpoint,
 )
 from app.ai.memory_client import memory_client
@@ -70,6 +71,35 @@ async def test_pdf_tool_testing_endpoint_requires_url():
 
     assert result["status"] == "error"
     assert "URL" in result["message"]
+
+
+@pytest.mark.asyncio
+async def test_query_calc_testing_endpoint_checks_sandbox_stdout_result():
+    mock_fetch_stock_info = AsyncMock(return_value=True)
+    mock_query_calc = AsyncMock(return_value={"success": True, "stdout": '{"result": 1}\n', "stderr": ""})
+
+    with patch("app.api.endpoints.testing.ingestor_manager.fetch_and_ingest_stock_info", mock_fetch_stock_info), \
+         patch("app.api.endpoints.testing.tools.query_and_calculate", SimpleNamespace(ainvoke=mock_query_calc)):
+        result = await run_query_calc_endpoint()
+
+    assert result["status"] == "success"
+    payload = mock_query_calc.await_args.args[0]
+    assert "print(json.dumps" in payload["compute_code"]
+
+
+@pytest.mark.asyncio
+async def test_query_calc_testing_endpoint_rejects_assignment_only_result():
+    with patch(
+        "app.api.endpoints.testing.ingestor_manager.fetch_and_ingest_stock_info",
+        AsyncMock(return_value=True),
+    ), \
+         patch(
+             "app.api.endpoints.testing.tools.query_and_calculate",
+             SimpleNamespace(ainvoke=AsyncMock(return_value={"success": True, "stdout": "", "stderr": ""})),
+         ):
+        result = await run_query_calc_endpoint()
+
+    assert result["status"] == "error"
 
 
 @pytest.mark.asyncio
