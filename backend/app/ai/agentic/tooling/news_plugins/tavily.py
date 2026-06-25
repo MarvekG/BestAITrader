@@ -27,6 +27,8 @@ import httpx
 from app.core.config import settings
 from app.core.logger import get_logger
 
+from app.ai.agentic.tooling.news_plugins.provider_clients import request_with_key_failover
+
 logger = get_logger(__name__)
 
 NAME = "Tavily 通用新闻搜索"
@@ -138,8 +140,7 @@ async def search(
     Returns:
         Normalized Tavily search results.
     """
-    api_key = settings.TAVILY_API_KEY
-    if not api_key:
+    if not settings.TAVILY_API_KEY:
         logger.warning("TAVILY_API_KEY is not configured.")
         return []
 
@@ -147,7 +148,6 @@ async def search(
     query_terms = _extract_search_terms(normalized_keyword) or [normalized_keyword]
     max_retries = 3
     payload = {
-        "api_key": api_key,
         "query": keyword,
         "search_depth": "advanced",
         "max_results": limit,
@@ -161,8 +161,13 @@ async def search(
     for attempt in range(max_retries):
         try:
             async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-                response = await client.post("https://api.tavily.com/search", json=payload)
-                response.raise_for_status()
+                async def request_once(api_key: str) -> httpx.Response:
+                    request_payload = {**payload, "api_key": api_key}
+                    return await client.post("https://api.tavily.com/search", json=request_payload)
+
+                response = await request_with_key_failover("Tavily", settings.TAVILY_API_KEY, request_once)
+                if response is None:
+                    return []
                 data = response.json()
                 results = []
                 for result in data.get("results", []):
