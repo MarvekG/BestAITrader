@@ -291,7 +291,6 @@ async def get_db_data(
         StockBlockTrade, StockPledgeSummary, StockTopHolders
     )
     from app.models.stock_indicators import StockIndicators
-    from collections import defaultdict
     import math
 
     def sanitize_float_values(obj):

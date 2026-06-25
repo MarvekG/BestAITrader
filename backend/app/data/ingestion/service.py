@@ -1,12 +1,9 @@
 import pandas as pd
-import json
-import logging
 from datetime import datetime
-from typing import Optional, List, Dict, Any
-from sqlalchemy import text, func, MetaData
+from typing import Optional, List, Dict
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.core.database import engine
-from app.models.data_registry import ApiRegistry
 from app.core.utils.formatters import StockCodeStandardizer
 from app.models.data_storage import (
     Base, CommonData, KlineData, StockBasic, NorthboundData, DragonTigerData, StockValuationHistory,
@@ -323,7 +320,7 @@ class DataIngestionService:
         # 优先使用 Unique Constraint (业务主键)，其次使用 Unique Index，最后 PKey
         # 因为很多表 (如 KlineData) 使用 UUID 作为 PK，但实际去重依赖业务字段 (stock_code, date)
         
-        from sqlalchemy.schema import UniqueConstraint, Index
+        from sqlalchemy.schema import UniqueConstraint
         
         conflict_target = None
         

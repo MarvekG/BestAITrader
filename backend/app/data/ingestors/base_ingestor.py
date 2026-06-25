@@ -11,7 +11,6 @@ import urllib3
 from app.core.config import settings
 from app.core.logger import get_logger
 from app.core.utils.backoff import backoff
-from app.data.ingestors.rate_limiter import LeakyBucketRateLimiter
 
 logger = get_logger(__name__)
 

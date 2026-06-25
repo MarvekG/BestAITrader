@@ -1068,7 +1068,6 @@ async def cleanup_stock_realtime_market_history(task_name: str | None = None) ->
         包含删除记录数和清理截止时间的结果。
     """
     _ = task_name
-    import pytz
 
     from app.models.data_storage import StockRealtimeMarket
 
