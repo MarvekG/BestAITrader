@@ -6,12 +6,10 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.messages.tool import invalid_tool_call
 from app.ai.agentic.tools import get_all_tools
 from app.ai.agentic.memory_tools import build_memory_tools
-from app.core.config import settings
 from app.ai.memory_client import memory_client
 from app.ai.llm_providers.litellm import LiteLLMProvider
 from app.ai.llm_engine.agents import base as base_agent_module
 from app.ai.llm_engine.agents.base import BaseAgent
-from app.ai.llm_engine.models import PMDecision
 from app.ai.llm_engine.roles import (
     AGENT_NAME_BULLISH_RESEARCHER,
     AGENT_NAME_CAPITAL_FLOW_ANALYST,
@@ -53,7 +51,7 @@ class _DummyStructuredLLMEngineAgent(BaseAgent):
         return "dummy structured system prompt"
 
     def get_output_model(self):
-        return PMDecision
+        return str
 
 
 @pytest.mark.asyncio
@@ -346,7 +344,7 @@ async def test_base_agent_forces_final_answer_after_iteration_limit():
 
 
 @pytest.mark.asyncio
-async def test_base_agent_repairs_structured_markdown_final_output_without_recalling_tools():
+async def test_base_agent_accepts_pm_markdown_final_output_without_json_repair():
     class _FakeTool:
         name = "search_news"
 
@@ -371,45 +369,15 @@ async def test_base_agent_repairs_structured_markdown_final_output_without_recal
     tool_response.usage_metadata = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
     markdown_response = MagicMock()
-    markdown_response.content = "## 交易执行确认\n\n| 项目 | 内容 |\n|:---|:---|\n| 动作 | 买入 |"
+    markdown_response.content = "# PM report\n\n## 1. Verdict\nExecuted a 15% pilot buy.\n\n## 2. Evidence\nConfirmed."
     markdown_response.tool_calls = []
     markdown_response.usage_metadata = {"input_tokens": 20, "output_tokens": 30, "total_tokens": 50}
-
-    invalid_retry_response_1 = AIMessage(
-        content="仍然不是 JSON",
-        usage_metadata={"input_tokens": 30, "output_tokens": 10, "total_tokens": 40},
-    )
-    invalid_retry_response_2 = AIMessage(
-        content="## 还是 Markdown",
-        usage_metadata={"input_tokens": 35, "output_tokens": 10, "total_tokens": 45},
-    )
-    json_response = AIMessage(
-        content=PMDecision(
-            decision="buy",
-            confidence_score=82,
-            target_position=0.15,
-            verdict_summary="Bull case is stronger after execution confirmation.",
-            investment_plan="Keep a 15% pilot position and review the next report.",
-            price_range="66.28",
-            stop_loss=60.0,
-            take_profit=78.0,
-            holding_horizon_days=20,
-            risk_assessment=0.42,
-            execution_details="Trade executed successfully; no additional tool call needed.",
-            report_markdown="# PM report\n\n## 1. Verdict\nExecuted a 15% pilot buy.",
-        ).model_dump_json(),
-        usage_metadata={"input_tokens": 30, "output_tokens": 40, "total_tokens": 70},
-    )
 
     mock_llm_with_tools = MagicMock()
     mock_llm_with_tools.ainvoke = AsyncMock(side_effect=[tool_response, markdown_response])
     mock_raw_llm = MagicMock()
     mock_raw_llm.bind_tools.return_value = mock_llm_with_tools
-    mock_raw_llm.ainvoke = AsyncMock(side_effect=[
-        invalid_retry_response_1,
-        invalid_retry_response_2,
-        json_response,
-    ])
+    mock_raw_llm.ainvoke = AsyncMock()
 
     with _patch_base_agent_llm_provider(mock_raw_llm), \
          patch("app.ai.llm_engine.agents.base.get_all_tools", return_value=[tool]), \
@@ -418,11 +386,10 @@ async def test_base_agent_repairs_structured_markdown_final_output_without_recal
         agent = _DummyStructuredLLMEngineAgent(role_name="Portfolio Manager")
         result = await agent.run({"stock_code": "601888.SH"})
 
-    assert result.decision == "buy"
-    assert result.target_position == 0.15
+    assert result.startswith("# PM report")
     assert tool.calls == [{"query": "601888.SH"}]
     assert mock_llm_with_tools.ainvoke.await_count == 2
-    assert mock_raw_llm.ainvoke.await_count == 3
+    assert mock_raw_llm.ainvoke.await_count == 0
 
     initial_human_messages = [
         message.content
@@ -432,12 +399,6 @@ async def test_base_agent_repairs_structured_markdown_final_output_without_recal
     assert any(content.startswith("STATIC_CONTEXT:\n") for content in initial_human_messages)
     assert any(content.startswith("RUNTIME_CONTEXT:\n") for content in initial_human_messages)
 
-    repair_messages = [
-        message.content
-        for message in mock_raw_llm.ainvoke.await_args.args[0]
-        if isinstance(message, HumanMessage)
-    ]
-    assert sum("不是合法 JSON" in content for content in repair_messages) == 3
 
 
 @pytest.mark.asyncio

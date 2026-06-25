@@ -10,9 +10,8 @@ from app.models.account import Account
 from app.models.position import Position
 from app.models.order import Order
 from app.models.trade_record import TradeRecord
-from app.models.debate_message import DebateMessage
 from app.websocket.manager import ws_manager
-from app.ai.llm_engine.roles import AGENT_ROLE_PORTFOLIO_MANAGER
+from app.models.pm_decision import PMDecisionRecord
 from app.data.market_utils import is_trading_time
 from app.data.storage import data_storage_service
 from app.risk_control.service import portfolio_risk_control_service
@@ -24,22 +23,14 @@ def _extract_session_stop_loss(db: Session, session_id: UUID | None) -> Decimal 
     if not session_id:
         return None
 
-    debate_message = db.query(DebateMessage).filter(
-        DebateMessage.session_id == session_id,
-        DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER
-    ).order_by(DebateMessage.created_at.desc()).first()
-
-    if not debate_message or not isinstance(debate_message.analysis, dict):
-        return None
-
-    stop_loss = debate_message.analysis.get("stop_loss")
-    if stop_loss in (None, ""):
+    pm_decision = db.query(PMDecisionRecord).filter(PMDecisionRecord.session_id == session_id).first()
+    if not pm_decision or pm_decision.stop_loss in (None, ""):
         return None
 
     try:
-        return Decimal(str(stop_loss))
+        return Decimal(str(pm_decision.stop_loss))
     except Exception:
-        logger.warning("Invalid stop_loss in PM decision for session %s: %s", session_id, stop_loss)
+        logger.warning("Invalid stop_loss in PM decision for session %s: %s", session_id, pm_decision.stop_loss)
         return None
 
 
@@ -850,7 +841,7 @@ class TradingService:
                 # 更新账户统计信息 (Update account statistics)
                 realized_pnl = Decimal(str(trade_result["realized_pnl"]))
                 locked_account.total_trades = (locked_account.total_trades or 0) + 1
-                
+
                 # 如果是盈利交易，更新胜率 (If profitable, update win rate)
                 if realized_pnl > 0:
                     current_wins = round((locked_account.win_rate or 0) * (locked_account.total_trades - 1) / 100)
@@ -860,15 +851,15 @@ class TradingService:
                     locked_account.win_rate = current_wins / locked_account.total_trades * 100
                 else:
                     locked_account.win_rate = 0 if realized_pnl <= 0 else 100
-                
+
                 # 更新盈亏比 (Update P/L ratio)
                 # Formula: ((realized_pnl + floating_pnl) / initial_capital) * 100
                 starting_capital = locked_account.initial_capital or locked_account.total_assets
                 if starting_capital and starting_capital > 0:
-                    # Note: account.market_value and positions are not fully updated in this object yet, 
-                    # but we can estimate or wait for the flush below. 
+                    # Note: account.market_value and positions are not fully updated in this object yet,
+                    # but we can estimate or wait for the flush below.
                     # For accuracy, we use the total_profit_loss which is updated.
-                    # We'll also need floating_pnl. Since this is complex here, 
+                    # We'll also need floating_pnl. Since this is complex here,
                     # we'll rely on the /my-assets dynamic calculation for the UI.
                     # But we update the persisted pct as a fallback.
                     locked_account.profit_loss_pct = (locked_account.total_profit_loss / starting_capital) * 100

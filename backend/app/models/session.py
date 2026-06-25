@@ -25,6 +25,12 @@ class Session(Base):
 
     debate_messages = relationship("DebateMessage", back_populates="session",
                                    uselist=True, lazy="dynamic", cascade="all, delete-orphan")
+    pm_decision = relationship(
+        "PMDecisionRecord",
+        back_populates="session",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     trade_records = relationship("TradeRecord", back_populates="session", uselist=True)
     # account 关系已移除，改为通过 user.account 访问
     orders = relationship("Order", back_populates="session", uselist=True)

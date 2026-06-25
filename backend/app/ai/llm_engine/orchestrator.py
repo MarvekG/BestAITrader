@@ -287,7 +287,7 @@ async def persist_agent_report(
                 elif hasattr(report_content, "confidence"):
                     confidence_val = float(getattr(report_content, "confidence"))
 
-                # report_markdown 是我们新加的，用于存储完整的 Markdown 报告
+                # 结构化模型若含 Markdown 字段，优先存储完整 Markdown 报告。
                 if hasattr(report_content, "report_markdown"):
                     reasoning_val = getattr(report_content, "report_markdown")
                 elif hasattr(report_content, "markdown_content"):
@@ -297,6 +297,14 @@ async def persist_agent_report(
             else:
                 reasoning_val = str(report_content)
                 analysis_dict = {"data": report_content}
+
+            if agent_role == AGENT_ROLE_PORTFOLIO_MANAGER:
+                from app.ai.llm_engine.pm_decision_service import get_pm_decision_for_session
+
+                pm_record = get_pm_decision_for_session(db, session_id)
+                if pm_record:
+                    analysis_dict = pm_record.to_dict()
+                    confidence_val = float(pm_record.confidence_score or 0) / 100.0
 
             # 创建数据库记录
             debate_msg = DebateMessage(
@@ -383,7 +391,11 @@ async def fetch_context(state: AnalystState) -> Dict[str, Any]:
                     account = db.query(Account).filter(Account.user_id == session_obj.user_id).first()
                     if account:
                         portfolio_overview = ai_context_snapshot.get("portfolio", {}).get("overview", {})
-                        portfolio_summary = portfolio_overview.get("summary", {}) if isinstance(portfolio_overview, dict) else {}
+                        portfolio_summary = (
+                            portfolio_overview.get("summary", {})
+                            if isinstance(portfolio_overview, dict)
+                            else {}
+                        )
                         portfolio_info["account"] = {
                             "total_assets": portfolio_summary.get("total_assets", account.total_assets),
                             "available_cash": portfolio_summary.get("available_cash", account.available_cash),
@@ -463,6 +475,7 @@ async def news_analysis(state: AnalystState) -> Dict[str, Any]:
     except Exception as e:
         logger.exception("%s execution failed", AGENT_NAME_NEWS_ANALYST)
         return {"errors": [_build_error_message(AGENT_NAME_NEWS_ANALYST, e)]}
+
 
 async def policy_analysis(state: AnalystState) -> Dict[str, Any]:
     """政策分析师节点：聚焦中国政府网最新政策与政策解读"""
@@ -557,10 +570,16 @@ def _build_previous_execution_summary(db, session_id: UUID) -> Dict[str, Any]:
     }
 
 
-def _build_pm_history_item(debate_msg: Any, session_obj: Any, execution_summary: Dict[str, Any]) -> Dict[str, Any]:
+def _build_pm_history_item(
+    pm_record: Any,
+    debate_msg: Any,
+    session_obj: Any,
+    execution_summary: Dict[str, Any],
+) -> Dict[str, Any]:
     """构建同股历史 PM 决策摘要。
 
     Args:
+        pm_record: PM 结构化决策记录。
         debate_msg: PM 决策消息记录。
         session_obj: 决策所属投研会话记录。
         execution_summary: 该会话关联的订单和成交摘要。
@@ -568,19 +587,16 @@ def _build_pm_history_item(debate_msg: Any, session_obj: Any, execution_summary:
     Returns:
         面向 PM 的压缩历史决策摘要，不包含完整长报告。
     """
-    analysis = debate_msg.analysis if isinstance(debate_msg.analysis, dict) else {}
     return {
         "session_id": str(session_obj.session_id),
         "created_at": safe_isoformat(debate_msg.created_at),
         "trading_frequency": session_obj.trading_frequency,
         "trading_strategy": session_obj.trading_strategy,
-        "decision": debate_msg.decision or analysis.get("decision"),
-        "confidence": debate_msg.confidence,
-        "target_position": analysis.get("target_position"),
-        "stop_loss": analysis.get("stop_loss"),
-        "take_profit": analysis.get("take_profit"),
-        "risk_assessment": analysis.get("risk_assessment"),
-        "verdict_summary": analysis.get("verdict_summary"),
+        "confidence": float(pm_record.confidence_score or 0) / 100.0,
+        "target_position": pm_record.target_position,
+        "stop_loss": pm_record.stop_loss,
+        "take_profit": pm_record.take_profit,
+        "holding_horizon_days": pm_record.holding_horizon_days,
         "execution_summary": execution_summary,
     }
 
@@ -625,7 +641,6 @@ def _build_order_history_item(order: Any, pm_by_session: Dict[str, Dict[str, Any
         "avg_fill_price": safe_float(order.avg_fill_price),
         "realized_pnl": safe_float(order.realized_pnl),
         "source": order.source,
-        "pm_decision": pm_snapshot.get("decision"),
         "pm_stop_loss": pm_snapshot.get("stop_loss"),
         "pm_take_profit": pm_snapshot.get("take_profit"),
         "pm_target_position": pm_snapshot.get("target_position"),
@@ -744,6 +759,7 @@ def _get_same_stock_history(
     from app.models.account import Account
     from app.models.debate_message import DebateMessage
     from app.models.order import Order
+    from app.models.pm_decision import PMDecisionRecord
     from app.models.session import Session as SessionModel
     from app.models.trade_record import TradeRecord
 
@@ -766,21 +782,25 @@ def _get_same_stock_history(
 
             pm_rows = []
             if previous_session_ids:
-                pm_rows = db.query(DebateMessage, SessionModel).join(
+                pm_rows = db.query(PMDecisionRecord, DebateMessage, SessionModel).join(
+                    DebateMessage,
+                    DebateMessage.session_id == PMDecisionRecord.session_id,
+                ).join(
                     SessionModel,
-                    SessionModel.session_id == DebateMessage.session_id,
+                    SessionModel.session_id == PMDecisionRecord.session_id,
                 ).filter(
-                    DebateMessage.session_id.in_(previous_session_ids),
+                    PMDecisionRecord.session_id.in_(previous_session_ids),
                     DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
                 ).order_by(DebateMessage.created_at.desc()).limit(decision_limit).all()
 
             recent_pm_decisions = [
                 _build_pm_history_item(
+                    pm_record,
                     debate_msg,
                     session_obj,
                     _build_previous_execution_summary(db, session_obj.session_id),
                 )
-                for debate_msg, session_obj in pm_rows
+                for pm_record, debate_msg, session_obj in pm_rows
             ]
             pm_by_session = {item["session_id"]: item for item in recent_pm_decisions}
 
@@ -914,6 +934,7 @@ def _get_previous_pm_decision(
     from app.core.database import SessionLocal
     from app.models.session import Session as SessionModel
     from app.models.debate_message import DebateMessage
+    from app.models.pm_decision import PMDecisionRecord
 
     with SessionLocal() as db:
         try:
@@ -923,21 +944,22 @@ def _get_previous_pm_decision(
             if not current_session:
                 return {}
 
-            previous_msg = db.query(DebateMessage, SessionModel).join(
-                SessionModel, SessionModel.session_id == DebateMessage.session_id
+            previous_msg = db.query(PMDecisionRecord, DebateMessage, SessionModel).join(
+                DebateMessage, DebateMessage.session_id == PMDecisionRecord.session_id
+            ).join(
+                SessionModel, SessionModel.session_id == PMDecisionRecord.session_id
             ).filter(
                 SessionModel.user_id == current_session.user_id,
                 SessionModel.stock_code == stock_code,
                 DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
-                DebateMessage.session_id != session_id
+                PMDecisionRecord.session_id != session_id
             ).order_by(
                 DebateMessage.created_at.desc()
             ).first()
             if not previous_msg:
                 return {}
 
-            debate_msg, prev_session = previous_msg
-            analysis = debate_msg.analysis if isinstance(debate_msg.analysis, dict) else {}
+            pm_record, debate_msg, prev_session = previous_msg
             execution_summary = _build_previous_execution_summary(db, prev_session.session_id)
             return {
                 "session_id": str(prev_session.session_id),
@@ -945,15 +967,12 @@ def _get_previous_pm_decision(
                 "created_at": debate_msg.created_at.isoformat() if debate_msg.created_at else None,
                 "trading_frequency": prev_session.trading_frequency,
                 "trading_strategy": prev_session.trading_strategy,
-                "decision": debate_msg.decision or analysis.get("decision"),
-                "confidence": debate_msg.confidence,
-                "target_position": analysis.get("target_position"),
-                "stop_loss": analysis.get("stop_loss"),
-                "take_profit": analysis.get("take_profit"),
-                "holding_horizon_days": analysis.get("holding_horizon_days"),
-                "price_range": analysis.get("price_range"),
-                "execution_details": analysis.get("execution_details"),
-                "report_markdown": analysis.get("report_markdown") or debate_msg.reasoning or "",
+                "confidence": float(pm_record.confidence_score or 0) / 100.0,
+                "target_position": pm_record.target_position,
+                "stop_loss": pm_record.stop_loss,
+                "take_profit": pm_record.take_profit,
+                "holding_horizon_days": pm_record.holding_horizon_days,
+                "report_markdown": debate_msg.reasoning or "",
                 "execution_summary": execution_summary,
             }
         except Exception:
@@ -1305,8 +1324,6 @@ async def portfolio_management(state: AnalystState) -> Dict[str, Any]:
     )
 
     from app.core.i18n import i18n_service
-    from app.trading.service import trading_service
-    from app.core.config import settings as app_settings
 
     if not session_id:
         logger.error("session_id is missing in portfolio_management state")
@@ -1327,20 +1344,15 @@ async def portfolio_management(state: AnalystState) -> Dict[str, Any]:
             prompt_input=agent.last_prompt
         )
 
-        decision_data = decision.model_dump() if hasattr(decision, "model_dump") else decision
+        from app.core.database import SessionLocal
+        from app.ai.llm_engine.pm_decision_service import get_pm_decision_for_session
 
-        # 把 PM 止损/止盈/持有期同步到持仓，供 market_watch 盘中扫描判定触发
-        try:
-            from app.trading.pm_rules import sync_pm_discipline_to_position
-
-            sync_pm_discipline_to_position(
-                session_id=session_id,
-                user_id=state.get("user_id"),
-                stock_code=state["stock_code"],
-                decision=decision_data if isinstance(decision_data, dict) else {},
-            )
-        except Exception:
-            logger.exception("Failed to sync PM discipline to position")
+        with SessionLocal() as db:
+            pm_record = get_pm_decision_for_session(db, session_id)
+            decision_data = pm_record.to_dict() if pm_record else {}
+        if not decision_data:
+            logger.error("PM structured decision was not saved by tool", extra={"session_id": str(session_id)})
+            return {"errors": ["PM Error: structured decision was not saved by save_pm_decision"]}
 
         return {"pm_decision": decision_data}
     except Exception as e:

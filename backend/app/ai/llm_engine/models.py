@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import List, Literal
+from typing import List
 
 from pydantic import BaseModel, Field
 from app.ai.llm_engine.roles import (
@@ -48,25 +48,6 @@ class AnalystOutput(BaseModel):
     analysis_summary: str = Field(..., description="One sentence summary of the analysis")
     key_factors: List[str] = Field(..., description="List of key factors influencing the decision")
     detailed_reasoning: str = Field(..., description="Detailed reasoning for the analysis")
-
-
-class PMDecision(BaseModel):
-    """Output format for Portfolio Manager"""
-    decision: Literal["buy", "sell", "hold"] = Field(..., description="Final decision: buy, sell, or hold")
-    confidence_score: float = Field(..., ge=0, le=100, description="Confidence in the decision (0-100)")
-    target_position: float = Field(..., ge=0, le=1, description="Target position ratio (0.0 - 1.0)")
-    verdict_summary: str = Field(..., description="Summary of the verdict based on the debate")
-    investment_plan: str = Field(..., description="Strategic plan for the execution")
-
-    # Detailed execution parameters for the trade
-    price_range: str = Field(..., description="Execution price range or target")
-    stop_loss: float = Field(..., description="Stop loss price")
-    take_profit: float = Field(..., gt=0, description="Active take-profit/target price, or reference target for exits")
-    holding_horizon_days: int = Field(..., gt=0, description="Expected holding horizon or post-exit review window in days")
-    risk_assessment: float = Field(..., ge=0, le=1, description="Risk assessment score for this specific trade")
-    execution_details: str = Field(..., description="Detailed execution plan")
-
-    report_markdown: str = Field(..., description="Full detailed report in Markdown format")
 
 
 class StrategicReport(BaseModel):

@@ -36,8 +36,8 @@ interface AuditAnalysis {
   confidence_score?: number;
   target_position?: number;
   stop_loss?: string | number;
-  price_range?: string;
-  execution_details?: string;
+  take_profit?: string | number;
+  holding_horizon_days?: number;
 }
 
 export interface DecisionAuditLogProps {
@@ -173,8 +173,8 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
         mdContent += `- **${t('debate.analysis.confidence')}:** ${(analysis.confidence_score || 0).toFixed(0)}%\n`;
         mdContent += `- **${t('debate.analysis.target_position')}:** ${((analysis.target_position || 0) * 100).toFixed(0)}%\n`;
         mdContent += `- **${t('debate.analysis.stop_loss')}:** ¥${analysis.stop_loss || 'N/A'}\n`;
-        mdContent += `- **${t('debate.analysis.price_range')}:** ${analysis.price_range || 'N/A'}\n`;
-        mdContent += `- **${t('debate.execution_plan')}:** ${analysis.execution_details || 'N/A'}\n\n`;
+        mdContent += `- **${t('debate.take_profit')}:** ¥${analysis.take_profit || 'N/A'}\n`;
+        mdContent += `- **${t('debate.analysis.holding_period')}:** ${analysis.holding_horizon_days || 'N/A'}\n\n`;
       }
       mdContent += `---\n\n`;
     });
@@ -266,8 +266,8 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
       mdContent += `- **${t('debate.analysis.confidence')}:** ${(analysis.confidence_score || 0).toFixed(0)}%\n`;
       mdContent += `- **${t('debate.analysis.target_position')}:** ${((analysis.target_position || 0) * 100).toFixed(0)}%\n`;
       mdContent += `- **${t('debate.analysis.stop_loss')}:** ¥${analysis.stop_loss || 'N/A'}\n`;
-      mdContent += `- **${t('debate.analysis.price_range')}:** ${analysis.price_range || 'N/A'}\n`;
-      mdContent += `- **${t('debate.execution_plan')}:** ${analysis.execution_details || 'N/A'}\n\n`;
+      mdContent += `- **${t('debate.take_profit')}:** ¥${analysis.take_profit || 'N/A'}\n`;
+      mdContent += `- **${t('debate.analysis.holding_period')}:** ${analysis.holding_horizon_days || 'N/A'}\n\n`;
     }
 
     navigator.clipboard.writeText(mdContent)
@@ -335,11 +335,11 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
               <Descriptions.Item label={t('debate.analysis.stop_loss')}>
                 ¥{analysis.stop_loss || 'N/A'}
               </Descriptions.Item>
-              <Descriptions.Item label={t('debate.analysis.price_range')} span={2}>
-                {analysis.price_range || 'N/A'}
+              <Descriptions.Item label={t('debate.take_profit')}>
+                ¥{analysis.take_profit || 'N/A'}
               </Descriptions.Item>
-              <Descriptions.Item label={t('debate.execution_plan')} span={2}>
-                {analysis.execution_details || 'N/A'}
+              <Descriptions.Item label={t('debate.analysis.holding_period')} span={2}>
+                {analysis.holding_horizon_days || 'N/A'}
               </Descriptions.Item>
             </Descriptions>
           </div>

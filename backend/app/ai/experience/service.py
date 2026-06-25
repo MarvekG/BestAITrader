@@ -26,11 +26,11 @@ from app.core.i18n import i18n_service
 from app.core.logger import get_logger
 from app.core.utils.converters import safe_float, safe_isoformat
 from app.ai.experience.workflow import create_experience_workflow
-from app.ai.llm_engine.roles import AGENT_ROLE_PORTFOLIO_MANAGER
 from app.models.data_storage import KlineData, StockBasic
 from app.models.debate_message import DebateMessage
 from app.models.experience_review_event import ExperienceReviewEvent
 from app.models.order import Order
+from app.models.pm_decision import PMDecisionRecord
 from app.models.session import Session as DebateSession
 from app.models.trade_record import TradeRecord
 from app.websocket.manager import ws_manager
@@ -43,6 +43,7 @@ VALID_ACTIONS = {"avoid", "watch", "buy", "add", "hold", "reduce", "sell"}
 CORRECTNESS_BUCKETS = {"correct", "partially_correct", "incorrect", "inconclusive"}
 ACTIVE_REVIEW_STATUSES = {"started", "running"}
 STALE_REVIEW_TIMEOUT = timedelta(hours=2)
+PM_AGENT_ROLE = "portfolio_manager"
 
 
 def _normalize_confidence(value: Any) -> float:
@@ -275,16 +276,8 @@ class ExperienceService:
         stock_rows = db.query(StockBasic).filter(StockBasic.stock_code.in_(stock_codes)).all()
         stock_map = {item.stock_code: item for item in stock_rows}
 
-        pm_rows = (
-            db.query(DebateMessage)
-            .filter(
-                DebateMessage.session_id.in_(session_ids),
-                DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
-            )
-            .order_by(DebateMessage.session_id.asc(), DebateMessage.created_at.desc())
-            .all()
-        )
-        latest_pm_by_session: dict[UUID, DebateMessage] = {}
+        pm_rows = db.query(PMDecisionRecord).filter(PMDecisionRecord.session_id.in_(session_ids)).all()
+        latest_pm_by_session: dict[UUID, PMDecisionRecord] = {}
         for row in pm_rows:
             latest_pm_by_session.setdefault(row.session_id, row)
 
@@ -310,7 +303,6 @@ class ExperienceService:
                 failed=bucket["failed"],
             )
             next_horizon, days_until_next_horizon = self._next_missing_horizon(market_day_count)
-            analysis = pm_row.analysis if isinstance(pm_row.analysis, dict) else {}
             item = {
                 "session_id": session_obj.session_id,
                 "stock_code": session_obj.stock_code,
@@ -319,8 +311,7 @@ class ExperienceService:
                 "status": session_obj.status,
                 "trading_frequency": session_obj.trading_frequency,
                 "trading_strategy": session_obj.trading_strategy,
-                "pm_decision": str(pm_row.decision or analysis.get("decision") or "hold").lower(),
-                "pm_confidence": _normalize_confidence(pm_row.confidence),
+                "pm_confidence": _normalize_confidence(pm_row.confidence_score),
                 "pm_created_at": pm_row.created_at,
                 "market_day_count": market_day_count,
                 "eligible_horizons": eligible,
@@ -518,7 +509,9 @@ class ExperienceService:
             industry = stock.industry if stock else None
             style_bucket = _style_bucket_from_frequency(session_obj.trading_frequency)
             if style_bucket not in VALID_STYLE_BUCKETS:
-                raise ValueError(f"Unsupported style bucket derived from trading_frequency: {session_obj.trading_frequency}")
+                raise ValueError(
+                    f"Unsupported style bucket derived from trading_frequency: {session_obj.trading_frequency}"
+                )
 
             debate_messages = (
                 db.query(DebateMessage)
@@ -544,7 +537,8 @@ class ExperienceService:
                 selected_review_horizon = self._default_review_horizon(available_horizons)
             if selected_review_horizon is None:
                 raise ValueError(
-                    "Market outcome summary is unavailable for this session; experience analysis requires post-decision market data."
+                    "Market outcome summary is unavailable for this session; "
+                    "experience analysis requires post-decision market data."
                 )
             required_days = HORIZON_REQUIRED_MARKET_DAYS[selected_review_horizon]
             if market_day_count < required_days:
@@ -565,7 +559,8 @@ class ExperienceService:
             )
             if not (debate_review_context.get("market_outcome_summary") or {}):
                 raise ValueError(
-                    "Market outcome summary is unavailable for this session; experience analysis requires post-decision market data."
+                    "Market outcome summary is unavailable for this session; "
+                    "experience analysis requires post-decision market data."
                 )
 
             async def persist_live_event(
@@ -755,16 +750,8 @@ class ExperienceService:
         stock_name_map = {code: name for code, name in basics}
 
         session_ids = [item.session_id for item in sessions]
-        pm_rows = (
-            db.query(DebateMessage)
-            .filter(
-                DebateMessage.session_id.in_(session_ids),
-                DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
-            )
-            .order_by(DebateMessage.session_id.asc(), DebateMessage.created_at.desc())
-            .all()
-        )
-        latest_pm_by_session: Dict[UUID, DebateMessage] = {}
+        pm_rows = db.query(PMDecisionRecord).filter(PMDecisionRecord.session_id.in_(session_ids)).all()
+        latest_pm_by_session: Dict[UUID, PMDecisionRecord] = {}
         for row in pm_rows:
             latest_pm_by_session.setdefault(row.session_id, row)
 
@@ -786,7 +773,6 @@ class ExperienceService:
             pm_row = latest_pm_by_session.get(session_obj.session_id)
             if not pm_row:
                 continue
-            analysis = pm_row.analysis if isinstance(pm_row.analysis, dict) else {}
             items.append(
                 {
                     "session_id": session_obj.session_id,
@@ -797,8 +783,7 @@ class ExperienceService:
                     "trading_strategy": session_obj.trading_strategy,
                     "created_at": session_obj.created_at,
                     "updated_at": session_obj.updated_at,
-                    "pm_decision": str(pm_row.decision or analysis.get("decision") or "hold").lower(),
-                    "pm_confidence": _normalize_confidence(pm_row.confidence),
+                    "pm_confidence": _normalize_confidence(pm_row.confidence_score),
                     "has_experience_review": session_obj.session_id in reviewed_session_ids,
                 }
             )
@@ -1073,7 +1058,7 @@ class ExperienceService:
 
     def _get_latest_pm_message(self, debate_messages: List[DebateMessage]) -> DebateMessage | None:
         for message in reversed(debate_messages):
-            if message.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER:
+            if message.agent_role == PM_AGENT_ROLE:
                 return message
         return None
 
@@ -1104,7 +1089,7 @@ class ExperienceService:
         Returns:
             包含会话、PM 决策、辩论时间线、执行摘要和市场结果的复盘上下文。
         """
-        pm_analysis = pm_message.analysis if isinstance(pm_message.analysis, dict) else {}
+        pm_record = db.query(PMDecisionRecord).filter(PMDecisionRecord.session_id == session_obj.session_id).first()
         orders = (
             db.query(Order)
             .filter(Order.session_id == session_obj.session_id)
@@ -1134,8 +1119,7 @@ class ExperienceService:
                 }
             )
 
-        pm_decision = str(pm_message.decision or pm_analysis.get("decision") or "hold").lower()
-        target_position = safe_float(pm_analysis.get("target_position"), 0.0)
+        target_position = safe_float(pm_record.target_position if pm_record else 0.0, 0.0)
         buy_fill_price = _weighted_buy_fill_price(trades)
         market_outcome = self._build_market_outcome_summary(
             db=db,
@@ -1161,19 +1145,11 @@ class ExperienceService:
             },
             "pm_decision": {
                 "message_id": str(pm_message.message_id),
-                "decision": pm_decision,
-                "confidence_score": _normalize_confidence(
-                    pm_analysis.get("confidence_score", pm_message.confidence)
-                ),
+                "confidence_score": _normalize_confidence(pm_record.confidence_score if pm_record else 0.0),
                 "target_position": target_position,
-                "stop_loss": pm_analysis.get("stop_loss"),
-                "take_profit": pm_analysis.get("take_profit"),
-                "holding_horizon_days": pm_analysis.get("holding_horizon_days"),
-                "price_range": pm_analysis.get("price_range"),
-                "verdict_summary": pm_analysis.get("verdict_summary"),
-                "investment_plan": pm_analysis.get("investment_plan"),
-                "execution_details": pm_analysis.get("execution_details"),
-                "risk_assessment": pm_analysis.get("risk_assessment"),
+                "stop_loss": pm_record.stop_loss if pm_record else None,
+                "take_profit": pm_record.take_profit if pm_record else None,
+                "holding_horizon_days": pm_record.holding_horizon_days if pm_record else None,
                 "created_at": safe_isoformat(pm_message.created_at),
             },
             "debate_timeline": debate_timeline,
@@ -1240,7 +1216,6 @@ class ExperienceService:
         debate_state: Dict[str, Any],
         pm_context_payload: Dict[str, Any],
     ) -> Dict[str, Any]:
-        pm_analysis = pm_message.analysis if isinstance(pm_message.analysis, dict) else {}
         return {
             "source": "debate_messages.prompt_input",
             "message_id": str(pm_message.message_id),
@@ -1248,7 +1223,7 @@ class ExperienceService:
             "stage": pm_message.stage,
             "created_at": safe_isoformat(pm_message.created_at),
             "prompt_input": pm_message.prompt_input or "",
-            "analysis": pm_analysis,
+            "analysis": pm_message.analysis if isinstance(pm_message.analysis, dict) else {},
             "context_from_db": pm_context_payload or {},
             "supporting_messages_from_db": {
                 "sentiment_message": debate_state.get("sentiment_message") or {},
@@ -1334,7 +1309,11 @@ class ExperienceService:
         )
         if not entry_price:
             return {}
-        entry_price_source = "trade_fill_price" if entry_price_override and entry_price_override > 0 else "decision_day_close"
+        entry_price_source = (
+            "trade_fill_price"
+            if entry_price_override and entry_price_override > 0
+            else "decision_day_close"
+        )
 
         def compute_return(index: int) -> float | None:
             if not closes or len(closes) <= index:
@@ -1557,7 +1536,7 @@ class ExperienceService:
             "original_judgment": {
                 "verdict": verdict,
                 "score": max(0.0, min(100.0, safe_float(original.get("score"), 50.0))),
-                "pm_decision": str(original.get("pm_decision") or original_pm.get("decision") or ""),
+                "pm_decision": str(original.get("pm_decision") or ""),
                 "outcome_basis": str(original.get("outcome_basis") or ""),
                 "reasoning": str(original.get("reasoning") or ""),
             },
@@ -1720,9 +1699,7 @@ class ExperienceService:
         normalized["reviewed_pm_decision"] = self._normalize_action(
             normalized.get("reviewed_pm_decision") or normalized.get("recommended_action")
         )
-        normalized["original_pm_decision"] = self._normalize_action(
-            normalized.get("original_pm_decision") or original_pm.get("decision")
-        )
+        normalized["original_pm_decision"] = self._normalize_action(normalized.get("original_pm_decision"))
         revised_target_position = normalized.get("revised_target_position")
         normalized["revised_target_position"] = (
             max(0.0, min(1.0, safe_float(revised_target_position, 0.0)))
@@ -1847,7 +1824,7 @@ class ExperienceService:
             db.query(DebateMessage)
             .filter(
                 DebateMessage.session_id == session_id,
-                DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
+                DebateMessage.agent_role == PM_AGENT_ROLE,
             )
             .order_by(DebateMessage.created_at.desc())
             .first()

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AgentCard } from './AgentCard';
-import { Empty, Spin, Card, Tabs, Descriptions, Space, Row, Col, Badge, Tag, Avatar } from 'antd';
-import { debateApi, PMDecision } from '../../api/debate';
+import { Empty, Spin, Card, Tabs, Descriptions, Space, Badge, Tag, Avatar } from 'antd';
+import { debateApi, PMDecisionRecord } from '../../api/debate';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -51,26 +51,10 @@ interface DebateArenaProps {
   loading?: boolean;
 }
 
-/**
- * 规范化 action 字段，兼容后端枚举序列化产生的历史脏数据
- * 例如: "AnalystSignal.SELL" => "sell", "SELL" => "sell"
- */
-const normalizeAction = (raw: string | undefined): 'buy' | 'sell' | 'hold' => {
-  if (!raw) return 'hold';
-  // 处理 "AnalystSignal.SELL" 格式
-  const val = raw.includes('.') ? raw.split('.').pop()! : raw;
-  const lower = val.trim().toLowerCase();
-
-  // 更加鲁棒的匹配逻辑 | More robust matching logic
-  if (lower === 'buy' || lower === 'strong_buy' || lower.includes('buy')) return 'buy';
-  if (lower === 'sell' || lower === 'reduce' || lower.includes('sell')) return 'sell';
-  return 'hold';
-};
-
 export const DebateArena: React.FC<DebateArenaProps> = ({ messages = [], loading = false }) => {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState('debate');
-  const [decisions, setDecisions] = useState<PMDecision[]>([]);
+  const [decisions, setDecisions] = useState<PMDecisionRecord[]>([]);
   const [decisionsLoading, setDecisionsLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -118,11 +102,9 @@ export const DebateArena: React.FC<DebateArenaProps> = ({ messages = [], loading
       <div className="p-4 overflow-y-auto" style={{ height: 'calc(100vh - 350px)' }}>
         <Space direction="vertical" size="large" style={{ width: '100%' }}>
           {decisions.map((decision) => {
-            const action = normalizeAction(decision.action);
-            const actionColor = action === 'buy' ? '#52c41a' : (action === 'sell' ? '#f5222d' : '#faad14');
-            const actionText = action === 'buy' ? `📈 ${t('trading.buy')}` : (action === 'sell' ? `📉 ${t('trading.sell')}` : `⏸️ ${t('trading.hold_action')}`);
             const confidenceColor = decision.confidence >= 0.7 ? '#52c41a' : (decision.confidence >= 0.5 ? '#faad14' : '#f5222d');
             const roleConfig = getRoleConfig(decision.agent_role || 'pm', t);
+            const formatPrice = (value?: number | null) => (value && value > 0 ? `¥${formatNumber(value)}` : 'N/A');
 
             return (
               <Card
@@ -136,9 +118,6 @@ export const DebateArena: React.FC<DebateArenaProps> = ({ messages = [], loading
                         style={{ backgroundColor: roleConfig.color }}
                       />
                       <span style={{ color: roleConfig.color, fontWeight: 'bold' }}>{roleConfig.title}</span>
-                      <Tag color={actionColor} style={{ fontSize: '14px', padding: '2px 8px', marginLeft: 8 }}>
-                        {actionText}
-                      </Tag>
                       <span style={{ marginLeft: 4, color: 'var(--app-text-secondary)', fontSize: '12px' }}>
                         {new Date(decision.created_at).toLocaleString('zh-CN')}
                       </span>
@@ -149,112 +128,31 @@ export const DebateArena: React.FC<DebateArenaProps> = ({ messages = [], loading
                   </div>
                 }
                 className="bg-gray-800 border-gray-700"
-                style={{ borderLeft: `4px solid ${actionColor}` }}
+                style={{ borderLeft: `4px solid ${roleConfig.color}` }}
               >
                 <Descriptions column={2} size="small" bordered>
                   <Descriptions.Item label={t('debate.target_position')} span={2}>
                     {(decision.target_position * 100).toFixed(0)}%
                   </Descriptions.Item>
-
                   <Descriptions.Item label={t('debate.decision_details')} span={2}>
-                    {(() => {
-                      let parsedReasoning: LooseRecord | null = null;
-                      try {
-                        if (typeof decision.reasoning === 'string') {
-                          // 尝试清理 markdown 代码块标记
-                          const cleaned = decision.reasoning.replace(/```json\n|\n```/g, '');
-                          const parsed = JSON.parse(cleaned);
-                          parsedReasoning = isLooseRecord(parsed) ? parsed : null;
-                        } else {
-                          parsedReasoning = null;
-                        }
-                      } catch {
-                        parsedReasoning = null;
-                      }
-
-                      if (!parsedReasoning || typeof parsedReasoning !== 'object') {
-                        return (
-                          <div className="decision-markdown-container">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                              {typeof decision.reasoning === 'string'
-                                ? decision.reasoning
-                                : JSON.stringify(decision.reasoning, null, 2)}
-                            </ReactMarkdown>
-                          </div>
-                        );
-                      }
-
-                      const { final_decision, consensus_summary, execution_plan } = parsedReasoning;
-
-                      return (
-                        <Space direction="vertical" style={{ width: '100%' }} size="middle">
-
-                          {/* 核心逻辑 */}
-                          {final_decision?.reasoning && (
-                            <div>
-                              <div style={{ fontWeight: 'bold', marginBottom: 4 }}>{t('debate.core_logic')}:</div>
-                              <div style={{ whiteSpace: 'pre-wrap', color: 'var(--app-text)', background: 'var(--app-bg-muted)', padding: '8px', borderRadius: '4px' }}>
-                                {final_decision.reasoning}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* 风险管理 */}
-                          {final_decision?.risk_management && (
-                            <Descriptions size="small" bordered column={2} title={t('debate.risk_mgmt')}>
-                              <Descriptions.Item label={t('debate.stop_loss')}>{final_decision.risk_management.stop_loss}%</Descriptions.Item>
-                              <Descriptions.Item label={t('debate.take_profit')}>{final_decision.risk_management.take_profit}%</Descriptions.Item>
-                              <Descriptions.Item label={t('debate.trailing_stop')}>{final_decision.risk_management.trailing_stop ? '启用' : '禁用'}</Descriptions.Item>
-                              <Descriptions.Item label={t('debate.position_ctrl')}>{final_decision.risk_management.position_sizing}</Descriptions.Item>
-                            </Descriptions>
-                          )}
-
-                          {/* 共识总结 - 看多/看空因素 */}
-                          {consensus_summary && (
-                            <Row gutter={16}>
-                              <Col span={12}>
-                                <Card size="small" title={<span style={{ color: '#ff4d4f' }}>📉 {t('debate.bearish_factors')}</span>} className="bg-gray-800 border-gray-700">
-                                  <ul style={{ paddingLeft: 20, margin: 0 }}>
-                                    {consensus_summary.bearish_factors?.map((factor: string, idx: number) => (
-                                      <li key={idx} style={{ color: '#ffa39e' }}>{factor}</li>
-                                    )) || <li>无显著风险</li>}
-                                  </ul>
-                                </Card>
-                              </Col>
-                              <Col span={12}>
-                                <Card size="small" title={<span style={{ color: '#52c41a' }}>📈 {t('debate.bullish_factors')}</span>} className="bg-gray-800 border-gray-700">
-                                  <ul style={{ paddingLeft: 20, margin: 0 }}>
-                                    {consensus_summary.bullish_factors?.map((factor: string, idx: number) => (
-                                      <li key={idx} style={{ color: '#b7eb8f' }}>{factor}</li>
-                                    )) || <li>无显著利好</li>}
-                                  </ul>
-                                </Card>
-                              </Col>
-                            </Row>
-                          )}
-
-                          {/* 决定性因素 */}
-                          {consensus_summary?.decisive_factors && (
-                            <div>
-                              <div style={{ fontWeight: 'bold', marginBottom: 4, color: '#1677ff' }}>🔔 {t('debate.decisive_factors')}:</div>
-                              <ul style={{ paddingLeft: 20 }}>
-                                {consensus_summary.decisive_factors.map((f: string, i: number) => <li key={i}>{f}</li>)}
-                              </ul>
-                            </div>
-                          )}
-
-                          {/* 执行方案 (优先显示 parsedReasoning 中的，如果不存在则显示 decision.execution_plan) */}
-                          {(execution_plan || decision.execution_plan) && (
-                            <Descriptions size="small" bordered column={1} title={t('debate.execution_plan')}>
-                              <Descriptions.Item label={t('debate.entry_strategy')}>{execution_plan?.entry_strategy || decision.execution_plan?.entry_strategy || 'N/A'}</Descriptions.Item>
-                              <Descriptions.Item label={t('debate.exit_strategy')}>{execution_plan?.exit_strategy || decision.execution_plan?.exit_strategy || 'N/A'}</Descriptions.Item>
-                              <Descriptions.Item label={t('debate.risk_mitigation')}>{execution_plan?.risk_mitigation || decision.execution_plan?.risk_mitigation || 'N/A'}</Descriptions.Item>
-                            </Descriptions>
-                          )}
-
-                        </Space>
-                      );
-                    })()}
+                    <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                      <Descriptions column={3} size="small" bordered>
+                        <Descriptions.Item label={t('debate.stop_loss')}>
+                          {formatPrice(decision.stop_loss)}
+                        </Descriptions.Item>
+                        <Descriptions.Item label={t('debate.take_profit')}>
+                          {formatPrice(decision.take_profit)}
+                        </Descriptions.Item>
+                        <Descriptions.Item label={t('debate.analysis.holding_period')}>
+                          {decision.holding_horizon_days ? `${decision.holding_horizon_days}D` : 'N/A'}
+                        </Descriptions.Item>
+                      </Descriptions>
+                      <div className="decision-markdown-container">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {decision.reasoning || ''}
+                        </ReactMarkdown>
+                      </div>
+                    </Space>
                   </Descriptions.Item>
                 </Descriptions>
               </Card>

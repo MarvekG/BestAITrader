@@ -1,12 +1,12 @@
-from typing import Type, List, Any
+from typing import List, Any
 from langchain_core.tools import tool
 from app.ai.llm_engine.agents.base import BaseAgent
-from app.ai.llm_engine.models import PMDecision
 from app.ai.llm_engine.prompts import templates
 from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER
 from app.ai.agentic.tools import (
     execute_trading_order as execute_trading_order_core,
     get_pm_order_type_guidance,
+    save_pm_decision as save_pm_decision_core,
 )
 
 
@@ -20,7 +20,7 @@ class PortfolioManagerAgent(BaseAgent):
         动态包装 execute_trading_order，隐藏 session_id 参数。
         """
         tools = super().get_tools()
-        
+
         # 定义一个闭包工具，LLM 只需看到必要的三个参数
         @tool
         async def execute_trading_order(
@@ -36,7 +36,7 @@ class PortfolioManagerAgent(BaseAgent):
         ):
             """
             执行股票交易下单工具 (Execute stock trading order).
-            
+
             该工具由投资经理(Portfolio Manager)在做出决策后调用，用于将决策转化为模拟交易订单。
 
             参数:
@@ -74,7 +74,35 @@ class PortfolioManagerAgent(BaseAgent):
                 order_id=order_id,
             )
 
+        @tool
+        async def save_pm_decision(
+            target_position: float = 0.0,
+            confidence_score: float = 0.0,
+            stop_loss: float | None = None,
+            take_profit: float | None = None,
+            holding_horizon_days: int | None = None,
+        ):
+            """
+            保存 PM 最小结构化决策字段。
+
+            参数:
+            - target_position: 操作完成后的目标仓位比例，范围 0 到 1。
+            - confidence_score: 本次决策置信度，范围 0 到 100。
+            - stop_loss: 止损或复议价格；无持仓或不适用时可留空。
+            - take_profit: 止盈或目标价格；无持仓或不适用时可留空。
+            - holding_horizon_days: 预期持有或复议周期天数；不适用时可留空。
+            """
+            return await save_pm_decision_core(
+                session_id=self.session_id,
+                target_position=target_position,
+                confidence_score=confidence_score,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                holding_horizon_days=holding_horizon_days,
+            )
+
         tools.append(get_pm_order_type_guidance)
+        tools.append(save_pm_decision)
         tools.append(execute_trading_order)
         return tools
 
@@ -85,5 +113,5 @@ class PortfolioManagerAgent(BaseAgent):
             trading_strategy=trading_strategy,
         )
 
-    def get_output_model(self) -> Type[PMDecision]:
-        return PMDecision
+    def get_output_model(self):
+        return str

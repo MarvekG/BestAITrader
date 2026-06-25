@@ -5,7 +5,6 @@ from uuid import uuid4
 
 import pytest
 
-from app.ai.llm_engine.models import PMDecision
 from app.ai.llm_engine.orchestrator import (
     create_analyst_workflow,
     _build_portfolio_field_descriptions,
@@ -13,6 +12,9 @@ from app.ai.llm_engine.orchestrator import (
     portfolio_management,
 )
 from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER, AGENT_ROLE_PORTFOLIO_MANAGER
+from app.models.pm_decision import PMDecisionRecord
+from app.models.session import Session as DebateSession
+from app.models.user import User
 
 
 MOCK_CONTEXT = {
@@ -54,41 +56,6 @@ MOCK_CONTEXT = {
 }
 
 
-def test_pm_decision_requires_take_profit_and_holding_horizon_days():
-    """PM 决策必须包含有效止盈目标和预期持有周期。"""
-    with pytest.raises(ValueError):
-        PMDecision(
-            decision="buy",
-            confidence_score=80,
-            target_position=0.5,
-            verdict_summary="Bull case is stronger",
-            investment_plan="Build position gradually",
-            price_range="9.8-10.2",
-            stop_loss=9.5,
-            take_profit=0,
-            holding_horizon_days=20,
-            risk_assessment=0.2,
-            execution_details="Start with half target size",
-            report_markdown="# PM Decision",
-        )
-
-    with pytest.raises(ValueError):
-        PMDecision(
-            decision="buy",
-            confidence_score=80,
-            target_position=0.5,
-            verdict_summary="Bull case is stronger",
-            investment_plan="Build position gradually",
-            price_range="9.8-10.2",
-            stop_loss=9.5,
-            take_profit=11.5,
-            holding_horizon_days=0,
-            risk_assessment=0.2,
-            execution_details="Start with half target size",
-            report_markdown="# PM Decision",
-        )
-
-
 def _expected_static_context(portfolio_info=None):
     static_context = {"data": MOCK_CONTEXT}
     static_context["portfolio_info"] = (
@@ -99,6 +66,53 @@ def _expected_static_context(portfolio_info=None):
         }
     )
     return static_context
+
+
+def _saved_pm_record():
+    """构造 PM 工具保存后的最小记录替身。"""
+    return SimpleNamespace(to_dict=lambda: {"confidence_score": 90, "target_position": 0.0})
+
+
+def test_save_pm_decision_record_persists_minimal_fields(db_session):
+    """PM 结构化决策保存到独立表，且同会话再次保存会更新原记录。"""
+    from app.ai.llm_engine.pm_decision_service import save_pm_decision_record
+
+    user = User(
+        username="pm_decision_user",
+        email="pm_decision_user@example.com",
+        password_hash="hashed",
+    )
+    db_session.add(user)
+    db_session.flush()
+    session_obj = DebateSession(
+        user_id=user.id,
+        stock_code="000001.SZ",
+        trading_frequency="swing",
+        trading_strategy="momentum",
+    )
+    db_session.add(session_obj)
+    db_session.commit()
+
+    with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)), \
+            patch("app.ai.llm_engine.pm_decision_service.sync_pm_discipline_to_position"):
+        first = save_pm_decision_record(
+            session_id=session_obj.session_id,
+            target_position=0.3,
+            confidence_score=80,
+            stop_loss=9.5,
+            take_profit=12.0,
+            holding_horizon_days=20,
+        )
+        second = save_pm_decision_record(
+            session_id=session_obj.session_id,
+            target_position=0.3,
+            confidence_score=65,
+        )
+
+    rows = db_session.query(PMDecisionRecord).filter(PMDecisionRecord.session_id == session_obj.session_id).all()
+    assert len(rows) == 1
+    assert first["decision_id"] == second["decision_id"]
+    assert rows[0].confidence_score == 65
 
 
 @pytest.fixture
@@ -132,6 +146,10 @@ async def test_current_workflow_runs_with_mocked_agents(initial_state):
     with patch("app.ai.llm_engine.orchestrator.AIContextService") as mock_context_service, \
             patch("app.ai.llm_engine.agents.base.BaseAgent.run", new_callable=AsyncMock) as mock_agent_run, \
             patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock) as mock_persist, \
+            patch(
+                "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
+                return_value=_saved_pm_record(),
+            ), \
             patch("app.core.database.SessionLocal") as mock_session_local, \
             patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={}):
         mock_context_service.return_value.build = AsyncMock(return_value=MOCK_CONTEXT)
@@ -143,28 +161,14 @@ async def test_current_workflow_runs_with_mocked_agents(initial_state):
             assert static_context == _expected_static_context()
             context = context or {}
             if "previous_pm_decision" in context:
-                return PMDecision(
-                    decision="buy",
-                    confidence_score=80,
-                    target_position=0.5,
-                    verdict_summary="Bull case is stronger",
-                    investment_plan="Build position gradually",
-                    price_range="9.8-10.2",
-                    stop_loss=9.5,
-                    take_profit=11.5,
-                    holding_horizon_days=20,
-                    risk_assessment=0.2,
-                    execution_details="Start with half target size",
-                    report_markdown="# PM Decision",
-                )
+                return "# PM Decision"
             return "Mock agent report"
 
         mock_agent_run.side_effect = agent_result
 
         final_state = await create_analyst_workflow().ainvoke(initial_state)
 
-    assert final_state["pm_decision"]["decision"] == "buy"
-    assert final_state["pm_decision"]["target_position"] == 0.5
+    assert "pm_decision" in final_state
     assert not final_state["errors"]
     assert mock_persist.call_count == 14
 
@@ -182,6 +186,10 @@ async def test_analyst_workflow_preserves_market_watch_trigger_context(initial_s
     with patch("app.ai.llm_engine.orchestrator.AIContextService") as mock_context_service, \
             patch("app.ai.llm_engine.agents.base.BaseAgent.run", new_callable=AsyncMock) as mock_agent_run, \
             patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock), \
+            patch(
+                "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
+                return_value=_saved_pm_record(),
+            ), \
             patch("app.core.database.SessionLocal") as mock_session_local, \
             patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={}):
         mock_context_service.return_value.build = AsyncMock(return_value=MOCK_CONTEXT)
@@ -193,20 +201,7 @@ async def test_analyst_workflow_preserves_market_watch_trigger_context(initial_s
             assert static_context["market_watch_trigger"] == trigger_context
             context = context or {}
             if "previous_pm_decision" in context:
-                return PMDecision(
-                    decision="buy",
-                    confidence_score=80,
-                    target_position=0.5,
-                    verdict_summary="Bull case is stronger",
-                    investment_plan="Build position gradually",
-                    price_range="9.8-10.2",
-                    stop_loss=9.5,
-                    take_profit=11.5,
-                    holding_horizon_days=20,
-                    risk_assessment=0.2,
-                    execution_details="Start with half target size",
-                    report_markdown="# PM Decision",
-                )
+                return "# PM Decision"
             return "Mock agent report"
 
         mock_agent_run.side_effect = agent_result
@@ -235,25 +230,16 @@ async def test_analyst_workflow_allows_agent_calls_in_parallel_by_default(initia
         await asyncio.sleep(0.01)
         active_calls -= 1
         if "previous_pm_decision" in context:
-            return PMDecision(
-                decision="buy",
-                confidence_score=80,
-                target_position=0.5,
-                verdict_summary="Bull case is stronger",
-                investment_plan="Build position gradually",
-                price_range="9.8-10.2",
-                stop_loss=9.5,
-                take_profit=11.5,
-                holding_horizon_days=20,
-                risk_assessment=0.2,
-                execution_details="Start with half target size",
-                report_markdown="# PM Decision",
-            )
+            return "# PM Decision"
         return "Mock agent report"
 
     with patch("app.ai.llm_engine.orchestrator.AIContextService") as mock_context_service, \
             patch("app.ai.llm_engine.agents.base.BaseAgent.run", new_callable=AsyncMock) as mock_agent_run, \
             patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock), \
+            patch(
+                "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
+                return_value=_saved_pm_record(),
+            ), \
             patch("app.core.database.SessionLocal") as mock_session_local, \
             patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={}):
         mock_context_service.return_value.build = AsyncMock(return_value=MOCK_CONTEXT)
@@ -286,25 +272,16 @@ async def test_analyst_workflow_runs_agent_calls_serially_when_env_parallel_disa
         await asyncio.sleep(0.01)
         active_calls -= 1
         if "previous_pm_decision" in context:
-            return PMDecision(
-                decision="buy",
-                confidence_score=80,
-                target_position=0.5,
-                verdict_summary="Bull case is stronger",
-                investment_plan="Build position gradually",
-                price_range="9.8-10.2",
-                stop_loss=9.5,
-                take_profit=11.5,
-                holding_horizon_days=20,
-                risk_assessment=0.2,
-                execution_details="Start with half target size",
-                report_markdown="# PM Decision",
-            )
+            return "# PM Decision"
         return "Mock agent report"
 
     with patch("app.ai.llm_engine.orchestrator.AIContextService") as mock_context_service, \
             patch("app.ai.llm_engine.agents.base.BaseAgent.run", new_callable=AsyncMock) as mock_agent_run, \
             patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock), \
+            patch(
+                "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
+                return_value=_saved_pm_record(),
+            ), \
             patch("app.core.database.SessionLocal") as mock_session_local, \
             patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={}):
         mock_context_service.return_value.build = AsyncMock(return_value=MOCK_CONTEXT)
@@ -320,47 +297,61 @@ async def test_analyst_workflow_runs_agent_calls_serially_when_env_parallel_disa
 
 
 @pytest.mark.asyncio
-async def test_portfolio_management_returns_current_pm_decision_schema(initial_state):
+async def test_portfolio_management_returns_saved_pm_decision(initial_state):
     """
-    PM 节点返回当前 PMDecision schema，而不是旧版 final_decision 包装结构。
+    PM 节点返回工具保存的结构化决策，而不是从最终 Markdown 解析字段。
     """
     initial_state["vertical_reports"] = {"fundamental": "fundamental report"}
     initial_state["strategic_reports"] = {"bull": "bull report", "bear": "bear report"}
     portfolio_info = {"account": {"total_assets": 100000}, "position": {}}
     initial_state["static_context"] = _expected_static_context(portfolio_info)
 
-    pm_decision = PMDecision(
-        decision="sell",
-        confidence_score=90,
-        target_position=0.0,
-        verdict_summary="Risk dominates",
-        investment_plan="Exit position",
-        price_range="market",
-        stop_loss=9.0,
-        take_profit=10.5,
-        holding_horizon_days=10,
-        risk_assessment=0.8,
-        execution_details="Sell all available shares",
-        report_markdown="# Sell",
+    saved_pm_decision = SimpleNamespace(
+        to_dict=lambda: {"confidence_score": 90, "target_position": 0.0}
     )
 
     with patch("app.ai.llm_engine.orchestrator.PortfolioManagerAgent") as mock_pm_agent, \
             patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock) as mock_persist, \
+            patch(
+                "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
+                return_value=saved_pm_decision,
+            ), \
+            patch("app.core.database.SessionLocal"), \
             patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={"decision": "hold"}), \
             patch("app.ai.llm_engine.orchestrator._get_same_stock_history", return_value={}), \
             patch("app.ai.llm_engine.orchestrator._get_pending_orders_for_pm", return_value=[]):
         agent = mock_pm_agent.return_value
         agent.last_prompt = "pm prompt"
-        agent.run = AsyncMock(return_value=pm_decision)
+        agent.run = AsyncMock(return_value="# Sell")
 
         result = await portfolio_management(initial_state)
 
-    assert result["pm_decision"]["decision"] == "sell"
     assert result["pm_decision"]["confidence_score"] == 90
     pm_snapshot, pm_runtime_context = agent.run.await_args.args
     assert pm_snapshot == _expected_static_context(portfolio_info)
     assert pm_runtime_context["previous_pm_decision"]["decision"] == "hold"
     assert mock_persist.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_portfolio_management_fails_when_pm_decision_not_saved(initial_state):
+    """PM 未调用工具保存结构化字段时，工作流应失败而不是静默完成。"""
+    initial_state["static_context"] = _expected_static_context()
+
+    with patch("app.ai.llm_engine.orchestrator.PortfolioManagerAgent") as mock_pm_agent, \
+            patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock), \
+            patch("app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session", return_value=None), \
+            patch("app.core.database.SessionLocal"), \
+            patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={}), \
+            patch("app.ai.llm_engine.orchestrator._get_same_stock_history", return_value={}), \
+            patch("app.ai.llm_engine.orchestrator._get_pending_orders_for_pm", return_value=[]):
+        agent = mock_pm_agent.return_value
+        agent.last_prompt = "pm prompt"
+        agent.run = AsyncMock(return_value="# PM Decision")
+
+        result = await portfolio_management(initial_state)
+
+    assert result == {"errors": ["PM Error: structured decision was not saved by save_pm_decision"]}
 
 
 class _PersistQuery:
@@ -407,29 +398,28 @@ class _SessionLocalContext:
 
 
 @pytest.mark.asyncio
-async def test_persist_agent_report_saves_current_pm_decision():
+async def test_persist_agent_report_saves_pm_markdown_and_saved_decision_snapshot():
     """
-    持久化层保存当前 PMDecision 为 DebateMessage。
+    持久化层保存 PM Markdown，并把已保存结构化决策快照写入 DebateMessage。
     """
     session_id = uuid4()
     fake_session = SimpleNamespace(session_id=session_id, user_id=1)
     fake_db = _PersistDb(fake_session)
-    pm_decision = PMDecision(
-        decision="hold",
+    saved_pm_decision = SimpleNamespace(
         confidence_score=75,
-        target_position=0.3,
-        verdict_summary="Wait for confirmation",
-        investment_plan="Hold current position",
-        price_range="10-11",
-        stop_loss=9.2,
-        take_profit=12.0,
-        holding_horizon_days=20,
-        risk_assessment=0.3,
-        execution_details="No immediate trade",
-        report_markdown="# Hold",
+        to_dict=lambda: {
+            "confidence_score": 75,
+            "target_position": 0.3,
+            "take_profit": 12.0,
+            "holding_horizon_days": 20,
+        },
     )
 
     with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(fake_db)), \
+            patch(
+                "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
+                return_value=saved_pm_decision,
+            ), \
             patch("app.api.endpoints.debate_ws.send_debate_message", new_callable=AsyncMock):
         await persist_agent_report(
             session_id=session_id,
@@ -437,14 +427,13 @@ async def test_persist_agent_report_saves_current_pm_decision():
             round_number=0,
             agent_name=AGENT_NAME_PORTFOLIO_MANAGER,
             agent_role=AGENT_ROLE_PORTFOLIO_MANAGER,
-            report_content=pm_decision,
+            report_content="# Hold",
             prompt_input="pm prompt",
         )
 
     assert len(fake_db.added) == 1
     saved_message = fake_db.added[0]
     assert saved_message.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER
-    assert saved_message.decision == "hold"
     assert saved_message.confidence == 0.75
     assert saved_message.reasoning == "# Hold"
     assert saved_message.analysis["target_position"] == 0.3
