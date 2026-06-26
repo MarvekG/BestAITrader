@@ -40,7 +40,7 @@ const FINISHED_TASK_STATUS = new Set(['completed', 'failed', 'cancelled']);
 const STOCK_ANALYSIS_HISTORY_PAGE_SIZE = 10;
 const DEBATE_SESSIONS_REFRESH_EVENT = 'debate-sessions-refresh';
 const DEBATE_SESSION_AUTO_REFRESH_INTERVAL_OPTIONS = [10, 30, 60, 300] as const;
-const DEFAULT_DEBATE_SESSION_AUTO_REFRESH_SECONDS = 30;
+const DEFAULT_DEBATE_SESSION_AUTO_REFRESH_SECONDS = 60;
 
 interface StockOption {
   value: string;
