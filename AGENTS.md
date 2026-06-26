@@ -22,8 +22,7 @@
 - `docs/`：正式编号设计/部署文档；`docs/superpowers/` 只作为临时工作流记录。
 
 ## 常用命令
-- 后端默认测试：`pytest`（根 `pytest.ini` 默认只收集 `backend/tests`）。
-- 后端定向测试：`pytest backend/tests/test_api_auth_required.py`。
+- 后端定向测试：`PYTHONPATH=backend pytest backend/tests/test_api_auth_required.py`。
 - MemoFlux 测试：在 `memo/` 下运行 `pytest tests`。
 - 前端质量门禁：`cd frontend && npm run lint && npm run typecheck && npm run build`。
 - 默认本地开发启动：`docker compose -f docker-compose.dev.yml up -d`。
@@ -81,18 +80,6 @@
 - Memory 测试环境设置 `MEMORY_DATABASE_URL=db.invalid`，真实数据库访问若未 mock 会失败。
 - 提示词变更禁止新增 pytest 或其他单元测试来约束 prompt 文案；也不要在既有单测中新增针对 prompt 文案的字符串断言。提示词效果通过人工审计、既有评测脚本或用户明确要求的 live eval 验证。
 - 前端当前没有 test script；提交前至少运行 lint、typecheck、build，且 ESLint warning 会因 `--max-warnings 0` 失败。
-
-## 高风险边界
-- 除 `/health`、`/api/v1/auth/register`、`/api/v1/auth/login`、`/api/v1/general/i18n/{lang}` 外，HTTP 业务路由默认必须要求登录；新增公开端点需同步测试白名单。
-- WebSocket 禁止使用 JWT query token；必须先通过已鉴权 HTTP 换 30 秒一次性 ticket。
-- `/api/v1/testing/*`、数据源配置、新闻插件、Skills、运行时依赖安装都属于高风险面，必须保持鉴权。
-- `ENABLE_OPENAPI_DOCS` 默认开启会暴露 `/api/v1/docs`、`/api/v1/redoc`、`/api/v1/openapi.json`；生产或公开部署必须关闭或加访问控制。
-- `ENABLE_RUNTIME_EXTENSIONS` 控制插件/Skill 管理与依赖安装入口，不等价于停止已安装 external 插件被 registry 扫描。
-- 根 `nginx.conf` 是实际 Compose 代理配置；`frontend/nginx.conf` 当前不是根 Compose 使用的入口。公开部署前要收紧根 Nginx 的 `client_max_body_size`、长超时、请求速率和 LiteLLM `4000` 暴露面。
-- `backend/app/ai/agentic/skills_loader/skills/` 与 `backend/app/ai/agentic/tooling/news_plugins/external/` 可能包含运行时上传或独立外部仓库内容，提交前必须核验 tracked 状态和敏感信息。
-- `backend/scripts/clear_tables.py` 是破坏性脚本，会对 PostgreSQL 执行 `TRUNCATE TABLE ... CASCADE`。
-- 不要提交真实 `.env`、`litellm/config.yaml`、API key、Cookie、JWT、浏览器 profile、数据库 dump、prompt/记忆/订单/账户真实数据或供应商原始 payload。
-- 常见本地产物和生成物不要提交：`node_modules/`、`dist/`、`coverage/`、`.pytest_cache/`、`__pycache__/`、`logs/`、`backend/runtime/snapshots/`、`memo/evals/reports/`、`pyodide-*.tar.bz2`、`reload-trigger.json`。
 
 ## 前端约定
 - API 请求优先新增到 `frontend/src/api/*.ts` 并复用 `apiClient`；调用方按业务体处理返回值，不再取 `.data`。
