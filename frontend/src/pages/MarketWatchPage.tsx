@@ -215,6 +215,25 @@ const sourceKey = (source: MarketWatchSourceConfig) => {
   return source.url;
 };
 
+const extractStockCodeFromUrl = (url: string) => {
+  return url.match(/\d{6}/)?.[0] ?? url;
+};
+
+const sortSourcesByStockCode = (sources: MarketWatchSourceConfig[]) => {
+  return [...sources].sort((first, second) => {
+    const firstCode = extractStockCodeFromUrl(first.url);
+    const secondCode = extractStockCodeFromUrl(second.url);
+    if (firstCode !== secondCode) {
+      return firstCode.localeCompare(secondCode);
+    }
+    return first.url.localeCompare(second.url);
+  });
+};
+
+const sortSourcesByUrl = (sources: MarketWatchSourceConfig[]) => {
+  return [...sources].sort((first, second) => first.url.localeCompare(second.url));
+};
+
 const sourceFormValuesToSource = (values: MarketWatchSourcePreviewFormValues): MarketWatchSourceConfig => {
   return {
     url: values.source_url.trim(),
@@ -487,6 +506,17 @@ export const MarketWatchPage: React.FC = () => {
     setSourcePreviewDocument(null);
   };
 
+  const copySourceIntoForm = (source: MarketWatchSourceConfig) => {
+    sourcePreviewForm.setFieldsValue({
+      source_url: source.url,
+      content_selectors: source.content_selectors ?? [],
+      cleanup_patterns: source.cleanup_patterns ?? [],
+    });
+    setEditingSourceField(null);
+    setEditingSourceKey(null);
+    setSourcePreviewDocument(null);
+  };
+
   const resetSourceEditor = () => {
     sourcePreviewForm.resetFields();
     setEditingSourceField(null);
@@ -666,7 +696,7 @@ export const MarketWatchPage: React.FC = () => {
                       <Text strong>{item.title || item.final_url || item.url}</Text>
                       <Space direction="vertical" size={2} style={{ width: '100%' }}>
                         <Text type="secondary">
-                          {t('market_watch.source_url')}:{' '}
+                          {t('market_watch.document_source_url')}:{' '}
                           <Text copyable={{ text: item.url }} style={sourceDocumentUrlStyle}>
                             {item.url}
                           </Text>
@@ -956,11 +986,14 @@ export const MarketWatchPage: React.FC = () => {
               <div style={sourceConfigListStyle}>
                 <List
                   size="small"
-                  dataSource={settings?.data_sources ?? []}
+                  dataSource={sortSourcesByStockCode(settings?.data_sources ?? [])}
                   locale={{ emptyText: t('market_watch.source_config_empty_list') }}
                   renderItem={(source) => (
                     <List.Item
                       actions={[
+                        <Button key="copy" size="small" onClick={() => copySourceIntoForm(source)}>
+                          {t('market_watch.source_config_copy_to_editor')}
+                        </Button>,
                         <Button key="load" size="small" onClick={() => loadSourceIntoForm('data_sources', source)}>
                           {t('market_watch.source_config_load')}
                         </Button>,
@@ -984,11 +1017,14 @@ export const MarketWatchPage: React.FC = () => {
               <div style={sourceConfigListStyle}>
                 <List
                   size="small"
-                  dataSource={settings?.news_sources ?? []}
+                  dataSource={sortSourcesByUrl(settings?.news_sources ?? [])}
                   locale={{ emptyText: t('market_watch.source_config_empty_list') }}
                   renderItem={(source) => (
                     <List.Item
                       actions={[
+                        <Button key="copy" size="small" onClick={() => copySourceIntoForm(source)}>
+                          {t('market_watch.source_config_copy_to_editor')}
+                        </Button>,
                         <Button key="load" size="small" onClick={() => loadSourceIntoForm('news_sources', source)}>
                           {t('market_watch.source_config_load')}
                         </Button>,
