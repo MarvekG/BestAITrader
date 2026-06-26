@@ -2,7 +2,7 @@
 辩论消息数据模型
 存储辩论过程中的每条消息
 """
-from sqlalchemy import Column, String, Integer, Float, Text, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -31,10 +31,8 @@ class DebateMessage(Base):
     # 消息内容
     decision = Column(Text)  # 决策(buy/sell/hold)
 
-    confidence = Column(Float)  # 信心度(0-1)
     reasoning = Column(Text)  # 推理过程
     prompt_input = Column(Text)  # 推理输入（发送给AI的prompt）
-    analysis = Column(JSON)  # 详细分析(JSON格式)
 
     # 元数据
     created_at = Column(DateTime, default=datetime.now, nullable=False)

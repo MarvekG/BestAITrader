@@ -830,14 +830,7 @@ def test_get_same_stock_history_includes_trades_pnl_and_stop_loss(db_session):
             agent_name="PM",
             agent_role=AGENT_ROLE_PORTFOLIO_MANAGER,
             decision="sell",
-            confidence=0.85,
             reasoning="# previous stop loss report",
-            analysis={
-                "decision": "sell",
-                "target_position": 0.0,
-                "stop_loss": 29.5,
-                "take_profit": 38.7,
-            },
             created_at=datetime(2026, 6, 4, 13, 37),
         )
     )
@@ -1064,15 +1057,7 @@ def test_get_previous_pm_decision_includes_execution_summary_with_dates(db_sessi
         agent_name="PM",
         agent_role=AGENT_ROLE_PORTFOLIO_MANAGER,
         decision="buy",
-        confidence=0.8,
         reasoning="# previous report",
-        analysis={
-            "decision": "buy",
-            "target_position": 0.3,
-            "stop_loss": 9.5,
-            "take_profit": 12.0,
-            "holding_horizon_days": 20,
-        },
         created_at=datetime(2026, 1, 1, 15, 0),
     )
     db_session.add(pm_message)
@@ -1174,9 +1159,7 @@ def test_get_previous_pm_decision_orders_execution_summary_by_order_time(db_sess
             agent_name="PM",
             agent_role=AGENT_ROLE_PORTFOLIO_MANAGER,
             decision="buy",
-            confidence=0.8,
             reasoning="# previous report",
-            analysis={"decision": "buy", "target_position": 0.3},
             created_at=datetime(2026, 1, 1, 15, 0),
         )
     )
@@ -1321,9 +1304,7 @@ def test_get_previous_pm_decision_marks_missing_execution(db_session):
             agent_name="PM",
             agent_role=AGENT_ROLE_PORTFOLIO_MANAGER,
             decision="hold",
-            confidence=0.7,
             reasoning="# previous hold report",
-            analysis={"decision": "hold", "target_position": 0.0},
             created_at=datetime(2026, 1, 1, 15, 0),
         )
     )

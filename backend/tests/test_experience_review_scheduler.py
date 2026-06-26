@@ -7,6 +7,7 @@ from app.ai.llm_engine.roles import AGENT_ROLE_PORTFOLIO_MANAGER
 from app.models.data_storage import KlineData, StockBasic
 from app.models.debate_message import DebateMessage
 from app.models.experience_review_event import ExperienceReviewEvent
+from app.models.pm_decision import PMDecisionRecord
 from app.models.session import Session as DebateSession
 from app.models.user import User
 from app.tasks import experience_review_scheduler as scheduler_module
@@ -65,6 +66,16 @@ def _create_completed_session(
 
 
 def _create_pm_message(db_session, session: DebateSession, created_at: datetime) -> DebateMessage:
+    db_session.add(
+        PMDecisionRecord(
+            session_id=session.session_id,
+            user_id=session.user_id,
+            stock_code=session.stock_code,
+            target_position=0.5,
+            confidence_score=80,
+            created_at=created_at,
+        )
+    )
     message = DebateMessage(
         session_id=session.session_id,
         stage="portfolio_manager",
@@ -72,9 +83,7 @@ def _create_pm_message(db_session, session: DebateSession, created_at: datetime)
         agent_name="PM",
         agent_role=AGENT_ROLE_PORTFOLIO_MANAGER,
         decision="buy",
-        confidence=0.8,
         reasoning="PM decision",
-        analysis={"decision": "buy"},
         created_at=created_at,
     )
     db_session.add(message)

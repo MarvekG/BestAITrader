@@ -129,9 +129,7 @@ def _create_stock_pm_and_klines(db_session, session):
             agent_name="PM",
             agent_role=AGENT_ROLE_PORTFOLIO_MANAGER,
             decision="buy",
-            confidence=0.82,
             reasoning="pm reasoning",
-            analysis={"decision": "buy"},
             created_at=datetime(2026, 1, 1, 15, 0),
         )
     )

@@ -59,10 +59,8 @@ def _create_debate_message(db_session, session):
         agent_name="Portfolio Manager",
         agent_role="portfolio_manager",
         decision="hold",
-        confidence=0.7,
         reasoning="private reasoning",
         prompt_input="private prompt",
-        analysis={"action": "hold", "target_position": 0.0},
     )
     db_session.add(message)
     db_session.commit()

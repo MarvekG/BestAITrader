@@ -10,6 +10,7 @@ from app.core.i18n import i18n_service
 from app.models.data_storage import KlineData, StockBasic
 from app.models.debate_message import DebateMessage
 from app.models.experience_review_event import ExperienceReviewEvent
+from app.models.pm_decision import PMDecisionRecord
 from app.models.session import Session as DebateSession
 from app.models.trade_record import TradeRecord
 from app.models.user import User
@@ -36,6 +37,23 @@ def _create_user_and_session(db_session):
     db_session.commit()
     db_session.refresh(session)
     return user, session
+
+
+def _create_pm_record(db_session, user, session, *, created_at=datetime(2026, 1, 1, 15, 0)):
+    record = PMDecisionRecord(
+        session_id=session.session_id,
+        user_id=user.id,
+        stock_code=session.stock_code,
+        target_position=0.5,
+        confidence_score=82,
+        stop_loss=9.5,
+        take_profit=12.0,
+        holding_horizon_days=20,
+        created_at=created_at,
+    )
+    db_session.add(record)
+    db_session.commit()
+    return record
 
 
 def test_cleanup_interrupted_review_runs_marks_active_runs_failed(db_session):
@@ -131,6 +149,7 @@ async def test_analyze_allows_existing_completed_review_to_run_again(db_session,
     user, session = _create_user_and_session(db_session)
     _create_stock_and_klines(db_session, count=21)
     existing_review_run_id = str(uuid.uuid4())
+    _create_pm_record(db_session, user, session)
     db_session.add_all(
         [
             DebateMessage(
@@ -140,9 +159,7 @@ async def test_analyze_allows_existing_completed_review_to_run_again(db_session,
                 agent_name="PM",
                 agent_role="portfolio_manager",
                 decision="buy",
-                confidence=0.82,
                 reasoning="pm reasoning",
-                analysis={"decision": "buy"},
                 created_at=datetime(2026, 1, 1, 15, 0),
             ),
             ExperienceReviewEvent(
@@ -198,6 +215,7 @@ async def test_analyze_allows_existing_completed_review_to_run_again(db_session,
 
 def test_list_debate_sessions_marks_existing_reviews(db_session):
     user, session = _create_user_and_session(db_session)
+    _create_pm_record(db_session, user, session)
     db_session.add(
         DebateMessage(
             session_id=session.session_id,
@@ -206,9 +224,7 @@ def test_list_debate_sessions_marks_existing_reviews(db_session):
             agent_name="PM",
             agent_role="portfolio_manager",
             decision="buy",
-            confidence=0.82,
             reasoning="pm reasoning",
-            analysis={"decision": "buy"},
         )
     )
     db_session.add(
@@ -231,6 +247,7 @@ def test_list_debate_sessions_marks_existing_reviews(db_session):
 
 def test_get_review_run_result_falls_back_from_completed_event_payload(db_session):
     user, session = _create_user_and_session(db_session)
+    _create_pm_record(db_session, user, session)
     pm_message = DebateMessage(
         session_id=session.session_id,
         stage="portfolio_manager",
@@ -238,9 +255,7 @@ def test_get_review_run_result_falls_back_from_completed_event_payload(db_sessio
         agent_name="PM",
         agent_role="portfolio_manager",
         decision="buy",
-        confidence=0.82,
         reasoning="pm reasoning",
-        analysis={"decision": "buy", "take_profit": 12.0, "holding_horizon_days": 20},
     )
     completed_run_id = str(uuid.uuid4())
     db_session.add(pm_message)
@@ -388,7 +403,9 @@ def _create_stock_and_klines(db_session, *, stock_code="000001.SZ", industry="Ba
     )
     db_session.commit()
 
-def _create_pm_decision(db_session, session, *, created_at=datetime(2026, 1, 1, 15, 0)):
+
+def _create_pm_decision(db_session, user, session, *, created_at=datetime(2026, 1, 1, 15, 0)):
+    _create_pm_record(db_session, user, session, created_at=created_at)
     message = DebateMessage(
         session_id=session.session_id,
         stage="portfolio_manager",
@@ -396,9 +413,7 @@ def _create_pm_decision(db_session, session, *, created_at=datetime(2026, 1, 1, 
         agent_name="PM",
         agent_role=AGENT_ROLE_PORTFOLIO_MANAGER,
         decision="buy",
-        confidence=0.82,
         reasoning="pm reasoning",
-        analysis={"decision": "buy", "take_profit": 12.0, "holding_horizon_days": 20},
         created_at=created_at,
     )
     db_session.add(message)
@@ -409,7 +424,7 @@ def _create_pm_decision(db_session, session, *, created_at=datetime(2026, 1, 1, 
 def test_build_debate_review_context_uses_buy_fill_price_as_entry(db_session):
     user, session = _create_user_and_session(db_session)
     _create_stock_and_klines(db_session, count=21)
-    pm_message = _create_pm_decision(db_session, session)
+    pm_message = _create_pm_decision(db_session, user, session)
     db_session.add_all(
         [
             TradeRecord(
@@ -462,7 +477,7 @@ def test_build_debate_review_context_uses_buy_fill_price_as_entry(db_session):
 def test_build_debate_review_context_falls_back_to_decision_day_close_without_buy_trade(db_session):
     user, session = _create_user_and_session(db_session)
     _create_stock_and_klines(db_session, count=21)
-    pm_message = _create_pm_decision(db_session, session)
+    pm_message = _create_pm_decision(db_session, user, session)
     db_session.add(
         TradeRecord(
             session_id=session.session_id,
@@ -533,7 +548,7 @@ def test_build_market_outcome_summary_returns_empty_when_kline_closes_missing(db
 def test_list_review_candidates_returns_ready_horizons(db_session):
     user, session = _create_user_and_session(db_session)
     _create_stock_and_klines(db_session, count=21)
-    _create_pm_decision(db_session, session)
+    _create_pm_decision(db_session, user, session)
 
     result = experience_service.list_review_candidates(db_session, user_id=user.id)
 
@@ -554,7 +569,7 @@ def test_list_review_candidates_returns_ready_horizons(db_session):
 def test_list_review_candidates_hides_completed_horizon_but_keeps_later_ready_horizon(db_session):
     user, session = _create_user_and_session(db_session)
     _create_stock_and_klines(db_session, count=61)
-    _create_pm_decision(db_session, session)
+    _create_pm_decision(db_session, user, session)
     db_session.add(
         ExperienceReviewEvent(
             review_run_id=str(uuid.uuid4()),
@@ -579,7 +594,7 @@ def test_list_review_candidates_hides_completed_horizon_but_keeps_later_ready_ho
 def test_list_review_candidates_marks_not_ready_when_market_data_is_short(db_session):
     user, session = _create_user_and_session(db_session)
     _create_stock_and_klines(db_session, count=5)
-    _create_pm_decision(db_session, session)
+    _create_pm_decision(db_session, user, session)
 
     result = experience_service.list_review_candidates(db_session, user_id=user.id)
 
@@ -594,7 +609,7 @@ def test_list_review_candidates_marks_not_ready_when_market_data_is_short(db_ses
 async def test_analyze_rejects_unavailable_review_horizon(db_session):
     user, session = _create_user_and_session(db_session)
     _create_stock_and_klines(db_session, count=6)
-    _create_pm_decision(db_session, session)
+    _create_pm_decision(db_session, user, session)
 
     with pytest.raises(ValueError, match="requires 21 market days"):
         await experience_service.analyze(
@@ -609,7 +624,7 @@ async def test_analyze_rejects_unavailable_review_horizon(db_session):
 async def test_analyze_defaults_to_highest_available_review_horizon(db_session, monkeypatch):
     user, session = _create_user_and_session(db_session)
     _create_stock_and_klines(db_session, count=21)
-    _create_pm_decision(db_session, session)
+    _create_pm_decision(db_session, user, session)
 
     class FakeWorkflow:
         async def ainvoke(self, state):
@@ -669,7 +684,10 @@ async def test_analyze_defaults_to_highest_available_review_horizon(db_session, 
     assert result["market_day_count"] == 21
     completed = (
         db_session.query(ExperienceReviewEvent)
-        .filter(ExperienceReviewEvent.review_run_id == result["review_run_id"], ExperienceReviewEvent.status == "completed")
+        .filter(
+            ExperienceReviewEvent.review_run_id == result["review_run_id"],
+            ExperienceReviewEvent.status == "completed",
+        )
         .one()
     )
     assert completed.payload["review_horizon"] == "20d"
@@ -680,7 +698,7 @@ async def test_analyze_defaults_to_highest_available_review_horizon(db_session, 
 async def test_analyze_defaults_to_20d_before_60d_when_both_are_available(db_session, monkeypatch):
     user, session = _create_user_and_session(db_session)
     _create_stock_and_klines(db_session, count=61)
-    _create_pm_decision(db_session, session)
+    _create_pm_decision(db_session, user, session)
 
     class FakeWorkflow:
         async def ainvoke(self, state):
