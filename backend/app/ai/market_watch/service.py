@@ -291,6 +291,11 @@ async def scan_market_watch(
                 debate_launch=debate_launch,
             )
 
+        ai_decision = _filter_allowed_watch_ai_decisions(
+            ai_decision,
+            allowed_stock_codes=scan_context["allowed_stock_codes"],
+            user_id=user_id,
+        )
         _apply_stock_debate_preferences(ai_decision, scan_context["items"])
         logger.info(
             "Market watch Watch AI decision received",
@@ -894,6 +899,38 @@ def _apply_stock_debate_preferences(
         preferences = stock_preferences.get(item.stock_code, {})
         item.debate_parameters.trading_frequency = preferences.get("trading_frequency_code") or "position"
         item.debate_parameters.trading_strategy = preferences.get("trading_strategy_code") or "value"
+
+
+def _filter_allowed_watch_ai_decisions(
+    decisions: list[Any],
+    *,
+    allowed_stock_codes: set[str],
+    user_id: int,
+) -> list[Any]:
+    """过滤盯盘 AI 返回的仓库外股票，避免外部网页噪声进入展示和审计。
+
+    Args:
+        decisions: 盯盘 AI 返回的结构化决策列表。
+        allowed_stock_codes: 本轮允许处理的股票代码集合，来自股票仓库和持仓。
+        user_id: 当前用户 ID，用于结构化日志。
+
+    Returns:
+        仅包含允许股票代码的决策列表。
+    """
+    filtered_decisions = []
+    for decision in decisions:
+        if decision.stock_code in allowed_stock_codes:
+            filtered_decisions.append(decision)
+            continue
+        logger.info(
+            "Market watch Watch AI decision filtered",
+            extra={
+                "user_id": user_id,
+                "stock_code": decision.stock_code,
+                "reason": "invalid_target_stock",
+            },
+        )
+    return filtered_decisions
 
 
 async def _audit_debate_skip(
