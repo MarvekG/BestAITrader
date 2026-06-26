@@ -1,4 +1,3 @@
-from datetime import datetime
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
@@ -80,9 +79,7 @@ def test_smoke_debate_run_flow(client, auth_headers, db_session, sqlite_session_
                     agent_name="Portfolio Manager",
                     agent_role=AGENT_ROLE_PORTFOLIO_MANAGER,
                     decision="hold",
-                    confidence=0.6,
                     reasoning="Mocked portfolio manager conclusion",
-                    analysis={"action": "hold"},
                 )
             )
             db.query(SessionModel).filter(SessionModel.session_id == UUID(session_id)).update({"status": "completed"})
