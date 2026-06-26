@@ -1,12 +1,9 @@
 import pandas as pd
-import json
-import logging
 from datetime import datetime
-from typing import Optional, List, Dict, Any
-from sqlalchemy import text, func, MetaData
+from typing import Optional, List, Dict
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.core.database import engine
-from app.models.data_registry import ApiRegistry
 from app.core.utils.formatters import StockCodeStandardizer
 from app.models.data_storage import (
     Base, CommonData, KlineData, StockBasic, NorthboundData, DragonTigerData, StockValuationHistory,
@@ -14,8 +11,7 @@ from app.models.data_storage import (
     StockLimitUpPool, StockLimitDownPool, StockZhabanPool, StockMoneyFlow, StockShareholder, StockPledge, StockPledgeSummary,
     StockInsider, StockRelease, StockMargin, IndexDaily,
     StockBlockTrade, SectorMoneyFlow,
-    StockTopHolders,
-    StockInteractiveQA
+    StockTopHolders
 )
 
 
@@ -52,7 +48,6 @@ class DataIngestionService:
             'sector_money_flow': SectorMoneyFlow,
             'stock_pledge_summary': StockPledgeSummary,
             'stock_top_holders': StockTopHolders,
-            'stock_interactive_qa': StockInteractiveQA,
             # 兼容带 schema 的名称 (虽然 SQLAlchemy metadata.tables 可能不带 schema)
             'data.common_data': CommonData,
             'data.kline_data': KlineData,
@@ -72,8 +67,7 @@ class DataIngestionService:
             'data.stock_margin_data': StockMargin,
             'data.index_daily': IndexDaily,
             'data.stock_pledge_summary': StockPledgeSummary,
-            'data.stock_top_holders': StockTopHolders,
-            'data.stock_interactive_qa': StockInteractiveQA
+            'data.stock_top_holders': StockTopHolders
         }
         # 确保表存在
         if self.engine.dialect.name.startswith("postgresql"):
@@ -326,7 +320,7 @@ class DataIngestionService:
         # 优先使用 Unique Constraint (业务主键)，其次使用 Unique Index，最后 PKey
         # 因为很多表 (如 KlineData) 使用 UUID 作为 PK，但实际去重依赖业务字段 (stock_code, date)
         
-        from sqlalchemy.schema import UniqueConstraint, Index
+        from sqlalchemy.schema import UniqueConstraint
         
         conflict_target = None
         

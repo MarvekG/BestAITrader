@@ -84,6 +84,7 @@ backend/app/ai/agentic/tooling/news_plugins/*.py
 - `base.py`
 - `manager.py`
 - `registry.py`
+- `provider_clients.py`
 
 推荐把业务插件放在：
 
@@ -145,6 +146,7 @@ plugin1.py
 __init__.py
 base.py
 manager.py
+provider_clients.py
 registry.py
 ```
 

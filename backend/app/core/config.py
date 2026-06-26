@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     LLM_TIMEOUT_SECONDS: float = 240.0
     LLM_MAX_RETRIES: int = 3
     DEBATE_AGENT_PARALLEL_ENABLED: bool = True
+    DEBATE_AGENT_MIN_ITERATIONS: int = 5
     ENABLE_AUTO_TRADE: bool = True
     ASYNC_TASK_MAX_CONCURRENT: int = 8
     PY_SANDBOX_ENABLED: bool = True

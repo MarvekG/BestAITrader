@@ -162,6 +162,15 @@ def test_registry_loads_external_plugins_from_runtime_dir(tmp_path, monkeypatch)
     assert plugins["custom_source"].file_path == external_dir / "custom_news.py"
 
 
+def test_registry_skips_builtin_provider_client_helper():
+    module_specs = news_plugin_registry._iter_plugin_modules(
+        news_plugin_registry.NEWS_PLUGIN_DIR,
+        "app.ai.agentic.tooling.news_plugins",
+    )
+
+    assert "provider_clients" not in {module_name for _, module_name, _, _ in module_specs}
+
+
 def test_validate_news_plugin_content_rejects_invalid_python():
     with pytest.raises(ValueError):
         manager.validate_news_plugin_content("def broken(:\n    pass\n")

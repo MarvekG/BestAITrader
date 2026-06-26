@@ -12,31 +12,25 @@ export interface DebateThread {
   speaker_role?: string; // Legacy
   content?: string; // Legacy
   reasoning: string;
-  reasoning_chain?: Record<string, unknown>;
-  analysis?: Record<string, unknown>;
   prompt_input?: string;
   timestamp: string; // Map from created_at
   created_at?: string;
 }
 
-export interface PMDecision {
+export interface PMDecisionRecord {
   id: string;
   session_id: string;
-  action: 'buy' | 'sell' | 'hold';
   confidence: number;
   target_position: number;
+  stop_loss?: number | null;
+  take_profit?: number | null;
+  holding_horizon_days?: number | null;
   reasoning: string;
-  execution_plan?: {
-    entry_strategy: string;
-    exit_strategy: string;
-    risk_mitigation: string;
-  };
-  status: 'pending' | 'executed' | 'rejected';
   agent_role?: string;
   created_at: string;
 }
 
-export type Decision = PMDecision;
+export type Decision = PMDecisionRecord;
 
 export const debateApi = {
   run: (data: {
@@ -52,5 +46,5 @@ export const debateApi = {
     apiClient.get<DebateThread[]>(`/debate/threads/${sessionId}`),
 
   getDecisions: (sessionId: string) =>
-    apiClient.get<PMDecision[]>(`/debate/decisions/${sessionId}`),
+    apiClient.get<PMDecisionRecord[]>(`/debate/decisions/${sessionId}`),
 };

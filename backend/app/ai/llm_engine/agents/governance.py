@@ -1,13 +1,13 @@
-from typing import Type, List, Any
+from typing import List, Any
 from langchain_core.tools import tool
 from app.ai.llm_engine.agents.base import BaseAgent
-from app.ai.llm_engine.models import PMDecision
 from app.ai.llm_engine.prompts import templates
 from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER
 from app.ai.agentic.tools import (
     execute_trading_order as execute_trading_order_core,
     get_pm_order_type_guidance,
 )
+from app.ai.llm_engine.pm_decision_service import save_pm_decision_record
 
 
 class PortfolioManagerAgent(BaseAgent):
@@ -20,7 +20,7 @@ class PortfolioManagerAgent(BaseAgent):
         动态包装 execute_trading_order，隐藏 session_id 参数。
         """
         tools = super().get_tools()
-        
+
         # 定义一个闭包工具，LLM 只需看到必要的三个参数
         @tool
         async def execute_trading_order(
@@ -36,7 +36,7 @@ class PortfolioManagerAgent(BaseAgent):
         ):
             """
             执行股票交易下单工具 (Execute stock trading order).
-            
+
             该工具由投资经理(Portfolio Manager)在做出决策后调用，用于将决策转化为模拟交易订单。
 
             参数:
@@ -74,7 +74,47 @@ class PortfolioManagerAgent(BaseAgent):
                 order_id=order_id,
             )
 
+        @tool
+        async def save_pm_decision(
+            target_position: float = 0.0,
+            confidence_score: float = 0.0,
+            stop_loss: float | None = None,
+            take_profit: float | None = None,
+            holding_horizon_days: int | None = None,
+        ):
+            """
+            保存 PM 最小结构化决策字段。
+
+            参数:
+            - target_position: 操作完成后的目标仓位比例，范围 0 到 1。
+            - confidence_score: 本次决策置信度，范围 0 到 100。
+            - stop_loss: 止损或复议价格；无持仓或不适用时可留空。
+            - take_profit: 止盈或目标价格；无持仓或不适用时可留空。
+            - holding_horizon_days: 预期持有或复议周期天数；不适用时可留空。
+            """
+            try:
+                record = save_pm_decision_record(
+                    session_id=self.session_id,
+                    target_position=target_position,
+                    confidence_score=confidence_score,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    holding_horizon_days=holding_horizon_days,
+                )
+                return {
+                    "success": True,
+                    "message": "PM structured decision saved.",
+                    "decision": record,
+                }
+            except Exception as exc:
+                return {
+                    "success": False,
+                    "message": str(exc),
+                    "reason": "pm_decision_save_failed",
+                }
+
         tools.append(get_pm_order_type_guidance)
+        tools.append(save_pm_decision)
         tools.append(execute_trading_order)
         return tools
 
@@ -85,5 +125,36 @@ class PortfolioManagerAgent(BaseAgent):
             trading_strategy=trading_strategy,
         )
 
-    def get_output_model(self) -> Type[PMDecision]:
-        return PMDecision
+    def get_output_model(self):
+        return str
+
+    async def get_final_output_feedback(self, final_content: str) -> str | None:
+        """确保 PM 最终报告前已保存本轮结构化纪律字段。
+
+        Args:
+            final_content: PM 最终 Markdown 报告。
+
+        Returns:
+            已保存时返回 None；未保存时返回要求继续调用工具的反馈。
+
+        Raises:
+            ValueError: 缺少会话 ID 时抛出。
+        """
+        if not self.session_id:
+            raise ValueError("PM structured decision requires session_id")
+
+        from app.ai.llm_engine.pm_decision_service import get_pm_decision_for_session
+        from app.core.database import SessionLocal
+
+        with SessionLocal() as db:
+            pm_record = get_pm_decision_for_session(db, self.session_id)
+        if pm_record:
+            return None
+        return (
+            "你的最终 Markdown 报告暂不能接受：本轮 PM 结构化纪律字段尚未保存。"
+            "你必须先调用 `save_pm_decision` 工具，写入 `target_position`、`confidence_score`、"
+            "`stop_loss`、`take_profit`、`holding_horizon_days`，然后再输出最终 Markdown 报告。"
+            "不要改用 JSON 最终输出。\n"
+            "Your final Markdown report cannot be accepted yet because the PM structured discipline fields "
+            "have not been saved. Call the `save_pm_decision` tool first, then provide the final Markdown report."
+        )

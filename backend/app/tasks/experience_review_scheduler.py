@@ -13,13 +13,12 @@ from app.ai.experience.horizons import ReviewHorizon
 from app.ai.experience.horizons import eligible_horizons
 from app.ai.experience.horizons import normalize_review_horizon
 from app.ai.experience.service import experience_service
-from app.ai.llm_engine.roles import AGENT_ROLE_PORTFOLIO_MANAGER
 from app.core.database import SessionLocal
 from app.core.logger import get_logger
 from app.crud.system_setting import system_setting
 from app.models.data_storage import KlineData
-from app.models.debate_message import DebateMessage
 from app.models.experience_review_event import ExperienceReviewEvent
+from app.models.pm_decision import PMDecisionRecord
 from app.models.session import Session as DebateSession
 from app.tasks.scheduled_task_registry import ScheduledTask
 from app.tasks.scheduled_task_registry import ScheduledTaskSnapshot
@@ -319,10 +318,9 @@ def _load_due_sessions(
         从最早到期会话到最新会话排序的复盘候选项；同一会话按 5D、20D、60D 输出缺失周期。
     """
     latest_pm_created_at = (
-        db.query(func.max(DebateMessage.created_at))
+        db.query(func.max(PMDecisionRecord.created_at))
         .filter(
-            DebateMessage.session_id == DebateSession.session_id,
-            DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
+            PMDecisionRecord.session_id == DebateSession.session_id,
         )
         .correlate(DebateSession)
         .scalar_subquery()

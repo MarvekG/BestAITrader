@@ -7,7 +7,6 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from app.ai.json_utils import stable_json_dumps
 from app.ai.agentic.tool_output_summarizer import (
-    SUMMARY_THRESHOLD,
     should_summarize_tool_output,
     summarize_tool_output,
 )
@@ -102,6 +101,17 @@ class BaseAgent(ABC):
         tools.extend(build_memory_tools(state=self.state))
         tools.extend(get_skills_loader_tools())
         return tools
+
+    async def get_final_output_feedback(self, final_content: str) -> Optional[str]:
+        """在接受最终输出前获取角色级补充指令。
+
+        Args:
+            final_content: LLM 即将作为最终报告返回的 Markdown 文本。
+
+        Returns:
+            若当前输出可接受则返回 None；否则返回需要追加给 LLM 的反馈文本。
+        """
+        return None
 
     @abstractmethod
     async def get_system_prompt(
@@ -221,6 +231,37 @@ class BaseAgent(ABC):
             "Do not call any more tools. Based strictly on the current conversation history, "
             "existing tool outputs, and available context, produce the final conclusion/report now "
             "without requesting additional external information."
+        )
+
+    def _get_min_iterations(self) -> int:
+        """获取接受最终报告前所需的最少迭代轮次。
+
+        Returns:
+            最少迭代轮次，范围为 1 到最大迭代次数。
+        """
+        return max(1, min(settings.DEBATE_AGENT_MIN_ITERATIONS, MAX_LLM_ITERATIONS))
+
+    def _build_min_iterations_feedback(self, iteration_index: int, min_iterations: int) -> str:
+        """构建迭代轮次不足时追加给 LLM 的补证反馈。
+
+        Args:
+            iteration_index: 当前迭代轮次。
+            min_iterations: 接受最终报告前要求的最少迭代轮次。
+
+        Returns:
+            要求继续补证的双语提示。
+        """
+        return (
+            f"你的最终报告暂不能接受：当前仅完成 {iteration_index} 轮迭代，"
+            f"系统要求至少运行 {min_iterations} 轮。"
+            "请围绕最影响仓位、置信度、止损止盈或事实仲裁的关键不确定性，"
+            "继续核验或补充推理；不要机械重复已有查询。之后再输出最终 Markdown 报告。\n"
+            f"Your final report cannot be accepted yet: only {iteration_index} LLM iteration(s) were completed, "
+            f"while the system requires at least {min_iterations}. "
+            "Use tool calls to verify the uncertainty most relevant to sizing, confidence, "
+            "stop/take-profit, or fact arbitration, or continue focused reasoning if no tool is needed. "
+            "Do not repeat existing queries mechanically. "
+            "After verification, produce the final Markdown report."
         )
 
     def _build_common_system_prompt(self, skills_catalog_prompt: str = "") -> str:
@@ -356,6 +397,7 @@ class BaseAgent(ABC):
         execution_error: Exception | None = None
 
         reached_iteration_limit = True
+        min_iterations = self._get_min_iterations()
 
         # 工具调用循环 (Tool-calling loop)
         for i in range(MAX_LLM_ITERATIONS):
@@ -371,8 +413,18 @@ class BaseAgent(ABC):
                 messages.append(response)
 
                 if not response.tool_calls and not invalid_tool_calls:
-                    reached_iteration_limit = False
                     final_text = (response.content or "").strip()
+                    if i + 1 < min_iterations:
+                        logger.warning(
+                            f"[{self.role_name}] Final text rejected: insufficient LLM iterations "
+                            f"({i + 1}/{min_iterations}). Requesting focused verification."
+                        )
+                        messages.append(HumanMessage(content=self._build_min_iterations_feedback(
+                            i + 1,
+                            min_iterations,
+                        )))
+                        continue
+
                     if output_model is str:
                         report_shape = self._measure_markdown_report_shape(final_text)
                         shape_feedback = self._report_shape_feedback(report_shape)
@@ -393,6 +445,15 @@ class BaseAgent(ABC):
                             "and avoid repeating parts that are already complete."
                         )))
                         continue
+                    role_feedback = await self.get_final_output_feedback(final_text)
+                    if role_feedback:
+                        logger.warning(
+                            f"[{self.role_name}] Final text rejected by role validator. "
+                            "Requesting the LLM to continue."
+                        )
+                        messages.append(HumanMessage(content=role_feedback))
+                        continue
+                    reached_iteration_limit = False
                     logger.info(f"[{self.role_name}] No more tool calls at iteration {i+1}.")
                     break
 
@@ -488,6 +549,9 @@ class BaseAgent(ABC):
             shape_feedback = self._report_shape_feedback(report_shape)
             if shape_feedback:
                 raise ValueError(f"Incomplete report output: {shape_feedback}")
+            role_feedback = await self.get_final_output_feedback(final_content)
+            if role_feedback:
+                raise ValueError(role_feedback)
             return final_content
         else:
             parser = PydanticOutputParser(pydantic_object=output_model)

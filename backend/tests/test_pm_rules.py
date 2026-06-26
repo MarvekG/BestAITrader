@@ -61,6 +61,31 @@ def test_sync_pm_discipline_to_position_writes_structured_fields(db_session, tes
     assert position.horizon_deadline is not None
 
 
+def test_sync_pm_discipline_to_position_ignores_non_positive_trigger_prices(db_session, test_db, monkeypatch):
+    """PM 输出空仓目标时不把 0 写成持仓止损止盈触发线。"""
+    user, account = _create_user(db_session)
+    position = _create_position(db_session, account)
+    monkeypatch.setattr("app.trading.pm_rules.SessionLocal", test_db)
+
+    synced = sync_pm_discipline_to_position(
+        session_id=None,
+        user_id=user.id,
+        stock_code=position.stock_code,
+        decision={
+            "decision": "hold",
+            "stop_loss": 0,
+            "take_profit": 0,
+            "holding_horizon_days": 5,
+        },
+    )
+
+    db_session.refresh(position)
+    assert synced is True
+    assert position.stop_loss is None
+    assert position.take_profit is None
+    assert position.horizon_deadline is not None
+
+
 def test_evaluate_position_disciplines_detects_stop_loss(db_session, monkeypatch):
     user, account = _create_user(db_session)
     position = _create_position(db_session, account)

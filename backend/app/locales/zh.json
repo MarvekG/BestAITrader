@@ -662,7 +662,6 @@
       "global_futures_daily": "外盘期货日线",
       "internal_futures_realtime": "内盘期货实时",
       "internal_futures_daily": "内盘期货日线",
-      "stock_interactive_qa": "互动问答",
       "stock_limit_pool": "涨停池",
       "stock_limit_down_pool": "跌停池",
       "stock_money_flow": "资金流向",
@@ -681,7 +680,6 @@
       "sync_zhaban_pool": "同步炸板池 [{{date}}]",
       "sync_shareholders": "同步股东户数",
       "sync_pledge": "同步股权质押",
-      "sync_interactive_qa": "同步互动问答",
       "clear_data": "清空数据",
       "confirm_clear": "确认清空",
       "warning_undone": "警告：此操作不可撤销。",
@@ -1990,7 +1988,6 @@
     "already_in_progress": "任务已在进行中，任务ID: {task_id}",
     "names": {
       "stock_basic_sync": "股票基础信息同步 ({info})",
-      "interactive_qa_sync": "互动问答同步 ({info})",
       "dragon_tiger_sync": "龙虎榜同步 ({dates})",
       "limit_up_pool_sync": "涨停池同步 ({date})",
       "limit_down_pool_sync": "跌停池同步 ({date})",
@@ -2131,23 +2128,6 @@
     "all_status": "全部状态",
     "refresh": "刷新",
     "total_records": "共 {{count}} 条记录"
-  },
-  "stock_interactive_qa": {
-    "stock_code": "股票代码",
-    "platform": "平台",
-    "platform_cninfo": "深证互动易",
-    "platform_sseinfo": "上证e互动",
-    "question": "问题",
-    "answer": "回答",
-    "questioner": "提问者",
-    "answerer": "回答者",
-    "question_time": "提问时间",
-    "answer_time": "回答时间",
-    "trade_date": "交易日期",
-    "question_source": "问题来源",
-    "answer_source": "回答来源",
-    "industry": "行业",
-    "data_source": "数据源"
   },
   "etf_realtime": {
     "stock_code": "代码",

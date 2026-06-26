@@ -11,6 +11,7 @@ from app.ai.llm_engine.runner import run_analysis_task  # 使用新的 LLM Engin
 from app.api.ownership import get_owned_session
 from app.api.endpoints.debate_ws import send_debate_status
 from app.models.debate_message import DebateMessage
+from app.models.pm_decision import PMDecisionRecord
 from app.core.logger import logger
 from app.core.security import get_current_user
 from app.models.async_task import AsyncTask
@@ -74,7 +75,10 @@ async def run_debate(
         if existing_decision:
             raise HTTPException(
                 status_code=400,
-                detail=f"Session {session_id} already has a completed debate. Cannot start a new debate for the same session."
+                detail=(
+                    f"Session {session_id} already has a completed debate. "
+                    "Cannot start a new debate for the same session."
+                )
             )
 
         # 如果有 debate 记录但没有 PM 决策，说明是断点续传/恢复
@@ -190,7 +194,6 @@ async def get_debate_history(
             "timestamp": msg.created_at.isoformat(),
             "round_number": msg.round_number,
             "stage": msg.stage,
-            "analysis": msg.analysis
         } for msg in debate_messages]
 
         return debate_history
@@ -225,7 +228,6 @@ async def get_debate_threads(
             "agent_role": msg.agent_role,
             "speaker_role": msg.agent_role,
             "content": msg.reasoning or "",
-            "reasoning_chain": msg.analysis,
             "prompt_input": msg.prompt_input or "",  # 添加推理输入字段
             "timestamp": msg.created_at.isoformat(),
             "stage": msg.stage
@@ -248,28 +250,26 @@ async def get_pm_decisions(
     try:
         get_owned_session(db, session_id, current_user)
         # Query messages from DebateMessage table for PM decisions
-        messages = db.query(DebateMessage).filter(
-            DebateMessage.session_id == session_id,
-            DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER
-        ).order_by(
-            DebateMessage.created_at.asc()
-        ).all()
+        rows = db.query(PMDecisionRecord, DebateMessage).join(
+            DebateMessage,
+            DebateMessage.session_id == PMDecisionRecord.session_id,
+        ).filter(
+            PMDecisionRecord.session_id == session_id,
+            DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
+        ).order_by(DebateMessage.created_at.asc()).all()
 
         pm_decisions = []
-        for msg in messages:
-            # Extract data from analysis JSON
-            analysis = msg.analysis or {}
-            target_pos = analysis.get("target_position", 0.0)
-            action = msg.decision or analysis.get("action", "hold")
+        for pm_row, msg in rows:
 
             pm_decisions.append({
-                "id": str(msg.message_id),
+                "id": str(pm_row.decision_id),
                 "session_id": str(msg.session_id),
-                "action": action.lower(),
-                "confidence": msg.confidence or 0.0,
-                "target_position": target_pos,
+                "confidence": float(pm_row.confidence_score or 0) / 100.0,
+                "target_position": pm_row.target_position,
+                "stop_loss": pm_row.stop_loss,
+                "take_profit": pm_row.take_profit,
+                "holding_horizon_days": pm_row.holding_horizon_days,
                 "reasoning": msg.reasoning,
-                "execution_plan": analysis.get("execution_details", ""),
                 "created_at": msg.created_at.isoformat(),
                 "agent_role": msg.agent_role
             })

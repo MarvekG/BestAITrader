@@ -278,12 +278,6 @@ class ExampleIngestor(BaseIngestor):
 
 推荐字段：`data_source`
 
-### `fetch_and_ingest_stock_interactive_qa` -> `stock_interactive_qa`
-
-必选字段：`stock_code`, `question`, `answer`, `question_time`, `answer_time`, `trade_date`
-
-推荐字段：`question_id`, `answer_id`, `answerer`, `content_hash`, `data_source`
-
 ## 财务报表
 
 财务类上下文读取 `data` JSON，同时使用 `report_date`、`announcement_date`、`updated_at` 排序。

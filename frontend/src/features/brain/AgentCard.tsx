@@ -11,23 +11,20 @@ interface AgentCardProps {
   role: string;
   content: string;
   timestamp: string;
-  rawAnalysis?: unknown;
   round?: number;
 }
 
-export const AgentCard: React.FC<AgentCardProps> = ({ role, content, timestamp, rawAnalysis, round }) => {
+export const AgentCard: React.FC<AgentCardProps> = ({ role, content, timestamp, round }) => {
   const { t } = useTranslation();
   const {
     token: {
       boxShadowSecondary,
       colorBgContainer,
-      colorBgLayout,
       colorFillQuaternary,
       colorBorderSecondary,
       colorPrimary,
       colorText,
       colorTextSecondary,
-      colorTextTertiary,
     },
   } = theme.useToken();
 
@@ -90,23 +87,6 @@ export const AgentCard: React.FC<AgentCardProps> = ({ role, content, timestamp, 
           <div style={{ color: colorText, fontSize: 14, lineHeight: 1.6 }}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{mainContent.trim()}</ReactMarkdown>
           </div>
-
-          {rawAnalysis !== undefined && rawAnalysis !== null && (
-            <details style={{ marginTop: 12, borderTop: `1px solid ${colorBorderSecondary}`, paddingTop: 8 }}>
-              <summary style={{ cursor: 'pointer', fontSize: 11, color: colorTextTertiary, userSelect: 'none' }}>{t('debate.raw_response')}</summary>
-              <pre style={{
-                marginTop: 8,
-                fontSize: 10,
-                background: colorBgLayout,
-                padding: 8,
-                borderRadius: 4,
-                overflowX: 'auto',
-                color: colorTextSecondary
-              }}>
-                {JSON.stringify(rawAnalysis, null, 2)}
-              </pre>
-            </details>
-          )}
         </Card>
       </div>
     </div>

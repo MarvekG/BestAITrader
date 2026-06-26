@@ -402,18 +402,6 @@ export const marketApi = {
     }>('/data/db/calculate/indicators', null, { params: stockCode ? { stock_code: stockCode } : {} });
   },
 
-  syncInteractiveQA: async (stockCode: string, startDate?: string, endDate?: string) => {
-    const params: { stock_code: string; start_date?: string; end_date?: string } = { stock_code: stockCode };
-    if (startDate) params.start_date = startDate;
-    if (endDate) params.end_date = endDate;
-
-    return apiClient.post<{
-      task_id: string;
-      task_name: string;
-      status: string;
-      message: string
-    }>('/data/db/sync/interactive-qa', null, { params });
-  },
   syncPledgeSummary: async (stockCode?: string) => {
     return apiClient.post<{
       task_id: string;

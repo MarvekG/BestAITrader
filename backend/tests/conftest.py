@@ -126,6 +126,7 @@ def _sqlite_test_tables():
     from app.models.experience_index import ExperienceIndex
     from app.models.market_watch import MarketWatchEvent
     from app.models.order import Order
+    from app.models.pm_decision import PMDecisionRecord
     from app.models.position import Position
     from app.models.session import Session
     from app.models.stock_indicators import StockIndicators
@@ -142,6 +143,7 @@ def _sqlite_test_tables():
         AccountEquitySnapshot.__table__,
         Position.__table__,
         Order.__table__,
+        PMDecisionRecord.__table__,
         TradeRecord.__table__,
         StockWarehouse.__table__,
         SystemSetting.__table__,

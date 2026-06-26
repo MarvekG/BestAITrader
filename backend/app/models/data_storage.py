@@ -791,36 +791,6 @@ class StockFundHolding(Base):
     )
 
 
-class StockInteractiveQA(Base):
-    """互动问答记录"""
-    __tablename__ = "stock_interactive_qa"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    stock_code = Column(String(20), ForeignKey('data.stock_basic.stock_code', ondelete='CASCADE'), nullable=False, index=True)
-
-    question_id = Column(String(100))
-    answer_id = Column(String(100))
-    question = Column(Text, nullable=False)
-    answer = Column(Text)
-
-    answerer = Column(String(500))
-
-    question_time = Column(DateTime, index=True)
-    answer_time = Column(DateTime, index=True)
-    trade_date = Column(Date, index=True)
-
-    content_hash = Column(String(64))
-
-    data_source = Column(String(50), default='tushare')
-    created_at = Column(DateTime, default=datetime.now)
-    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
-
-    __table_args__ = (
-        Index('idx_interactive_qa_query', 'stock_code', 'answer_time'),
-        {"schema": "data"}
-    )
-
-
 class FinancialCalendar(Base):
     """
     财报预约披露日历

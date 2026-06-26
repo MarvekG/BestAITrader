@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { App as AntdApp, Avatar, Button, Card, Descriptions, Dropdown, Empty, Space, Spin, Steps, Tag, Typography } from 'antd';
 import { useSessionStore } from '../../store/useSessionStore';
-import { DebateThread, debateApi } from '../../api/debate';
+import { DebateThread, PMDecisionRecord, debateApi } from '../../api/debate';
 import { sessionApi, Session } from '../../api/session';
 import { AuditOutlined, BarChartOutlined, MessageOutlined, FileSearchOutlined, RobotOutlined, ReloadOutlined, ExportOutlined, DownOutlined, CopyOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +11,7 @@ import { getRoleConfig } from './roleConfig';
 
 import type { MenuProps } from 'antd';
 
-const { Text, Title } = Typography;
+const { Text } = Typography;
 
 interface AuditMessage {
   id: string;
@@ -19,25 +19,11 @@ interface AuditMessage {
   round_number: number;
   speaker_role: string;
   content: string;
-  reasoning_chain?: AuditAnalysis;
   prompt_input?: string;
   timestamp: string;
   agent_role?: string;
   stage?: string;
-  // For Decision results
-  action?: string;
-  confidence?: number;
-  target_position?: number;
-  execution_plan?: string;
-}
-
-interface AuditAnalysis {
-  decision?: string;
-  confidence_score?: number;
-  target_position?: number;
-  stop_loss?: string | number;
-  price_range?: string;
-  execution_details?: string;
+  pmDecision?: PMDecisionRecord;
 }
 
 export interface DecisionAuditLogProps {
@@ -73,6 +59,9 @@ const getStepMessagesFor = (allMessages: AuditMessage[], stepIndex: number) => {
   }
 };
 
+const formatPercent = (value: number) => `${(value * 100).toFixed(0)}%`;
+const formatPrice = (value?: number | null) => (value && value > 0 ? `¥${value.toFixed(2)}` : 'N/A');
+
 export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, isActive = true }) => {
   const { t } = useTranslation();
   const { message } = AntdApp.useApp();
@@ -101,11 +90,11 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
         }
       }
 
-      // 统一从 getThreads 获取所有 DebateMessage，后端已经包含了所有 stage 信息
-      const threads = await debateApi.getHistory(effectiveSessionId);
+      const [threads, pmDecisions] = await Promise.all([
+        debateApi.getHistory(effectiveSessionId),
+        debateApi.getDecisions(effectiveSessionId),
+      ]);
 
-      // 转换为 AuditMessage 格式，注意映射后端字段
-      // 后端 getThreads 返回: speaker_role, content, timestamp, round_number, reasoning_chain (analysis), prompt_input, stage
       const auditMessages: AuditMessage[] = threads.map((msg: DebateThread) => ({
         id: msg.id || Math.random().toString(),
         session_id: effectiveSessionId,
@@ -116,11 +105,27 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
         prompt_input: msg.prompt_input || "",
         timestamp: msg.timestamp,
         stage: msg.stage || 'unknown',
-        reasoning_chain: (msg.analysis || msg.reasoning_chain) as AuditAnalysis | undefined, // 兼顾不同接口的分析数据键名
       }));
 
-      // 决策和执行通常在最后，如果需要合并 getDecisions 的精简数据也可以
-      // 但其实 DebateMessage 已经包含了 PM 的详细分报告 (包含执行详情)
+      const pmMessages = auditMessages.filter(msg => msg.stage === 'portfolio_management');
+      pmMessages.forEach((msg, index) => {
+        msg.pmDecision = (pmDecisions || [])[index];
+      });
+      for (const decision of pmDecisions || []) {
+        if (pmMessages.some(msg => msg.pmDecision?.id === decision.id)) continue;
+        auditMessages.push({
+          id: decision.id,
+          session_id: decision.session_id,
+          round_number: 0,
+          speaker_role: decision.agent_role || 'portfolio_manager',
+          agent_role: decision.agent_role || 'portfolio_manager',
+          content: decision.reasoning || '',
+          timestamp: decision.created_at,
+          stage: 'portfolio_management',
+          pmDecision: decision,
+        });
+      }
+
       setMessages(auditMessages);
 
       // 默认选中最新的有数据的步骤
@@ -165,17 +170,15 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
       if (msg.content) {
         mdContent += `${msg.content}\n\n`;
       }
-
-      if (msg.stage === 'portfolio_management' && msg.reasoning_chain?.decision) {
-        const analysis = msg.reasoning_chain;
+      if (msg.pmDecision) {
         mdContent += `### ${t('debate.decision_tab')}\n\n`;
-        mdContent += `- **${t('debate.analysis.action')}:** ${(analysis.decision || 'HOLD').toUpperCase()}\n`;
-        mdContent += `- **${t('debate.analysis.confidence')}:** ${(analysis.confidence_score || 0).toFixed(0)}%\n`;
-        mdContent += `- **${t('debate.analysis.target_position')}:** ${((analysis.target_position || 0) * 100).toFixed(0)}%\n`;
-        mdContent += `- **${t('debate.analysis.stop_loss')}:** ¥${analysis.stop_loss || 'N/A'}\n`;
-        mdContent += `- **${t('debate.analysis.price_range')}:** ${analysis.price_range || 'N/A'}\n`;
-        mdContent += `- **${t('debate.execution_plan')}:** ${analysis.execution_details || 'N/A'}\n\n`;
+        mdContent += `- **${t('debate.confidence')}:** ${formatPercent(msg.pmDecision.confidence)}\n`;
+        mdContent += `- **${t('debate.target_position')}:** ${formatPercent(msg.pmDecision.target_position)}\n`;
+        mdContent += `- **${t('debate.stop_loss')}:** ${formatPrice(msg.pmDecision.stop_loss)}\n`;
+        mdContent += `- **${t('debate.take_profit')}:** ${formatPrice(msg.pmDecision.take_profit)}\n`;
+        mdContent += `- **${t('debate.analysis.holding_period')}:** ${msg.pmDecision.holding_horizon_days || 'N/A'}\n\n`;
       }
+
       mdContent += `---\n\n`;
     });
 
@@ -258,16 +261,13 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
     if (msg.content) {
       mdContent += `${msg.content}\n\n`;
     }
-
-    if (msg.stage === 'portfolio_management' && msg.reasoning_chain?.decision) {
-      const analysis = msg.reasoning_chain;
+    if (msg.pmDecision) {
       mdContent += `### ${t('debate.decision_tab')}\n\n`;
-      mdContent += `- **${t('debate.analysis.action')}:** ${(analysis.decision || 'HOLD').toUpperCase()}\n`;
-      mdContent += `- **${t('debate.analysis.confidence')}:** ${(analysis.confidence_score || 0).toFixed(0)}%\n`;
-      mdContent += `- **${t('debate.analysis.target_position')}:** ${((analysis.target_position || 0) * 100).toFixed(0)}%\n`;
-      mdContent += `- **${t('debate.analysis.stop_loss')}:** ¥${analysis.stop_loss || 'N/A'}\n`;
-      mdContent += `- **${t('debate.analysis.price_range')}:** ${analysis.price_range || 'N/A'}\n`;
-      mdContent += `- **${t('debate.execution_plan')}:** ${analysis.execution_details || 'N/A'}\n\n`;
+      mdContent += `- **${t('debate.confidence')}:** ${formatPercent(msg.pmDecision.confidence)}\n`;
+      mdContent += `- **${t('debate.target_position')}:** ${formatPercent(msg.pmDecision.target_position)}\n`;
+      mdContent += `- **${t('debate.stop_loss')}:** ${formatPrice(msg.pmDecision.stop_loss)}\n`;
+      mdContent += `- **${t('debate.take_profit')}:** ${formatPrice(msg.pmDecision.take_profit)}\n`;
+      mdContent += `- **${t('debate.analysis.holding_period')}:** ${msg.pmDecision.holding_horizon_days || 'N/A'}\n\n`;
     }
 
     navigator.clipboard.writeText(mdContent)
@@ -279,7 +279,6 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
 
   const renderMessageCard = (msg: AuditMessage, index: number) => {
     const roleConfig = getRoleConfig(msg.agent_role || 'pm', t);
-    const analysis = msg.reasoning_chain || {};
 
     return (
       <Card
@@ -313,33 +312,27 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
           </ReactMarkdown>
         </div>
 
-        {/* 对于决策和执行阶段，尝试解析并展示结构化数据 */}
-        {msg.stage === 'portfolio_management' && analysis.decision && (
+        {msg.pmDecision && (
           <div className="mt-4 p-3 bg-gray-900 rounded border border-blue-900/30">
-            <Title level={5} style={{ fontSize: 14, color: '#1677ff', marginBottom: 8 }}>
+            <Text strong style={{ color: '#1677ff' }}>
               <AuditOutlined style={{ marginRight: 8 }} />
               {t('debate.decision_tab')}
-            </Title>
-            <Descriptions column={2} size="small" bordered>
-              <Descriptions.Item label={t('debate.analysis.action')}>
-                <Tag color={analysis.decision === 'buy' ? '#cf1322' : (analysis.decision === 'sell' ? '#3f8600' : 'gray')}>
-                  {(analysis.decision || 'HOLD').toUpperCase()}
-                </Tag>
+            </Text>
+            <Descriptions column={2} size="small" bordered style={{ marginTop: 12 }}>
+              <Descriptions.Item label={t('debate.confidence')}>
+                {formatPercent(msg.pmDecision.confidence)}
               </Descriptions.Item>
-              <Descriptions.Item label={t('debate.analysis.confidence')}>
-                {(analysis.confidence_score || 0).toFixed(0)}%
+              <Descriptions.Item label={t('debate.target_position')}>
+                {formatPercent(msg.pmDecision.target_position)}
               </Descriptions.Item>
-              <Descriptions.Item label={t('debate.analysis.target_position')}>
-                {((analysis.target_position || 0) * 100).toFixed(0)}%
+              <Descriptions.Item label={t('debate.stop_loss')}>
+                {formatPrice(msg.pmDecision.stop_loss)}
               </Descriptions.Item>
-              <Descriptions.Item label={t('debate.analysis.stop_loss')}>
-                ¥{analysis.stop_loss || 'N/A'}
+              <Descriptions.Item label={t('debate.take_profit')}>
+                {formatPrice(msg.pmDecision.take_profit)}
               </Descriptions.Item>
-              <Descriptions.Item label={t('debate.analysis.price_range')} span={2}>
-                {analysis.price_range || 'N/A'}
-              </Descriptions.Item>
-              <Descriptions.Item label={t('debate.execution_plan')} span={2}>
-                {analysis.execution_details || 'N/A'}
+              <Descriptions.Item label={t('debate.analysis.holding_period')} span={2}>
+                {msg.pmDecision.holding_horizon_days ? `${msg.pmDecision.holding_horizon_days}D` : 'N/A'}
               </Descriptions.Item>
             </Descriptions>
           </div>
@@ -354,12 +347,6 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
           </details>
         )}
 
-        <details className="mt-2 border-t border-gray-700 pt-2">
-          <summary className="text-[10px] text-gray-500 cursor-pointer">{t('brain.ai_output')}</summary>
-          <pre className="mt-2 text-[10px] text-gray-400 bg-black/50 p-2 rounded overflow-x-auto border border-gray-900">
-            {JSON.stringify(analysis, null, 2)}
-          </pre>
-        </details>
       </Card>
     );
   };

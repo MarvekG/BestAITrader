@@ -33,6 +33,21 @@ def _to_decimal(value: Any) -> Decimal | None:
         return None
 
 
+def _positive_trigger_price(value: Any) -> Decimal | None:
+    """解析需要写入持仓监控的正数价格。
+
+    Args:
+        value: PM 决策输出中的价格字段。
+
+    Returns:
+        大于 0 的价格；缺失、非法或非正数时返回 None。
+    """
+    price = _to_decimal(value)
+    if price is None or price <= 0:
+        return None
+    return price
+
+
 def sync_pm_discipline_to_position(
     *,
     session_id: Any,
@@ -46,7 +61,7 @@ def sync_pm_discipline_to_position(
         session_id: 给出该纪律的辩论会话 ID。
         user_id: 决策所属用户 ID。
         stock_code: 标准股票代码。
-        decision: PM 结构化决策（PMDecision.model_dump()）。
+        decision: PM 结构化决策字段。
 
     Returns:
         是否写入成功。无持仓（如 buy 未成交）时跳过并返回 False。
@@ -102,8 +117,8 @@ def _sync_pm_discipline_with_session(
         )
         return False
 
-    stop_loss = _to_decimal(decision.get("stop_loss"))
-    take_profit = _to_decimal(decision.get("take_profit"))
+    stop_loss = _positive_trigger_price(decision.get("stop_loss"))
+    take_profit = _positive_trigger_price(decision.get("take_profit"))
     horizon_days = decision.get("holding_horizon_days")
     horizon_deadline = None
     try:

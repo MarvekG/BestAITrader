@@ -1519,58 +1519,6 @@ class AkshareIngestor(BaseIngestor):
             logger.error(f"Failed to ingest AKShare top holders for {stock_code}: {e}")
             return None
 
-    async def fetch_and_ingest_stock_interactive_qa(
-        self,
-        stock_code: str,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None
-    ) -> Optional[dict]:
-        """采集上证或深证互动问答数据。"""
-        try:
-            symbol = StockCodeStandardizer.to_number(stock_code)
-            logger.info(f"Fetching AKShare interactive QA for {symbol}")
-            # 使用 stock_irm_cninfo (互动易)
-            df = await self._run_in_executor(ak.stock_irm_cninfo, symbol=symbol)
-            if df is None or df.empty:
-                return {"success": False, "data": [], "count": 0}
-            df.rename(columns={
-                '股票代码': 'stock_code',
-                '问题': 'question',
-                '提问时间': 'question_time',
-                '更新时间': 'answer_time',
-                '问题编号': 'question_id',
-                '回答ID': 'answer_id',
-                '回答内容': 'answer',
-                '回答者': 'answerer',
-            }, inplace=True)
-            df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
-            if start_date:
-                start_dt = pd.to_datetime(start_date, errors='coerce')
-                df = df[pd.to_datetime(df['question_time'], errors='coerce') >= start_dt]
-            if end_date:
-                end_dt = pd.to_datetime(end_date, errors='coerce')
-                df = df[pd.to_datetime(df['question_time'], errors='coerce') <= end_dt]
-            if df.empty:
-                return {"success": False, "data": [], "count": 0}
-            df['question_time'] = pd.to_datetime(df['question_time'], errors='coerce')
-            df['answer_time'] = pd.to_datetime(df['answer_time'], errors='coerce')
-            df['trade_date'] = df['question_time'].dt.date
-            df['data_source'] = self.source
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
-                'interactive_qa', df, source=self.source, target_table='stock_interactive_qa'
-            )
-
-            # 返回字典格式
-            return {
-                "success": True,
-                "data": df.to_dict('records'),
-                "count": len(df)
-            }
-        except Exception as e:
-            logger.error(f"Failed to ingest AKShare interactive QA for {stock_code}: {e}")
-            return None
-
     async def fetch_and_ingest_income_statement(
             self,
             stock_code: str,

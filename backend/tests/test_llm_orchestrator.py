@@ -1,4 +1,3 @@
-import asyncio
 from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace
@@ -7,19 +6,19 @@ from uuid import uuid4
 
 import pytest
 from app.ai.llm_engine.orchestrator import (
-    AnalystState, fetch_context, sentiment_analysis, vertical_analysis,
-    strategic_round_1, strategic_round_2_1, strategic_round_2_rebuttal,
+    fetch_context, sentiment_analysis, vertical_analysis,
+    strategic_round_1, strategic_round_2_1,
     fact_arbitration, portfolio_management, persist_agent_report,
     create_analyst_workflow, _get_previous_pm_decision, _get_same_stock_history,
     _get_pending_orders_for_pm, _build_pm_review_focus, _build_portfolio_field_descriptions
 )
-from app.ai.llm_engine.models import PMDecision
 from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER, AGENT_ROLE_PORTFOLIO_MANAGER, AGENT_ROLE_RISK
 from app.models.account import Account
 from app.models.data_storage import KlineData, StockBasic, StockRealtimeMarket, StockValuationHistory
 from app.models.debate_message import DebateMessage
 from app.models.order import Order
 from app.models.position import Position
+from app.models.pm_decision import PMDecisionRecord
 from app.models.session import Session as DebateSession
 from app.models.trade_record import TradeRecord
 from app.models.user import User
@@ -49,7 +48,6 @@ MOCK_CONTEXT = {
         "northbound_trend": {"trend": "up"},
         "financial_trend": {"items": [1, 2, 3]},
         "insider_activity": {"records": []},
-        "interactive_qa": {"items": []},
         "seo_history": {"items": []},
     },
     "signals": {
@@ -95,6 +93,11 @@ def _expected_static_context(portfolio_info=None):
     return static_context
 
 
+def _saved_pm_record():
+    """构造 PM 工具保存后的最小记录替身。"""
+    return SimpleNamespace(to_dict=lambda: {"confidence_score": 80, "target_position": 0.0})
+
+
 @pytest.fixture
 def initial_state():
     return {
@@ -117,13 +120,14 @@ def initial_state():
         "errors": []
     }
 
+
 @pytest.mark.asyncio
 async def test_fetch_context_node(initial_state):
     initial_state["session_id"] = None
     with patch("app.ai.llm_engine.orchestrator.AIContextService") as MockService:
         mock_service = MockService.return_value
         mock_service.build = AsyncMock(return_value=MOCK_CONTEXT)
-        
+
         result = await fetch_context(initial_state)
 
         assert "static_context" in result
@@ -425,6 +429,7 @@ async def test_fetch_context_keeps_portfolio_info_consistent_with_overview(initi
     assert position["unrealized_pnl"] == -800.0
     assert position["unrealized_pnl_pct"] == -0.08
 
+
 @pytest.mark.asyncio
 async def test_sentiment_analysis_node(initial_state):
     initial_state["static_context"] = _expected_static_context()
@@ -446,19 +451,19 @@ async def test_sentiment_analysis_node(initial_state):
 @pytest.mark.asyncio
 async def test_vertical_analysis_node(initial_state):
     initial_state["static_context"] = _expected_static_context()
-    
+
     # Mock specific agents
     with patch("app.ai.llm_engine.orchestrator.FundamentalAgent") as MockF, \
          patch("app.ai.llm_engine.orchestrator.TechnicalAgent") as MockT, \
          patch("app.ai.llm_engine.orchestrator.CapitalFlowAgent") as MockC, \
          patch("app.ai.llm_engine.orchestrator.RiskAgent") as MockR, \
          patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock) as mock_persist:
-        
+
         MockF.return_value.run = AsyncMock(return_value="F_Report")
         MockT.return_value.run = AsyncMock(return_value="T_Report")
         MockC.return_value.run = AsyncMock(return_value="C_Report")
         MockR.return_value.run = AsyncMock(return_value="R_Report")
-        
+
         result = await vertical_analysis(initial_state)
 
         assert len(result["vertical_reports"]) == 4
@@ -489,36 +494,37 @@ async def test_vertical_analysis_collects_agent_failures(initial_state):
     assert result["vertical_reports"]["technical"] == "T_Report"
     assert any("fundamental feed timeout" in error for error in result["errors"])
 
+
 @pytest.mark.asyncio
 async def test_strategic_round_nodes(initial_state):
     initial_state["static_context"] = _expected_static_context()
     initial_state["vertical_reports"] = {"fundamental": "F", "technical": "T"}
-    
+
     with patch("app.ai.llm_engine.orchestrator.BullAgent") as MockBull, \
          patch("app.ai.llm_engine.orchestrator.BearAgent") as MockBear, \
          patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock) as mock_persist_1:
-        
+
         MockBull.return_value.run = AsyncMock(return_value="Bull_Report")
         MockBear.return_value.run = AsyncMock(return_value="Bear_Report")
-        
+
         res1 = await strategic_round_1(initial_state)
         assert len(res1["strategic_reports"]) == 2
         bull_snapshot, bull_runtime_context = MockBull.return_value.run.await_args.args
         assert bull_snapshot == _expected_static_context()
         assert bull_runtime_context["layer1_analysis"] == {"fundamental": "F", "technical": "T"}
         assert mock_persist_1.call_count == 2
-        
+
         # Round 2
         initial_state["strategic_reports"] = res1["strategic_reports"]
         with patch("app.ai.llm_engine.orchestrator.AggressiveAgent") as MockA, \
              patch("app.ai.llm_engine.orchestrator.ConservativeAgent") as MockC, \
              patch("app.ai.llm_engine.orchestrator.NeutralAgent") as MockN, \
              patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock) as mock_persist_2:
-            
+
             MockA.return_value.run = AsyncMock(return_value="A_Report")
             MockC.return_value.run = AsyncMock(return_value="C_Report")
             MockN.return_value.run = AsyncMock(return_value="N_Report")
-            
+
             res2 = await strategic_round_2_1(initial_state)
             assert "strategic_round_2_1_reports" in res2
             aggressive_snapshot, aggressive_runtime_context = MockA.return_value.run.await_args.args
@@ -541,18 +547,25 @@ async def test_strategic_round_nodes(initial_state):
             assert fact_runtime_context["strategic_round_2_1"] == res2["strategic_round_2_1_reports"]
             assert mock_persist_fact.call_count == 1
 
+
 @pytest.mark.asyncio
 async def test_full_workflow_integration(initial_state):
     """Integration test for the full graph flow using mocks for all external calls"""
-    with patch("app.ai.llm_engine.orchestrator.AIContextService") as MockService, \
-         patch("app.ai.llm_engine.agents.base.BaseAgent.run", new_callable=AsyncMock) as mock_agent_run, \
-         patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock) as mock_persist, \
-         patch(
-             "app.trading.service.trading_service.execute_order_and_update_db",
-             new_callable=AsyncMock,
-         ) as mock_trade, \
-         patch("app.core.database.SessionLocal") as mock_session_local, \
-         patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={}):
+    with (
+        patch("app.ai.llm_engine.orchestrator.AIContextService") as MockService,
+        patch("app.ai.llm_engine.agents.base.BaseAgent.run", new_callable=AsyncMock) as mock_agent_run,
+        patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock) as mock_persist,
+        patch(
+            "app.trading.service.trading_service.execute_order_and_update_db",
+            new_callable=AsyncMock,
+        ) as mock_trade,
+        patch("app.core.database.SessionLocal") as mock_session_local,
+        patch(
+            "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
+            return_value=_saved_pm_record(),
+        ),
+        patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={}),
+    ):
 
         mock_service = MockService.return_value
         mock_service.build = AsyncMock(return_value=MOCK_CONTEXT)
@@ -564,29 +577,18 @@ async def test_full_workflow_integration(initial_state):
         def mock_run_side_effect(static_context, context=None):
             assert static_context == _expected_static_context()
             context = context or {}
-            # If it's the PM, return PMDecision fields
+            # If it's the PM, return final Markdown report.
             if "previous_pm_decision" in context:
-                return {
-                    "decision": "hold",
-                    "confidence_score": 90.0,
-                    "target_position": 0.0,
-                    "verdict_summary": "Test verdict",
-                    "investment_plan": "Test plan",
-                    "price_range": "100-110",
-                    "stop_loss": 95.0,
-                    "risk_assessment": 0.1,
-                    "execution_details": "Test details",
-                    "report_markdown": "Test report"
-                }
+                return "# PM report"
             # Otherwise return vertical/strategic reports
             return "Test Report"
 
         mock_agent_run.side_effect = mock_run_side_effect
         mock_trade.return_value = {"success": True, "message": "Success"}
-        
+
         workflow = create_analyst_workflow()
         final_state = await workflow.ainvoke(initial_state)
-        
+
         assert "context" in final_state
         assert "sentiment_report" in final_state
         assert "vertical_reports" in final_state
@@ -596,7 +598,7 @@ async def test_full_workflow_integration(initial_state):
         assert "pm_decision" in final_state
         assert "trader_execution" not in final_state
         assert not final_state["errors"]
-        
+
         # Total persists: 1 (news) + 1 (policy) + 1 (sentiment) + 4 (vertical) + 2 (round 1)
         # + 3 (round 2.1) + 1 (fact arbitration) + 1 (PM) = 14
         assert mock_persist.call_count == 14
@@ -697,37 +699,32 @@ async def test_persist_agent_report_saves_pm_report():
         trading_frequency="swing",
     )
     fake_db = _PersistDb(fake_session)
-    pm_report = PMDecision(
-        decision="buy",
+    saved_pm_decision = SimpleNamespace(
         confidence_score=88,
-        target_position=0.4,
-        verdict_summary="Bull case stronger",
-        investment_plan="Build position in tranches",
-        price_range="10-11",
-        stop_loss=9.5,
-        take_profit=12.0,
-        holding_horizon_days=20,
-        risk_assessment=0.2,
-        execution_details="Start with half size",
-        report_markdown="# PM report",
+        to_dict=lambda: {"confidence_score": 88, "target_position": 0.4},
     )
 
-    with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(fake_db)), \
-         patch("app.api.endpoints.debate_ws.send_debate_message", new_callable=AsyncMock):
+    with (
+        patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(fake_db)),
+        patch(
+            "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
+            return_value=saved_pm_decision,
+        ),
+        patch("app.api.endpoints.debate_ws.send_debate_message", new_callable=AsyncMock),
+    ):
         await persist_agent_report(
             session_id=session_id,
             stage="portfolio_management",
             round_number=0,
             agent_name=AGENT_NAME_PORTFOLIO_MANAGER,
             agent_role=AGENT_ROLE_PORTFOLIO_MANAGER,
-            report_content=pm_report,
+            report_content="# PM report",
             prompt_input="pm prompt",
         )
 
     assert len(fake_db.added) == 1
     assert fake_db.added[0].agent_role == AGENT_ROLE_PORTFOLIO_MANAGER
     assert fake_db.added[0].reasoning == "# PM report"
-    assert fake_db.added[0].analysis["decision"] == "buy"
     assert fake_db.added[0].prompt_input == "pm prompt"
 
 
@@ -739,20 +736,26 @@ async def test_portfolio_management_passes_expected_top_level_keys(initial_state
     portfolio_info = {"account": {"total_assets": 1000000}, "position": {}}
     initial_state["static_context"] = _expected_static_context(portfolio_info)
 
-    with patch("app.ai.llm_engine.orchestrator.PortfolioManagerAgent") as MockPM, \
-         patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock), \
-         patch(
-             "app.ai.llm_engine.orchestrator._get_previous_pm_decision",
-             return_value={"decision": "buy", "target_position": 0.3},
-         ), \
-         patch(
-             "app.ai.llm_engine.orchestrator._get_same_stock_history",
-             return_value={"recent_execution_summary": {"recent_realized_pnl": -100.0}},
-         ), \
-         patch(
-             "app.ai.llm_engine.orchestrator._get_pending_orders_for_pm",
-             return_value=[],
-         ):
+    with (
+        patch("app.ai.llm_engine.orchestrator.PortfolioManagerAgent") as MockPM,
+        patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock),
+        patch(
+            "app.ai.llm_engine.orchestrator._get_previous_pm_decision",
+            return_value={"decision": "buy", "target_position": 0.3},
+        ),
+        patch(
+            "app.ai.llm_engine.orchestrator._get_same_stock_history",
+            return_value={"recent_execution_summary": {"recent_realized_pnl": -100.0}},
+        ),
+        patch(
+            "app.ai.llm_engine.orchestrator._get_pending_orders_for_pm",
+            return_value=[],
+        ),
+        patch(
+            "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
+            return_value=_saved_pm_record(),
+        ),
+    ):
         mock_agent = MockPM.return_value
         mock_agent.last_prompt = "test prompt"
         mock_agent.run = AsyncMock(return_value={"decision": "hold", "confidence_score": 80})
@@ -834,10 +837,20 @@ def test_get_same_stock_history_includes_trades_pnl_and_stop_loss(db_session):
                 "target_position": 0.0,
                 "stop_loss": 29.5,
                 "take_profit": 38.7,
-                "risk_assessment": 0.85,
-                "verdict_summary": "trend breakdown and stop-loss liquidation",
             },
             created_at=datetime(2026, 6, 4, 13, 37),
+        )
+    )
+    db_session.add(
+        PMDecisionRecord(
+            session_id=previous_session.session_id,
+            user_id=user.id,
+            stock_code="000001.SZ",
+            target_position=0.0,
+            confidence_score=85,
+            stop_loss=29.5,
+            take_profit=38.7,
+            holding_horizon_days=20,
         )
     )
     buy_order = Order(
@@ -980,6 +993,15 @@ def test_get_same_stock_history_does_not_treat_rejected_sell_as_exit(db_session)
             source=f"ai:{previous_session.session_id}",
         )
     )
+    db_session.add(
+        PMDecisionRecord(
+            session_id=previous_session.session_id,
+            user_id=user.id,
+            stock_code="000001.SZ",
+            target_position=0.0,
+            confidence_score=70,
+        )
+    )
     db_session.commit()
 
     with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
@@ -1050,12 +1072,22 @@ def test_get_previous_pm_decision_includes_execution_summary_with_dates(db_sessi
             "stop_loss": 9.5,
             "take_profit": 12.0,
             "holding_horizon_days": 20,
-            "price_range": "10-11",
-            "execution_details": "filled",
         },
         created_at=datetime(2026, 1, 1, 15, 0),
     )
     db_session.add(pm_message)
+    db_session.add(
+        PMDecisionRecord(
+            session_id=previous_session.session_id,
+            user_id=user.id,
+            stock_code="000001.SZ",
+            target_position=0.3,
+            confidence_score=80,
+            stop_loss=9.5,
+            take_profit=12.0,
+            holding_horizon_days=20,
+        )
+    )
     db_session.add_all(
         [
             Order(
@@ -1092,7 +1124,6 @@ def test_get_previous_pm_decision_includes_execution_summary_with_dates(db_sessi
     with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
         result = _get_previous_pm_decision(current_session.session_id, "000001.SZ")
 
-    assert result["decision"] == "buy"
     assert result["take_profit"] == 12.0
     assert result["holding_horizon_days"] == 20
     assert result["execution_summary"] == {
@@ -1147,6 +1178,15 @@ def test_get_previous_pm_decision_orders_execution_summary_by_order_time(db_sess
             reasoning="# previous report",
             analysis={"decision": "buy", "target_position": 0.3},
             created_at=datetime(2026, 1, 1, 15, 0),
+        )
+    )
+    db_session.add(
+        PMDecisionRecord(
+            session_id=previous_session.session_id,
+            user_id=user.id,
+            stock_code="000001.SZ",
+            target_position=0.3,
+            confidence_score=80,
         )
     )
     later_order_id = uuid4()
@@ -1287,12 +1327,20 @@ def test_get_previous_pm_decision_marks_missing_execution(db_session):
             created_at=datetime(2026, 1, 1, 15, 0),
         )
     )
+    db_session.add(
+        PMDecisionRecord(
+            session_id=previous_session.session_id,
+            user_id=user.id,
+            stock_code="000001.SZ",
+            target_position=0.0,
+            confidence_score=70,
+        )
+    )
     db_session.commit()
 
     with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
         result = _get_previous_pm_decision(current_session.session_id, "000001.SZ")
 
-    assert result["decision"] == "hold"
     assert result["execution_summary"] == {
         "has_orders": False,
         "has_trades": False,
