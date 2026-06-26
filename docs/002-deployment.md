@@ -119,7 +119,7 @@ scripts/database-maintenance.sh backup
 恢复主系统数据库和 Memo 数据库。脚本会先提示将停止 `backend`、`memo`，输入 `RESTORE` 确认后继续，完成后自动拉起服务：
 
 ```bash
-scripts/database-maintenance.sh restore backups/best-ai-trader-YYYYMMDD-HHMMSS
+scripts/database-maintenance.sh restore backups/bat.YYYYMMDD.HHMMSS
 ```
 
 ## 6. 注意事项

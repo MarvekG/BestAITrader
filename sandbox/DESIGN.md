@@ -4,7 +4,7 @@
 
 本文原先描述的是后端进程内的 Deno + Pyodide 预热池。当前实现已将这套运行时迁移到独立 `sandbox/` 服务：后端只保留 AST 静态校验和 `execute_python_in_sandbox` 工具入口，通过 `PY_SANDBOX_BASE_URL` 调用 `sandbox` 的 `/execute`；Deno、Pyodide、one-shot worker、预热池和显式 subprocess 模式都在 `sandbox` 容器内运行。
 
-Compose 中新增 `sandbox` 服务，生产镜像名为 `ghcr.io/marvekg/bestaitrader-sandbox:latest`，开发环境从 `./sandbox/Dockerfile` 构建并映射 `8030:8030`。沙箱服务默认只需要内部网络访问，健康检查为 `http://sandbox:8030/health`。
+Compose 中新增 `sandbox` 服务，生产镜像名为 `ghcr.io/marvekg/bat.sandbox:latest`，开发环境从 `./sandbox/Dockerfile` 构建并映射 `8030:8030`。沙箱服务默认只需要内部网络访问，健康检查为 `http://sandbox:8030/health`。
 
 主要配置分为两层：后端使用 `PY_SANDBOX_BASE_URL`、`PY_SANDBOX_HTTP_TIMEOUT_SECONDS`、`PY_SANDBOX_TIMEOUT_SECONDS`、`PY_SANDBOX_STDOUT_MAX_BYTES`、`PY_SANDBOX_STDERR_MAX_BYTES` 控制 HTTP 调用和返回限制；`sandbox` 服务使用 `SANDBOX_DENO_EXECUTABLE`、`SANDBOX_PYODIDE_ROOT`、`SANDBOX_PREWARM_POOL_ENABLED`、`SANDBOX_PREWARM_POOL_SIZE`、`SANDBOX_PREWARM_MAX_STARTING`、`SANDBOX_MAX_CONCURRENT_EXECUTIONS` 控制 Deno/Pyodide 运行时和预热池。
 
