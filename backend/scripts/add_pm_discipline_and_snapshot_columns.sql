@@ -1,5 +1,0 @@
-ALTER TABLE positions
-    ADD COLUMN IF NOT EXISTS stop_loss DECIMAL(10, 4),
-    ADD COLUMN IF NOT EXISTS take_profit DECIMAL(10, 4),
-    ADD COLUMN IF NOT EXISTS horizon_deadline TIMESTAMP,
-    ADD COLUMN IF NOT EXISTS pm_session_id UUID;
