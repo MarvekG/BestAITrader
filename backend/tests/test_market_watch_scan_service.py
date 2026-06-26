@@ -1036,7 +1036,7 @@ async def test_scan_existing_pending_or_running_task_always_skips(db_session) ->
 
 
 @pytest.mark.asyncio
-async def test_scan_skips_launch_when_watch_ai_targets_unwatched_stock(db_session) -> None:
+async def test_scan_filters_watch_ai_decision_when_target_stock_is_unwatched(db_session) -> None:
     user = _create_user(db_session)
     _add_stock(db_session, user.id, "000001")
     _add_quote(db_session, "000001")
@@ -1049,13 +1049,13 @@ async def test_scan_skips_launch_when_watch_ai_targets_unwatched_stock(db_sessio
         debate_launcher=lambda **kwargs: launcher_calls.append(kwargs),
     )
 
-    assert result["debate_launch"]["status"] == "skipped"
-    assert result["debate_launch"]["reason"] == "invalid_target_stock"
+    assert result["watch_ai_decision"] is None
+    assert result["debate_launch"]["status"] == "not_started"
+    assert result["debate_launch"]["reason"] == "watch_ai_decision"
     assert launcher_calls == []
     assert db_session.query(Session).count() == 0
-    event = db_session.query(MarketWatchEvent).filter(MarketWatchEvent.event_type == "debate_skipped").one()
-    assert event.reason == "invalid_target_stock"
-    assert event.watch_ai_decision["stock_code"] == "999999"
+    event = db_session.query(MarketWatchEvent).filter(MarketWatchEvent.event_type == "ai_decision").one()
+    assert event.watch_ai_decision == []
 
 
 @pytest.mark.asyncio
