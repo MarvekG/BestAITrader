@@ -1,7 +1,9 @@
+name: bat
+
 services:
   postgres:
     image: postgres:17-alpine
-    container_name: best_ai_trader_postgres
+    container_name: bat.postgres
     restart: unless-stopped
     mem_limit: 2g
     memswap_limit: 4g
@@ -12,7 +14,7 @@ services:
       POSTGRES_DB: trading
       TZ: Asia/Shanghai
     volumes:
-      - postgres17_data:/var/lib/postgresql/data
+      - postgres17.data:/var/lib/postgresql/data
       - ./litellm/01-create-litellm-database.sql:/docker-entrypoint-initdb.d/01-create-litellm-database.sql:ro
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U tradeuser -d trading" ]
@@ -22,18 +24,18 @@ services:
       retries: 5
       start_period: 20s
     networks:
-      - best_ai_trader_network
+      - bat.network
 
   redis:
     image: redis:7-alpine
-    container_name: best_ai_trader_redis
+    container_name: bat.redis
     restart: unless-stopped
     mem_limit: 2g
     memswap_limit: 4g
     mem_swappiness: 0
 
     volumes:
-      - redis_data:/data
+      - redis.data:/data
     environment:
       - TZ=Asia/Shanghai
     healthcheck:
@@ -44,11 +46,11 @@ services:
       retries: 5
       start_period: 20s
     networks:
-      - best_ai_trader_network
+      - bat.network
 
   memo-postgres:
     image: pgvector/pgvector:pg17
-    container_name: best_ai_trader_memo_postgres
+    container_name: bat.memo.postgres
     restart: unless-stopped
     mem_limit: 2g
     memswap_limit: 4g
@@ -59,7 +61,7 @@ services:
       POSTGRES_DB: memory
       TZ: Asia/Shanghai
     volumes:
-      - memo_pgvector17_data:/var/lib/postgresql/data
+      - memo.pgvector17.data:/var/lib/postgresql/data
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U tradeuser -d memory" ]
       interval: 1m
@@ -68,11 +70,11 @@ services:
       retries: 5
       start_period: 20s
     networks:
-      - best_ai_trader_network
+      - bat.network
 
   litellm:
     image: docker.litellm.ai/berriai/litellm-non_root:latest
-    container_name: best_ai_trader_litellm
+    container_name: bat.litellm
     restart: unless-stopped
     mem_limit: 2g
     memswap_limit: 4g
@@ -95,11 +97,11 @@ services:
       retries: 3
       start_period: 40s
     networks:
-      - best_ai_trader_network
+      - bat.network
 
   memo:
     image: ghcr.io/marvekg/memoflux:latest
-    container_name: best_ai_trader_memo
+    container_name: bat.memo
     restart: unless-stopped
     mem_limit: 2g
     memswap_limit: 4g
@@ -109,7 +111,7 @@ services:
     environment:
       TZ: Asia/Shanghai
     volumes:
-      - memo_runtime_data:/home/memo/.memoflux/data
+      - memo.runtime.data:/home/memo/.memoflux/data
     depends_on:
       memo-postgres:
         condition: service_healthy
@@ -121,11 +123,11 @@ services:
       retries: 3
       start_period: 40s
     networks:
-      - best_ai_trader_network
+      - bat.network
 
   backend:
-    image: ghcr.io/marvekg/bestaitrader-backend:latest
-    container_name: best_ai_trader_backend
+    image: ghcr.io/marvekg/bat.backend:latest
+    container_name: bat.backend
     restart: unless-stopped
     mem_limit: 2g
     memswap_limit: 4g
@@ -145,7 +147,7 @@ services:
         condition: service_healthy
     volumes:
     #   - ./backend:/app # FOR DEBUG
-      - backend_runtime_data:/runtime
+      - backend.runtime.data:/runtime
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://127.0.0.1:8000/health" ]
       interval: 1m
@@ -154,11 +156,11 @@ services:
       retries: 3
       start_period: 80s
     networks:
-      - best_ai_trader_network
+      - bat.network
 
   sandbox:
-    image: ghcr.io/marvekg/bestaitrader-sandbox:latest
-    container_name: best_ai_trader_sandbox
+    image: ghcr.io/marvekg/bat.sandbox:latest
+    container_name: bat.sandbox
     restart: unless-stopped
     cpus: "4.0"
     mem_limit: 4g
@@ -176,7 +178,7 @@ services:
       SANDBOX_PREWARM_POOL_SIZE: 4
       SANDBOX_PREWARM_MAX_STARTING: 2
     volumes:
-      - sandbox_runtime_data:/runtime
+      - sandbox.runtime.data:/runtime
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://127.0.0.1:8030/health" ]
       interval: 1m
@@ -185,11 +187,11 @@ services:
       retries: 3
       start_period: 80s
     networks:
-      - best_ai_trader_network
+      - bat.network
 
   webfetch:
-    image: ghcr.io/marvekg/bestaitrader-webfetch:latest
-    container_name: best_ai_trader_webfetch
+    image: ghcr.io/marvekg/bat.webfetch:latest
+    container_name: bat.webfetch
     restart: unless-stopped
     cpus: "4.0"
     mem_limit: 2g
@@ -205,7 +207,7 @@ services:
       PLAYWRIGHT_BROWSERS_PATH: /runtime/browsers/ms-playwright
       XDG_CACHE_HOME: /runtime/cache
     volumes:
-      - webfetch_runtime_data:/runtime
+      - webfetch.runtime.data:/runtime
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://127.0.0.1:8010/health" ]
       interval: 1m
@@ -214,7 +216,7 @@ services:
       retries: 3
       start_period: 80s
     networks:
-      - best_ai_trader_network
+      - bat.network
 
   scrapling.mcp:
     image: ghcr.io/d4vinci/scrapling:latest
@@ -239,11 +241,11 @@ services:
       retries: 3
       start_period: 80s
     networks:
-      - best_ai_trader_network
+      - bat.network
 
   frontend:
-    image: ghcr.io/marvekg/bestaitrader-frontend:latest
-    container_name: best_ai_trader_frontend
+    image: ghcr.io/marvekg/bat.frontend:latest
+    container_name: bat.frontend
     restart: unless-stopped
     mem_limit: 2g
     memswap_limit: 4g
@@ -262,11 +264,11 @@ services:
       retries: 3
       start_period: 40s
     networks:
-      - best_ai_trader_network
+      - bat.network
 
   nginx:
     image: nginxinc/nginx-unprivileged:alpine
-    container_name: best_ai_trader_nginx
+    container_name: bat.nginx
     restart: unless-stopped
     mem_limit: 2g
     memswap_limit: 4g
@@ -294,24 +296,34 @@ services:
     environment:
       - TZ=Asia/Shanghai
     networks:
-      - best_ai_trader_network
+      - bat.network
 
 volumes:
-  postgres17_data:
-  redis_data:
-  memo_pgvector17_data:
-  memo_runtime_data:
-  backend_runtime_data:
-  sandbox_runtime_data:
-  webfetch_runtime_data:
+  postgres17.data:
+    name: bat.postgres17.data
+  redis.data:
+    name: bat.redis.data
+  memo.pgvector17.data:
+    name: bat.memo.pgvector17.data
+  memo.runtime.data:
+    name: bat.memo.runtime.data
+  backend.runtime.data:
+    name: bat.backend.runtime.data
+  sandbox.runtime.data:
+    name: bat.sandbox.runtime.data
+  webfetch.runtime.data:
+    name: bat.webfetch.runtime.data
 
 
 secrets:
   litellm_config:
+    name: bat.litellm.config
     file: ./litellm/config.yaml
   nginx_config:
+    name: bat.nginx.config
     file: ./nginx.conf
 
 networks:
-  best_ai_trader_network:
+  bat.network:
+    name: bat.network
     driver: bridge

@@ -37,7 +37,7 @@ Environment overrides:
 Examples:
   scripts/database-maintenance.sh backup
   scripts/database-maintenance.sh backup backups/manual-20260613
-  scripts/database-maintenance.sh restore backups/best-ai-trader-20260613-153000
+  scripts/database-maintenance.sh restore backups/bat.20260613.153000
   COMPOSE_FILE=docker-compose.dev.yml scripts/database-maintenance.sh backup
 EOF
 }
@@ -118,7 +118,7 @@ restore_database() {
 backup_all() {
   local output_dir="${1:-}"
   if [[ -z "${output_dir}" ]]; then
-    output_dir="${BACKUP_DIR}/best-ai-trader-$(date +%Y%m%d-%H%M%S)"
+    output_dir="${BACKUP_DIR}/bat.$(date +%Y%m%d.%H%M%S)"
   fi
 
   require_project_root

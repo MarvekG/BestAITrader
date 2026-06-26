@@ -38,7 +38,7 @@ webfetch/
       limiter.py
 ```
 
-Compose 服务名固定为 `webfetch`，容器名建议为 `best_ai_trader_webfetch`。主后端通过 `http://webfetch:8010` 访问。
+Compose 服务名固定为 `webfetch`，容器名建议为 `bat.webfetch`。主后端通过 `http://webfetch:8010` 访问。
 
 默认不通过公网 Nginx 暴露该服务；如需本地调试，可在 `docker-compose.dev.yml` 中映射 `8010:8010`。
 
@@ -264,8 +264,8 @@ Markdown 返回：
 
 ```yaml
 webfetch:
-  image: ghcr.io/marvekg/bestaitrader-webfetch:latest
-  container_name: best_ai_trader_webfetch
+  image: ghcr.io/marvekg/bat.webfetch:latest
+  container_name: bat.webfetch
   restart: unless-stopped
   environment:
     TZ: Asia/Shanghai
@@ -281,7 +281,7 @@ webfetch:
   healthcheck:
     test: ["CMD", "curl", "-f", "http://127.0.0.1:8010/health"]
   networks:
-    - best_ai_trader_network
+    - bat.network
 ```
 
 开发 Compose 可额外增加：
