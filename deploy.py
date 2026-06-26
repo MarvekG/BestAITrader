@@ -208,6 +208,8 @@ def validate_tavily(api_key: str) -> tuple[bool, str]:
     payload = {"api_key": api_key, "query": "A股", "max_results": 1}
     ok, data = post_json("https://api.tavily.com/search", payload)
     if not ok:
+        if str(data).startswith("HTTP 432:"):
+            return True, "Tavily Key 已被服务端接受，但当前触发套餐用量限制"
         return False, str(data)
     if not isinstance(data, dict) or "results" not in data:
         return False, f"响应缺少 results 字段: {data}"
@@ -327,6 +329,48 @@ def collect_validated_secret(label: str, validator: Any) -> str:
         print(message)
         if ok:
             return value
+        print("校验失败，请重新输入。")
+
+
+def split_secret_values(raw_value: str) -> list[str]:
+    """
+    拆分英文逗号分隔的密钥输入。
+
+    Args:
+        raw_value: 用户输入的单个或多个密钥。
+
+    Returns:
+        去除空白和空项后的密钥列表。
+    """
+    return [value.strip() for value in raw_value.split(",") if value.strip()]
+
+
+def collect_validated_secrets(label: str, validator: Any) -> str:
+    """
+    循环读取并校验一个或多个英文逗号分隔的密钥。
+
+    Args:
+        label: 密钥名称。
+        validator: 接收单个密钥并返回验证结果的函数。
+
+    Returns:
+        通过验证的密钥配置，多个密钥使用英文逗号连接。
+    """
+    while True:
+        raw_value = prompt_text(f"{label}（多个用英文逗号分隔）", secret=True)
+        values = split_secret_values(raw_value)
+        if not values:
+            print("该项不能为空，请重新输入。")
+            continue
+
+        all_ok = True
+        for index, value in enumerate(values, start=1):
+            ok, message = validator(value)
+            print(f"{label} #{index}: {message}")
+            if not ok:
+                all_ok = False
+        if all_ok:
+            return ",".join(values)
         print("校验失败，请重新输入。")
 
 
@@ -567,8 +611,8 @@ def collect_config() -> dict[str, str]:
         print("校验失败，请重新输入 Tushare 配置。")
         config["tushare_api"] = prompt_text("Tushare API URL", config["tushare_api"])
 
-    config["tavily_api_key"] = collect_validated_secret("Tavily API Key", validate_tavily)
-    config["news_api_key"] = collect_validated_secret("NewsAPI API Key", validate_newsapi)
+    config["tavily_api_key"] = collect_validated_secrets("Tavily API Key", validate_tavily)
+    config["news_api_key"] = collect_validated_secrets("NewsAPI API Key", validate_newsapi)
     return config
 
 
