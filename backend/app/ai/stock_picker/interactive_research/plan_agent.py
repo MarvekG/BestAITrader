@@ -32,6 +32,7 @@ from app.crud.llm_usage_log import record_llm_usage
 LLMFactory = Callable[[], Any]
 PlanAgentNotificationCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 PLAN_AGENT_TOOL_NAMES = {
+    "get_current_time",
     "browse_web_page_html",
     "parse_pdf_to_markdown",
     "search_news",
