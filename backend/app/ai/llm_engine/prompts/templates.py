@@ -838,11 +838,6 @@ SYSTEM_PROMPT_BULL_CN = """
 3. 需要做横向比较、历史分位、连续天数、累计变化、区间表现或事件后效果验证时，应主动补算或补证。
 4. 补查必须小而精：限制时间窗口和结果规模，优先补最影响结论的证据。补证后仍缺失的维度降置信度但不放空结论，基于已有最佳证据给出可执行判断。
 **特别注意**: 如果 Context 中包含 `portfolio_info`，请务必参考其中的 `total_shares`（总持仓）和 `available_shares`（**可卖出数量**）。如果当前建议卖出但 `available_shares` 为 0，请分析是否受 T+1 规则限制，并给出前瞻性的卖出建议（如“次日卖出”）。
-**辩论可见性规则**:
-1. 你只能引用、总结、反驳 Context 中真实出现的历史观点。
-2. 如果 Context 里没有对手原始观点或历史辩论内容，禁止写成“对手说了什么”。
-3. 若本轮看不到对手观点，直接省略 `第二部分: 辩论反驳`，不要输出这个章节。
-4. 反驳必须同时给出“对方原文或证据点 / 你的反驳证据 / 对 PM 决策的影响”；若缺少可引用原文或反驳证据，只能写“未见可反驳观点”。
 **自我证伪要求**: 必须列出本轮多头论证的最弱环节、最早证伪信号，以及若证伪成立应如何调整仓位或转为观望/卖出。
 
 请严格遵循以下 Markdown 格式输出分析报告：
@@ -874,12 +869,7 @@ SYSTEM_PROMPT_BULL_CN = """
 ### 3. [论点三]
 *   **论证**: ...
 
-## 第二部分: 辩论反驳（仅在 Context 提供了可引用的对手观点时输出）
-*   **针对对手**: [针对空方观点的有力回击]
-*   **逻辑纠偏**:
-    *   *对手观点*: "..." -> *我的反驳*: "..."
-
-## 第三部分: 总结与展望
+## 第二部分: 总结与展望
 *   **总结陈词**: [重申核心价值]
 *   **目标展望**:
     *   短期目标: ...
@@ -900,11 +890,6 @@ SYSTEM_PROMPT_BEAR_CN = """
 3. 需要做连续统计、事件频率、历史回撤、估值分位、资金撤离幅度或事件后表现验证时，应主动补算或补证。
 4. 补查必须小而精：限制时间窗口和结果规模，优先补最影响卖出结论的证据。补证后仍缺失的维度降置信度但不放空结论，基于已有最佳证据给出可执行判断。
 **特别注意**: 请参考 `portfolio_info` 中的 `available_shares`。若你建议卖出但当前可卖出数量较少或为 0（因 T+1 锁定），你必须在论据中提及此限制，并说明最佳的卖出方案。
-**辩论可见性规则**:
-1. 你只能引用、总结、反驳 Context 中真实出现的历史观点。
-2. 如果 Context 里没有对手原始观点或历史辩论内容，禁止写成“对手说了什么”。
-3. 若本轮看不到对手观点，直接省略 `第二部分: 辩论反驳`，不要输出这个章节。
-4. 反驳必须同时给出“对方原文或证据点 / 你的反驳证据 / 对 PM 决策的影响”；若缺少可引用原文或反驳证据，只能写“未见可反驳观点”。
 **自我证伪要求**: 必须列出本轮空头论证的最弱环节、最早证伪信号，以及若证伪成立应如何调整仓位或转为观望/买入。
 
 请严格遵循以下 Markdown 格式输出分析报告：
@@ -936,12 +921,7 @@ SYSTEM_PROMPT_BEAR_CN = """
 ### 3. [论点三]
 *   **论证**: ...
 
-## 第二部分: 辩论反驳（仅在 Context 提供了可引用的对手观点时输出）
-*   **针对对手**: [针对多方观点的有力回击]
-*   **逻辑纠偏**:
-    *   *对手观点*: "..." -> *我的反驳*: "..."
-
-## 第三部分: 总结与展望
+## 第二部分: 总结与展望
 *   **总结陈词**: [重申核心风险]
 *   **目标展望**:
     *   短期目标: [看跌目标]
@@ -2073,11 +2053,6 @@ You must not act as a mere repeater of prior reports. If Layer 1 evidence is thi
 3. For cross-checks such as historical percentile, peer comparison, consecutive-day counts, cumulative change, range performance, or event follow-through, actively calculate or verify them.
 4. Keep every follow-up retrieval tight: constrain time window and result size, and prioritize evidence with the highest impact on the buy thesis.
 **SPECIAL NOTICE**: If `portfolio_info` is provided in the Context, you MUST refer to `total_shares` and `available_shares`. If you suggest selling but `available_shares` is 0 (due to T+1 lock), you must provide a forward-looking sell plan (e.g., "Sell on the next trading day").
-**Debate Visibility Rules**:
-1. You may only quote, summarize, or rebut views that explicitly appear in the Context.
-2. If the Context does not include opponent statements or prior debate history, do not write as if an opponent actually said something.
-3. If no opponent view is visible in this round, omit `Part 2: Debate Rebuttal` entirely and do not output that section.
-4. Each rebuttal must include opponent quote or evidence point, your rebuttal evidence, and impact on PM decision. If no quotable opponent view or rebuttal evidence is visible, write “No rebuttable view found”.
 **Self-Falsification Requirement**: State the weakest link in this bullish thesis, the earliest disconfirming signal, and how PM should adjust sizing or switch to hold/sell if the thesis is invalidated.
 
 Please strictly follow this Markdown format for the analysis report:
@@ -2109,12 +2084,7 @@ Please strictly follow this Markdown format for the analysis report:
 ### 3. [Argument Three]
 *   **Evidence**: ...
 
-## Part 2: Debate Rebuttal (Only output when opponent views are explicitly available in Context)
-*   **Against Opponent**: [Powerful counter-attack against bearish views]
-*   **Logic Correction**:
-    *   *Opponent View*: "..." -> *My Rebuttal*: "..."
-
-## Part 3: Summary & Outlook
+## Part 2: Summary & Outlook
 *   **Closing Statement**: [Reiterate core value]
 *   **Target Outlook**:
     *   Short-term Target: ...
@@ -2135,11 +2105,6 @@ You must not merely recycle existing risk language. If the negative thesis lacks
 3. For checks such as consecutive statistics, event frequency, drawdown history, valuation percentile, capital withdrawal magnitude, or post-event performance, actively calculate or verify them.
 4. Keep every follow-up retrieval tight: constrain time window and result size, and prioritize evidence with the highest impact on the sell thesis.
 **SPECIAL NOTICE**: Please check `available_shares` in `portfolio_info`. If you recommend selling but the current sellable quantity is 0 (due to T+1 rules), you must mention this constraint in your arguments and propose a delayed sell plan.
-**Debate Visibility Rules**:
-1. You may only quote, summarize, or rebut views that explicitly appear in the Context.
-2. If the Context does not include opponent statements or prior debate history, do not write as if an opponent actually said something.
-3. If no opponent view is visible in this round, omit `Part 2: Debate Rebuttal` entirely and do not output that section.
-4. Each rebuttal must include opponent quote or evidence point, your rebuttal evidence, and impact on PM decision. If no quotable opponent view or rebuttal evidence is visible, write “No rebuttable view found”.
 **Self-Falsification Requirement**: State the weakest link in this bearish thesis, the earliest disconfirming signal, and how PM should adjust sizing or switch to hold/buy if the thesis is invalidated.
 
 Please strictly follow this Markdown format for the analysis report:
@@ -2171,12 +2136,7 @@ Please strictly follow this Markdown format for the analysis report:
 ### 3. [Argument Three]
 *   **Evidence**: ...
 
-## Part 2: Debate Rebuttal (Only output when opponent views are explicitly available in Context)
-*   **Against Opponent**: [Powerful counter-attack against bullish views]
-*   **Logic Correction**:
-    *   *Opponent View*: "..." -> *My Rebuttal*: "..."
-
-## Part 3: Summary & Outlook
+## Part 2: Summary & Outlook
 *   **Closing Statement**: [Reiterate core risks]
 *   **Target Outlook**:
     *   Short-term Target: [Bearish target]
