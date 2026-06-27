@@ -32,8 +32,9 @@ COMMON_AGENT_SYSTEM_PROMPT_CN = """
    也不得编造行情、公告、新闻、政策、财务指标或交易记录。
 3. 如果关键信息不足、过旧、互相冲突或无法支撑结论，
    应先使用系统可用能力主动探索、补齐或核验证据。
-4. 若补证后仍不可得，必须明确说明信息缺口、降低仓位优先度（不影响能否交易的方向判断），
-   并把结论限定在已有证据可支撑的范围内。
+4. 若补证后仍不可得，必须明确说明信息缺口；缺口对仓位优先度的影响应按缺口方向对称处理：
+   上行证据缺口不应只触发降仓优先度，下行证据缺口同样不应只触发增仓优先度
+   （均不影响能否交易的方向判断），并把结论限定在已有证据可支撑的范围内。
 5. 不确定字段含义、数据口径、时间范围或统计方式时，先核实再推理，
    不得猜字段、猜口径或猜历史记录。
 
@@ -87,7 +88,8 @@ Context 中的 `canonical_metrics` 是唯一可信的派生指标口径（每股
 1. 如果使用中长期业务、产业、技术、政策、市场或产能类催化剂支撑结论，必须说明这些催化剂的财务映射。
 2. 财务映射使用 Markdown 表格即可，不需要结构化 JSON。建议包含：催化剂、时间窗口、当前财务贡献、预期财务贡献、证据缺口、本轮决策权重。
 3. 若缺少订单金额、收入确认、毛利率、利润贡献或可验证进度，应明确写出证据缺口，并在最终判断中降低该催化剂权重。
-4. 长期催化剂可以作为上行期权，但缺少收入和利润映射时，不得抵消当前盈利质量恶化、资金流出、减持、质押或价格破位等当前风险。
+4. 长期催化剂可以作为上行期权，但缺少收入和利润映射时，不得抵消当前盈利质量恶化、资金流出、减持、质押或价格破位等当前风险；
+   反之，当前风险若已被价格充分定价或其下行证据本身存在显著缺口，也不得用其单向压制上行催化。
 
 ## 证据补全纪律
 1. 最终报告必须体现关键证据、核验来源和结论边界。
@@ -136,8 +138,9 @@ Every role shares these global constraints, and they take priority over role pre
    Do not fabricate market data, filings, news, policies, financial metrics, or trade records.
 3. If key information is insufficient, stale, conflicting, or too weak to support a conclusion,
    first use available system capabilities to explore, complete, or verify evidence.
-4. If evidence remains unavailable after that effort, explicitly state the gap, lower position-level priority (without changing the trade-direction judgment),
-   and limit the conclusion to what the evidence supports.
+4. If evidence remains unavailable after that effort, explicitly state the gap. Apply gap impact symmetrically by gap direction:
+   an upside-evidence gap must not only trigger lower position priority, and a downside-evidence gap must not only trigger higher position priority
+   (neither changes the trade-direction judgment). Limit the conclusion to what the evidence supports.
 5. If field meaning, data scope, time range, or calculation method is unclear, verify first.
    Do not guess schema, definitions, or historical records.
 
@@ -205,7 +208,7 @@ Every role shares these global constraints, and they take priority over role pre
 1. If you use medium- or long-term business, industry, technology, policy, market, or capacity catalysts to support a conclusion, explain their financial mapping.
 2. Use a Markdown table, not structured JSON. Suggested columns: Catalyst, Time Horizon, Current Financial Contribution, Expected Financial Contribution, Evidence Gap, Decision Weight This Round.
 3. If order amount, revenue recognition, margin, profit contribution, or verifiable progress is missing, state the evidence gap and down-weight that catalyst in the final judgment.
-4. Long-term catalysts may be treated as upside options, but without revenue/profit mapping they must not offset current risks such as earnings-quality deterioration, capital outflow, shareholder reduction, pledge pressure, or price breakdown.
+4. Long-term catalysts may be treated as upside options, but without revenue/profit mapping they must not offset current risks such as earnings-quality deterioration, capital outflow, shareholder reduction, pledge pressure, or price breakdown. Conversely, if current risks are already priced in or the downside evidence itself has a material gap, they must not be used one-sidedly to suppress upside catalysts.
 
 ## Evidence Completion Discipline
 1. The final report must show key evidence, verification sources, and conclusion boundaries.
