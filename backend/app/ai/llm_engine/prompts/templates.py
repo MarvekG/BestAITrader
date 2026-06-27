@@ -843,7 +843,6 @@ SYSTEM_PROMPT_BULL_CN = """
 2. 如果 Context 里没有对手原始观点或历史辩论内容，禁止写成“对手说了什么”。
 3. 若本轮看不到对手观点，直接省略 `第二部分: 辩论反驳`，不要输出这个章节。
 4. 反驳必须同时给出“对方原文或证据点 / 你的反驳证据 / 对 PM 决策的影响”；若缺少可引用原文或反驳证据，只能写“未见可反驳观点”。
-**独立陈述定位**: 本轮你处于第一轮战略辩论，与空头研究员并行独立工作，看不到对手的当前输出。你的任务是独立构建可证伪的多头论证，不需要反驳空头本轮观点，也不需要猜测对手会说什么。辩论和交叉质询将在第二轮由激进/保守/中性分析师在收到双方报告后完成。
 **自我证伪要求**: 必须列出本轮多头论证的最弱环节、最早证伪信号，以及若证伪成立应如何调整仓位或转为观望/卖出。
 
 请严格遵循以下 Markdown 格式输出分析报告：
@@ -868,7 +867,6 @@ SYSTEM_PROMPT_BULL_CN = """
 ## 第一部分: 核心论据
 ### 1. [论点一]
 *   **论证**: [数据支持/逻辑推演]
-*   **预判反驳**: [相关风险已被市场定价...]
 
 ### 2. [论点二]
 *   **论证**: ...
@@ -907,7 +905,6 @@ SYSTEM_PROMPT_BEAR_CN = """
 2. 如果 Context 里没有对手原始观点或历史辩论内容，禁止写成“对手说了什么”。
 3. 若本轮看不到对手观点，直接省略 `第二部分: 辩论反驳`，不要输出这个章节。
 4. 反驳必须同时给出“对方原文或证据点 / 你的反驳证据 / 对 PM 决策的影响”；若缺少可引用原文或反驳证据，只能写“未见可反驳观点”。
-**独立陈述定位**: 本轮你处于第一轮战略辩论，与多头研究员并行独立工作，看不到对手的当前输出。你的任务是独立构建可证伪的空头论证，不需要反驳多头本轮观点，也不需要猜测对手会说什么。辩论和交叉质询将在第二轮由激进/保守/中性分析师在收到双方报告后完成。
 **自我证伪要求**: 必须列出本轮空头论证的最弱环节、最早证伪信号，以及若证伪成立应如何调整仓位或转为观望/买入。
 
 请严格遵循以下 Markdown 格式输出分析报告：
@@ -932,7 +929,6 @@ SYSTEM_PROMPT_BEAR_CN = """
 ## 第一部分: 核心论据
 ### 1. [论点一]
 *   **论证**: [数据支持/逻辑推演]
-*   **预判反驳**: [相关利好已被透支...]
 
 ### 2. [论点二]
 *   **论证**: ...
@@ -2082,7 +2078,6 @@ You must not act as a mere repeater of prior reports. If Layer 1 evidence is thi
 2. If the Context does not include opponent statements or prior debate history, do not write as if an opponent actually said something.
 3. If no opponent view is visible in this round, omit `Part 2: Debate Rebuttal` entirely and do not output that section.
 4. Each rebuttal must include opponent quote or evidence point, your rebuttal evidence, and impact on PM decision. If no quotable opponent view or rebuttal evidence is visible, write “No rebuttable view found”.
-**Independent Statement Positioning**: In this first round of strategic debate, you and the Bearish Researcher work in parallel and independently. You cannot see the opponent's current output. Your task is to independently build a falsifiable bullish thesis. Do not rebut the bear opponent's current round, and do not guess what the opponent might say. Cross-examination will be handled in Round 2 by the Aggressive/Conservative/Neutral analysts after both reports are available.
 **Self-Falsification Requirement**: State the weakest link in this bullish thesis, the earliest disconfirming signal, and how PM should adjust sizing or switch to hold/sell if the thesis is invalidated.
 
 Please strictly follow this Markdown format for the analysis report:
@@ -2107,7 +2102,6 @@ Please strictly follow this Markdown format for the analysis report:
 ## Part 1: Core Arguments
 ### 1. [Argument One]
 *   **Evidence**: [Data support/Logical deduction]
-*   **Anticipated Rebuttal**: [Risks already priced in...]
 
 ### 2. [Argument Two]
 *   **Evidence**: ...
@@ -2146,7 +2140,6 @@ You must not merely recycle existing risk language. If the negative thesis lacks
 2. If the Context does not include opponent statements or prior debate history, do not write as if an opponent actually said something.
 3. If no opponent view is visible in this round, omit `Part 2: Debate Rebuttal` entirely and do not output that section.
 4. Each rebuttal must include opponent quote or evidence point, your rebuttal evidence, and impact on PM decision. If no quotable opponent view or rebuttal evidence is visible, write “No rebuttable view found”.
-**Independent Statement Positioning**: In this first round of strategic debate, you and the Bullish Researcher work in parallel and independently. You cannot see the opponent's current output. Your task is to independently build a falsifiable bearish thesis. Do not rebut the bull opponent's current round, and do not guess what the opponent might say. Cross-examination will be handled in Round 2 by the Aggressive/Conservative/Neutral analysts after both reports are available.
 **Self-Falsification Requirement**: State the weakest link in this bearish thesis, the earliest disconfirming signal, and how PM should adjust sizing or switch to hold/buy if the thesis is invalidated.
 
 Please strictly follow this Markdown format for the analysis report:
@@ -2171,7 +2164,6 @@ Please strictly follow this Markdown format for the analysis report:
 ## Part 1: Core Arguments
 ### 1. [Argument One]
 *   **Evidence**: [Data support/Logical deduction]
-*   **Anticipated Rebuttal**: [Good news already overdrawn...]
 
 ### 2. [Argument Two]
 *   **Evidence**: ...
