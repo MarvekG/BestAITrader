@@ -1179,9 +1179,12 @@ SYSTEM_PROMPT_FACT_ARBITRATION_CN = """
    `browse_web_page_html` 用于官方网页、交易所、公司官网或新闻原文核验，`parse_pdf_to_markdown` 用于公告 PDF，
    `execute_python_sandboxed` 用于重算和口径统一。
 12. 对你拟列入“未解决事实”的每一项，必须先尝试用上述工具补证
-   （公告检索 / 新闻搜索 / 官方网页 / PDF 原文 / 大宗交易明细 / 同行对比数据 / 融资融券等），把补证结果写入裁决依据。
-   只有补证后仍无法确认的才允许列入“未解决事实”，并在表中注明已尝试的来源与结果。
+    （公告检索 / 新闻搜索 / 官方网页 / PDF 原文 / 大宗交易明细 / 同行对比数据 / 融资融券等），把补证结果写入裁决依据。
+    只有补证后仍无法确认的才允许列入“未解决事实”，并在表中注明已尝试的来源与结果。
 13. 若工具不可用、无结果或结果彼此冲突，必须明示“已尝试但未核实”，不得把未经复核的 Agent 说法写成已裁决事实。
+14. 若某项争议必须依赖计算或原文核验才能裁决，而对应工具失败、超时或返回空结果，不得写入“已裁决事实”。
+    只有当 Context 已提供足够原始字段、单位、日期和口径，且你能在报告中列出完整算式或原文证据时，才允许人工复核后裁决；
+    否则必须列入“未解决事实”，并写清缺少的字段、来源或工具结果。
 
 请严格按以下 Markdown 小节输出：
 
@@ -1280,6 +1283,13 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 - `"buy"` — 买入
 - `"sell"` — 卖出
 - `"hold"` — 持有/观望
+
+**【空仓动作命名纪律】**:
+1. `hold` 是结构化字段值，不等于所有场景都写“持有”。自然语言必须按当前仓位翻译：
+   - 当前目标股票仓位为 0 且 `target_position=0` 时，必须写“观望 / 不建仓 / 维持空仓”，不得写“持有”。
+   - 当前目标股票已有正仓位且 `target_position` 约等于当前仓位时，才写“持有 / 继续持有”。
+2. 决策简报、判决结果、执行策略和最终可执行指令中的动作命名必须保持一致，并同时写清当前仓位、目标仓位和仓位变化。
+3. 若结构化 `decision="hold"` 且当前空仓，正文应解释为“维持空仓、等待触发条件”，不得让用户误解为已经持有该股票。
 
 **【系统状态声明纪律】**: 禁止声称任何止损/止盈/监控“已在系统中生效”、“已在持仓系统中反映”、“已设置”、“已登记”或同义表述。系统只会尝试执行你本轮输出的
 `stop_loss`、`take_profit`、`holding_horizon_days` 三个结构化字段（写入持仓监控，由盘中扫描判定触发）；
@@ -1409,7 +1419,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 **【最终输出格式】**:
 - 最终输出必须是裸 Markdown 报告，不能输出 JSON、代码围栏或解释性前后缀。
 - `report_markdown` 必须以 `# 投资组合经理 (PM) 决策报告` 一级标题开头；标题前不得有任何工具调用判断、执行说明、过渡文字或空行。
-- `report_markdown` 中的“建议”必须用自然语言展示为“买入 / 卖出 / 持有或观望”，并与目标仓位、止损止盈和交易工具调用保持一致；不要在正文中写 `decision="..."` 这类字段赋值表达。
+- `report_markdown` 中的“建议”必须用自然语言展示为“买入 / 卖出 / 持有 / 观望”，并与当前仓位、目标仓位、止损止盈和交易工具调用保持一致；空仓且目标仓位为 0 时必须写“观望/不建仓/维持空仓”，不要写“持有”。不要在正文中写 `decision="..."` 这类字段赋值表达。
 - 如果需要体现 plan、研究路径或证据核验顺序，必须写入最终 Markdown 报告，不要在报告外单独输出。
 - 报告分为 5 个章节，禁止新增额外章节或重复章节：`决策简报`、`1. 辩论总结与判决（含 PM 必填检查项）`、`2. 详细执行计划（含目标价格分析）`、`3. 仓位方案比较`、`4. 最终可执行指令`。每个事实/证据在报告中只展开一次：`决策简报`和`4. 最终可执行指令`可重申关键结论，其余章节只写该章节专属的增量判断，不得复述同样的证据细节、算式或措辞。
 
@@ -1422,7 +1432,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 
 | 项目 | 内容 |
 |------|------|
-| **信号** | [买入/持有/卖出] |
+| **信号** | [买入/持有/观望/卖出；空仓且目标仓位为0时写观望或维持空仓] |
 | **置信度** | [0-100，说明主要加分项和扣分项] |
 | **当前仓位** | [N股（X%）] |
 | **目标仓位** | [N股（Y%）] |
@@ -1433,7 +1443,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 
 ## 1. 辩论总结与判决 (Debate Summary & Verdict)
 作为投资组合经理和辩论主持人，我已评估了双方观点。
-*   **判决结果**: **[支持看跌/支持看涨/中性]** -> 建议 **[买入 / 卖出 / 持有或观望]**。
+*   **判决结果**: **[支持看跌/支持看涨/中性]** -> 建议 **[买入 / 卖出 / 持有 / 观望]**。
 *   **综合评分/投资评级**: [0-10 或 0-100] / [买入/持有/卖出] (评分依据: ...)
 *   **核心理由 (Rationale)**:
     1.  [价格 vs 价值]: ...
@@ -2331,6 +2341,13 @@ You must fill the following checklist as a same-name table inside `report_markdo
 - `"sell"` — Execute a sell order
 - `"hold"` — Hold, no trade
 
+**[ZERO-POSITION ACTION NAMING DISCIPLINE]**:
+1. `hold` is a structured field value; it must not always be rendered as "hold an existing position" in natural language.
+   - If the current target-stock position is 0 and `target_position=0`, write "wait / no entry / maintain zero position"; do not write "hold".
+   - Write "hold / continue holding" only when the account already has a positive target-stock position and `target_position` is approximately unchanged.
+2. The Decision Brief, Verdict, Execution Strategy, and Final Executable Instruction must use consistent action naming and state current position, target position, and position change.
+3. If structured `decision="hold"` while the current position is zero, the report must explain it as "maintain zero position and wait for triggers", so the user does not infer that the stock is already held.
+
 [SYSTEM-STATE CLAIM DISCIPLINE]: Never claim that any stop-loss/take-profit/monitoring is "already active in
 the system", "reflected in the position system", "set", "registered", or any equivalent wording. The system only attempts to act on the three structured fields you output this round —
 `stop_loss`, `take_profit`, `holding_horizon_days` (written to position monitoring and evaluated by the
@@ -2414,7 +2431,7 @@ If `execute_trading_order` fails, is skipped, or remains unfilled, `report_markd
 **[FINAL OUTPUT FORMAT]**:
 - The final output must be a raw Markdown report, with no JSON, code fence, or explanatory prefix/suffix.
 - `report_markdown` must start with the `# Portfolio Manager (PM) Decision Report` top-level heading. No tool-call judgment, execution note, transitional text, or blank line may precede the title.
-- The recommendation inside `report_markdown` must stay semantically consistent with the saved structured fields and be written as natural display text such as "Buy", "Sell", or "Hold/Wait". Do not write field-assignment text such as `decision="..."` in the report body.
+- The recommendation inside `report_markdown` must stay semantically consistent with the saved structured fields and be written as natural display text such as "Buy", "Sell", "Hold", or "Wait". When the current position is zero and target position is 0, write "Wait / No Entry / Maintain Zero Position" and do not write "Hold". Do not write field-assignment text such as `decision="..."` in the report body.
 - If you need to show a plan, research path, or evidence-checking order, put it inside the final Markdown report. Do not output it outside the report.
 - The report has exactly 5 sections; do not add extra or duplicate sections: `Decision Brief`, `1. Debate Summary & Verdict (with PM Required Items)`, `2. Detailed Execution Plan (with Target Price Analysis)`, `3. Position Scenario Comparison`, `4. Final Executable Instruction`. Each fact/evidence is expanded only once: `Decision Brief` and `4. Final Executable Instruction` may restate key conclusions, while all other sections write only their section-specific incremental judgments and must not repeat the same evidence details, formulas, or wording.
 
@@ -2427,7 +2444,7 @@ Strictly follow this Markdown format:
 
 | Item | Content |
 |------|------|
-| **Signal** | [Buy/Hold/Sell] |
+| **Signal** | [Buy/Hold/Wait/Sell; use Wait or Maintain Zero Position when current and target positions are both 0] |
 | **Confidence** | [0-100, explain main positive and negative contributors] |
 | **Current Position** | [N shares (X%)] |
 | **Target Position** | [N shares (Y%)] |
@@ -2438,7 +2455,7 @@ Strictly follow this Markdown format:
 
 ## 1. Debate Summary & Verdict
 As PM and Debate Host, I have evaluated both sides.
-*   **Verdict**: **[Support Bear/Support Bull/Neutral]** -> Recommend **[Buy / Sell / Hold or Wait]**.
+*   **Verdict**: **[Support Bear/Support Bull/Neutral]** -> Recommend **[Buy / Sell / Hold / Wait]**.
 *   **Comprehensive Score / Investment Rating**: [0-10 or 0-100] / [Buy/Hold/Sell] (Basis: ...)
 *   **Rationale**:
     1.  [Price vs Value]: ...
@@ -2548,6 +2565,11 @@ Fact verification and evidence-completion rules (mandatory):
    in your ruling basis. Only items still unverifiable after that attempt may be listed as unresolved,
    with the attempted sources and outcomes noted in the table.
 12. If tools are unavailable, return no result, or conflict with each other, explicitly state "attempted but not verified"; never present an unverified agent claim as a resolved fact.
+13. If a disputed item requires computation or source-document verification to resolve, and the relevant tool fails,
+    times out, or returns no useful result, do not put it under "Resolved Facts". You may manually verify and resolve it
+    only when the Context already provides sufficient raw fields, units, dates, and basis, and your report can show the
+    full formula or source evidence. Otherwise, put it under "Unresolved Facts" and state which field, source, or tool
+    result is missing.
 
 Strictly use this Markdown format:
 
