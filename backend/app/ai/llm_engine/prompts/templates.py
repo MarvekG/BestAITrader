@@ -1568,31 +1568,31 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN = """
 
 | 项目 | 内容 |
 |------|------|
-| **信号** | [买入/卖出/持有/观望] |
-| **置信度** | [0-100，说明主要加分项和扣分项] |
-| **当前仓位** | [N股（X%）] |
-| **目标仓位** | [Y%] |
-| **仓位变化** | [增持/减持/清仓/维持] |
-| **最关键证据** | [1-2条最影响仓位的证据，含日期或时间戳] |
-| **最大反证** | [最可能推翻当前裁决的证据] |
-| **交易影响** | [已执行/挂单/无需交易/执行失败及原因] |
+| **信号** | 写买入、卖出、持有或观望 |
+| **置信度** | 写 0-100，并说明主要加分项和扣分项 |
+| **当前仓位** | 写持仓股数和仓位比例 |
+| **目标仓位** | 写目标仓位比例 |
+| **仓位变化** | 写增持、减持、清仓或维持 |
+| **最关键证据** | 写 1-2 条最影响仓位的证据，含日期或时间戳 |
+| **最大反证** | 写最可能推翻当前裁决的证据 |
+| **交易影响** | 写已执行、挂单、无需交易或执行失败及原因 |
 
 ## 1. 综合裁决
-- **最终裁决**: [buy/sell/hold 对应的自然语言建议]
-- **核心理由**: [用 3-5 条说明为什么当前方案优于其他可选方案]
-- **风险覆盖**: [说明采纳/未采纳 risk_report 的关键风险及替代控制]
-- **风格与组合影响**: [交易频率、交易策略、现金、当前持仓、风控规则如何影响仓位]
+- **最终裁决**: 写 buy/sell/hold 对应的自然语言建议
+- **核心理由**: 用 3-5 条说明为什么当前方案优于其他可选方案
+- **风险覆盖**: 说明采纳或未采纳 risk_report 的关键风险及替代控制
+- **风格与组合影响**: 说明交易频率、交易策略、现金、当前持仓、风控规则如何影响仓位
 
 ## 2. 执行计划
-- **执行策略**: [市价/限价/分批/保留旧挂单/撤单/不交易]
-- **目标仓位**: [target_position]
-- **止损**: [价格或不适用，必须与结构化字段一致]
-- **止盈/目标价**: [价格或不适用，必须与结构化字段一致]
-- **持有/复议周期**: [N天或不适用]
-- **失败处理**: [交易失败、跳过或未成交后的计划；未调用交易工具时写不适用]
+- **执行策略**: 写市价、限价、分批、保留旧挂单、撤单或不交易
+- **目标仓位**: 写 target_position
+- **止损**: 写价格或不适用，必须与结构化字段一致
+- **止盈/目标价**: 写价格或不适用，必须与结构化字段一致
+- **持有/复议周期**: 写天数或不适用
+- **失败处理**: 写交易失败、跳过或未成交后的计划；未调用交易工具时写不适用
 
 ## 3. 最终指令
-> [从当前仓位到目标仓位的明确动作；若调用交易工具，写明返回结果；若未调用，写明无需交易原因；写明下一次复议触发条件。]
+> 写从当前仓位到目标仓位的明确动作；若调用交易工具，写明返回结果；若未调用，写明无需交易原因；写明下一次复议触发条件。
 """
 
 
@@ -2678,31 +2678,31 @@ Use this format:
 
 | Item | Content |
 |------|------|
-| **Signal** | [Buy/Sell/Hold/Wait] |
-| **Confidence** | [0-100, with main positive and negative contributors] |
-| **Current Position** | [N shares (X%)] |
-| **Target Position** | [Y%] |
-| **Position Change** | [Add/Trim/Liquidate/Maintain] |
-| **Key Evidence** | [1-2 position-changing facts with date or timestamp] |
-| **Strongest Counter-Evidence** | [Evidence most likely to overturn this verdict] |
-| **Trading Impact** | [Executed/Pending order/No trade needed/Execution failed and why] |
+| **Signal** | Write Buy, Sell, Hold, or Wait |
+| **Confidence** | Write 0-100 with main positive and negative contributors |
+| **Current Position** | Write share count and position percentage |
+| **Target Position** | Write target position percentage |
+| **Position Change** | Write Add, Trim, Liquidate, or Maintain |
+| **Key Evidence** | Write 1-2 position-changing facts with date or timestamp |
+| **Strongest Counter-Evidence** | Write the evidence most likely to overturn this verdict |
+| **Trading Impact** | Write Executed, Pending order, No trade needed, or Execution failed and why |
 
 ## 1. Integrated Verdict
-- **Final Verdict**: [natural-language recommendation matching buy/sell/hold]
-- **Core Rationale**: [3-5 points explaining why the current plan beats the alternatives]
-- **Risk Coverage**: [key risk_report items adopted or overridden, with replacement controls]
-- **Style And Portfolio Impact**: [how trading frequency, strategy, cash, current position, and risk rules affect sizing]
+- **Final Verdict**: Write a natural-language recommendation matching buy/sell/hold
+- **Core Rationale**: Write 3-5 points explaining why the current plan beats the alternatives
+- **Risk Coverage**: Write key risk_report items adopted or overridden, with replacement controls
+- **Style And Portfolio Impact**: Write how trading frequency, strategy, cash, current position, and risk rules affect sizing
 
 ## 2. Execution Plan
-- **Execution Strategy**: [market/limit/staged/keep old order/cancel/no trade]
-- **Target Position**: [target_position]
-- **Stop Loss**: [price or N/A, consistent with structured field]
-- **Take Profit / Target Price**: [price or N/A, consistent with structured field]
-- **Holding / Review Horizon**: [N days or N/A]
-- **Failure Handling**: [plan after failed/skipped/unfilled execution; N/A if no trading tool was called]
+- **Execution Strategy**: Write market, limit, staged, keep old order, cancel, or no trade
+- **Target Position**: Write target_position
+- **Stop Loss**: Write price or N/A, consistent with structured field
+- **Take Profit / Target Price**: Write price or N/A, consistent with structured field
+- **Holding / Review Horizon**: Write days or N/A
+- **Failure Handling**: Write plan after failed/skipped/unfilled execution; write N/A if no trading tool was called
 
 ## 3. Final Instruction
-> [Clear action from current position to target position; if a trading tool was called, state its result; if not, state why no trade is needed; state the next review trigger.]
+> Write the clear action from current position to target position; if a trading tool was called, state its result; if not, state why no trade is needed; state the next review trigger.
 """
 
 
