@@ -16,8 +16,22 @@ def make_json_serializable(obj: Any) -> Any:
     return obj
 
 
-def format_error(message: str, source: str) -> List[Dict[str, Any]]:
-    return [{"error": message, "source": source}]
+def format_error(message: str, source: str, fatal: bool = False) -> List[Dict[str, Any]]:
+    """
+    生成新闻插件统一错误结果。
+
+    Args:
+        message: 面向调用方展示的错误信息。
+        source: 新闻插件来源标识。
+        fatal: 是否为插件不可用等致命错误。
+
+    Returns:
+        单元素错误结果列表，保持与新闻搜索结果列表契约一致。
+    """
+    item: Dict[str, Any] = {"error": message, "source": source}
+    if fatal:
+        item["fatal"] = True
+    return [item]
 
 
 def ensure_source(results: Any, source: str) -> List[Dict[str, Any]]:

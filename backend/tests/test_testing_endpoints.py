@@ -7,6 +7,7 @@ from app.api.endpoints.testing import (
     MEMORY_TEST_QUERY,
     MEMORY_TEST_STOCK_CODE,
     MEMORY_TEST_USER_ID,
+    _run_news_source_test,
     list_testing_tools,
     test_pdf_tool as run_pdf_tool_endpoint,
     test_memory as run_memory_write_endpoint,
@@ -29,6 +30,27 @@ async def test_testing_catalog_includes_skills_probe():
     assert any(item["name"] == "pdf_tool" and item["test_route"] == "/testing/pdf_tool" for item in fixed_tools)
     assert all(item["name"] != "tavily" for item in fixed_tools)
     assert all(item["name"] != "llm" for item in fixed_tools)
+
+
+@pytest.mark.asyncio
+async def test_news_source_test_returns_plugin_fatal_error():
+    mock_search_news = AsyncMock(
+        return_value=[{"error": "Tavily request failed with HTTP 401", "source": "tavily", "fatal": True}]
+    )
+
+    with patch("app.api.endpoints.testing.tools.search_news", SimpleNamespace(ainvoke=mock_search_news)):
+        result = await _run_news_source_test(
+            "Tavily 通用新闻搜索",
+            "tavily",
+            ["AI"],
+            3,
+            "Tavily 通用新闻搜索",
+        )
+
+    assert result["status"] == "error"
+    assert result["fatal"] is True
+    assert result["keyword"] == "AI"
+    assert "HTTP 401" in result["message"]
 
 
 @pytest.mark.asyncio

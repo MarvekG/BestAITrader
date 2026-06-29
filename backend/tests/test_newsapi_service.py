@@ -126,7 +126,23 @@ async def test_search_returns_empty_when_api_key_missing(monkeypatch):
 
     results = await newsapi.search("AI", limit=1, from_date="2026-05-01", to_date="2026-05-09")
 
-    assert results == []
+    assert results == [{"error": "NEWS_API_KEY is not configured", "source": "newsapi", "fatal": True}]
+
+
+@pytest.mark.asyncio
+async def test_search_returns_fatal_error_when_all_keys_fail(monkeypatch):
+    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.newsapi.settings.NEWS_API_KEY", "expired-key")
+
+    class _ExpiredKeyClient(_FakeAsyncClient):
+        async def get(self, url, params=None):
+            return _FakeResponse({"status": "error", "message": "invalid api key"}, status_code=401)
+
+    with patch("app.ai.agentic.tooling.news_plugins.newsapi.httpx.AsyncClient", _ExpiredKeyClient):
+        results = await newsapi.search("AI", limit=1, from_date="2026-05-01", to_date="2026-05-09")
+
+    assert results[0]["fatal"] is True
+    assert results[0]["source"] == "newsapi"
+    assert "HTTP 401" in results[0]["error"]
 
 
 @pytest.mark.asyncio

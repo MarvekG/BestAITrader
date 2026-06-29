@@ -27,7 +27,8 @@ import httpx
 from app.core.config import settings
 from app.core.logger import get_logger
 
-from app.ai.agentic.tooling.news_plugins.provider_clients import request_with_key_failover
+from app.ai.agentic.tooling.news_plugins.base import format_error
+from app.ai.agentic.tooling.news_plugins.provider_clients import ProviderRequestError, request_with_key_failover
 
 logger = get_logger(__name__)
 
@@ -142,7 +143,7 @@ async def search(
     """
     if not settings.TAVILY_API_KEY:
         logger.warning("TAVILY_API_KEY is not configured.")
-        return []
+        return format_error("TAVILY_API_KEY is not configured", PLUGIN_ID, fatal=True)
 
     normalized_keyword = _normalize_inline_text(keyword)
     query_terms = _extract_search_terms(normalized_keyword) or [normalized_keyword]
@@ -167,7 +168,7 @@ async def search(
 
                 response = await request_with_key_failover("Tavily", settings.TAVILY_API_KEY, request_once)
                 if response is None:
-                    return []
+                    return format_error("TAVILY_API_KEY is not configured", PLUGIN_ID, fatal=True)
                 data = response.json()
                 results = []
                 for result in data.get("results", []):
@@ -192,7 +193,11 @@ async def search(
                 await asyncio.sleep(attempt + 1)
                 continue
             logger.error("Tavily search failed after %s attempts: %s", max_retries, exc)
+            return format_error(f"Tavily request failed: {exc}", PLUGIN_ID, fatal=True)
+        except ProviderRequestError as exc:
+            logger.warning("Tavily provider request failed: %s", exc)
+            return format_error(str(exc), PLUGIN_ID, fatal=True)
         except Exception as exc:
             logger.exception("Unexpected error in Tavily search: %s", exc)
-            break
+            return format_error(f"Unexpected error in Tavily search: {exc}", PLUGIN_ID, fatal=True)
     return []
