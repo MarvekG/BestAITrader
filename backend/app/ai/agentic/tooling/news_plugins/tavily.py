@@ -8,7 +8,7 @@ Best for:
 
 Keyword guidance:
 - 推荐格式: `主题/公司/股票 + latest/today/事件词`
-- Examples: `贵州茅台 latest buyback progress`, `AI server demand outlook`, `A-share market sentiment today`
+- Examples: `AI`
 
 Coverage note:
 - 基于 Tavily 搜索 API，不限定单一财经站点；结果广但来源质量需要交叉验证
@@ -37,9 +37,7 @@ PLUGIN_ID = "tavily"
 TOOL_NAME = "Tavily 通用新闻搜索"
 NEWS_TYPES = ["跨来源新闻检索", "开放网页线索", "通用市场和公司事件搜索"]
 KEYWORD_EXAMPLES = [
-    "贵州茅台 latest buyback progress",
-    "AI server demand outlook",
-    "A-share market sentiment today",
+    "AI",
 ]
 PYTHON_REQUIREMENTS = ["httpx"]
 TIMEOUT = httpx.Timeout(settings.DEFAULT_HTTP_TIMEOUT, connect=10.0)
