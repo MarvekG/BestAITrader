@@ -29,7 +29,8 @@ import httpx
 from app.core.config import settings
 from app.core.logger import get_logger
 
-from app.ai.agentic.tooling.news_plugins.provider_clients import request_with_key_failover
+from app.ai.agentic.tooling.news_plugins.base import format_error
+from app.ai.agentic.tooling.news_plugins.provider_clients import ProviderRequestError, request_with_key_failover
 
 logger = get_logger(__name__)
 
@@ -38,9 +39,7 @@ PLUGIN_ID = "newsapi"
 TOOL_NAME = "NewsAPI 全球新闻搜索"
 NEWS_TYPES = ["全球新闻检索", "英文媒体报道", "实时事件追踪"]
 KEYWORD_EXAMPLES = [
-    "Apple earnings Q1 2025",
-    "Federal Reserve interest rate decision",
-    "NVIDIA AI chip demand",
+    "AI",
 ]
 PYTHON_REQUIREMENTS = ["httpx"]
 TIMEOUT = httpx.Timeout(settings.DEFAULT_HTTP_TIMEOUT, connect=10.0)
@@ -67,7 +66,7 @@ async def search(
     """
     if not settings.NEWS_API_KEY:
         logger.warning("NEWS_API_KEY is not configured.")
-        return []
+        return format_error("NEWS_API_KEY is not configured", PLUGIN_ID, fatal=True)
 
     today = datetime.now().strftime("%Y-%m-%d")
     week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
@@ -91,12 +90,16 @@ async def search(
 
                 response = await request_with_key_failover("NewsAPI", settings.NEWS_API_KEY, request_once)
                 if response is None:
-                    return []
+                    return format_error("NEWS_API_KEY is not configured", PLUGIN_ID, fatal=True)
                 data = response.json()
 
                 if data.get("status") != "ok":
                     logger.warning("NewsAPI returned non-ok status: %s", data.get("message"))
-                    return []
+                    return format_error(
+                        f"NewsAPI returned non-ok status: {data.get('message') or data.get('status')}",
+                        PLUGIN_ID,
+                        fatal=True,
+                    )
 
                 results = []
                 for article in data.get("articles", []):
@@ -127,7 +130,11 @@ async def search(
                 await asyncio.sleep(attempt + 1)
                 continue
             logger.error("NewsAPI search failed after %s attempts: %s", max_retries, exc)
+            return format_error(f"NewsAPI request failed: {exc}", PLUGIN_ID, fatal=True)
+        except ProviderRequestError as exc:
+            logger.warning("NewsAPI provider request failed: %s", exc)
+            return format_error(str(exc), PLUGIN_ID, fatal=True)
         except Exception as exc:
             logger.exception("Unexpected error in NewsAPI search: %s", exc)
-            break
+            return format_error(f"Unexpected error in NewsAPI search: {exc}", PLUGIN_ID, fatal=True)
     return []

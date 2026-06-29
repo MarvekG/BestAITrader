@@ -40,8 +40,9 @@ async def test_request_with_key_failover_clears_unavailable_state_and_recovers_i
 
     used_keys.clear()
     status_codes = {"first-key": 503, "second-key": 503}
-    response = await provider_clients.request_with_key_failover("test-service", "first-key,second-key", request_once)
-    assert response is None
+    with pytest.raises(provider_clients.ProviderRequestError) as exc_info:
+        await provider_clients.request_with_key_failover("test-service", "first-key,second-key", request_once)
+    assert exc_info.value.status_code == 503
     assert used_keys == ["second-key", "first-key"]
 
     used_keys.clear()

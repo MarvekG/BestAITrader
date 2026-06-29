@@ -103,4 +103,20 @@ async def test_search_returns_empty_when_api_key_missing(monkeypatch):
 
     results = await tavily.search("AI", limit=1)
 
-    assert results == []
+    assert results == [{"error": "TAVILY_API_KEY is not configured", "source": "tavily", "fatal": True}]
+
+
+@pytest.mark.asyncio
+async def test_search_returns_fatal_error_when_all_keys_fail(monkeypatch):
+    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.tavily.settings.TAVILY_API_KEY", "expired-key")
+
+    class _ExpiredKeyClient(_FakeAsyncClient):
+        async def post(self, url, json):
+            return _FakeResponse({"error": "invalid api key"}, status_code=401)
+
+    with patch("app.ai.agentic.tooling.news_plugins.tavily.httpx.AsyncClient", _ExpiredKeyClient):
+        results = await tavily.search("AI", limit=1)
+
+    assert results[0]["fatal"] is True
+    assert results[0]["source"] == "tavily"
+    assert "HTTP 401" in results[0]["error"]
