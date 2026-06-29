@@ -42,6 +42,7 @@ async def run_debate(
         simplified = request.get("simplified", False)
         trading_frequency = request.get("trading_frequency")
         trading_strategy = request.get("trading_strategy")
+        sync_before_analysis = bool(request.get("sync_before_analysis", False))
 
         if not session_id_str:
             raise HTTPException(status_code=400, detail="session_id is required")
@@ -96,6 +97,22 @@ async def run_debate(
         ).first()
         if existing_stock_task:
             existing_task_session_id = str((existing_stock_task.parameters or {}).get("session_id") or "")
+            if existing_task_session_id == str(session_id):
+                logger.info(
+                    "Debate already running for session %s, reusing task %s",
+                    session_id,
+                    existing_stock_task.task_id,
+                )
+                return JSONResponse(
+                    status_code=status.HTTP_200_OK,
+                    content={
+                        "task_id": existing_stock_task.task_id,
+                        "session_id": str(session_id),
+                        "status": existing_stock_task.status,
+                        "message": "AI Analysis is already running",
+                        "new_task": False,
+                    },
+                )
             if existing_task_session_id != str(session_id):
                 raise HTTPException(
                     status_code=400,
@@ -105,17 +122,21 @@ async def run_debate(
                     ),
                 )
 
+        task_parameters = {
+            "session_id": str(session_id),
+            "stock_code": stock_code,
+            "trading_frequency": trading_frequency,
+            "trading_strategy": trading_strategy,
+        }
+        if sync_before_analysis:
+            task_parameters["sync_before_analysis"] = True
+
         # 提交任务到任务管理器
         task_info = task_manager.submit_task(
             db=db,
             task_name=f"AI Analysis - {stock_code}",
             task_type="ai_analysis",
-            parameters={
-                "session_id": str(session_id),
-                "stock_code": stock_code,
-                "trading_frequency": trading_frequency,
-                "trading_strategy": trading_strategy,
-            },
+            parameters=task_parameters,
             allow_concurrent=False  # 同一个Session不建议并行辩论?
             # 其实可以并行,但前端可能乱。这里暂设为False，或者True?
             # 这里的allow_concurrent是针对task_type + parameters.
@@ -143,15 +164,18 @@ async def run_debate(
         # 发送辩论开始状态
         await send_debate_status(str(session_id), "started")
 
+        launch_kwargs = {
+            "task_id": task_info["task_id"],
+            "session_id": str(session_id),
+            "stock_code": stock_code,
+            "trading_frequency": trading_frequency,
+            "trading_strategy": trading_strategy,
+        }
+        if sync_before_analysis:
+            launch_kwargs["sync_before_analysis"] = True
+
         # 添加后台任务 (使用新的 runner)
-        background_tasks.add_task(
-            run_analysis_task,
-            task_id=task_info["task_id"],
-            session_id=str(session_id),
-            stock_code=stock_code,
-            trading_frequency=trading_frequency,
-            trading_strategy=trading_strategy
-        )
+        background_tasks.add_task(run_analysis_task, **launch_kwargs)
 
         return {
             "task_id": task_info["task_id"],
