@@ -20,16 +20,19 @@
   width: 100%;
   max-width: 100%;
   margin: 8px 0 12px;
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .debate-markdown table,
 .decision-markdown-container table {
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
   border-collapse: collapse;
   border: 1px solid var(--app-border);
   table-layout: auto;
+}
+
+.debate-markdown-table-scroll > table {
+  display: table;
 }
 
 .debate-markdown th,
@@ -38,8 +41,17 @@
 .decision-markdown-container td {
   padding: 4px 8px;
   border: 1px solid var(--app-border);
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: normal;
   vertical-align: top;
+}
+
+.debate-markdown thead th,
+.debate-markdown tbody td,
+.decision-markdown-container thead th,
+.decision-markdown-container tbody td {
+  border: 1px solid var(--app-border);
 }
 
 .debate-markdown th,

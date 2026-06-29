@@ -1,28 +1,10 @@
 import React from 'react';
 import { Card, Typography, Avatar, Tag, theme } from 'antd';
-import ReactMarkdown from 'react-markdown';
-import type { Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { useTranslation } from 'react-i18next';
 import { getRoleConfig } from './roleConfig';
-import './debateMarkdown.css';
+import { DebateMarkdown } from './DebateMarkdown';
 
 const { Text } = Typography;
-
-type MarkdownTableProps = React.ComponentPropsWithoutRef<'table'> & {
-  node?: unknown;
-};
-
-const markdownComponents: Components = {
-  table: ({ children, node, ...props }: MarkdownTableProps) => {
-    void node;
-    return (
-      <div className="debate-markdown-table-scroll">
-        <table {...props}>{children}</table>
-      </div>
-    );
-  },
-};
 
 interface AgentCardProps {
   role: string;
@@ -101,9 +83,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ role, content, timestamp, 
               </div>
             </details>
           )}
-          <div className="debate-markdown" style={{ color: colorText, fontSize: 14, lineHeight: 1.6 }}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{mainContent.trim()}</ReactMarkdown>
-          </div>
+          <DebateMarkdown content={mainContent.trim()} style={{ color: colorText, fontSize: 14, lineHeight: 1.6 }} />
         </Card>
       </div>
     </div>
