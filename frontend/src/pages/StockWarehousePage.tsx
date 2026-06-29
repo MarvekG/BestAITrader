@@ -354,14 +354,7 @@ export const StockWarehousePage: React.FC = () => {
     setIsAiAnalysisModalOpen(true);
   };
 
-  const handleStartTrade = async (record: StockInfo) => {
-    // 强制先打开配置模态框，因为交易偏好是必填的 | Force open config modal as preferences are mandatory
-    setIsBatchAnalysis(false);
-    setSelectedStockForAnalysis(record);
-    setIsAiAnalysisModalOpen(true);
-  };
-
-  const handleStartAiAnalysis = (record: StockInfo) => {
+  const handleStartDebate = (record: StockInfo) => {
     setIsBatchAnalysis(false);
     setSelectedStockForAnalysis(record);
     setIsAiAnalysisModalOpen(true);
@@ -549,14 +542,6 @@ export const StockWarehousePage: React.FC = () => {
           <Button
             type="primary"
             size="small"
-            icon={<PlayCircleOutlined />}
-            onClick={() => handleStartTrade(record)}
-          >
-            {t('warehouse.trade')}
-          </Button>
-          <Button
-            type="primary"
-            size="small"
             style={{ backgroundColor: '#ff4d4f', borderColor: '#ff4d4f' }}
             onClick={() => navigate(`/trading?stock_code=${record.stock_code}`)}
           >
@@ -578,9 +563,9 @@ export const StockWarehousePage: React.FC = () => {
           <Button
             size="small"
             icon={<PlayCircleOutlined />}
-            onClick={() => handleStartAiAnalysis(record)}
+            onClick={() => handleStartDebate(record)}
           >
-            {t('warehouse.start_ai_analysis')}
+            {t('warehouse.start_debate')}
           </Button>
           <Button
             danger

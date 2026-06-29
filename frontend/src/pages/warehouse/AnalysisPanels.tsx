@@ -20,7 +20,6 @@ import {
   DeleteOutlined,
   FileSearchOutlined,
   FolderOpenOutlined,
-  InboxOutlined,
   PlayCircleOutlined,
 } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
@@ -206,17 +205,6 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
     }
   };
 
-  const handleArchive = async (sessionId: string) => {
-    try {
-      await sessionApi.archive(sessionId);
-      message.success(t('session.archived_msg'));
-      fetchSessions(sessionsPage, sessionsPageSize);
-    } catch (error) {
-      const errorMessage = getApiErrorMessage(error, t('common.error'));
-      message.error(errorMessage);
-    }
-  };
-
   const handleDelete = async (sessionId: string) => {
     modal.confirm({
       title: t('session.delete_confirm_title'),
@@ -252,28 +240,6 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
           message.success(res.message || t('session.batch_deleted_msg'));
           setSelectedRowKeys([]);
           fetchSessions(1, sessionsPageSize);
-        } catch (error) {
-          const errorMessage = getApiErrorMessage(error, t('common.error'));
-          message.error(errorMessage);
-        }
-      },
-    });
-  };
-
-  const handleBatchArchive = () => {
-    if (selectedRowKeys.length === 0) return;
-
-    modal.confirm({
-      title: t('session.batch_archive_confirm_title'),
-      content: t('session.batch_archive_confirm_desc', { count: selectedRowKeys.length }),
-      okText: t('common.confirm'),
-      cancelText: t('common.cancel'),
-      onOk: async () => {
-        try {
-          const res = await sessionApi.batchArchive(selectedRowKeys as string[]);
-          message.success(res.message || t('session.batch_archived_msg'));
-          setSelectedRowKeys([]);
-          fetchSessions(sessionsPage, sessionsPageSize);
         } catch (error) {
           const errorMessage = getApiErrorMessage(error, t('common.error'));
           message.error(errorMessage);
@@ -361,12 +327,6 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
           />
           <Button
             size="small"
-            icon={<InboxOutlined />}
-            onClick={() => handleArchive(record.session_id)}
-            title={t('session.archive')}
-          />
-          <Button
-            size="small"
             type="primary"
             icon={<FileSearchOutlined />}
             onClick={() => {
@@ -396,9 +356,6 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
     <div>
       <div className="flex justify-between items-center mb-6">
         <Space wrap>
-          <Button icon={<InboxOutlined />} onClick={handleBatchArchive} disabled={selectedRowKeys.length === 0}>
-            {t('session.batch_archive')}
-          </Button>
           <Button danger icon={<DeleteOutlined />} onClick={handleBatchDelete} disabled={selectedRowKeys.length === 0}>
             {t('session.batch_delete')}
           </Button>
