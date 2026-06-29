@@ -557,6 +557,7 @@
     "stock_removed_success": "股票 {stock_code} 已从仓库中移除",
     "start_debate": "启动辩论",
     "starting_ai_analysis": "正在启动AI分析...",
+    "sync_before_debate": "是否同步数据",
     "analysis_settings_title": "AI分析配置",
     "auto_analysis": "自动分析",
     "auto_analysis_config_title": "自动分析配置",

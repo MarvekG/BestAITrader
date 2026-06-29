@@ -39,6 +39,7 @@ export const debateApi = {
     simplified?: boolean;
     trading_frequency: string;
     trading_strategy: string;
+    sync_before_analysis?: boolean;
   }) =>
     apiClient.post('/debate/run', data, { timeout: 1800000 }),
 

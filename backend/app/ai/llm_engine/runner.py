@@ -120,6 +120,7 @@ async def run_analysis_task(
     trigger_reason: Optional[str] = None,
     evidence_summary: Optional[str] = None,
     discipline_trigger: Optional[dict[str, Any]] = None,
+    sync_before_analysis: bool = False,
 ):
     """运行后台 AI 分析任务并维护任务状态。
 
@@ -132,6 +133,7 @@ async def run_analysis_task(
         trigger_reason: 盯盘自动启动辩论时传入的触发原因。
         evidence_summary: 盯盘自动启动辩论时传入的证据摘要。
         discipline_trigger: 持仓纪律扫描触发复议时传入的结构化触发上下文。
+        sync_before_analysis: 是否在启动工作流前复用数据同步任务刷新单股数据。
     """
     request_token = set_request_id(task_id)
     user_token = None
@@ -147,6 +149,11 @@ async def run_analysis_task(
         from app.api.endpoints.debate_ws import send_debate_status
         if session_id:
             await send_debate_status(session_id, "started")
+
+        if sync_before_analysis:
+            from app.tasks.analysis_data_sync import sync_stock_data_before_analysis
+
+            await sync_stock_data_before_analysis(stock_code)
 
         # 3. Run workflow
         logger.info(f"Starting analysis workflow for task {task_id}, stock {stock_code}, session {session_id}")

@@ -128,7 +128,7 @@ async def test_auto_analysis_task_records_owner_user_id(db_session, monkeypatch)
         return None
 
     monkeypatch.setattr(stock_analysis_scheduler, "SessionLocal", lambda: _SessionContext())
-    monkeypatch.setattr(stock_analysis_scheduler, "_sync_stock_data_before_analysis", _noop_sync)
+    monkeypatch.setattr(stock_analysis_scheduler, "sync_stock_data_before_analysis", _noop_sync)
     monkeypatch.setattr(stock_analysis_scheduler, "run_analysis_task", _noop_analysis)
     monkeypatch.setattr(stock_analysis_scheduler.asyncio, "create_task", _create_task)
 

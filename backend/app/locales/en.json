@@ -557,6 +557,7 @@
     "stock_removed_success": "Stock {stock_code} has been removed from the warehouse",
     "start_debate": "Start Debate",
     "starting_ai_analysis": "Starting AI Analysis...",
+    "sync_before_debate": "Sync data before debate",
     "analysis_settings_title": "AI Analysis Configuration",
     "auto_analysis": "Auto Analysis",
     "auto_analysis_config_title": "Auto Analysis Configuration",

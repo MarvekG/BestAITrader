@@ -4,6 +4,7 @@ import {
   AutoComplete,
   Button,
   Card,
+  Checkbox,
   Col,
   Form,
   Input,
@@ -84,6 +85,7 @@ export const StockWarehousePage: React.FC = () => {
   const [selectedStockForAnalysis, setSelectedStockForAnalysis] = useState<StockInfo | null>(null);
   const [tradingFrequency, setTradingFrequency] = useState(t('warehouse.freq_position_trading'));
   const [tradingStrategy, setTradingStrategy] = useState(t('warehouse.strategy_value'));
+  const [syncBeforeAnalysis, setSyncBeforeAnalysis] = useState(true);
   const [isBatchAnalysis, setIsBatchAnalysis] = useState(false);
   const [isAutoConfigModalOpen, setIsAutoConfigModalOpen] = useState(false);
   const [selectedStockForAutoConfig, setSelectedStockForAutoConfig] = useState<StockInfo | null>(null);
@@ -351,12 +353,14 @@ export const StockWarehousePage: React.FC = () => {
 
     // 设置为批量模式并打开配置弹窗
     setIsBatchAnalysis(true);
+    setSyncBeforeAnalysis(true);
     setIsAiAnalysisModalOpen(true);
   };
 
   const handleStartDebate = (record: StockInfo) => {
     setIsBatchAnalysis(false);
     setSelectedStockForAnalysis(record);
+    setSyncBeforeAnalysis(true);
     setIsAiAnalysisModalOpen(true);
   };
 
@@ -445,6 +449,7 @@ export const StockWarehousePage: React.FC = () => {
               simplified: false,
               trading_frequency: tradingFrequency,
               trading_strategy: tradingStrategy,
+              sync_before_analysis: syncBeforeAnalysis,
             });
             successCount++;
           } catch (error) {
@@ -478,6 +483,7 @@ export const StockWarehousePage: React.FC = () => {
           simplified: false,
           trading_frequency: tradingFrequency,
           trading_strategy: tradingStrategy,
+          sync_before_analysis: syncBeforeAnalysis,
         });
         setActiveSession(session);
         message.success({ content: t('common.success'), key: 'ai_analysis' });
@@ -745,6 +751,11 @@ export const StockWarehousePage: React.FC = () => {
               {tradingStrategy === t('warehouse.strategy_growth') && t('warehouse.strategy_growth_desc')}
               {tradingStrategy === t('warehouse.strategy_trend') && t('warehouse.strategy_trend_desc')}
             </div>
+          </Form.Item>
+          <Form.Item>
+            <Checkbox checked={syncBeforeAnalysis} onChange={(event) => setSyncBeforeAnalysis(event.target.checked)}>
+              {t('warehouse.sync_before_debate')}
+            </Checkbox>
           </Form.Item>
         </Form>
       </Modal>
