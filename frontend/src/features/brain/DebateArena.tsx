@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getRoleConfig } from './roleConfig';
+import './debateMarkdown.css';
 
 const formatNumber = (value: unknown, precision = 2) => {
   if (typeof value !== 'number') return '0';
