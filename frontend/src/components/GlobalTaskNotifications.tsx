@@ -10,6 +10,7 @@ const runningTaskStatuses = new Set(['pending', 'running', 'started']);
 const completedTaskStatuses = new Set(['completed', 'success']);
 const failedTaskStatuses = new Set(['failed', 'error', 'cancelled']);
 const taskStatusPollIntervalMs = 60000;
+const runningTaskMessageDurationSeconds = 15;
 
 export const GlobalTaskNotifications: React.FC = () => {
   const { t } = useTranslation();
@@ -105,7 +106,7 @@ export const GlobalTaskNotifications: React.FC = () => {
         message.loading({
           content: `${taskName}: ${currentStep || t('common.processing')}${progressText}`,
           key: taskId || taskName,
-          duration: 0,
+          duration: runningTaskMessageDurationSeconds,
         });
         startTaskStatusPolling(taskId, taskName);
         return;
