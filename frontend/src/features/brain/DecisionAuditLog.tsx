@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { App as AntdApp, Avatar, Button, Card, Descriptions, Dropdown, Empty, Space, Spin, Steps, Tag, Typography } from 'antd';
+import { App as AntdApp, Avatar, Button, Card, Descriptions, Dropdown, Empty, Space, Spin, Steps, Tag, Tooltip, Typography } from 'antd';
 import { useSessionStore } from '../../store/useSessionStore';
 import { DebateThread, PMDecisionRecord, debateApi } from '../../api/debate';
 import { sessionApi, Session } from '../../api/session';
@@ -390,23 +390,23 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
           />
         </div>
         <Space style={{ marginLeft: 16 }} wrap>
-          <Button
-            icon={<LeftOutlined />}
-            disabled={activeCardIndex <= 0 || currentStepMessages.length <= 1}
-            onClick={handlePreviousCard}
-          >
-            {t('common.previous', { defaultValue: '上一个' })}
-          </Button>
+          <Tooltip title={t('common.previous', { defaultValue: '上一个' })}>
+            <Button
+              icon={<LeftOutlined />}
+              disabled={activeCardIndex <= 0 || currentStepMessages.length <= 1}
+              onClick={handlePreviousCard}
+            />
+          </Tooltip>
           <Text type="secondary" style={{ whiteSpace: 'nowrap' }}>
             {currentStepMessages.length > 0 ? `${activeCardIndex + 1}/${currentStepMessages.length}` : '0/0'}
           </Text>
-          <Button
-            icon={<RightOutlined />}
-            disabled={activeCardIndex >= currentStepMessages.length - 1 || currentStepMessages.length <= 1}
-            onClick={handleNextCard}
-          >
-            {t('common.next', { defaultValue: '下一个' })}
-          </Button>
+          <Tooltip title={t('common.next', { defaultValue: '下一个' })}>
+            <Button
+              icon={<RightOutlined />}
+              disabled={activeCardIndex >= currentStepMessages.length - 1 || currentStepMessages.length <= 1}
+              onClick={handleNextCard}
+            />
+          </Tooltip>
           <Button
             type="primary"
             ghost
@@ -450,7 +450,7 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
           justify-content: space-between;
           align-items: flex-start;
           gap: 16px;
-          padding: 16px 24px;
+          padding: 8px 12px;
           background: color-mix(in srgb, var(--app-bg-layout) 94%, transparent);
           border-bottom: 1px solid var(--app-border);
           backdrop-filter: blur(8px);
@@ -460,7 +460,7 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
           flex: 1 1 auto;
           min-height: 0;
           overflow-y: auto;
-          padding: 24px;
+          padding: 8px 12px;
         }
         .audit-content-area .ant-card-head {
           border-bottom: 1px solid var(--app-border) !important;

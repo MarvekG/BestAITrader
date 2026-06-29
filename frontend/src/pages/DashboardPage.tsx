@@ -324,8 +324,8 @@ export const DashboardPage: React.FC = () => {
   }
 
   return (
-    <div style={{ height: '100vh', padding: 16 }}>
-      <Row gutter={16} style={{ height: '100%' }}>
+    <div style={{ height: '100%' }}>
+      <Row gutter={0} style={{ height: '100%' }}>
         {/* AI Brain - Full Width */}
         <Col span={24} style={{ height: '100%' }}>
           <Card
@@ -369,7 +369,7 @@ export const DashboardPage: React.FC = () => {
                   key: '1',
                   label: messageCount > 0 ? `${t('dashboard.live_debate')} (${messageCount})` : t('dashboard.live_debate'),
                   children: (
-                    <div style={{ minHeight: 'calc(100vh - 300px)' }}>
+                    <div style={{ height: 'calc(100vh - 240px)' }}>
                       <DebateArena
                         messages={debateMessages}
                         sessionId={activeSession.session_id}
@@ -378,7 +378,7 @@ export const DashboardPage: React.FC = () => {
                     </div>
                   )
                 },
-                { key: '2', label: t('dashboard.decision_audit'), children: <div style={{ minHeight: 'calc(100vh - 300px)' }}><DecisionAuditLog isActive={activeDashboardTab === '2'} /></div> }
+                { key: '2', label: t('dashboard.decision_audit'), children: <div style={{ height: 'calc(100vh - 240px)' }}><DecisionAuditLog isActive={activeDashboardTab === '2'} /></div> }
               ]}
             />
           </Card>
