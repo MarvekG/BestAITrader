@@ -5,9 +5,8 @@ import { DebateThread, PMDecisionRecord, debateApi } from '../../api/debate';
 import { sessionApi, Session } from '../../api/session';
 import { AuditOutlined, BarChartOutlined, MessageOutlined, FileSearchOutlined, RobotOutlined, ReloadOutlined, ExportOutlined, DownOutlined, CopyOutlined, LeftOutlined, RightOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { getRoleConfig } from './roleConfig';
+import { DebateMarkdown } from './DebateMarkdown';
 
 import type { MenuProps } from 'antd';
 
@@ -306,11 +305,11 @@ export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, i
           </div>
         }
       >
-        <div className="markdown-content" style={{ color: 'var(--app-text)' }}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {msg.content || t('brain.no_content')}
-          </ReactMarkdown>
-        </div>
+        <DebateMarkdown
+          content={msg.content || t('brain.no_content')}
+          className="markdown-content"
+          style={{ color: 'var(--app-text)' }}
+        />
 
         {msg.pmDecision && (
           <div className="mt-4 p-3 bg-gray-900 rounded border border-blue-900/30">
