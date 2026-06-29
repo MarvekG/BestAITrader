@@ -23,7 +23,7 @@ class SessionCreate(SessionBase):
 
 # 更新会话模型
 class SessionUpdate(BaseModel):
-    status: Optional[str] = Field(None, pattern="^(active|completed|archived)$")
+    status: Optional[str] = Field(None, pattern="^(active|completed|failed)$")
     stock_code: Optional[str] = None
     source: Optional[str] = Field(None, pattern=SESSION_SOURCE_VALUES)
 

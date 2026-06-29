@@ -49,7 +49,7 @@
 页面主体使用 Ant Design `Tabs`：
 
 - Tab 1：`辩论管理`
-  - 放入当前已有会话列表、批量归档、批量删除、刷新和搜索功能。
+  - 放入当前已有会话列表、批量删除、刷新和搜索功能。
   - 现有行为保持不变。
 - Tab 2：`AI投研分析`
   - 新增单 LLM 自主投研入口。
@@ -292,7 +292,7 @@ export interface StockAnalysisRequest {
 ### 前端验证
 
 - “AI交易分析”页面显示 `辩论管理` 和 `AI投研分析` 两个 Tab。
-- `辩论管理` Tab 保留原有会话列表、批量归档、批量删除、刷新和搜索功能。
+- `辩论管理` Tab 保留原有会话列表、批量删除、刷新和搜索功能。
 - `AI投研分析` Tab 的可选标的输入调用 `marketApi.getDbStocks` 并展示 `代码 - 名称`。
 - 不选择股票也可以提交投研问题。
 - `AI投研分析` Tab 首次挂载时调用 `tasksApi.listTasks({ task_type: 'stock_analysis', limit: 1 })`。

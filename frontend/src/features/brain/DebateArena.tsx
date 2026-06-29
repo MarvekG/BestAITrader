@@ -4,6 +4,7 @@ import { Empty, Spin, Card, Tabs, Descriptions, Space, Badge, Tag, Avatar } from
 import { debateApi, PMDecisionRecord } from '../../api/debate';
 import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
+import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getRoleConfig } from './roleConfig';
 import './debateMarkdown.css';
@@ -14,6 +15,21 @@ const formatNumber = (value: unknown, precision = 2) => {
     maximumFractionDigits: precision,
     minimumFractionDigits: 0,
   });
+};
+
+type MarkdownTableProps = React.ComponentPropsWithoutRef<'table'> & {
+  node?: unknown;
+};
+
+const markdownComponents: Components = {
+  table: ({ children, node, ...props }: MarkdownTableProps) => {
+    void node;
+    return (
+      <div className="debate-markdown-table-scroll">
+        <table {...props}>{children}</table>
+      </div>
+    );
+  },
 };
 
 export interface DebateMessage {
@@ -126,7 +142,7 @@ export const DebateArena: React.FC<DebateArenaProps> = ({ messages = [], session
                         </Descriptions.Item>
                       </Descriptions>
                       <div className="decision-markdown-container">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                           {decision.reasoning || ''}
                         </ReactMarkdown>
                       </div>

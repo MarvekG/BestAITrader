@@ -154,8 +154,7 @@ def test_session_list_only_returns_current_user_sessions(client, ownership_conte
     ("method", "path_template", "kwargs"),
     [
         ("get", "/api/v1/sessions/{session_id}", {}),
-        ("put", "/api/v1/sessions/{session_id}", {"json": {"status": "archived"}}),
-        ("post", "/api/v1/sessions/{session_id}/archive", {}),
+        ("put", "/api/v1/sessions/{session_id}", {"json": {"status": "completed"}}),
         ("get", "/api/v1/debate/history/{session_id}", {}),
         ("get", "/api/v1/debate/threads/{session_id}", {}),
         ("get", "/api/v1/debate/decisions/{session_id}", {}),
@@ -193,19 +192,12 @@ def test_delete_session_hides_other_users_session(client, ownership_context):
 def test_batch_session_operations_ignore_other_users_sessions(client, ownership_context):
     owner_session_id = str(ownership_context["owner_session"].session_id)
 
-    archive_response = client.post(
-        "/api/v1/sessions/batch-archive",
-        headers=ownership_context["intruder_headers"],
-        json={"session_ids": [owner_session_id]},
-    )
     delete_response = client.post(
         "/api/v1/sessions/batch-delete",
         headers=ownership_context["intruder_headers"],
         json={"session_ids": [owner_session_id]},
     )
 
-    assert archive_response.status_code == 200
-    assert archive_response.json()["updated_count"] == 0
     assert delete_response.status_code == 404
 
 

@@ -1,5 +1,7 @@
 .debate-markdown,
 .decision-markdown-container {
+  min-width: 0;
+  width: 100%;
   max-width: 100%;
   overflow-wrap: break-word;
 }
@@ -14,12 +16,20 @@
   margin-bottom: 0;
 }
 
+.debate-markdown-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  margin: 8px 0 12px;
+  overflow-x: auto;
+}
+
 .debate-markdown table,
 .decision-markdown-container table {
-  display: block;
-  max-width: 100%;
-  overflow-x: auto;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
+  border: 1px solid var(--app-border);
+  table-layout: auto;
 }
 
 .debate-markdown th,
@@ -29,6 +39,7 @@
   padding: 4px 8px;
   border: 1px solid var(--app-border);
   white-space: nowrap;
+  vertical-align: top;
 }
 
 .debate-markdown th,
