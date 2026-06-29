@@ -113,7 +113,7 @@ await search(
 - 元数据缺失或格式不正确。
 - `search` 抛出异常。
 - `search` 返回值不是 `list`。
-- 返回列表第一项包含 `error` 或 `fatal`。
+- 返回列表第一项包含 `error` 或 `fatal`。其中 `fatal` 表示插件或上游来源不可用。
 
 ## 3. 插件文件命名规范
 
@@ -253,6 +253,18 @@ if not keyword:
 [{"error": "错误说明", "source": PLUGIN_ID}]
 ```
 
+插件不可用错误：
+
+```python
+[{"error": "错误说明", "source": PLUGIN_ID, "fatal": True}]
+```
+
+错误语义要求：
+
+- `fatal=True` 只用于插件不可用或上游来源不可用，例如 token 缺失、API key 过期、HTTP 401/403/429/5xx、超时、网络错误、响应结构变化导致无法解析。
+- 关键词没有命中新闻、筛选后没有可用文章、空关键词等业务性失败不要标记 `fatal`。
+- 测试中心和插件管理会把首项 `fatal=True` 作为明确的来源不可用错误展示，不会再改写成 `No news found`。
+
 插件不应抛出未处理异常。注册器会兜底捕获异常，但插件内部返回可读错误更利于排障。
 
 ## 7. 质量要求
@@ -266,6 +278,7 @@ if not keyword:
 - 每个请求都有 timeout。
 - 每个返回结果有 `title`。
 - 能处理 HTTP 错误、超时和格式变化。
+- 插件不可用时返回带 `fatal=True` 的错误结果，无结果时不标记 `fatal`。
 - 输出数量受 `limit` 控制。
 - 输出正文长度受控。
 - `search` 必须是异步函数。
@@ -371,6 +384,13 @@ def _clean_limit(limit: int) -> int:
     return max(1, min(int(limit or 10), MAX_LIMIT))
 
 
+def _format_error(message: str, fatal: bool = False) -> list[dict[str, Any]]:
+    item: dict[str, Any] = {"error": message, "source": PLUGIN_ID}
+    if fatal:
+        item["fatal"] = True
+    return [item]
+
+
 async def search(
     keyword: str,
     limit: int = 10,
@@ -381,11 +401,11 @@ async def search(
     keyword = str(keyword or "").strip()
     limit = _clean_limit(limit)
     if not keyword:
-        return []
+        return _format_error("No keyword provided for internal_news")
 
     token = _read_token()
     if not token:
-        return [{"error": "Internal news token is not configured", "source": PLUGIN_ID}]
+        return _format_error("Internal news token is not configured", fatal=True)
 
     payload = {
         "keyword": keyword,
@@ -404,9 +424,9 @@ async def search(
             response.raise_for_status()
             data = response.json()
     except httpx.TimeoutException:
-        return [{"error": "Internal news API timeout", "source": PLUGIN_ID}]
+        return _format_error("Internal news API timeout", fatal=True)
     except httpx.HTTPError as exc:
-        return [{"error": f"Internal news API failed: {exc}", "source": PLUGIN_ID}]
+        return _format_error(f"Internal news API failed: {exc}", fatal=True)
 
     results: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -452,6 +472,7 @@ async def search(
 - 检查 `search` 是否返回 `list`。
 - 检查返回首项是否包含 `error` 或 `fatal`。
 - 检查 token、网络、API 授权和限流。
+- 如果返回 `fatal=True`，按插件不可用处理，优先查 token/API key、HTTP 状态码、网络和上游响应格式。
 
 Agent 不会选择你的插件：
 
@@ -463,10 +484,10 @@ Agent 不会选择你的插件：
 插件返回为空：
 
 - 检查关键词是否被来源支持。
-- 检查 API key、token 文件和授权。
 - 检查目标 API 响应结构是否变化。
 - 检查是否触发限流。
 - 检查是否把 `limit` 或分页参数传错。
+- 如果是 API key、token、授权、超时、限流或响应格式变化导致不可用，应返回 `fatal=True` 错误，而不是空列表或普通无结果错误。
 
 插件导致 Agent 上下文过大：
 
