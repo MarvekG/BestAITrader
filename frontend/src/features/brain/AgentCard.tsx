@@ -42,13 +42,13 @@ export const AgentCard: React.FC<AgentCardProps> = ({ role, content, timestamp, 
   }
 
   return (
-    <div style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+    <div style={{ marginBottom: 10, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
       <Avatar
         icon={config.icon}
         style={{ backgroundColor: config.color, flexShrink: 0, marginTop: 4 }}
         size="large"
       />
-      <div style={{ flex: 1, maxWidth: '90%', minWidth: 0 }}>
+      <div style={{ flex: 1, maxWidth: '100%', minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
           <Text strong style={{ color: config.color, fontSize: 14 }}>{config.title}</Text>
           <Text type="secondary" style={{ fontSize: 11 }}>{new Date(timestamp).toLocaleTimeString()}</Text>
