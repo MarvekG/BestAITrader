@@ -4,6 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useTranslation } from 'react-i18next';
 import { getRoleConfig } from './roleConfig';
+import './debateMarkdown.css';
 
 const { Text } = Typography;
 
@@ -49,7 +50,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ role, content, timestamp, 
         style={{ backgroundColor: config.color, flexShrink: 0, marginTop: 4 }}
         size="large"
       />
-      <div style={{ flex: 1, maxWidth: '90%' }}>
+      <div style={{ flex: 1, maxWidth: '90%', minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
           <Text strong style={{ color: config.color, fontSize: 14 }}>{config.title}</Text>
           <Text type="secondary" style={{ fontSize: 11 }}>{new Date(timestamp).toLocaleTimeString()}</Text>
@@ -84,7 +85,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ role, content, timestamp, 
               </div>
             </details>
           )}
-          <div style={{ color: colorText, fontSize: 14, lineHeight: 1.6 }}>
+          <div className="debate-markdown" style={{ color: colorText, fontSize: 14, lineHeight: 1.6 }}>
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{mainContent.trim()}</ReactMarkdown>
           </div>
         </Card>

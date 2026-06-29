@@ -1,0 +1,49 @@
+.debate-markdown,
+.decision-markdown-container {
+  max-width: 100%;
+  overflow-wrap: break-word;
+}
+
+.debate-markdown > :first-child,
+.decision-markdown-container > :first-child {
+  margin-top: 0;
+}
+
+.debate-markdown > :last-child,
+.decision-markdown-container > :last-child {
+  margin-bottom: 0;
+}
+
+.debate-markdown table,
+.decision-markdown-container table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.debate-markdown th,
+.debate-markdown td,
+.decision-markdown-container th,
+.decision-markdown-container td {
+  padding: 4px 8px;
+  border: 1px solid var(--app-border);
+  white-space: nowrap;
+}
+
+.debate-markdown th,
+.decision-markdown-container th {
+  background: var(--app-bg-muted);
+  font-weight: 600;
+}
+
+.debate-markdown pre,
+.decision-markdown-container pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.debate-markdown code,
+.decision-markdown-container code {
+  white-space: pre-wrap;
+}
