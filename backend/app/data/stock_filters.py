@@ -6,7 +6,11 @@ from app.models.data_storage import StockBasic
 
 
 def get_basic_stock_filter_conds():
-    """Shared base universe filter for A-share stock selection related flows."""
+    """构建基础 A 股同步过滤条件。
+
+    Returns:
+        SQLAlchemy 过滤表达式，用于排除 ST、退市、非核心交易板块和上市未满半年的股票。
+    """
     six_months_ago = (datetime.now() - timedelta(days=180)).date()
     return and_(
         ~StockBasic.name.like("%ST%"),

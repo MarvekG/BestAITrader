@@ -38,6 +38,7 @@ def _authenticate_websocket(db: Session, ticket: str | None, scope: str, resourc
         return db.query(User).filter(User.id == ticket_user_id).first()
     return None
 
+
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -55,16 +56,16 @@ async def websocket_endpoint(
     if current_user is None:
         await websocket.close(code=1008)
         return
-    
-    await ws_manager.connect(websocket, session_id_str)
-    
+
+    await ws_manager.connect(websocket, session_id_str, current_user.id)
+
     try:
         while True:
             data = await websocket.receive_text()
             try:
                 message = json.loads(data)
                 msg_type = message.get("type")
-                
+
                 if msg_type == "subscribe":
                     event_type = message.get("event_type")
                     resource_id = message.get("resource_id", "*")
@@ -75,7 +76,7 @@ async def websocket_endpoint(
                             "event_type": event_type,
                             "resource_id": resource_id
                         }, websocket)
-                
+
                 elif msg_type == "unsubscribe":
                     event_type = message.get("event_type")
                     resource_id = message.get("resource_id", "*")
@@ -86,7 +87,7 @@ async def websocket_endpoint(
                             "event_type": event_type,
                             "resource_id": resource_id
                         }, websocket)
-                
+
                 # 兼容旧的价格订阅方式
                 elif msg_type == "subscribe_price":
                     stock_code = message.get("stock_code")
@@ -97,7 +98,7 @@ async def websocket_endpoint(
                             "event_type": "price",
                             "stock_code": stock_code
                         }, websocket)
-                
+
                 elif msg_type == "unsubscribe_price":
                     stock_code = message.get("stock_code")
                     if stock_code:
@@ -107,31 +108,32 @@ async def websocket_endpoint(
                             "event_type": "price",
                             "stock_code": stock_code
                         }, websocket)
-                
+
                 elif msg_type == "ping":
                     await ws_manager.send_personal_message({
                         "type": "pong",
                         "timestamp": message.get("timestamp")
                     }, websocket)
-                
+
                 else:
                     await ws_manager.broadcast_to_session({
                         "type": "message",
                         "content": f"Received: {data}",
                         "timestamp": message.get("timestamp")
                     }, session_id_str)
-                    
+
             except json.JSONDecodeError:
                 await ws_manager.broadcast_to_session({
                     "type": "error",
                     "message": "Invalid JSON format"
                 }, session_id_str)
-                
+
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket, session_id_str)
     except Exception as e:
         ws_manager.disconnect(websocket, session_id_str)
         logger.error(f"WebSocket error: {e}")
+
 
 @router.get("/ws/status/{session_id}")
 async def get_ws_status(
@@ -141,12 +143,12 @@ async def get_ws_status(
     del current_user
     # 获取当前会话的订阅信息
     subscriptions = ws_manager.subscriptions.get(session_id, {})
-    
+
     # 转换为前端友好的格式
     formatted_subscriptions = {}
     for event_type, resource_ids in subscriptions.items():
         formatted_subscriptions[event_type] = list(resource_ids)
-    
+
     return {
         "session_id": session_id,
         "connected": session_id in ws_manager.active_connections,

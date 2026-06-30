@@ -110,18 +110,18 @@ Agent 可以调用 Python 做数值计算和表格分析，但不是直接执行
 - `DataIngestionService` 自动过滤无效股票代码、按唯一约束去重，并执行 PostgreSQL upsert。
 - 调度器错峰刷新基础资料、K 线、指数、技术指标、资金流、龙虎榜、北向、估值和盘中动态。
 
-### 2.5 AI 智能选股和经验复盘
+### 2.5 交互式选股和经验复盘
 
 核心代码：
 
-- [`ai/stock_picker/service.py`](./ai/stock_picker/service.py)：股票池构建、因子初排、LLM 深研和推荐生成。
-- [`ai/stock_picker/models.py`](./ai/stock_picker/models.py)：选股 run、事件、候选表。
+- [`ai/stock_picker/interactive_research/service.py`](./ai/stock_picker/interactive_research/service.py)：交互式 Deep Research 选股状态机、消息流和后台执行。
+- [`ai/stock_picker/interactive_research/models.py`](./ai/stock_picker/interactive_research/models.py)：交互式选股 run 和消息表。
 - [`ai/experience/service.py`](./ai/experience/service.py)：经验复盘任务、上下文构建、事件持久化和结果查询。
 - [`ai/experience/workflow.py`](./ai/experience/workflow.py)：复盘 LangGraph、LLM 工具循环和结构化复盘输出。
 
 关键机制：
 
-- 选股先用确定性规则压缩候选池，再让 LLM 做整池深研，避免全市场逐只调用模型。
+- 交互式选股先把自然语言需求转成可确认计划，再用工具循环补全数据、新闻和证据。
 - 复盘读取 PM 决策后的市场结果，检查收益、回撤、相对指数、相对行业表现。
 - 经验复盘只在提炼出可复用赚钱经验、失败教训、仓位纪律或流程改进时写入 MemoFlux Memory；没有新增可复用经验时允许跳过写入。
 
@@ -181,7 +181,7 @@ Agent 可以调用 Python 做数值计算和表格分析，但不是直接执行
 | DataFrame 智能落库 | `data/ingestion/service.py` | 自动过滤无效股票、按唯一约束去重、执行 PostgreSQL upsert |
 | 技术指标批量计算 | `data/analytics/indicators.py` | 计算 MA、MACD、RSI、KDJ、CCI、WR、BOLL、ATR、OBV 等指标 |
 | 自动刷新调度 | `data/refresh_scheduler.py` | APScheduler 错峰刷新日线、指数、资金流、龙虎榜、北向、热榜和实时行情 |
-| AI 智能选股任务 | `ai/stock_picker/service.py` | 股票池过滤、因子初排、LLM 深研、推荐生成和事件记录 |
+| 交互式选股任务 | `ai/stock_picker/interactive_research/service.py` | 自然语言需求、计划确认、工具循环研究、消息流和事件推送 |
 | 经验复盘任务 | `ai/experience/workflow.py` | 基于 PM 决策后的真实价格路径输出复盘 JSON，并按可复用经验价值选择是否写入记忆 |
 | 经验复盘调度 | `tasks/experience_review_scheduler.py` | 默认关闭，可配置盘后扫描可复盘 session 并自动发起经验分析任务 |
 | FIFO 持仓账本 | `trading/trading_engine.py` | 维护买入批次、T+1 可卖股数、费用、止损/止盈判断 |

@@ -23,11 +23,6 @@ from app.models.data_storage import (
     StockLimitUpPool,
     StockLimitDownPool
 )
-from app.ai.stock_picker.models import (
-    StockSelectionCandidate,
-    StockSelectionEvent,
-    StockSelectionRun,
-)
 from app.ai.stock_picker.interactive_research.models import (
     InteractiveResearchMessage,
     InteractiveResearchRun,
@@ -64,9 +59,6 @@ __all__ = [
     "ExperienceReviewEvent",
     "ExperienceIndex",
     "MarketWatchEvent",
-    "StockSelectionRun",
-    "StockSelectionEvent",
-    "StockSelectionCandidate",
     "InteractiveResearchRun",
     "InteractiveResearchMessage",
 ]

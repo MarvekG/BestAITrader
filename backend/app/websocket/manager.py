@@ -13,6 +13,7 @@ logger = get_logger(__name__)
 class WebSocketManager:
     def __init__(self):
         self.active_connections: Dict[str, Set[WebSocket]] = {}
+        self.session_user_ids: Dict[str, int] = {}
         # Extend subscription mechanism, support multiple event types
         self.subscriptions: Dict[str, Dict[str, Set[str]]] = {}
         self.price_update_task: Optional[asyncio.Task] = None
@@ -38,12 +39,14 @@ class WebSocketManager:
             "health_check_interval": 30,
         }
 
-    async def connect(self, websocket: WebSocket, session_id: str):
+    async def connect(self, websocket: WebSocket, session_id: str, user_id: Optional[int] = None):
         logger.info(f"WebSocket connect attempt: {session_id}")
         await websocket.accept()
         if session_id not in self.active_connections:
             self.active_connections[session_id] = set()
         self.active_connections[session_id].add(websocket)
+        if user_id is not None:
+            self.session_user_ids[session_id] = user_id
         logger.info(f"WebSocket connected for session: {session_id}. Total sessions: {len(self.active_connections)}")
 
         # If heartbeat task is not started, start it
@@ -59,6 +62,7 @@ class WebSocketManager:
             self.active_connections[session_id].discard(websocket)
             if not self.active_connections[session_id]:
                 del self.active_connections[session_id]
+                self.session_user_ids.pop(session_id, None)
                 logger.info(f"WebSocket session removed: {session_id}")
 
         if session_id in self.subscriptions and session_id not in self.active_connections:
@@ -548,16 +552,17 @@ class WebSocketManager:
             if "agentic" in subs:
                 await self.broadcast_to_session(update_msg, session_id)
 
-    async def send_stock_picker_update(
+    async def send_interactive_stock_picker_update(
         self,
         run_id: str,
         stage: str,
         status: str,
         message: str,
+        user_id: int,
         payload: Optional[Dict[str, Any]] = None,
     ):
         update_msg = {
-            "type": "stock_picker_update",
+            "type": "interactive_stock_picker_update",
             "data": {
                 "run_id": run_id,
                 "stage": stage,
@@ -568,7 +573,7 @@ class WebSocketManager:
             },
         }
         for session_id, subs in self.subscriptions.items():
-            if "stock_picker" in subs:
+            if "interactive_stock_picker" in subs and self.session_user_ids.get(session_id) == user_id:
                 await self.broadcast_to_session(update_msg, session_id)
 
     async def send_experience_review_update(
@@ -581,7 +586,7 @@ class WebSocketManager:
         payload: Optional[Dict[str, Any]] = None,
         message_key: Optional[str] = None,
         message_params: Optional[Dict[str, Any]] = None,
-        ):
+    ):
         update_msg = {
             "type": "experience_review_update",
             "data": {

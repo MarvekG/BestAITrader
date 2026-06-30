@@ -114,8 +114,8 @@
 .interactive-research-card {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 135px);
-  max-height: calc(100vh - 135px);
+  height: calc(100vh - 24px);
+  max-height: calc(100vh - 24px);
   min-height: 0;
 }
 
@@ -128,6 +128,7 @@
 }
 
 .interactive-research-card .ant-card-head {
+  margin-top: 4px;
   min-height: 44px;
   padding: 0 12px;
 }
@@ -143,7 +144,7 @@
 }
 
 .interactive-research-run-select {
-  width: clamp(220px, 30vw, 360px);
+  width: 450px;
 }
 
 .interactive-research-run-option,
@@ -152,6 +153,21 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ant-tooltip.interactive-research-run-tooltip {
+  max-width: min(450px, calc(100vw - 32px));
+}
+
+.interactive-research-run-tooltip .ant-tooltip-inner {
+  max-width: min(450px, calc(100vw - 32px));
+}
+
+.interactive-research-run-tooltip-content {
+  max-width: min(410px, calc(100vw - 72px));
+  overflow-wrap: anywhere;
+  white-space: normal;
+  word-break: break-word;
 }
 
 .interactive-research-content {

@@ -361,11 +361,15 @@ class InteractiveResearchService:
             or payload.get("event")
             or ""
         )
-        await ws_manager.send_stock_picker_update(
+        user_id = run_payload.get("user_id")
+        if user_id is None:
+            return
+        await ws_manager.send_interactive_stock_picker_update(
             run_id=str(run_payload.get("run_id") or ""),
             stage=str(run_payload.get("current_stage") or ""),
             status=str(run_payload.get("status") or ""),
             message=str(message_text),
+            user_id=int(user_id),
             payload={
                 "domain": "interactive_research",
                 "event": payload.get("event"),

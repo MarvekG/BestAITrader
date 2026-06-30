@@ -43,7 +43,7 @@ import {
   interactiveStockPickerApi,
 } from '../../api/stockPicker';
 import { useWebSocketSubscription } from '../../hooks/useWebSocketSubscription';
-import { StockPickerUpdateMessage, WebSocketMessage } from '../../services/websocket';
+import { InteractiveStockPickerUpdateMessage, WebSocketMessage } from '../../services/websocket';
 import { formatErrorMessage, getApiErrorDetail } from '../../utils/errorUtils';
 import './InteractiveResearchTab.css';
 
@@ -391,8 +391,8 @@ export const InteractiveResearchTab: React.FC = () => {
     return () => window.clearInterval(timer);
   }, [refreshSelectedRun, selectedRun, selectedRunId]);
 
-  useWebSocketSubscription('stock_picker_update', (msg: WebSocketMessage) => {
-    const update = msg as StockPickerUpdateMessage;
+  useWebSocketSubscription('interactive_stock_picker_update', (msg: WebSocketMessage) => {
+    const update = msg as InteractiveStockPickerUpdateMessage;
     const data = update.data;
     const payload = asRecord(data?.payload);
     if (payload.domain !== 'interactive_research') {
@@ -699,7 +699,14 @@ export const InteractiveResearchTab: React.FC = () => {
       runs.map((run) => ({
         value: run.run_id,
         label: (
-          <Tooltip title={`${getStatusLabel(run.status)} · ${run.title || run.raw_requirement}`}>
+          <Tooltip
+            title={(
+              <div className="interactive-research-run-tooltip-content">
+                {getStatusLabel(run.status)} · {run.raw_requirement || run.title}
+              </div>
+            )}
+            classNames={{ root: 'interactive-research-run-tooltip' }}
+          >
             <span className="interactive-research-run-option">
               {getStatusLabel(run.status)} · {run.title || run.raw_requirement}
             </span>

@@ -24,7 +24,7 @@ export type TaskCompletedMessage = WebSocketMessage & {
   data?: TaskCompletedData;
 };
 
-export interface StockPickerUpdateData {
+export interface InteractiveStockPickerUpdateData {
   run_id?: string;
   stage?: string;
   status?: string;
@@ -33,15 +33,15 @@ export interface StockPickerUpdateData {
   timestamp?: string;
 }
 
-export type StockPickerUpdateMessage = WebSocketMessage & {
-  data?: StockPickerUpdateData;
+export type InteractiveStockPickerUpdateMessage = WebSocketMessage & {
+  data?: InteractiveStockPickerUpdateData;
 };
 
 type MessageHandler = (message: WebSocketMessage) => void;
 
 export const BACKEND_EVENT_TYPES = {
   task_completed: 'task_completed',
-  stock_picker_update: 'stock_picker',
+  interactive_stock_picker_update: 'interactive_stock_picker',
   price_update: 'price',
   experience_review_update: 'experience_review',
   position_update: 'position_update',

@@ -11,9 +11,9 @@ from app.core.database import engine
 # Import all models to ensure they are registered in Base.metadata if needed, 
 # though for simple TRUNCATE we might just inspect the DB.
 # However, importing them is good practice to ensure metadata is populated if we used it.
-from app.models import data_storage, stock_warehouse, stock_picker
+import app.models  # noqa: F401,E402
 
-SUPPORTED_SCHEMAS = ["public", "data", "stock_picker", "stock_picker_interactive"]
+SUPPORTED_SCHEMAS = ["public", "data", "stock_picker_interactive"]
 
 
 def get_tables():

@@ -6,7 +6,7 @@
 
 - `llm_engine/`：单股多 Agent 投研辩论和 PM 决策工作流。
 - `agentic/`：Agent 工具、新闻插件、Skills、沙箱、浏览器、PDF 和 Memory 工具。
-- `stock_picker/`：股票池、因子初排、整池 LLM 深研和推荐生成。
+- `stock_picker/interactive_research/`：交互式 Deep Research 选股、计划确认、工具循环和消息流。
 - `stock_analysis/`：面向单股分析页面/API 的分析能力。
 - `experience/`：PM 决策后验复盘、事件流和 Memory 写入判断。
 - `market_watch/`：市场监控相关 AI 能力。
@@ -18,7 +18,7 @@
 - LLM 接入固定走 LiteLLM Proxy 和模型别名，真实 provider key、模型名和 base URL 不进入代码。
 - Agent 事实材料优先由 context、tool 或 service 编译，不直接绑定数据库表结构拼 prompt。
 - PM 是唯一能追加交易工具的 Agent；普通分析师不能直接下单。
-- 选股模块只输出推荐、备选和风险摘要，不构建持仓组合、不执行交易。
+- 交互式选股只输出推荐、观察名单、淘汰候选和证据摘要，不构建持仓组合、不执行交易。
 - 后验评估统一落在 `experience`，不新增平行历史评估中心。
 - 主后端只通过 `memory_client.py` 或 Memory 工具访问 MemoFlux HTTP API，不直接写 MemoFlux 数据库。
 - Prompt 变更不要新增 pytest 字符串断言；通过人工审计、既有 eval 或明确 live eval 验证效果。
@@ -26,5 +26,5 @@
 ## 验证
 
 - LLM/Agentic 修改运行相关 `test_llm_*`、`test_agentic_*`。
-- 选股修改运行 stock picker 相关测试。
+- 交互式选股修改运行 `PYTHONPATH=backend pytest backend/tests/test_interactive_stock_picker.py`。
 - 经验复盘修改运行 `PYTHONPATH=backend pytest backend/tests/test_experience_workflow.py`。

@@ -15,7 +15,6 @@ def _ensure_required_schemas() -> None:
         return
     with engine.begin() as conn:
         conn.execute(text("CREATE SCHEMA IF NOT EXISTS data;"))
-        conn.execute(text("CREATE SCHEMA IF NOT EXISTS stock_picker;"))
         conn.execute(text("CREATE SCHEMA IF NOT EXISTS stock_picker_interactive;"))
 
 

@@ -1188,7 +1188,7 @@ async def sync_base_info_func(
             from app.models.data_storage import StockBasic
             from app.models.async_task import AsyncTask
             from app.models.stock_warehouse import StockWarehouse
-            from app.ai.stock_picker.universe import get_basic_stock_filter_conds
+            from app.data.stock_filters import get_basic_stock_filter_conds
 
             stock_list = []
             start_index = 0

@@ -17,7 +17,7 @@
 - `backend/app/main.py`：FastAPI 应用、lifespan 启停副作用、HTTP access log、CORS、WebSocket 挂载。
 - `backend/app/api/__init__.py`：`/api/v1` 路由聚合与默认鉴权边界。
 - `backend/app/ai/llm_engine/`：单股多 Agent 投研辩论工作流。
-- `backend/app/ai/stock_picker/`：股票池、因子初排、整池 LLM 深研和推荐生成；不下单。
+- `backend/app/ai/stock_picker/interactive_research/`：交互式 Deep Research 选股、计划确认、工具循环和消息流；不下单。
 - `backend/app/ai/experience/`：已有 PM 决策的后验复盘、事件流和记忆写入。
 - `backend/app/ai/agentic/`：Agent 工具、新闻插件、Skills Loader、Python 沙箱、浏览器、PDF、Memory 工具。
 - `backend/app/data/`：A 股数据接入、DataFrame 落库、指标、刷新调度。
@@ -44,7 +44,7 @@
 - 后端能力地图：`backend/app/README.md`。
 - 交易链路：`backend/app/trading/README.md`。
 - Debate 工作流：`backend/app/ai/llm_engine/README.md`。
-- AI 选股：`backend/app/ai/stock_picker/README.md`。
+- 交互式 AI 选股：`backend/app/ai/stock_picker/interactive_research/INTERACTIVE_RESEARCH_DESIGN.md`。
 - 经验复盘：`backend/app/ai/experience/README.md`；当前允许无新增可复用经验时不写 Memory，以 `backend/app/ai/experience/workflow.py` 和 `backend/tests/test_experience_workflow.py` 为准。
 - Skills Loader：`backend/app/ai/agentic/skills_loader/README.md`。
 - 新闻插件：`backend/app/ai/agentic/tooling/news_plugins/README.md`。

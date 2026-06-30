@@ -23,7 +23,7 @@ v1 不做自动发现局域网服务、不内置公开 MCP 市场、不允许模
 | `backend/app/ai/agentic/skills_loader/runtime.py` | 生成 Skills prompt 和 loader tools | 参考其 catalog prompt 模式生成 MCP 工具说明 |
 | `backend/app/ai/llm_engine/agents/base.py` | Debate Agent 默认绑定内置工具、Memory tools、Skills tools | 不改工具调用循环，只扩展工具列表 |
 | `backend/app/ai/stock_analysis/runner.py` | 单股分析绑定固定工具和 Skills tools | 在工具装配层按需引入 MCP |
-| `backend/app/ai/stock_picker/service.py`、`backend/app/ai/experience/workflow.py` | 自主研究和复盘也绑定同类工具 | 统一复用 MCP runtime |
+| `backend/app/ai/stock_picker/interactive_research/`、`backend/app/ai/experience/workflow.py` | 自主研究和复盘也绑定同类工具 | 统一复用 MCP runtime |
 | `backend/app/api/__init__.py` | `ENABLE_RUNTIME_EXTENSIONS` 下挂载 news plugins 和 skills | 新增 `/api/v1/mcp`，同样要求登录 |
 
 因此 MCP 不需要侵入各业务 Agent 的 tool-call 执行循环，只需要把远端 MCP tool 包装成 LangChain tool，并在工具装配层接入。

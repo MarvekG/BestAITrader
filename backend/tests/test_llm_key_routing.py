@@ -8,7 +8,6 @@ from langchain_core.messages import AIMessage
 from app.ai.agentic.tool_output_summarizer import summarize_tool_output
 from app.ai.experience import workflow
 from app.ai.llm_engine.agents.base import BaseAgent
-from app.ai.stock_picker.service import RankedCandidate, StockPickerService
 
 
 class FakeLLM:
@@ -50,26 +49,6 @@ class DummyAgent(BaseAgent):
 
     def get_output_model(self):
         return str
-
-
-def _valid_stock_research_payload() -> str:
-    return json.dumps(
-        {
-            "research": [
-                {
-                    "stock_code": "688021.SH",
-                    "ai_score": 86,
-                    "thesis": "研究结论",
-                    "catalysts": ["催化"],
-                    "risks": ["风险"],
-                    "style_fit_explanation": "匹配平衡风格",
-                    "holding_horizon": "mid_term",
-                    "decision": "keep",
-                }
-            ]
-        },
-        ensure_ascii=False,
-    )
 
 
 def test_base_agent_uses_litellm_backend_model(monkeypatch):
@@ -143,67 +122,6 @@ async def test_experience_review_uses_litellm_backend_model_and_usage_lane(monke
     )
 
     assert result["errors"] == []
-    assert provider.calls[0]["model"] == "backend"
-    assert "api_key" not in provider.calls[0] or provider.calls[0]["api_key"] is None
-    assert usage_calls[0]["cache_lane"] == "research"
-    assert usage_calls[0]["api_key_alias"] == "research_llm_api_key"
-
-
-@pytest.mark.asyncio
-async def test_stock_picker_research_uses_litellm_backend_model_and_usage_lane(monkeypatch):
-    import app.ai.stock_picker.service as stock_picker_service_module
-
-    provider = FakeProvider(
-        FakeLLM(
-            [
-                AIMessage(
-                    content="",
-                    tool_calls=[
-                        {
-                            "id": "tool-1",
-                            "name": "query_stock_data",
-                            "args": {"stock_code": "688021.SH"},
-                        }
-                    ],
-                ),
-                AIMessage(content=_valid_stock_research_payload()),
-            ]
-        )
-    )
-    usage_calls = []
-
-    class FakeTool:
-        name = "query_stock_data"
-
-        async def ainvoke(self, args):
-            return {"stock_code": args.get("stock_code"), "results": {"basic": {}}}
-
-    ranked = [
-        RankedCandidate(
-            stock_code="688021.SH",
-            stock_name="测试一号",
-            industry="半导体",
-            market="科创板",
-            factor_score=61.0,
-            ai_score=0.0,
-            final_score=61.0,
-            decision="watch",
-            research_payload={"quant_summary": {}, "quant_support": {}},
-        )
-    ]
-    monkeypatch.setattr(stock_picker_service_module.settings, "LLM_MODEL", "backend")
-    monkeypatch.setattr(stock_picker_service_module, "get_llm_provider", lambda: provider)
-    monkeypatch.setattr(stock_picker_service_module, "get_all_tools", lambda: [FakeTool()])
-    monkeypatch.setattr(stock_picker_service_module, "get_skills_loader_tools", lambda: [])
-    monkeypatch.setattr(
-        stock_picker_service_module,
-        "record_llm_usage",
-        lambda *args, **kwargs: usage_calls.append(kwargs),
-    )
-
-    payload = await StockPickerService()._request_llm_research(ranked, "balanced", 1)
-
-    assert payload is not None
     assert provider.calls[0]["model"] == "backend"
     assert "api_key" not in provider.calls[0] or provider.calls[0]["api_key"] is None
     assert usage_calls[0]["cache_lane"] == "research"

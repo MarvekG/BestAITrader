@@ -2432,10 +2432,6 @@
   },
   "ai_stock_picker": {
     "title": "AI Stock Picker",
-    "tabs": {
-      "automatic": "Automatic Picker",
-      "interactive": "AI Deep Research Stock Picker"
-    },
     "interactive": {
       "statuses": {
         "drafting_plan": "Drafting Plan",
@@ -2474,7 +2470,7 @@
         "search_required": "Search Required"
       },
       "cards": {
-        "chat": "Research Chat"
+        "chat": "AI Deep Research Stock Picker"
       },
       "actions": {
         "create_run": "Generate Research Plan",
@@ -2632,182 +2628,6 @@
       "low": "Low Risk",
       "medium": "Medium Risk",
       "high": "High Risk"
-    },
-    "statuses": {
-      "completed": "Completed",
-      "running": "Running",
-      "created": "Created",
-      "failed_ai_research": "AI Research Failed",
-      "failed_recommendation": "Recommendation Build Failed",
-      "failed_factor": "Factor Ranking Failed",
-      "failed_universe": "Universe Build Failed"
-    },
-    "stages": {
-      "created": "Run Created",
-      "universe_built": "Universe Built",
-      "factor_ranked": "Factor Ranked",
-      "ai_researched": "AI Researched",
-      "recommendations_built": "Recommendations Built",
-      "completed": "Completed",
-      "failed_ai_research": "AI Research Failed",
-      "failed_recommendation": "Recommendation Build Failed",
-      "failed_factor": "Factor Ranking Failed",
-      "failed_universe": "Universe Build Failed"
-    },
-    "failure_hints": {
-      "failed_ai_research": "The LLM did not return valid stock research results. The run was terminated with no rule-based fallback.",
-      "failed_recommendation": "The recommendation-build stage failed and the run was terminated.",
-      "failed_factor": "The factor-ranking stage did not produce a usable candidate pool.",
-      "failed_universe": "No analyzable stocks are available for the selected source."
-    },
-    "quant_support": {
-      "style_fit": "Style Fit",
-      "profit_condition": "Profit Setup",
-      "trend_quality": "Trend Quality",
-      "liquidity": "Liquidity",
-      "valuation_safety": "Valuation Safety",
-      "volatility": "Volatility Control",
-      "risk_penalty": "Risk Penalty"
-    },
-    "fields": {
-      "scope": "Stock Source",
-      "style": "Style",
-      "recommendation_count": "Recommendation Count",
-      "factor_candidate_limit": "Factor Candidate Limit",
-      "research_candidate_limit": "Research Candidate Count",
-      "allowed_industries": "Allowed Industries",
-      "same_industry_limit": "Same-Industry Limit",
-      "risk_level": "Risk Level",
-      "status": "Status"
-    },
-    "field_tips": {
-      "scope": "Choose where stocks come from. Warehouse is best for a curated watchlist, Core covers representative index constituents, and All has the widest coverage but the highest data-quality requirements.",
-      "style": "Choose the stock-picking style. The style changes factor-ranking logic, default candidate sizes, and the focus of later AI research.",
-      "recommendation_count": "How many stocks should be returned in the final recommendation list. It is the target output size and directly constrains two other parameters: research candidate count cannot be lower than it, and same-industry limit cannot be higher than it. Full relation: recommendation count <= research candidate count <= factor candidate limit, and same-industry limit <= recommendation count.",
-      "factor_candidate_limit": "Maximum number of stocks kept after factor ranking. This is the outermost pool size. The system ranks by factor score first, applies the same-industry limit, and then truncates to this count.",
-      "research_candidate_limit": "How many stocks are actually sent into deep AI research. The system takes the top N from the ranked candidate pool, so this value cannot be lower than recommendation count and cannot exceed factor candidate limit.",
-      "allowed_industries": "Only pick stocks from these industries. If empty, the system uses all available industries under the selected source.",
-      "same_industry_limit": "Maximum number of stocks from the same industry allowed in candidates or final recommendations. This controls industry concentration. It cannot exceed recommendation count, and it is enforced twice: once when trimming the factor-ranked candidate pool, and again when building the final recommendations.",
-      "risk_level": "Currently kept mainly as a run configuration field for risk preference and result display."
-    },
-    "actions": {
-      "start": "Start AI Stock Picker",
-      "clear_history": "Clear History",
-      "add_to_warehouse": "Add to Warehouse",
-      "in_warehouse": "In Warehouse"
-    },
-    "confirmations": {
-      "clear_runs": "Clear all runs?",
-      "delete_run": "Delete this run?"
-    },
-    "messages": {
-      "load_runs_failed": "Failed to load AI stock picker runs",
-      "load_result_failed": "Failed to load AI stock picker result",
-      "load_industries_failed": "Failed to load industry options",
-      "active_run_exists": "An unfinished AI stock picker run already exists ({{run_id}}). Wait for it to finish before starting a new run",
-      "start_failed": "Failed to start AI stock picker",
-      "run_deleted": "Run deleted",
-      "runs_cleared": "History cleared",
-      "added_to_warehouse": "Added {{stock_code}} to warehouse",
-      "delete_failed": "Failed to delete run"
-    },
-    "validations": {
-      "factor_candidate_limit_min": "Factor candidate limit cannot be lower than recommendation count {{recommendation_count}}",
-      "factor_candidate_limit_max": "Factor candidate limit cannot exceed the current scope maximum {{max_limit}}",
-      "research_candidate_limit_min": "Research candidate count cannot be lower than recommendation count {{recommendation_count}}",
-      "research_candidate_limit_max": "Research candidate count cannot exceed the current scope maximum {{max_limit}}",
-      "research_candidate_limit_factor": "Research candidate count cannot exceed factor candidate limit {{factor_limit}}",
-      "same_industry_limit_max": "Same-industry limit cannot exceed recommendation count {{recommendation_count}}"
-    },
-    "cards": {
-      "config": "Run Config",
-      "data_sync": "Data Sync",
-      "history": "Run History",
-      "run_status": "Run Status",
-      "timeline": "Stage Timeline",
-      "recommendations": "Recommended Stocks",
-      "candidates": "Candidates",
-      "top_candidates": "Top Candidates"
-    },
-    "table": {
-      "created_at": "Created At",
-      "scope": "Source",
-      "style": "Style",
-      "status": "Status",
-      "actions": "Actions"
-    },
-    "run_details": {
-      "run_id": "Run ID",
-      "current_stage": "Current Stage",
-      "status": "Status",
-      "risk_level": "Risk Level"
-    },
-    "timeline": {
-      "count": "Count",
-      "source": "Source",
-      "style": "Style",
-      "mode": "Mode",
-      "recommended_stock_codes": "Recommended Stocks",
-      "factor_candidate_count": "Factor Candidates",
-      "factor_candidate_limit": "Factor Candidate Limit",
-      "research_candidate_count": "Research Candidates",
-      "same_industry_limit": "Same-Industry Limit",
-      "industry_filter_count": "Industry Filter Count",
-      "allowed_industries": "Allowed Industries"
-    },
-    "recommendations": {
-      "style": "Style",
-      "scope": "Source",
-      "generated_at": "Generated At",
-      "research_mode": "Research Mode",
-      "decision_breakdown": "Decision Breakdown",
-      "candidate_count": "Candidate Count",
-      "universe_count": "Universe Count",
-      "factor_candidate_count": "Factor Candidates",
-      "research_candidate_count": "Research Candidates",
-      "same_industry_limit": "Same-Industry Limit"
-    },
-    "recommendations_table": {
-      "rank": "Rank",
-      "stock": "Stock",
-      "conviction_score": "Conviction",
-      "holding_horizon": "Holding Horizon",
-      "entry_logic": "Recommendation Reason",
-      "trend_evidence": "Trend Evidence",
-      "risk_evidence": "Risk Evidence",
-      "invalidation_conditions": "Invalidation",
-      "risk_flags": "Risk Flags"
-    },
-    "candidates_table": {
-      "stock": "Stock",
-      "industry": "Industry",
-      "factor_score": "Quant Score",
-      "ai_score": "AI Score",
-      "final_score": "Final Score",
-      "quant_support": "Quant Support",
-      "decision": "Decision",
-      "thesis": "Research Summary",
-      "trend_evidence": "Trend Evidence",
-      "risk_evidence": "Risk Evidence",
-      "invalidation_conditions": "Invalidation",
-      "eliminated_reason": "Eliminated Reason"
-    },
-    "decisions": {
-      "keep": "keep",
-      "watch": "watch",
-      "drop": "drop"
-    },
-    "top_candidates": {
-      "quant": "Quant",
-      "final": "Final"
-    },
-    "empty": {
-      "runs": "No runs",
-      "events": "No events",
-      "result": "No result",
-      "recommendations": "No recommended stocks",
-      "candidates": "No candidates",
-      "recommendation_logic": "No recommendation summary available"
     }
   },
   "experience": {
@@ -3043,55 +2863,6 @@
     "outcome_label": "Outcome Label",
     "summary": "Experience Summary",
     "market_outcome": "Market Outcome Evidence"
-  },
-  "ai_stock_picker_backend": {
-    "api": {
-      "run_created": "AI stock picker run created",
-      "run_not_found": "Run not found",
-      "run_deleted": "Run deleted",
-      "runs_deleted": "Runs deleted"
-    },
-    "events": {
-      "run_created": "AI stock picker run created",
-      "universe_ready": "Universe built with {count} stocks",
-      "factor_ranked": "Factor ranking completed with {count} candidates for style {style}",
-      "ai_researched": "Structured AI research generated for {count} candidates",
-      "recommendations_ready": "Recommended stock list built with {count} stocks",
-      "completed": "AI stock picker run completed"
-    },
-    "defaults": {
-      "selection_logic": "LLM research output produced the recommended stock list",
-      "not_selected_for_research": "Not selected for deep research",
-      "not_selected_after_research": "Not selected after LLM research"
-    },
-    "errors": {
-      "active_run_exists": "An unfinished AI stock picker run already exists ({run_id}). Wait for it to finish before starting a new run",
-      "no_stocks_for_scope": "No stocks available for the selected source",
-      "no_candidates_passed_factor": "No candidates passed factor ranking",
-      "factor_data_incomplete": "Factor ranking is missing required data: {reason}",
-      "invalid_factor_candidate_limit": "Factor candidate limit {limit} exceeds the maximum {max_limit} for the selected scope",
-      "invalid_research_candidate_limit": "Research candidate count {limit} exceeds the maximum {max_limit} for the selected scope",
-      "invalid_candidate_limit_relation": "Invalid candidate limits: recommendation count {recommendation_count}, research count {research_limit}, factor candidate limit {factor_limit}",
-      "invalid_same_industry_limit": "Same-industry limit {limit} cannot exceed recommendation count {recommendation_count}",
-      "invalid_allowed_industries": "Allowed industries payload is invalid",
-      "invalid_allowed_industries_with_reason": "Invalid industries found: {industries}",
-      "research_generation_failed": "LLM research generation failed",
-      "research_payload_invalid": "LLM research payload is invalid",
-      "research_payload_missing_list": "LLM research payload must contain a research list",
-      "research_payload_invalid_with_reason": "LLM research payload is invalid: {reason}",
-      "recommendation_count_mismatch": "Not enough recommendations remain after applying constraints: expected {expected}, got {actual}",
-      "run_interrupted_by_restart": "The service restarted and the unfinished AI stock picker run was marked as failed",
-      "fragments": {
-        "factor_completeness_ratio": "Factor-ready stocks {complete_count}/{total_count}, completeness {completeness_ratio}%, below the required {required_ratio}%",
-        "missing_quant_fields": "{stock_code} {stock_name} is missing {fields}",
-        "more_missing_quant_fields": "{count} more stocks are missing required data",
-        "ignored_non_object_items": "ignored {count} non-object items",
-        "ignored_outside_stocks": "ignored out-of-candidate stocks: {stocks}",
-        "ignored_duplicate_stocks": "ignored duplicate stocks: {stocks}",
-        "no_valid_research_remaining": "no valid candidate research remained after validation",
-        "expected_positions_mismatch": "expected {expected} unique in-candidate recommended stocks but got {actual}"
-      }
-    }
   },
   "stock_hot_rank": {
     "rank": "Current Rank",
