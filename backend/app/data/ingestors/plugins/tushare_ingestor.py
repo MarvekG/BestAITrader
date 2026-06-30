@@ -2,7 +2,7 @@ import tushare as ts
 import asyncio
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Any
+from typing import Optional
 from app.data.ingestion.service import DataIngestionService
 from app.core.config import settings
 from app.core.data_source_settings import (
@@ -152,7 +152,7 @@ class TushareIngestor(BaseIngestor):
         try:
             if not self.pro:
                 return {"success": False, "data": [], "count": 0}
-                
+
             # Map period to Tushare API and frequency
             period_map = {
                 "daily": (self.pro.daily, "D", "daily"),
@@ -162,7 +162,7 @@ class TushareIngestor(BaseIngestor):
             if period not in period_map:
                 logger.warning(f"Unsupported period {period} for Tushare kline. Using daily.")
                 period = "daily"
-                
+
             api_func, freq, api_name = period_map[period]
 
             # Ensure stock code has suffix (e.g. 000001.SZ) for Tushare API
@@ -320,7 +320,9 @@ class TushareIngestor(BaseIngestor):
             # Unit conversion:
             # Tushare total_mv/circ_mv are in 万元 -> convert to 元
             # Tushare total_share/float_share are in 万股 -> convert to 股
-            val_unit_cols = ['total_market_value', 'circulating_market_value', 'total_share', 'float_share', 'free_share']
+            val_unit_cols = [
+                'total_market_value', 'circulating_market_value', 'total_share', 'float_share', 'free_share'
+            ]
             for col in val_unit_cols:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce') * 10000
@@ -385,7 +387,11 @@ class TushareIngestor(BaseIngestor):
             code = StockCodeStandardizer.standardize(stock_code)
             logger.info(f"Fetching financial indicators for {code}")
             today = datetime.now().date()
-            parsed_start_date = pd.to_datetime(start_date, errors='coerce') if start_date else pd.Timestamp(today - timedelta(days=365))
+            parsed_start_date = (
+                pd.to_datetime(start_date, errors='coerce')
+                if start_date
+                else pd.Timestamp(today - timedelta(days=365))
+            )
             parsed_end_date = pd.to_datetime(end_date, errors='coerce') if end_date else pd.Timestamp(today)
             if pd.isna(parsed_start_date):
                 logger.error(f"Invalid start_date for financial indicators sync: {start_date}")
@@ -1480,7 +1486,6 @@ class TushareIngestor(BaseIngestor):
             logger.error(f"Failed to ingest pledge summary (Tushare) for {stock_code or 'All'}: {e}")
             return {"success": False, "data": [], "count": 0}
 
-
     async def fetch_and_ingest_stock_lockup_release(self, stock_code: str) -> Optional[dict]:
         """
         采集单只股票未来限售股解禁数据并写入解禁表。
@@ -1875,6 +1880,7 @@ class TushareIngestor(BaseIngestor):
         except Exception as e:
             logger.error(f"Failed to ingest stock_zhaban_pool: {e}")
             return {"success": False, "data": [], "count": 0}
+
     async def fetch_and_ingest_stock_insider_trading(self, stock_code: str) -> Optional[dict]:
         """
         采集高管及相关人员持股变动数据并写入内部人交易表。
@@ -2091,7 +2097,7 @@ class TushareIngestor(BaseIngestor):
             if df is None or df.empty:
                 return {"success": False, "data": [], "count": 0}
 
-            # Rename columns to match filter if necessary (ColumnMapper will do it later for DB, but we need it now for filter)
+            # Rename columns to match filter before ColumnMapper prepares DB columns.
             # TuShare moneyflow_ind_dc returns 'name'
             if 'name' in df.columns:
                 df = df[df['name'] == industry]
@@ -2243,7 +2249,11 @@ class TushareIngestor(BaseIngestor):
 
             code = StockCodeStandardizer.standardize(stock_code)
             today = datetime.now().date()
-            normalized_start_date = normalize_compact_date(start_date) if start_date else (today - timedelta(days=365)).strftime('%Y%m%d')
+            normalized_start_date = (
+                normalize_compact_date(start_date)
+                if start_date
+                else (today - timedelta(days=365)).strftime('%Y%m%d')
+            )
             normalized_end_date = normalize_compact_date(end_date) if end_date else today.strftime('%Y%m%d')
             params = {'ts_code': code}
             params['start_date'] = normalized_start_date
@@ -2521,7 +2531,9 @@ class TushareIngestor(BaseIngestor):
             today = datetime.now().date()
             normalized_start_date = normalize_compact_date(start_date)
             normalized_end_date = normalize_compact_date(end_date)
-            table_mapping = ColumnMapper.get_table_mapping('data.stock_cashflow_statement', 'tushare_cashflow_statement')
+            table_mapping = ColumnMapper.get_table_mapping(
+                'data.stock_cashflow_statement', 'tushare_cashflow_statement'
+            )
             params = {
                 'ts_code': code,
                 'start_date': normalized_start_date,
