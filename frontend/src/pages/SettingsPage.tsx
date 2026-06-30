@@ -401,9 +401,9 @@ export const SettingsPage: React.FC = () => {
     try {
       const res = await testingApi.testTushare();
       if (res.status === 'success') {
-        message.success(`${res.message} (${res.elapsed_ms}ms)`);
+        message.success(t('settings.tushare_test_success'));
       } else {
-        message.error(res.message);
+        message.error(res.error || t('settings.test_failed'));
       }
     } catch (error) {
       message.error(getApiErrorMessage(error, t('settings.test_failed')));

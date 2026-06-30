@@ -1586,6 +1586,7 @@
     "redis_test_title": "Redis 连接测试",
     "db_test_title": "数据库连接测试",
     "tushare_test_title": "TuShare 接口测试",
+    "tushare_test_success": "TuShare 配置测试成功",
     "execute_test": "执行测试",
     "search_keyword": "搜索关键词",
     "test_result": "测试结果",
