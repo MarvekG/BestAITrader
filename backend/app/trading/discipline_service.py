@@ -7,6 +7,10 @@ from uuid import UUID
 
 from fastapi import BackgroundTasks
 
+from app.ai.llm_engine.debate_concurrency import (
+    DebateConcurrencyLimitReached,
+    ensure_debate_concurrency_available,
+)
 from app.ai.market_watch.schemas import DebateParameters, WatchAiDecision
 from app.ai.llm_engine.runner import run_analysis_task
 from app.ai.market_watch.service import trading_frequency_label, trading_frequency_to_code
@@ -187,14 +191,22 @@ async def _handle_position_discipline_trigger(
         "source_pm_session_id": str(item["pm_session_id"]) if item["pm_session_id"] is not None else None,
         "source": "position_discipline",
     }
-    launch = await _create_and_schedule_position_discipline_debate(
-        user_id=user_id,
-        decision=decision,
-        debate_launcher=debate_launcher,
-        background_tasks=background_tasks,
-        session_source=PM_DISCIPLINE_SESSION_SOURCES.get(item["trigger"], "market_watch"),
-        discipline_trigger=discipline_trigger,
-    )
+    try:
+        launch = await _create_and_schedule_position_discipline_debate(
+            user_id=user_id,
+            decision=decision,
+            debate_launcher=debate_launcher,
+            background_tasks=background_tasks,
+            session_source=PM_DISCIPLINE_SESSION_SOURCES.get(item["trigger"], "market_watch"),
+            discipline_trigger=discipline_trigger,
+        )
+    except DebateConcurrencyLimitReached as exc:
+        return {
+            "status": "skipped",
+            "reason": "concurrency_limit",
+            "stock_code": item["stock_code"],
+            "error": str(exc),
+        }
     if launch.get("status") == "failed":
         return {"stock_code": item["stock_code"], **launch}
 
@@ -256,6 +268,7 @@ async def _create_and_schedule_position_discipline_debate(
     trading_frequency = trading_frequency_label(parameters.trading_frequency)
     trading_strategy = trading_strategy_label(parameters.trading_strategy)
     with database_module.SessionLocal() as db:
+        ensure_debate_concurrency_available(db)
         session = crud_session.create(
             db,
             obj_in=SessionCreate(

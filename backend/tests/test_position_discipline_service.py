@@ -13,6 +13,7 @@ from app.models.stock_warehouse import StockWarehouse
 from app.models.system_setting import SystemSetting
 from app.schemas.user import UserCreate
 from app.trading.discipline_service import scan_position_disciplines
+from app.trading import discipline_service
 from app.trading.discipline_settings import PositionDisciplineSettingsResponse
 
 
@@ -57,6 +58,48 @@ def _add_stock_warehouse(db_session, user_id):
         )
     )
     db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_position_discipline_debate_respects_global_concurrency_limit(db_session, test_db, monkeypatch):
+    user, _account = _create_user(db_session)
+    db_session.add_all([
+        SystemSetting(key="ai_debate.max_concurrent", value=1, description="test"),
+        AsyncTask(
+            task_name="AI Analysis - 000001.SZ",
+            task_type="ai_analysis",
+            status="running",
+            allow_concurrent=False,
+            parameters={"stock_code": "000001.SZ"},
+            user_id=user.id,
+        ),
+    ])
+    db_session.commit()
+    monkeypatch.setattr("app.trading.discipline_service.database_module.SessionLocal", test_db)
+    monkeypatch.setattr("app.trading.discipline_service._is_duplicate_discipline_trigger", lambda **kwargs: False)
+
+    result = await discipline_service._handle_position_discipline_trigger(
+        user_id=user.id,
+        settings=PositionDisciplineSettingsResponse(
+            user_id=user.id,
+            enabled=True,
+            scan_non_trading_days=True,
+            auto_launch_debate=True,
+        ),
+        item={
+            "trigger": "stop_loss",
+            "stock_code": "000002.SZ",
+            "threshold": Decimal("9.50"),
+            "latest_price": Decimal("9.40"),
+            "pm_session_id": uuid4(),
+        },
+        debate_launcher=lambda **kwargs: None,
+        background_tasks=None,
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason"] == "concurrency_limit"
+    assert db_session.query(AsyncTask).count() == 1
 
 
 @pytest.mark.asyncio

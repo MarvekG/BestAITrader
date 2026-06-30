@@ -26,6 +26,7 @@ from app.models.market_watch import MarketWatchEvent
 from app.models.position import Position
 from app.models.session import Session
 from app.models.stock_warehouse import StockWarehouse
+from app.models.system_setting import SystemSetting
 from app.models.user import User
 
 
@@ -151,6 +152,51 @@ def test_market_watch_llm_usage_observability_uses_dedicated_lane() -> None:
     assert metadata["call_kind"] == "agent"
     assert metadata["cache_lane"] == "market_watch"
     assert metadata["api_key_alias"] == "market_watch_llm_api_key"
+
+
+@pytest.mark.asyncio
+async def test_market_watch_debate_launch_respects_global_concurrency_limit(db_session, test_db, monkeypatch) -> None:
+    user = User(username="market_watch_limit", email="market_watch_limit@example.com", password_hash="x")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    db_session.add_all([
+        SystemSetting(key="ai_debate.max_concurrent", value=1, description="test"),
+        AsyncTask(
+            task_name="AI Analysis - 000001.SZ",
+            task_type="ai_analysis",
+            status="running",
+            allow_concurrent=False,
+            parameters={"stock_code": "000001.SZ"},
+            user_id=user.id,
+        ),
+    ])
+    db_session.commit()
+    monkeypatch.setattr("app.ai.market_watch.service.database_module.SessionLocal", test_db)
+
+    response = await market_watch_service._maybe_launch_debate(
+        user_id=user.id,
+        settings={},
+        cooldown_minutes=0,
+        auto_launch_debate=True,
+        allowed_stock_codes={"000002.SZ"},
+        decision=WatchAiDecision(
+            stock_code="000002.SZ",
+            stock_name="000002.SZ",
+            action="start_debate",
+            confidence=1.0,
+            urgency="high",
+            trigger_reason="test",
+            evidence_summary="test",
+            debate_parameters=DebateParameters(trading_frequency="position", trading_strategy="value"),
+        ),
+        debate_launcher=lambda **kwargs: None,
+        background_tasks=None,
+    )
+
+    assert response["status"] == "skipped"
+    assert response["reason"] == "concurrency_limit"
+    assert db_session.query(AsyncTask).count() == 1
 
 
 def test_build_watch_ai_payload_sorts_stock_lists_for_cache_stability() -> None:

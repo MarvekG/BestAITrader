@@ -1102,7 +1102,7 @@
     "source_take_profit": "止盈",
     "delete_active_error": "无法删除正在分析中的活跃会话",
     "batch_delete_active_warning": "已自动跳过 {{count}} 个正在分析中的活跃会话",
-    "analysis_sessions_tab": "AI分析会话管理",
+    "analysis_sessions_tab": "AI投研辩论",
     "stock_analysis_tab": "AI投研分析",
     "stock_analysis_run": "开始投研分析",
     "stock_analysis_stock_placeholder": "可选标的/股票",
@@ -1490,6 +1490,15 @@
   "settings": {
     "title": "系统设置",
     "data_sources": "数据源设置",
+    "runtime_settings": "运行参数",
+    "refresh_runtime_settings": "刷新运行参数",
+    "runtime_saved": "运行参数已保存",
+    "runtime_load_failed": "加载运行参数失败",
+    "runtime_save_failed": "保存运行参数失败",
+    "ai_debate_max_concurrent": "AI投研辩论最大并发数",
+    "ai_debate_max_concurrent_tip": "限制同时处于等待或运行中的 AI投研辩论任务数量。默认 5，用于控制 LLM 和数据源资源消耗。",
+    "ai_debate_max_concurrent_required": "请输入 AI投研辩论最大并发数",
+    "ai_debate_max_concurrent_range": "并发数必须在 1 到 100 之间",
     "automation": "自动化任务",
     "experience_scheduler_title": "经验分析师定时任务",
     "experience_scheduler_enabled": "启用自动经验复盘",
@@ -1988,6 +1997,7 @@
   "tasks": {
     "submission_success": "异步任务提交成功，任务ID: {task_id}",
     "already_in_progress": "任务已在进行中，任务ID: {task_id}",
+    "ai_debate_concurrency_limit_reached": "AI投研辩论并发数已达上限（{running_count}/{max_concurrent}），请等待当前辩论完成后再试。",
     "names": {
       "stock_basic_sync": "股票基础信息同步 ({info})",
       "dragon_tiger_sync": "龙虎榜同步 ({dates})",

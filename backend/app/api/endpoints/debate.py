@@ -7,6 +7,10 @@ from uuid import UUID
 
 from app.core.database import get_db
 from app.tasks.task_manager import task_manager
+from app.ai.llm_engine.debate_concurrency import (
+    DebateConcurrencyLimitReached,
+    ensure_debate_concurrency_available,
+)
 from app.ai.llm_engine.runner import run_analysis_task  # 使用新的 LLM Engine
 from app.api.ownership import get_owned_session
 from app.api.endpoints.debate_ws import send_debate_status
@@ -121,6 +125,11 @@ async def run_debate(
                         f"(Task ID: {existing_stock_task.task_id}). Please wait for it to complete."
                     ),
                 )
+
+        try:
+            ensure_debate_concurrency_available(db)
+        except DebateConcurrencyLimitReached as exc:
+            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
 
         task_parameters = {
             "session_id": str(session_id),
