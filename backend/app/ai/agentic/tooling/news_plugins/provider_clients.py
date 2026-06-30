@@ -31,22 +31,9 @@ class ProviderRequestError(RuntimeError):
         super().__init__(message)
 
 
-def split_api_keys(raw_api_keys: str) -> list[str]:
-    """
-    将逗号分隔的配置拆分为可用 API Key 列表。
-
-    Args:
-        raw_api_keys: 配置项原始值，支持英文逗号分隔多个 Key。
-
-    Returns:
-        去除空白和空项后的 API Key 列表。
-    """
-    return [api_key.strip() for api_key in raw_api_keys.split(",") if api_key.strip()]
-
-
 async def request_with_key_failover(
     service_name: str,
-    raw_api_keys: str,
+    api_keys: list[str],
     request_once: Callable[[str], Awaitable[httpx.Response]],
 ) -> httpx.Response | None:
     """
@@ -54,7 +41,7 @@ async def request_with_key_failover(
 
     Args:
         service_name: 日志中展示的外部服务名称。
-        raw_api_keys: 配置项原始值，支持英文逗号分隔多个 Key。
+        api_keys: API Key 列表。
         request_once: 使用单个 API Key 发起请求的异步回调。
 
     Returns:
@@ -63,7 +50,7 @@ async def request_with_key_failover(
     Raises:
         ProviderRequestError: 所有已配置 API Key 均返回非 200 状态。
     """
-    api_keys = split_api_keys(raw_api_keys)
+    api_keys = [api_key.strip() for api_key in api_keys if api_key.strip()]
     healthy_key = _SERVICE_HEALTHY_KEYS.get(service_name)
     if healthy_key in api_keys:
         ordered_keys = [healthy_key, *[api_key for api_key in api_keys if api_key != healthy_key]]

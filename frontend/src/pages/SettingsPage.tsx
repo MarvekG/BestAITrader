@@ -219,7 +219,7 @@ export const SettingsPage: React.FC = () => {
     alignItems: 'baseline',
     display: 'flex',
     gap: 8,
-    maxWidth: 960,
+    maxWidth: 672,
     width: '100%',
   };
   const activeSettingsTab = SETTINGS_TAB_KEYS.has(settingsSearchParams.get('tab') || '')
@@ -242,6 +242,10 @@ export const SettingsPage: React.FC = () => {
   const [tushareLoading, setTushareLoading] = useState(false);
   const [dataSourceTestLoading, setDataSourceTestLoading] = useState<Partial<Record<DataSourceConfigTestKey, boolean>>>({});
   const [dataSourceTestOutputs, setDataSourceTestOutputs] = useState<Partial<Record<DataSourceConfigTestKey, string>>>({});
+  const [dataSourceTestQueries, setDataSourceTestQueries] = useState<Record<'tavily' | 'newsapi', string>>({
+    tavily: 'AI',
+    newsapi: 'AI',
+  });
 
   // Prompt Config State
   const [prompts, setPrompts] = useState<Record<string, string>>({});
@@ -1838,9 +1842,7 @@ export const SettingsPage: React.FC = () => {
   const handleSaveTushare = async (values: Record<string, unknown>) => {
     setTushareLoading(true);
     try {
-      const payload = Object.fromEntries(
-        Object.entries(values).filter(([, value]) => typeof value !== 'string' || !value.startsWith('...'))
-      );
+      const payload = Object.fromEntries(Object.entries(values));
       payload.tavily_api_key = normalizeApiKeyList(values.tavily_api_key);
       payload.news_api_key = normalizeApiKeyList(values.news_api_key);
       await sourcesApi.updateDataSourceConfig(payload);
@@ -1855,7 +1857,8 @@ export const SettingsPage: React.FC = () => {
   const handleTestDataSourceConfig = async (key: DataSourceConfigTestKey) => {
     setDataSourceTestLoading((prev) => ({ ...prev, [key]: true }));
     try {
-      const result = await sourcesApi.testDataSourceConfig(key);
+      const query = key === 'tavily' || key === 'newsapi' ? dataSourceTestQueries[key] : undefined;
+      const result = await sourcesApi.testDataSourceConfig(key, query);
       setDataSourceTestOutputs((prev) => ({ ...prev, [key]: formatApiOutput(result) }));
       if (result.status === 'success') {
         message.success(t('settings.data_source_test_completed'));
@@ -2101,6 +2104,12 @@ export const SettingsPage: React.FC = () => {
                       </Space>
                     )}
                   </Form.List>
+                  <Form.Item label={t('settings.test_query')}>
+                    <Input
+                      value={dataSourceTestQueries.tavily}
+                      onChange={(event) => setDataSourceTestQueries((prev) => ({ ...prev, tavily: event.target.value }))}
+                    />
+                  </Form.Item>
                   {dataSourceTestOutputs.tavily && (
                     <pre style={diagnosticPanelStyle}>{dataSourceTestOutputs.tavily}</pre>
                   )}
@@ -2134,6 +2143,12 @@ export const SettingsPage: React.FC = () => {
                       </Space>
                     )}
                   </Form.List>
+                  <Form.Item label={t('settings.test_query')}>
+                    <Input
+                      value={dataSourceTestQueries.newsapi}
+                      onChange={(event) => setDataSourceTestQueries((prev) => ({ ...prev, newsapi: event.target.value }))}
+                    />
+                  </Form.Item>
                   {dataSourceTestOutputs.newsapi && (
                     <pre style={diagnosticPanelStyle}>{dataSourceTestOutputs.newsapi}</pre>
                   )}

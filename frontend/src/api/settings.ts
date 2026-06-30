@@ -32,7 +32,7 @@ export const sourcesApi = {
     return apiClient.post('/sources/config', config);
   },
 
-  testDataSourceConfig: async (key: DataSourceConfigTestKey) => {
-    return apiClient.post<DataSourceConfigTestResult>(`/sources/config/test/${key}`);
+  testDataSourceConfig: async (key: DataSourceConfigTestKey, query?: string) => {
+    return apiClient.post<DataSourceConfigTestResult>(`/sources/config/test/${key}`, query ? { query } : undefined);
   }
 };

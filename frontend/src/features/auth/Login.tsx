@@ -18,16 +18,13 @@ interface LoginFormValues {
   password: string;
 }
 
-const isMaskedValue = (value?: string | null): boolean => typeof value === 'string' && value.startsWith('...');
-
-const hasMaskedListValue = (value?: string[] | null): boolean => Array.isArray(value) && value.some(isMaskedValue);
+const hasListValue = (value?: string[] | null): boolean => Array.isArray(value) && value.some((item) => item.trim());
 
 const isDataSourceSetupIncomplete = (config: Awaited<ReturnType<typeof sourcesApi.getDataSourceConfig>>): boolean => {
   return !config.tushare_api_url
     || !config.tushare_token
-    || !isMaskedValue(config.tushare_token)
-    || !hasMaskedListValue(config.tavily_api_key)
-    || !hasMaskedListValue(config.news_api_key);
+    || !hasListValue(config.tavily_api_key)
+    || !hasListValue(config.news_api_key);
 };
 
 export const Login: React.FC = () => {

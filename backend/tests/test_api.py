@@ -262,9 +262,9 @@ class TestSourcesAPI:
         assert config_response.status_code == 200
         assert config_response.json()["config"] == {
             "tushare_api_url": "https://api.example.com/tushare",
-            "tushare_token": "...ret",
-            "tavily_api_key": ["...ret"],
-            "news_api_key": ["...ret"],
+            "tushare_token": "tushare-secret",
+            "tavily_api_key": ["tavily-secret"],
+            "news_api_key": ["news-secret"],
         }
 
     def test_data_source_config_cache_invalidates_after_update(self, client, auth_headers):
@@ -277,7 +277,7 @@ class TestSourcesAPI:
 
         first_config = client.get("/api/v1/sources/config", headers=auth_headers)
         assert first_config.status_code == 200
-        assert first_config.json()["config"]["tavily_api_key"] == ["...key"]
+        assert first_config.json()["config"]["tavily_api_key"] == ["first-key"]
 
         second_response = client.post(
             "/api/v1/sources/config",
@@ -288,31 +288,11 @@ class TestSourcesAPI:
 
         second_config = client.get("/api/v1/sources/config", headers=auth_headers)
         assert second_config.status_code == 200
-        assert second_config.json()["config"]["tavily_api_key"] == ["...ret"]
-
-    def test_data_source_config_keeps_masked_list_items(self, client, auth_headers, db_session):
-        from app.models.system_setting import SystemSetting
-
-        first_response = client.post(
-            "/api/v1/sources/config",
-            headers=auth_headers,
-            json={"tavily_api_key": ["first-secret", "second-secret"]},
-        )
-        assert first_response.status_code == 200, first_response.text
-
-        update_response = client.post(
-            "/api/v1/sources/config",
-            headers=auth_headers,
-            json={"tavily_api_key": ["...ret", "third-secret"]},
-        )
-        assert update_response.status_code == 200, update_response.text
-
-        row = db_session.query(SystemSetting).filter(SystemSetting.key == "data_sources.tavily.api_key").one()
-        assert row.value == ["second-secret", "third-secret"]
+        assert second_config.json()["config"]["tavily_api_key"] == ["second-secret"]
 
     def test_data_source_config_test_endpoints_passthrough(self, client, auth_headers):
         class FakeTushareClient:
-            def daily(self, **kwargs):
+            def stock_basic(self, **kwargs):
                 return [{"ok": True, "params": kwargs}]
 
         config_response = client.post(
@@ -342,12 +322,21 @@ class TestSourcesAPI:
             ) as newsapi_search,
         ):
             tushare_response = client.post("/api/v1/sources/config/test/tushare", headers=auth_headers)
-            tavily_response = client.post("/api/v1/sources/config/test/tavily", headers=auth_headers)
-            newsapi_response = client.post("/api/v1/sources/config/test/newsapi", headers=auth_headers)
+            tavily_response = client.post(
+                "/api/v1/sources/config/test/tavily",
+                headers=auth_headers,
+                json={"query": "AI"},
+            )
+            newsapi_response = client.post(
+                "/api/v1/sources/config/test/newsapi",
+                headers=auth_headers,
+                json={"query": "AI"},
+            )
 
         assert tushare_response.status_code == 200
         assert tushare_response.json()["status"] == "success"
         assert tushare_response.json()["data"][0]["params"]["ts_code"] == "000001.SZ"
+        assert tushare_response.json()["data"][0]["params"]["fields"] == "ts_code,symbol,name,area,industry,list_date"
 
         for response in [tavily_response, newsapi_response]:
             assert response.status_code == 200
@@ -357,8 +346,10 @@ class TestSourcesAPI:
                 assert item["status"] == "success"
                 assert item["data"]
 
-        assert [call.args[0] for call in tavily_search.await_args_list] == ["tavily-token-a", "tavily-token-b"]
-        assert [call.args[0] for call in newsapi_search.await_args_list] == ["news-token-a", "news-token-b"]
+        assert [call.args[0] for call in tavily_search.await_args_list] == [["tavily-token-a"], ["tavily-token-b"]]
+        assert [call.args[1] for call in tavily_search.await_args_list] == ["AI", "AI"]
+        assert [call.args[0] for call in newsapi_search.await_args_list] == [["news-token-a"], ["news-token-b"]]
+        assert [call.args[1] for call in newsapi_search.await_args_list] == ["AI", "AI"]
 
 
 class TestSessionAPI:

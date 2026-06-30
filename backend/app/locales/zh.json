@@ -1512,6 +1512,7 @@
     "save_config": "保存配置",
     "multiple_api_keys_placeholder": "输入一个 Key",
     "add_api_key": "添加 Key",
+    "test_query": "测试查询词",
     "data_source_setup_guide_title": "请先完成数据源设置",
     "data_source_setup_guide_desc": "请配置 Tushare API 地址和 Token、Tavily API Key、NewsAPI API Key。配置会保存到系统设置表中，用于后续数据同步和新闻检索。",
     "test_config": "测试配置",
