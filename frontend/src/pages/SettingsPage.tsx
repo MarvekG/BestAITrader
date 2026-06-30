@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ReloadOutlined } from '@ant-design/icons';
 import {
+  Alert,
   App as AntdApp,
   Button,
   Card,
@@ -25,7 +26,7 @@ import {
 } from 'antd';
 import type { RcFile, UploadFile } from 'antd/es/upload/interface';
 import type { ColumnsType } from 'antd/es/table';
-import { sourcesApi } from '../api/settings';
+import { DataSourceConfigTestKey, sourcesApi } from '../api/settings';
 import { PromptStats, UsageBreakdownEntry, promptApi } from '../api/prompt';
 import { testingApi } from '../api/testing';
 import type {
@@ -207,6 +208,7 @@ export const SettingsPage: React.FC = () => {
   const activeSettingsTab = SETTINGS_TAB_KEYS.has(settingsSearchParams.get('tab') || '')
     ? settingsSearchParams.get('tab') || 'datasources'
     : 'datasources';
+  const showDataSourceSetupGuide = settingsSearchParams.get('setup') === 'data-sources';
 
   const handleSettingsTabChange = (activeKey: string) => {
     const nextSearchParams = new URLSearchParams(settingsSearchParams);
@@ -221,6 +223,8 @@ export const SettingsPage: React.FC = () => {
   // Tushare Config State
   const [tushareForm] = Form.useForm();
   const [tushareLoading, setTushareLoading] = useState(false);
+  const [dataSourceTestLoading, setDataSourceTestLoading] = useState<Partial<Record<DataSourceConfigTestKey, boolean>>>({});
+  const [dataSourceTestOutputs, setDataSourceTestOutputs] = useState<Partial<Record<DataSourceConfigTestKey, string>>>({});
 
   // Prompt Config State
   const [prompts, setPrompts] = useState<Record<string, string>>({});
@@ -1772,7 +1776,7 @@ export const SettingsPage: React.FC = () => {
 
   const loadTushareConfig = useCallback(async () => {
     try {
-      const config = await sourcesApi.getTushareConfig();
+      const config = await sourcesApi.getDataSourceConfig();
       tushareForm.setFieldsValue(config);
     } catch {
       // Ignore error if config not found
@@ -1813,12 +1817,37 @@ export const SettingsPage: React.FC = () => {
   const handleSaveTushare = async (values: Record<string, unknown>) => {
     setTushareLoading(true);
     try {
-      await sourcesApi.updateTushareConfig(values);
+      const payload = Object.fromEntries(
+        Object.entries(values).filter(([, value]) => typeof value !== 'string' || !value.startsWith('...'))
+      );
+      await sourcesApi.updateDataSourceConfig(payload);
       message.success(t('common.success'));
     } catch {
       message.error(t('common.error'));
     } finally {
       setTushareLoading(false);
+    }
+  };
+
+  const handleTestDataSourceConfig = async (key: DataSourceConfigTestKey) => {
+    setDataSourceTestLoading((prev) => ({ ...prev, [key]: true }));
+    try {
+      const result = await sourcesApi.testDataSourceConfig(key);
+      setDataSourceTestOutputs((prev) => ({ ...prev, [key]: formatApiOutput(result) }));
+      if (result.status === 'success') {
+        message.success(t('settings.data_source_test_completed'));
+      } else {
+        message.warning(t('settings.data_source_test_completed'));
+      }
+    } catch (error) {
+      const responseData = getApiErrorResponseData(error);
+      setDataSourceTestOutputs((prev) => ({
+        ...prev,
+        [key]: formatApiOutput(responseData || { error: getApiErrorMessage(error, t('common.error')) }),
+      }));
+      message.error(t('common.error'));
+    } finally {
+      setDataSourceTestLoading((prev) => ({ ...prev, [key]: false }));
     }
   };
 
@@ -1985,25 +2014,86 @@ export const SettingsPage: React.FC = () => {
           label: t('settings.data_sources'),
           children: (
             <div className="flex flex-col gap-4">
-              <Card title={t('settings.tushare_config')}>
-                <Form
-                  form={tushareForm}
-                  layout="vertical"
-                  onFinish={handleSaveTushare}
+              {showDataSourceSetupGuide && (
+                <Alert
+                  type="info"
+                  showIcon
+                  message={t('settings.data_source_setup_guide_title')}
+                  description={t('settings.data_source_setup_guide_desc')}
+                />
+              )}
+              <Form
+                form={tushareForm}
+                layout="vertical"
+                onFinish={handleSaveTushare}
+                style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+              >
+                <Card
+                  title={t('settings.tushare_config')}
+                  extra={(
+                    <Button
+                      onClick={() => void handleTestDataSourceConfig('tushare')}
+                      loading={!!dataSourceTestLoading.tushare}
+                    >
+                      {t('settings.test_config')}
+                    </Button>
+                  )}
                 >
-                  <Form.Item label={t('settings.api_url')} name="api_url">
+                  <Form.Item label={t('settings.api_url')} name="tushare_api_url">
                     <Input placeholder="https://api.tushare.pro" />
                   </Form.Item>
-                  <Form.Item label={t('settings.api_token')} name="token">
+                  <Form.Item label={t('settings.api_token')} name="tushare_token">
                     <Input.Password placeholder={t('settings.enter_tushare_token')} />
                   </Form.Item>
-                  <Form.Item>
-                    <Button type="primary" htmlType="submit" loading={tushareLoading}>
-                      {t('settings.save_config')}
+                  {dataSourceTestOutputs.tushare && (
+                    <pre style={diagnosticPanelStyle}>{dataSourceTestOutputs.tushare}</pre>
+                  )}
+                </Card>
+
+                <Card
+                  title="Tavily API Key"
+                  extra={(
+                    <Button
+                      onClick={() => void handleTestDataSourceConfig('tavily')}
+                      loading={!!dataSourceTestLoading.tavily}
+                    >
+                      {t('settings.test_config')}
                     </Button>
+                  )}
+                >
+                  <Form.Item label="Tavily API Key" name="tavily_api_key">
+                    <Input.Password placeholder={t('settings.multiple_api_keys_placeholder')} />
                   </Form.Item>
-                </Form>
-              </Card>
+                  {dataSourceTestOutputs.tavily && (
+                    <pre style={diagnosticPanelStyle}>{dataSourceTestOutputs.tavily}</pre>
+                  )}
+                </Card>
+
+                <Card
+                  title="NewsAPI API Key"
+                  extra={(
+                    <Button
+                      onClick={() => void handleTestDataSourceConfig('newsapi')}
+                      loading={!!dataSourceTestLoading.newsapi}
+                    >
+                      {t('settings.test_config')}
+                    </Button>
+                  )}
+                >
+                  <Form.Item label="NewsAPI API Key" name="news_api_key">
+                    <Input.Password placeholder={t('settings.multiple_api_keys_placeholder')} />
+                  </Form.Item>
+                  {dataSourceTestOutputs.newsapi && (
+                    <pre style={diagnosticPanelStyle}>{dataSourceTestOutputs.newsapi}</pre>
+                  )}
+                </Card>
+
+                <Form.Item>
+                  <Button type="primary" htmlType="submit" loading={tushareLoading}>
+                    {t('settings.save_config')}
+                  </Button>
+                </Form.Item>
+              </Form>
 
             </div>
           )

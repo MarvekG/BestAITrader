@@ -279,22 +279,9 @@ async def test_db():
 
 @router.get("/tushare", response_model=Dict[str, Any])
 async def test_tushare():
-    try:
-        ingestor = ingestor_manager.get_ingestor("tushare")
-        if not ingestor or not ingestor.pro:
-            return {"status": "error", "message": i18n_service.t("testing.tushare_no_token")}
+    from app.api.endpoints.sources import test_tushare_config_key
 
-        start_time = time.time()
-        # 默认只查询几条数据的接口测试
-        df = ingestor.pro.stock_basic(exchange='', list_status='L',
-                                      fields='ts_code,symbol,name,area,industry,list_date', limit=5)
-        elapsed = int((time.time() - start_time) * 1000)
-        if df is not None and not df.empty:
-            return {"status": "success", "message": i18n_service.t("testing.tushare_success"), "elapsed_ms": elapsed}
-        else:
-            return {"status": "error", "message": i18n_service.t("testing.tushare_empty")}
-    except Exception as e:
-        return {"status": "error", "message": i18n_service.t("testing.tushare_failed").format(error=str(e))}
+    return await test_tushare_config_key()
 
 
 @router.get("/python_sandbox", response_model=Dict[str, Any])

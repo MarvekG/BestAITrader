@@ -51,7 +51,7 @@ class _FakeAsyncClient:
 
 @pytest.mark.asyncio
 async def test_search_returns_normalized_results(monkeypatch):
-    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.tavily.settings.TAVILY_API_KEY", "test-key")
+    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.tavily.get_data_source_config_value", lambda *args, **kwargs: "test-key")
 
     with patch("app.ai.agentic.tooling.news_plugins.tavily.httpx.AsyncClient", _FakeAsyncClient):
         results = await tavily.search("AI", limit=1)
@@ -69,7 +69,7 @@ async def test_search_returns_normalized_results(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_invoke_news_plugin_uses_tavily_source(monkeypatch):
-    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.tavily.settings.TAVILY_API_KEY", "test-key")
+    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.tavily.get_data_source_config_value", lambda *args, **kwargs: "test-key")
 
     with patch("app.ai.agentic.tooling.news_plugins.tavily.httpx.AsyncClient", _FakeAsyncClient):
         results = await invoke_news_plugin(source="tavily", keyword="AI", limit=1)
@@ -80,7 +80,7 @@ async def test_invoke_news_plugin_uses_tavily_source(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_tries_next_key_when_response_is_not_200(monkeypatch):
-    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.tavily.settings.TAVILY_API_KEY", "bad-key, good-key")
+    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.tavily.get_data_source_config_value", lambda *args, **kwargs: "bad-key, good-key")
     used_keys = []
 
     class _FailoverClient(_FakeAsyncClient):
@@ -99,7 +99,7 @@ async def test_search_tries_next_key_when_response_is_not_200(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_returns_empty_when_api_key_missing(monkeypatch):
-    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.tavily.settings.TAVILY_API_KEY", "")
+    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.tavily.get_data_source_config_value", lambda *args, **kwargs: "")
 
     results = await tavily.search("AI", limit=1)
 
@@ -108,7 +108,7 @@ async def test_search_returns_empty_when_api_key_missing(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_returns_fatal_error_when_all_keys_fail(monkeypatch):
-    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.tavily.settings.TAVILY_API_KEY", "expired-key")
+    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.tavily.get_data_source_config_value", lambda *args, **kwargs: "expired-key")
 
     class _ExpiredKeyClient(_FakeAsyncClient):
         async def post(self, url, json):

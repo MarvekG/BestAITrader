@@ -5,6 +5,11 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional, Any
 from app.data.ingestion.service import DataIngestionService
 from app.core.config import settings
+from app.core.data_source_settings import (
+    TUSHARE_API_SETTING_KEY,
+    TUSHARE_TOKEN_SETTING_KEY,
+)
+from app.core.data_source_config_cache import get_data_source_config_value
 from app.data.ingestors.base_ingestor import BaseIngestor
 from app.data.ingestors.plugins.column_mapping import ColumnMapper
 from app.data.ingestors.rate_limiter import LeakyBucketRateLimiter
@@ -27,7 +32,6 @@ class TushareIngestor(BaseIngestor):
     def __init__(self):
         self.ingestion_service = DataIngestionService()
         self.source = self.get_source_name()
-        self.pro = self.get_pro_client() if settings.TUSHARE_TOKEN else None
         self._stock_info_cache = {}  # Cache for shares and financial data
 
         # 初始化限流器（单例模式）
@@ -41,11 +45,23 @@ class TushareIngestor(BaseIngestor):
         logger.info(
             "TushareIngestor initialized",
             extra={
-                "config": self.get_tushare_config(),
                 "rate_limit": f"{self.rate_limiter.max_calls_per_minute} calls/min",
                 "rate_limit_timeout_seconds": settings.DATA_SOURCE_RATE_LIMIT_TIMEOUT_SECONDS,
             }
         )
+
+    @property
+    def pro(self):
+        """
+        基于数据库中的最新 Tushare 配置创建 Pro 客户端。
+
+        Returns:
+            Tushare Pro 客户端。
+
+        Raises:
+            ValueError: 未配置 Tushare Token。
+        """
+        return self.get_pro_client()
 
     async def _run_in_executor(self, func, *args, use_cache: bool = True, cache_ttl: int = 60, **kwargs):
         """
@@ -78,54 +94,35 @@ class TushareIngestor(BaseIngestor):
 
     @staticmethod
     def get_pro_client():
-        if settings.TUSHARE_API:
-            TushareIngestor.update_tushare_config(api_url=settings.TUSHARE_API)
-        if not settings.TUSHARE_TOKEN:
-            raise ValueError("Tushare token is not configured")
-        return ts.pro_api(settings.TUSHARE_TOKEN)
-
-    def update_token(self, token: str):
-        """Update Tushare token at runtime"""
-        if token:
-            self.pro = ts.pro_api(token)
-            settings.TUSHARE_TOKEN = token
-            logger.info("Tushare token updated at runtime")
-
-    @staticmethod
-    def update_tushare_config(
-            token: Optional[str] = None, api_url: Optional[str] = None) -> Dict[str, Any]:
-        """
-        更新Tushare配置 (Deprecated mechanism, use EnvManager in API layer)
-        This method is kept for compatibility but token persistence happens in API layer.
-        """
-        from tushare.pro.client import DataApi
-        result = {}
-
-        # 更新API地址
+        api_url = TushareIngestor.get_tushare_api_url()
+        token = TushareIngestor.get_tushare_token()
         if api_url:
-            logger.info(f"before updating Tushare config: {DataApi._DataApi__http_url}")
+            from tushare.pro.client import DataApi
+
             DataApi._DataApi__http_url = api_url
-            logger.info(f"after updating Tushare config: ${DataApi._DataApi__http_url}")
-            result["api_url"] = api_url
-
-        # 更新token
-        if token:
-            result["token"] = token
-            # Note: Persistence is now handled by EnvManager in the API endpoint
-
-        return result
+        if not token:
+            raise ValueError("Tushare token is not configured")
+        return ts.pro_api(token)
 
     @staticmethod
-    def get_tushare_config() -> Dict[str, Any]:
-        """获取当前Tushare配置"""
-        from tushare.pro.client import DataApi
-        return {
-            "api_url": getattr(
-                DataApi,
-                "_DataApi__http_url",
-                "http://api.waditu.com/dataapi"),
-            "token": f"...{settings.TUSHARE_TOKEN[-3:]}" if settings.TUSHARE_TOKEN else None
-        }
+    def get_tushare_token() -> str:
+        """
+        读取当前 Tushare Token。
+
+        Returns:
+            system_settings 中配置的 Token；未配置时返回空字符串。
+        """
+        return get_data_source_config_value(TUSHARE_TOKEN_SETTING_KEY)
+
+    @staticmethod
+    def get_tushare_api_url() -> str:
+        """
+        读取当前 Tushare API URL。
+
+        Returns:
+            system_settings 中配置的 API URL；未配置时返回空字符串。
+        """
+        return get_data_source_config_value(TUSHARE_API_SETTING_KEY)
 
     async def fetch_and_ingest_stock_kline(
             self,

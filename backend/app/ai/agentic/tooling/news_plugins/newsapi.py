@@ -27,6 +27,8 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.core.data_source_config_cache import get_data_source_config_value
+from app.core.data_source_settings import NEWS_API_KEY_SETTING_KEY
 from app.core.logger import get_logger
 
 from app.ai.agentic.tooling.news_plugins.base import format_error
@@ -64,7 +66,8 @@ async def search(
     Returns:
         Normalized NewsAPI search results.
     """
-    if not settings.NEWS_API_KEY:
+    api_keys = get_data_source_config_value(NEWS_API_KEY_SETTING_KEY)
+    if not api_keys:
         logger.warning("NEWS_API_KEY is not configured.")
         return format_error("NEWS_API_KEY is not configured", PLUGIN_ID, fatal=True)
 
@@ -88,7 +91,7 @@ async def search(
                     request_params = {**params, "apiKey": api_key}
                     return await client.get("https://newsapi.org/v2/everything", params=request_params)
 
-                response = await request_with_key_failover("NewsAPI", settings.NEWS_API_KEY, request_once)
+                response = await request_with_key_failover("NewsAPI", api_keys, request_once)
                 if response is None:
                     return format_error("NEWS_API_KEY is not configured", PLUGIN_ID, fatal=True)
                 data = response.json()

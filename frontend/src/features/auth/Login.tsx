@@ -3,6 +3,7 @@ import { Card, Form, Input, Button, Typography, App as AntdApp, theme } from 'an
 import { UserOutlined, LockOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { authApi } from '../../api/auth';
+import { sourcesApi } from '../../api/settings';
 import { setAuthToken } from '../../services/authSession';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -16,6 +17,18 @@ interface LoginFormValues {
   username: string;
   password: string;
 }
+
+const isMaskedValue = (value?: string | null): boolean => typeof value === 'string' && value.startsWith('...');
+
+const isDataSourceSetupIncomplete = (config: Awaited<ReturnType<typeof sourcesApi.getDataSourceConfig>>): boolean => {
+  return !config.tushare_api_url
+    || !config.tushare_token
+    || !isMaskedValue(config.tushare_token)
+    || !config.tavily_api_key
+    || !isMaskedValue(config.tavily_api_key)
+    || !config.news_api_key
+    || !isMaskedValue(config.news_api_key);
+};
 
 export const Login: React.FC = () => {
   const { t } = useTranslation();
@@ -36,6 +49,16 @@ export const Login: React.FC = () => {
 
       setAuthToken(response.access_token);
       message.success(t('auth.welcome'));
+      try {
+        const dataSourceConfig = await sourcesApi.getDataSourceConfig();
+        if (isDataSourceSetupIncomplete(dataSourceConfig)) {
+          navigate('/settings?setup=data-sources');
+          return;
+        }
+      } catch {
+        navigate('/settings?setup=data-sources');
+        return;
+      }
       navigate('/dashboard');
     } catch (error) {
       console.error('Login failed:', error);

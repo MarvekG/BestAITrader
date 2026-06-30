@@ -7,6 +7,11 @@ import pandas as pd
 import tushare as ts
 
 from app.core.config import settings
+from app.core.data_source_settings import (
+    TUSHARE_API_SETTING_KEY,
+    TUSHARE_TOKEN_SETTING_KEY,
+)
+from app.core.data_source_config_cache import get_data_source_config_value
 from app.core.logger import get_logger
 from app.core.utils.formatters import StockCodeStandardizer
 
@@ -37,15 +42,17 @@ def _build_candidate_ranges(as_of: Optional[date] = None) -> List[tuple[str, str
 
 def _get_tushare_pro_client():
     """Create a Tushare pro client using current runtime settings."""
-    if not settings.TUSHARE_TOKEN:
+    token = get_data_source_config_value(TUSHARE_TOKEN_SETTING_KEY)
+    api_url = get_data_source_config_value(TUSHARE_API_SETTING_KEY)
+    if not token:
         raise RuntimeError("Tushare token is required for core index constituent queries")
 
-    if settings.TUSHARE_API:
+    if api_url:
         from tushare.pro.client import DataApi
 
-        DataApi._DataApi__http_url = settings.TUSHARE_API
+        DataApi._DataApi__http_url = api_url
 
-    return ts.pro_api(settings.TUSHARE_TOKEN)
+    return ts.pro_api(token)
 
 
 def get_core_index_constituent_codes(
