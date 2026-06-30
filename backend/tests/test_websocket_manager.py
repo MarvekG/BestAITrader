@@ -90,3 +90,44 @@ async def test_trading_notification_methods_swallow_broadcast_errors(monkeypatch
     await manager.send_order_status("session", {"order_id": "order-1"})
     await manager.send_position_update("session", {"stock_code": "000001.SZ"})
     await manager.send_trade_executed("session", {"trade_id": "trade-1"})
+
+
+@pytest.mark.asyncio
+async def test_interactive_stock_picker_update_is_scoped_to_owner_session(monkeypatch):
+    """交互式选股更新只推送给 run 所属用户的订阅会话。
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture。
+    """
+    manager = WebSocketManager()
+    manager.subscriptions = {
+        "owner-session": {"interactive_stock_picker": {"*"}},
+        "other-session": {"interactive_stock_picker": {"*"}},
+    }
+    manager.session_user_ids = {
+        "owner-session": 1,
+        "other-session": 2,
+    }
+    sent_sessions = []
+
+    async def fake_broadcast_to_session(_message, session_id):
+        """记录收到推送的 session。
+
+        Args:
+            _message: 推送消息。
+            session_id: 目标 WebSocket session。
+        """
+        sent_sessions.append(session_id)
+
+    monkeypatch.setattr(manager, "broadcast_to_session", fake_broadcast_to_session)
+
+    await manager.send_interactive_stock_picker_update(
+        run_id="run-1",
+        stage="planning",
+        status="awaiting_plan_approval",
+        message="plan ready",
+        user_id=1,
+        payload={"run": {"user_id": 1}},
+    )
+
+    assert sent_sessions == ["owner-session"]
