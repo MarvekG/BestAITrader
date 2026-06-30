@@ -219,11 +219,11 @@ export const SettingsPage: React.FC = () => {
     alignItems: 'baseline',
     display: 'flex',
     gap: 8,
-    maxWidth: 538,
+    maxWidth: 622,
     width: '100%',
   };
   const dataSourceInputStyle: React.CSSProperties = {
-    maxWidth: 538,
+    maxWidth: 622,
     width: '100%',
   };
   const activeSettingsTab = SETTINGS_TAB_KEYS.has(settingsSearchParams.get('tab') || '')
