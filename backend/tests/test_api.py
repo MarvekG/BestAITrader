@@ -1,4 +1,3 @@
-import json
 from datetime import date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
@@ -312,28 +311,9 @@ class TestSourcesAPI:
         assert row.value == ["second-secret", "third-secret"]
 
     def test_data_source_config_test_endpoints_passthrough(self, client, auth_headers):
-        class FakeResponse:
-            status = 200
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, exc_type, exc, tb):
-                return False
-
-            def read(self):
-                return b'{"ok": true, "items": [1]}'
-
-        captured = []
-
-        def fake_urlopen(request, timeout):
-            captured.append({
-                "url": request.full_url,
-                "method": request.get_method(),
-                "data": json.loads(request.data.decode("utf-8")) if request.data else None,
-                "timeout": timeout,
-            })
-            return FakeResponse()
+        class FakeTushareClient:
+            def daily(self, **kwargs):
+                return [{"ok": True, "params": kwargs}]
 
         config_response = client.post(
             "/api/v1/sources/config",
@@ -347,36 +327,38 @@ class TestSourcesAPI:
         )
         assert config_response.status_code == 200, config_response.text
 
-        with patch("app.api.endpoints.sources.urlopen", fake_urlopen):
+        with (
+            patch(
+                "app.api.endpoints.sources.TushareIngestor.get_pro_client",
+                return_value=FakeTushareClient(),
+            ),
+            patch(
+                "app.api.endpoints.sources.tavily.search_with_api_keys",
+                AsyncMock(return_value=[{"title": "tavily result", "source": "tavily"}]),
+            ) as tavily_search,
+            patch(
+                "app.api.endpoints.sources.newsapi.search_with_api_keys",
+                AsyncMock(return_value=[{"title": "newsapi result", "source": "newsapi"}]),
+            ) as newsapi_search,
+        ):
             tushare_response = client.post("/api/v1/sources/config/test/tushare", headers=auth_headers)
             tavily_response = client.post("/api/v1/sources/config/test/tavily", headers=auth_headers)
             newsapi_response = client.post("/api/v1/sources/config/test/newsapi", headers=auth_headers)
 
         assert tushare_response.status_code == 200
         assert tushare_response.json()["status"] == "success"
-        assert tushare_response.json()["http_status"] == 200
-        assert tushare_response.json()["data"] == {"ok": True, "items": [1]}
-        assert tushare_response.json()["raw_body"] == '{"ok": true, "items": [1]}'
+        assert tushare_response.json()["data"][0]["params"]["ts_code"] == "000001.SZ"
 
         for response in [tavily_response, newsapi_response]:
             assert response.status_code == 200
             assert response.json()["status"] == "completed"
             assert len(response.json()["results"]) == 2
             for item in response.json()["results"]:
-                assert item["http_status"] == 200
-                assert item["data"] == {"ok": True, "items": [1]}
-                assert item["raw_body"] == '{"ok": true, "items": [1]}'
+                assert item["status"] == "success"
+                assert item["data"]
 
-        assert captured[0]["url"] == "https://api.example.com/tushare/daily"
-        assert captured[0]["data"]["token"] == "tushare-token"
-        assert captured[1]["url"] == "https://api.tavily.com/search"
-        assert captured[1]["data"]["api_key"] == "tavily-token-a"
-        assert captured[2]["url"] == "https://api.tavily.com/search"
-        assert captured[2]["data"]["api_key"] == "tavily-token-b"
-        assert captured[3]["url"].startswith("https://newsapi.org/v2/everything?")
-        assert "apiKey=news-token-a" in captured[3]["url"]
-        assert captured[4]["url"].startswith("https://newsapi.org/v2/everything?")
-        assert "apiKey=news-token-b" in captured[4]["url"]
+        assert [call.args[0] for call in tavily_search.await_args_list] == ["tavily-token-a", "tavily-token-b"]
+        assert [call.args[0] for call in newsapi_search.await_args_list] == ["news-token-a", "news-token-b"]
 
 
 class TestSessionAPI:

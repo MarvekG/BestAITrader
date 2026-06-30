@@ -142,6 +142,29 @@ async def search(
         Normalized Tavily search results.
     """
     api_keys = ",".join(get_data_source_config_list(TAVILY_API_KEY_SETTING_KEY))
+    return await search_with_api_keys(api_keys, keyword, limit, from_date, to_date)
+
+
+async def search_with_api_keys(
+    api_keys: str,
+    keyword: str,
+    limit: int = 10,
+    from_date: str = "",
+    to_date: str = "",
+) -> list[dict[str, Any]]:
+    """
+    使用指定 API Key 列表执行 Tavily 搜索。
+
+    Args:
+        api_keys: 逗号分隔的 API Key 列表。
+        keyword: 搜索关键词。
+        limit: 最大返回结果数。
+        from_date: 开始日期。
+        to_date: 结束日期。
+
+    Returns:
+        标准化后的 Tavily 搜索结果。
+    """
     if not api_keys:
         logger.warning("TAVILY_API_KEY is not configured.")
         return format_error("TAVILY_API_KEY is not configured", PLUGIN_ID, fatal=True)

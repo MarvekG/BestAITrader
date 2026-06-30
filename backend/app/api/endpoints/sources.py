@@ -1,17 +1,14 @@
-import http.client
-import json
-import time
 from typing import Dict, Any, Optional
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
+from app.ai.agentic.tooling.news_plugins import newsapi, tavily
 from app.core.data_source_config_cache import (
     get_data_source_config as get_cached_data_source_config,
     invalidate_data_source_config_cache,
 )
+from app.data.ingestors.plugins.tushare_ingestor import TushareIngestor
 from app.data.ingestors.manager import ingestor_manager
 from app.core.data_source_settings import (
     NEWS_API_KEY_SETTING_KEY,
@@ -23,7 +20,6 @@ from app.crud.system_setting import save_system_setting
 from app.core.i18n import i18n_service
 
 router = APIRouter()
-DATA_SOURCE_TEST_TIMEOUT_SECONDS = 30
 
 
 @router.get("/", response_model=Dict[str, Any])
@@ -192,106 +188,6 @@ def _normalize_secret_list_update(next_values: list[str], current_values: Any) -
     return normalized
 
 
-def _read_json_response(request: Request) -> Dict[str, Any]:
-    """
-    发送 HTTP 请求并透传外部服务响应。
-
-    Args:
-        request: 已构造的 urllib 请求。
-
-    Returns:
-        包含 HTTP 状态码、耗时和响应正文的结果。
-    """
-    start_time = time.time()
-    try:
-        with urlopen(request, timeout=DATA_SOURCE_TEST_TIMEOUT_SECONDS) as response:
-            body = response.read().decode("utf-8", errors="replace")
-            return _build_external_response(response.status, body, int((time.time() - start_time) * 1000))
-    except HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        return _build_external_response(exc.code, body, int((time.time() - start_time) * 1000))
-    except URLError as exc:
-        return _build_transport_error(str(exc.reason), int((time.time() - start_time) * 1000))
-    except http.client.HTTPException as exc:
-        return _build_transport_error(str(exc), int((time.time() - start_time) * 1000))
-    except OSError as exc:
-        return _build_transport_error(str(exc), int((time.time() - start_time) * 1000))
-    except TimeoutError:
-        return _build_transport_error("request timeout", int((time.time() - start_time) * 1000))
-
-
-def _build_external_response(http_status: int, body: str, elapsed_ms: int) -> Dict[str, Any]:
-    """
-    构造外部服务透传响应。
-
-    Args:
-        http_status: 外部服务 HTTP 状态码。
-        body: 外部服务响应正文。
-        elapsed_ms: 请求耗时。
-
-    Returns:
-        API 响应体。
-    """
-    payload: Dict[str, Any] = {
-        "status": "success" if 200 <= http_status < 300 else "error",
-        "http_status": http_status,
-        "elapsed_ms": elapsed_ms,
-        "raw_body": body[:4000],
-    }
-    try:
-        payload["data"] = json.loads(body) if body else None
-    except json.JSONDecodeError:
-        payload["data"] = None
-    return payload
-
-
-def _build_transport_error(error: str, elapsed_ms: int) -> Dict[str, Any]:
-    """
-    构造请求未到达外部服务时的错误响应。
-
-    Args:
-        error: 传输层错误说明。
-        elapsed_ms: 请求耗时。
-
-    Returns:
-        API 响应体。
-    """
-    return {"status": "error", "elapsed_ms": elapsed_ms, "error": error}
-
-
-def _post_json_to_external(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    向外部服务发送 JSON POST 请求。
-
-    Args:
-        url: 请求地址。
-        payload: JSON 请求体。
-
-    Returns:
-        外部服务透传响应。
-    """
-    request = Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    return _read_json_response(request)
-
-
-def _get_external(url: str) -> Dict[str, Any]:
-    """
-    向外部服务发送 GET 请求。
-
-    Args:
-        url: 请求地址。
-
-    Returns:
-        外部服务透传响应。
-    """
-    return _read_json_response(Request(url, method="GET"))
-
-
 def _attach_key_context(result: Dict[str, Any], index: int, api_key: str) -> Dict[str, Any]:
     """
     为单个 API Key 的透传测试结果添加上下文。
@@ -307,26 +203,55 @@ def _attach_key_context(result: Dict[str, Any], index: int, api_key: str) -> Dic
     return {"key_index": index, "key": _mask_secret(api_key), **result}
 
 
+def _build_plugin_test_result(results: list[dict[str, Any]]) -> Dict[str, Any]:
+    """
+    将新闻插件搜索结果转换为配置测试响应。
+
+    Args:
+        results: 新闻插件返回的标准化结果。
+
+    Returns:
+        配置测试响应体。
+    """
+    fatal_error = next((item for item in results if item.get("fatal") and item.get("error")), None)
+    if fatal_error:
+        return {"status": "error", "error": fatal_error["error"], "data": results}
+    return {"status": "success", "data": results}
+
+
+def _build_tushare_test_result(data: Any) -> Dict[str, Any]:
+    """
+    将 Tushare 查询结果转换为配置测试响应。
+
+    Args:
+        data: Tushare Pro 客户端返回的数据。
+
+    Returns:
+        配置测试响应体。
+    """
+    if hasattr(data, "to_dict"):
+        return {"status": "success", "data": data.to_dict(orient="records")}
+    return {"status": "success", "data": data}
+
+
 @router.post("/config/test/tushare", response_model=Dict[str, Any])
 async def test_tushare_config_key():
-    """测试当前 Tushare 配置并透传外部响应。"""
-    data_source_config = get_cached_data_source_config()
-    api_url = data_source_config.get(TUSHARE_API_SETTING_KEY, "") or "http://api.waditu.com/dataapi"
-    token = data_source_config.get(TUSHARE_TOKEN_SETTING_KEY, "")
-    return _post_json_to_external(
-        f"{api_url.rstrip('/')}/daily",
-        {
-            "api_name": "daily",
-            "token": token,
-            "params": {"ts_code": "000001.SZ", "start_date": "20240102", "end_date": "20240110"},
-            "fields": "ts_code,trade_date,open,close",
-        },
-    )
+    """测试当前 Tushare 配置。"""
+    try:
+        data = TushareIngestor().pro.daily(
+            ts_code="000001.SZ",
+            start_date="20240102",
+            end_date="20240110",
+            fields="ts_code,trade_date,open,close",
+        )
+        return _build_tushare_test_result(data)
+    except Exception as exc:
+        return {"status": "error", "error": str(exc)}
 
 
 @router.post("/config/test/tavily", response_model=Dict[str, Any])
 async def test_tavily_config_key():
-    """测试当前 Tavily 配置并透传外部响应。"""
+    """测试当前 Tavily 配置。"""
     data_source_config = get_cached_data_source_config()
     raw_api_keys = data_source_config.get(TAVILY_API_KEY_SETTING_KEY, [])
     api_keys = raw_api_keys if isinstance(raw_api_keys, list) else []
@@ -335,10 +260,7 @@ async def test_tavily_config_key():
         "status": "completed",
         "results": [
             _attach_key_context(
-                _post_json_to_external(
-                    "https://api.tavily.com/search",
-                    {"api_key": api_key, "query": "A股", "max_results": 1},
-                ),
+                _build_plugin_test_result(await tavily.search_with_api_keys(api_key, "A股", limit=1)),
                 index,
                 api_key,
             )
@@ -349,19 +271,16 @@ async def test_tavily_config_key():
 
 @router.post("/config/test/newsapi", response_model=Dict[str, Any])
 async def test_newsapi_config_key():
-    """测试当前 NewsAPI 配置并透传外部响应。"""
-    from urllib.parse import urlencode
-
+    """测试当前 NewsAPI 配置。"""
     data_source_config = get_cached_data_source_config()
     raw_api_keys = data_source_config.get(NEWS_API_KEY_SETTING_KEY, [])
     api_keys = raw_api_keys if isinstance(raw_api_keys, list) else []
     api_keys = api_keys or [""]
     results = []
     for index, api_key in enumerate(api_keys, start=1):
-        query = urlencode({"q": "stock", "pageSize": 1, "apiKey": api_key})
         results.append(
             _attach_key_context(
-                _get_external(f"https://newsapi.org/v2/everything?{query}"),
+                _build_plugin_test_result(await newsapi.search_with_api_keys(api_key, "stock", limit=1)),
                 index,
                 api_key,
             )

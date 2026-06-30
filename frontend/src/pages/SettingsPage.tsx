@@ -215,6 +215,13 @@ export const SettingsPage: React.FC = () => {
     maxHeight: 360,
     overflowY: 'auto',
   };
+  const apiKeyInputRowStyle: React.CSSProperties = {
+    alignItems: 'baseline',
+    display: 'flex',
+    gap: 8,
+    maxWidth: 960,
+    width: '100%',
+  };
   const activeSettingsTab = SETTINGS_TAB_KEYS.has(settingsSearchParams.get('tab') || '')
     ? settingsSearchParams.get('tab') || 'datasources'
     : 'datasources';
@@ -2081,12 +2088,12 @@ export const SettingsPage: React.FC = () => {
                     {(fields, { add, remove }) => (
                       <Space direction="vertical" style={{ width: '100%' }}>
                         {fields.map((field) => (
-                          <Space key={field.key} align="baseline" style={{ display: 'flex', width: '100%' }}>
+                          <div key={field.key} style={apiKeyInputRowStyle}>
                             <Form.Item {...field} style={{ flex: 1 }}>
                               <Input.Password placeholder={t('settings.multiple_api_keys_placeholder')} />
                             </Form.Item>
                             <Button danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
-                          </Space>
+                          </div>
                         ))}
                         <Button type="dashed" icon={<PlusOutlined />} onClick={() => add()}>
                           {t('settings.add_api_key')}
@@ -2114,12 +2121,12 @@ export const SettingsPage: React.FC = () => {
                     {(fields, { add, remove }) => (
                       <Space direction="vertical" style={{ width: '100%' }}>
                         {fields.map((field) => (
-                          <Space key={field.key} align="baseline" style={{ display: 'flex', width: '100%' }}>
+                          <div key={field.key} style={apiKeyInputRowStyle}>
                             <Form.Item {...field} style={{ flex: 1 }}>
                               <Input.Password placeholder={t('settings.multiple_api_keys_placeholder')} />
                             </Form.Item>
                             <Button danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
-                          </Space>
+                          </div>
                         ))}
                         <Button type="dashed" icon={<PlusOutlined />} onClick={() => add()}>
                           {t('settings.add_api_key')}
