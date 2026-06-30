@@ -232,8 +232,8 @@ class TestSourcesAPI:
             json={
                 "tushare_token": "tushare-secret",
                 "tushare_api_url": "https://api.example.com/tushare",
-                "tavily_api_key": "tavily-secret",
-                "news_api_key": "news-secret",
+                "tavily_api_key": ["tavily-secret"],
+                "news_api_key": ["news-secret"],
             },
         )
 
@@ -254,8 +254,8 @@ class TestSourcesAPI:
         assert values == {
             "data_sources.tushare.token": "tushare-secret",
             "data_sources.tushare.api_url": "https://api.example.com/tushare",
-            "data_sources.tavily.api_key": "tavily-secret",
-            "data_sources.newsapi.api_key": "news-secret",
+            "data_sources.tavily.api_key": ["tavily-secret"],
+            "data_sources.newsapi.api_key": ["news-secret"],
         }
 
         config_response = client.get("/api/v1/sources/config", headers=auth_headers)
@@ -264,32 +264,52 @@ class TestSourcesAPI:
         assert config_response.json()["config"] == {
             "tushare_api_url": "https://api.example.com/tushare",
             "tushare_token": "...ret",
-            "tavily_api_key": "...ret",
-            "news_api_key": "...ret",
+            "tavily_api_key": ["...ret"],
+            "news_api_key": ["...ret"],
         }
 
     def test_data_source_config_cache_invalidates_after_update(self, client, auth_headers):
         first_response = client.post(
             "/api/v1/sources/config",
             headers=auth_headers,
-            json={"tavily_api_key": "first-key"},
+            json={"tavily_api_key": ["first-key"]},
         )
         assert first_response.status_code == 200, first_response.text
 
         first_config = client.get("/api/v1/sources/config", headers=auth_headers)
         assert first_config.status_code == 200
-        assert first_config.json()["config"]["tavily_api_key"] == "...key"
+        assert first_config.json()["config"]["tavily_api_key"] == ["...key"]
 
         second_response = client.post(
             "/api/v1/sources/config",
             headers=auth_headers,
-            json={"tavily_api_key": "second-secret"},
+            json={"tavily_api_key": ["second-secret"]},
         )
         assert second_response.status_code == 200, second_response.text
 
         second_config = client.get("/api/v1/sources/config", headers=auth_headers)
         assert second_config.status_code == 200
-        assert second_config.json()["config"]["tavily_api_key"] == "...ret"
+        assert second_config.json()["config"]["tavily_api_key"] == ["...ret"]
+
+    def test_data_source_config_keeps_masked_list_items(self, client, auth_headers, db_session):
+        from app.models.system_setting import SystemSetting
+
+        first_response = client.post(
+            "/api/v1/sources/config",
+            headers=auth_headers,
+            json={"tavily_api_key": ["first-secret", "second-secret"]},
+        )
+        assert first_response.status_code == 200, first_response.text
+
+        update_response = client.post(
+            "/api/v1/sources/config",
+            headers=auth_headers,
+            json={"tavily_api_key": ["...ret", "third-secret"]},
+        )
+        assert update_response.status_code == 200, update_response.text
+
+        row = db_session.query(SystemSetting).filter(SystemSetting.key == "data_sources.tavily.api_key").one()
+        assert row.value == ["second-secret", "third-secret"]
 
     def test_data_source_config_test_endpoints_passthrough(self, client, auth_headers):
         class FakeResponse:
@@ -321,8 +341,8 @@ class TestSourcesAPI:
             json={
                 "tushare_token": "tushare-token",
                 "tushare_api_url": "https://api.example.com/tushare",
-                "tavily_api_key": "tavily-token-a,tavily-token-b",
-                "news_api_key": "news-token-a,news-token-b",
+                "tavily_api_key": ["tavily-token-a", "tavily-token-b"],
+                "news_api_key": ["news-token-a", "news-token-b"],
             },
         )
         assert config_response.status_code == 200, config_response.text

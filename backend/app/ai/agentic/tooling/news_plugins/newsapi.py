@@ -27,7 +27,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
-from app.core.data_source_config_cache import get_data_source_config_value
+from app.core.data_source_config_cache import get_data_source_config_list
 from app.core.data_source_settings import NEWS_API_KEY_SETTING_KEY
 from app.core.logger import get_logger
 
@@ -66,7 +66,7 @@ async def search(
     Returns:
         Normalized NewsAPI search results.
     """
-    api_keys = get_data_source_config_value(NEWS_API_KEY_SETTING_KEY)
+    api_keys = ",".join(get_data_source_config_list(NEWS_API_KEY_SETTING_KEY))
     if not api_keys:
         logger.warning("NEWS_API_KEY is not configured.")
         return format_error("NEWS_API_KEY is not configured", PLUGIN_ID, fatal=True)

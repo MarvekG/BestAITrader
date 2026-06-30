@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ReloadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
   Alert,
   App as AntdApp,
@@ -175,6 +175,16 @@ type UsageRoleRow = {
 const isNewsPluginBatchUploadResult = (
   result: NewsPluginBatchUploadResult | NewsPluginMutationResult,
 ): result is NewsPluginBatchUploadResult => Array.isArray((result as NewsPluginBatchUploadResult).items);
+
+const normalizeApiKeyList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
 
 export const SettingsPage: React.FC = () => {
   const { t } = useTranslation();
@@ -1777,7 +1787,11 @@ export const SettingsPage: React.FC = () => {
   const loadTushareConfig = useCallback(async () => {
     try {
       const config = await sourcesApi.getDataSourceConfig();
-      tushareForm.setFieldsValue(config);
+      tushareForm.setFieldsValue({
+        ...config,
+        tavily_api_key: config.tavily_api_key || [],
+        news_api_key: config.news_api_key || [],
+      });
     } catch {
       // Ignore error if config not found
     }
@@ -1820,6 +1834,8 @@ export const SettingsPage: React.FC = () => {
       const payload = Object.fromEntries(
         Object.entries(values).filter(([, value]) => typeof value !== 'string' || !value.startsWith('...'))
       );
+      payload.tavily_api_key = normalizeApiKeyList(values.tavily_api_key);
+      payload.news_api_key = normalizeApiKeyList(values.news_api_key);
       await sourcesApi.updateDataSourceConfig(payload);
       message.success(t('common.success'));
     } catch {
@@ -2061,9 +2077,23 @@ export const SettingsPage: React.FC = () => {
                     </Button>
                   )}
                 >
-                  <Form.Item label="Tavily API Key" name="tavily_api_key">
-                    <Input.Password placeholder={t('settings.multiple_api_keys_placeholder')} />
-                  </Form.Item>
+                  <Form.List name="tavily_api_key">
+                    {(fields, { add, remove }) => (
+                      <Space direction="vertical" style={{ width: '100%' }}>
+                        {fields.map((field) => (
+                          <Space key={field.key} align="baseline" style={{ display: 'flex', width: '100%' }}>
+                            <Form.Item {...field} style={{ flex: 1 }}>
+                              <Input.Password placeholder={t('settings.multiple_api_keys_placeholder')} />
+                            </Form.Item>
+                            <Button danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                          </Space>
+                        ))}
+                        <Button type="dashed" icon={<PlusOutlined />} onClick={() => add()}>
+                          {t('settings.add_api_key')}
+                        </Button>
+                      </Space>
+                    )}
+                  </Form.List>
                   {dataSourceTestOutputs.tavily && (
                     <pre style={diagnosticPanelStyle}>{dataSourceTestOutputs.tavily}</pre>
                   )}
@@ -2080,9 +2110,23 @@ export const SettingsPage: React.FC = () => {
                     </Button>
                   )}
                 >
-                  <Form.Item label="NewsAPI API Key" name="news_api_key">
-                    <Input.Password placeholder={t('settings.multiple_api_keys_placeholder')} />
-                  </Form.Item>
+                  <Form.List name="news_api_key">
+                    {(fields, { add, remove }) => (
+                      <Space direction="vertical" style={{ width: '100%' }}>
+                        {fields.map((field) => (
+                          <Space key={field.key} align="baseline" style={{ display: 'flex', width: '100%' }}>
+                            <Form.Item {...field} style={{ flex: 1 }}>
+                              <Input.Password placeholder={t('settings.multiple_api_keys_placeholder')} />
+                            </Form.Item>
+                            <Button danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                          </Space>
+                        ))}
+                        <Button type="dashed" icon={<PlusOutlined />} onClick={() => add()}>
+                          {t('settings.add_api_key')}
+                        </Button>
+                      </Space>
+                    )}
+                  </Form.List>
                   {dataSourceTestOutputs.newsapi && (
                     <pre style={diagnosticPanelStyle}>{dataSourceTestOutputs.newsapi}</pre>
                   )}

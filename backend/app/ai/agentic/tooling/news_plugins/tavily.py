@@ -25,7 +25,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
-from app.core.data_source_config_cache import get_data_source_config_value
+from app.core.data_source_config_cache import get_data_source_config_list
 from app.core.data_source_settings import TAVILY_API_KEY_SETTING_KEY
 from app.core.logger import get_logger
 
@@ -141,7 +141,7 @@ async def search(
     Returns:
         Normalized Tavily search results.
     """
-    api_keys = get_data_source_config_value(TAVILY_API_KEY_SETTING_KEY)
+    api_keys = ",".join(get_data_source_config_list(TAVILY_API_KEY_SETTING_KEY))
     if not api_keys:
         logger.warning("TAVILY_API_KEY is not configured.")
         return format_error("TAVILY_API_KEY is not configured", PLUGIN_ID, fatal=True)

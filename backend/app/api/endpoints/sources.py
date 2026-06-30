@@ -20,7 +20,6 @@ from app.core.data_source_settings import (
     TUSHARE_TOKEN_SETTING_KEY,
 )
 from app.crud.system_setting import save_system_setting
-from app.ai.agentic.tooling.news_plugins.provider_clients import split_api_keys
 from app.core.i18n import i18n_service
 
 router = APIRouter()
@@ -68,8 +67,8 @@ async def set_default_data_source(source_name: str):
 class DataSourceConfigUpdate(BaseModel):
     tushare_token: Optional[str] = None
     tushare_api_url: Optional[str] = None
-    tavily_api_key: Optional[str] = None
-    news_api_key: Optional[str] = None
+    tavily_api_key: Optional[list[str]] = None
+    news_api_key: Optional[list[str]] = None
 
 
 @router.get("/config", response_model=Dict[str, Any])
@@ -84,8 +83,8 @@ async def get_data_source_config():
             "config": {
                 "tushare_api_url": tushare_api_url,
                 "tushare_token": _mask_secret(tushare_token),
-                "tavily_api_key": _mask_secret(data_source_config.get(TAVILY_API_KEY_SETTING_KEY, "")),
-                "news_api_key": _mask_secret(data_source_config.get(NEWS_API_KEY_SETTING_KEY, "")),
+                "tavily_api_key": _mask_secret_list(data_source_config.get(TAVILY_API_KEY_SETTING_KEY, [])),
+                "news_api_key": _mask_secret_list(data_source_config.get(NEWS_API_KEY_SETTING_KEY, [])),
             },
         }
     except Exception as e:
@@ -99,17 +98,29 @@ async def get_data_source_config():
 async def update_data_source_config(config: DataSourceConfigUpdate):
     """保存数据源配置到 system_settings。"""
     try:
+        data_source_config = get_cached_data_source_config()
+
         if config.tushare_token:
             save_system_setting(TUSHARE_TOKEN_SETTING_KEY, config.tushare_token, "Tushare API Token")
 
         if config.tushare_api_url:
             save_system_setting(TUSHARE_API_SETTING_KEY, config.tushare_api_url, "Tushare API URL")
 
-        if config.tavily_api_key:
-            save_system_setting(TAVILY_API_KEY_SETTING_KEY, config.tavily_api_key, "Tavily API Key")
+        if config.tavily_api_key is not None:
+            current_tavily_keys = data_source_config.get(TAVILY_API_KEY_SETTING_KEY, [])
+            save_system_setting(
+                TAVILY_API_KEY_SETTING_KEY,
+                _normalize_secret_list_update(config.tavily_api_key, current_tavily_keys),
+                "Tavily API Key",
+            )
 
-        if config.news_api_key:
-            save_system_setting(NEWS_API_KEY_SETTING_KEY, config.news_api_key, "NewsAPI API Key")
+        if config.news_api_key is not None:
+            current_news_keys = data_source_config.get(NEWS_API_KEY_SETTING_KEY, [])
+            save_system_setting(
+                NEWS_API_KEY_SETTING_KEY,
+                _normalize_secret_list_update(config.news_api_key, current_news_keys),
+                "NewsAPI API Key",
+            )
 
         invalidate_data_source_config_cache()
         return {"status": "success", "message": i18n_service.t("sources.config_updated")}
@@ -133,6 +144,52 @@ def _mask_secret(value: str) -> Optional[str]:
     if not value:
         return None
     return f"...{value[-3:]}"
+
+
+def _mask_secret_list(value: Any) -> list[str]:
+    """
+    返回敏感配置列表的脱敏展示值。
+
+    Args:
+        value: 原始敏感配置列表。
+
+    Returns:
+        脱敏字符串列表。
+    """
+    if not isinstance(value, list):
+        return []
+    return [masked for item in value if isinstance(item, str) and (masked := _mask_secret(item))]
+
+
+def _normalize_secret_list_update(next_values: list[str], current_values: Any) -> list[str]:
+    """
+    规范化前端提交的密钥列表，并保留未修改的脱敏占位项。
+
+    Args:
+        next_values: 前端提交的密钥列表，可能包含脱敏占位值。
+        current_values: 数据库当前保存的真实密钥列表。
+
+    Returns:
+        可直接保存到 system_settings 的真实密钥列表。
+    """
+    current_keys = (
+        [item for item in current_values if isinstance(item, str)]
+        if isinstance(current_values, list)
+        else []
+    )
+    masked_to_current = {_mask_secret(item): item for item in current_keys}
+    normalized: list[str] = []
+    for value in next_values:
+        stripped_value = value.strip()
+        if not stripped_value:
+            continue
+        if stripped_value.startswith("..."):
+            current_value = masked_to_current.get(stripped_value)
+            if current_value:
+                normalized.append(current_value)
+            continue
+        normalized.append(stripped_value)
+    return normalized
 
 
 def _read_json_response(request: Request) -> Dict[str, Any]:
@@ -271,7 +328,9 @@ async def test_tushare_config_key():
 async def test_tavily_config_key():
     """测试当前 Tavily 配置并透传外部响应。"""
     data_source_config = get_cached_data_source_config()
-    api_keys = split_api_keys(data_source_config.get(TAVILY_API_KEY_SETTING_KEY, "")) or [""]
+    raw_api_keys = data_source_config.get(TAVILY_API_KEY_SETTING_KEY, [])
+    api_keys = raw_api_keys if isinstance(raw_api_keys, list) else []
+    api_keys = api_keys or [""]
     return {
         "status": "completed",
         "results": [
@@ -294,7 +353,9 @@ async def test_newsapi_config_key():
     from urllib.parse import urlencode
 
     data_source_config = get_cached_data_source_config()
-    api_keys = split_api_keys(data_source_config.get(NEWS_API_KEY_SETTING_KEY, "")) or [""]
+    raw_api_keys = data_source_config.get(NEWS_API_KEY_SETTING_KEY, [])
+    api_keys = raw_api_keys if isinstance(raw_api_keys, list) else []
+    api_keys = api_keys or [""]
     results = []
     for index, api_key in enumerate(api_keys, start=1):
         query = urlencode({"q": "stock", "pageSize": 1, "apiKey": api_key})

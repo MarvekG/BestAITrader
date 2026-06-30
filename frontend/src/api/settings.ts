@@ -3,8 +3,8 @@ import { apiClient } from './client';
 export interface DataSourceConfig {
   tushare_api_url?: string | null;
   tushare_token?: string | null;
-  tavily_api_key?: string | null;
-  news_api_key?: string | null;
+  tavily_api_key?: string[] | null;
+  news_api_key?: string[] | null;
 }
 
 export interface DataSourceConfigTestResult {

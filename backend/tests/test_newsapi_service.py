@@ -54,7 +54,7 @@ class _FakeAsyncClient:
 
 @pytest.mark.asyncio
 async def test_search_returns_normalized_results(monkeypatch):
-    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.newsapi.get_data_source_config_value", lambda *args, **kwargs: "test-key")
+    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.newsapi.get_data_source_config_list", lambda *args, **kwargs: ["test-key"])
 
     with patch("app.ai.agentic.tooling.news_plugins.newsapi.httpx.AsyncClient", _FakeAsyncClient):
         results = await newsapi.search("AI", limit=1, from_date="2026-05-01", to_date="2026-05-09")
@@ -70,7 +70,7 @@ async def test_search_returns_normalized_results(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_passes_date_params_to_request(monkeypatch):
-    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.newsapi.get_data_source_config_value", lambda *args, **kwargs: "test-key")
+    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.newsapi.get_data_source_config_list", lambda *args, **kwargs: ["test-key"])
     captured_params = {}
 
     class _CapturingClient(_FakeAsyncClient):
@@ -90,7 +90,7 @@ async def test_search_passes_date_params_to_request(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_tries_next_key_when_response_is_not_200(monkeypatch):
-    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.newsapi.get_data_source_config_value", lambda *args, **kwargs: "bad-key, good-key")
+    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.newsapi.get_data_source_config_list", lambda *args, **kwargs: ["bad-key", "good-key"])
     used_keys = []
 
     class _FailoverClient(_FakeAsyncClient):
@@ -109,7 +109,7 @@ async def test_search_tries_next_key_when_response_is_not_200(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_invoke_news_plugin_uses_newsapi_source(monkeypatch):
-    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.newsapi.get_data_source_config_value", lambda *args, **kwargs: "test-key")
+    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.newsapi.get_data_source_config_list", lambda *args, **kwargs: ["test-key"])
 
     with patch("app.ai.agentic.tooling.news_plugins.newsapi.httpx.AsyncClient", _FakeAsyncClient):
         results = await invoke_news_plugin(
@@ -122,7 +122,7 @@ async def test_invoke_news_plugin_uses_newsapi_source(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_returns_empty_when_api_key_missing(monkeypatch):
-    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.newsapi.get_data_source_config_value", lambda *args, **kwargs: "")
+    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.newsapi.get_data_source_config_list", lambda *args, **kwargs: [])
 
     results = await newsapi.search("AI", limit=1, from_date="2026-05-01", to_date="2026-05-09")
 
@@ -131,7 +131,7 @@ async def test_search_returns_empty_when_api_key_missing(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_returns_fatal_error_when_all_keys_fail(monkeypatch):
-    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.newsapi.get_data_source_config_value", lambda *args, **kwargs: "expired-key")
+    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.newsapi.get_data_source_config_list", lambda *args, **kwargs: ["expired-key"])
 
     class _ExpiredKeyClient(_FakeAsyncClient):
         async def get(self, url, params=None):
@@ -147,7 +147,7 @@ async def test_search_returns_fatal_error_when_all_keys_fail(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_skips_removed_articles(monkeypatch):
-    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.newsapi.get_data_source_config_value", lambda *args, **kwargs: "test-key")
+    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.newsapi.get_data_source_config_list", lambda *args, **kwargs: ["test-key"])
 
     class _FakeClientWithRemoved(_FakeAsyncClient):
         async def get(self, url, params=None):
