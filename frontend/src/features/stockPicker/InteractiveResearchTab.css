@@ -114,8 +114,8 @@
 .interactive-research-card {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 135px);
-  max-height: calc(100vh - 135px);
+  height: calc(100vh - 24px);
+  max-height: calc(100vh - 24px);
   min-height: 0;
 }
 
