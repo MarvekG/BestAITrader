@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ReloadOutlined } from '@ant-design/icons';
+import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
+  Alert,
   App as AntdApp,
   Button,
   Card,
@@ -25,7 +26,7 @@ import {
 } from 'antd';
 import type { RcFile, UploadFile } from 'antd/es/upload/interface';
 import type { ColumnsType } from 'antd/es/table';
-import { sourcesApi } from '../api/settings';
+import { DataSourceConfigTestKey, sourcesApi } from '../api/settings';
 import { PromptStats, UsageBreakdownEntry, promptApi } from '../api/prompt';
 import { testingApi } from '../api/testing';
 import type {
@@ -175,6 +176,16 @@ const isNewsPluginBatchUploadResult = (
   result: NewsPluginBatchUploadResult | NewsPluginMutationResult,
 ): result is NewsPluginBatchUploadResult => Array.isArray((result as NewsPluginBatchUploadResult).items);
 
+const normalizeApiKeyList = (value: unknown): string[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
 export const SettingsPage: React.FC = () => {
   const { t } = useTranslation();
   const { message, modal } = AntdApp.useApp();
@@ -204,9 +215,21 @@ export const SettingsPage: React.FC = () => {
     maxHeight: 360,
     overflowY: 'auto',
   };
+  const apiKeyInputRowStyle: React.CSSProperties = {
+    alignItems: 'baseline',
+    display: 'flex',
+    gap: 8,
+    maxWidth: 622,
+    width: '100%',
+  };
+  const dataSourceInputStyle: React.CSSProperties = {
+    maxWidth: 622,
+    width: '100%',
+  };
   const activeSettingsTab = SETTINGS_TAB_KEYS.has(settingsSearchParams.get('tab') || '')
     ? settingsSearchParams.get('tab') || 'datasources'
     : 'datasources';
+  const showDataSourceSetupGuide = settingsSearchParams.get('setup') === 'data-sources';
 
   const handleSettingsTabChange = (activeKey: string) => {
     const nextSearchParams = new URLSearchParams(settingsSearchParams);
@@ -221,6 +244,12 @@ export const SettingsPage: React.FC = () => {
   // Tushare Config State
   const [tushareForm] = Form.useForm();
   const [tushareLoading, setTushareLoading] = useState(false);
+  const [dataSourceTestLoading, setDataSourceTestLoading] = useState<Partial<Record<DataSourceConfigTestKey, boolean>>>({});
+  const [dataSourceTestOutputs, setDataSourceTestOutputs] = useState<Partial<Record<DataSourceConfigTestKey, string>>>({});
+  const [dataSourceTestQueries, setDataSourceTestQueries] = useState<Record<'tavily' | 'newsapi', string>>({
+    tavily: 'AI',
+    newsapi: 'AI',
+  });
 
   // Prompt Config State
   const [prompts, setPrompts] = useState<Record<string, string>>({});
@@ -1772,8 +1801,12 @@ export const SettingsPage: React.FC = () => {
 
   const loadTushareConfig = useCallback(async () => {
     try {
-      const config = await sourcesApi.getTushareConfig();
-      tushareForm.setFieldsValue(config);
+      const config = await sourcesApi.getDataSourceConfig();
+      tushareForm.setFieldsValue({
+        ...config,
+        tavily_api_key: config.tavily_api_key || [],
+        news_api_key: config.news_api_key || [],
+      });
     } catch {
       // Ignore error if config not found
     }
@@ -1813,12 +1846,38 @@ export const SettingsPage: React.FC = () => {
   const handleSaveTushare = async (values: Record<string, unknown>) => {
     setTushareLoading(true);
     try {
-      await sourcesApi.updateTushareConfig(values);
+      const payload = Object.fromEntries(Object.entries(values));
+      payload.tavily_api_key = normalizeApiKeyList(values.tavily_api_key);
+      payload.news_api_key = normalizeApiKeyList(values.news_api_key);
+      await sourcesApi.updateDataSourceConfig(payload);
       message.success(t('common.success'));
     } catch {
       message.error(t('common.error'));
     } finally {
       setTushareLoading(false);
+    }
+  };
+
+  const handleTestDataSourceConfig = async (key: DataSourceConfigTestKey) => {
+    setDataSourceTestLoading((prev) => ({ ...prev, [key]: true }));
+    try {
+      const query = key === 'tavily' || key === 'newsapi' ? dataSourceTestQueries[key] : undefined;
+      const result = await sourcesApi.testDataSourceConfig(key, query);
+      setDataSourceTestOutputs((prev) => ({ ...prev, [key]: formatApiOutput(result) }));
+      if (result.status === 'success') {
+        message.success(t('settings.data_source_test_completed'));
+      } else {
+        message.warning(t('settings.data_source_test_completed'));
+      }
+    } catch (error) {
+      const responseData = getApiErrorResponseData(error);
+      setDataSourceTestOutputs((prev) => ({
+        ...prev,
+        [key]: formatApiOutput(responseData || { error: getApiErrorMessage(error, t('common.error')) }),
+      }));
+      message.error(t('common.error'));
+    } finally {
+      setDataSourceTestLoading((prev) => ({ ...prev, [key]: false }));
     }
   };
 
@@ -1985,25 +2044,128 @@ export const SettingsPage: React.FC = () => {
           label: t('settings.data_sources'),
           children: (
             <div className="flex flex-col gap-4">
-              <Card title={t('settings.tushare_config')}>
-                <Form
-                  form={tushareForm}
-                  layout="vertical"
-                  onFinish={handleSaveTushare}
-                >
-                  <Form.Item label={t('settings.api_url')} name="api_url">
-                    <Input placeholder="https://api.tushare.pro" />
-                  </Form.Item>
-                  <Form.Item label={t('settings.api_token')} name="token">
-                    <Input.Password placeholder={t('settings.enter_tushare_token')} />
-                  </Form.Item>
-                  <Form.Item>
-                    <Button type="primary" htmlType="submit" loading={tushareLoading}>
-                      {t('settings.save_config')}
+              {showDataSourceSetupGuide && (
+                <Alert
+                  type="info"
+                  showIcon
+                  message={t('settings.data_source_setup_guide_title')}
+                  description={t('settings.data_source_setup_guide_desc')}
+                />
+              )}
+              <Form
+                form={tushareForm}
+                layout="vertical"
+                onFinish={handleSaveTushare}
+                style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+              >
+                <Card
+                  title={t('settings.tushare_config')}
+                  extra={(
+                    <Button
+                      onClick={() => void handleTestDataSourceConfig('tushare')}
+                      loading={!!dataSourceTestLoading.tushare}
+                    >
+                      {t('settings.test_config')}
                     </Button>
+                  )}
+                >
+                  <Form.Item label={t('settings.api_url')} name="tushare_api_url">
+                    <Input placeholder="https://api.tushare.pro" style={dataSourceInputStyle} />
                   </Form.Item>
-                </Form>
-              </Card>
+                  <Form.Item label={t('settings.api_token')} name="tushare_token">
+                    <Input.Password placeholder={t('settings.enter_tushare_token')} style={dataSourceInputStyle} />
+                  </Form.Item>
+                  {dataSourceTestOutputs.tushare && (
+                    <pre style={diagnosticPanelStyle}>{dataSourceTestOutputs.tushare}</pre>
+                  )}
+                </Card>
+
+                <Card
+                  title="Tavily API Key"
+                  extra={(
+                    <Button
+                      onClick={() => void handleTestDataSourceConfig('tavily')}
+                      loading={!!dataSourceTestLoading.tavily}
+                    >
+                      {t('settings.test_config')}
+                    </Button>
+                  )}
+                >
+                  <Form.List name="tavily_api_key">
+                    {(fields, { add, remove }) => (
+                      <Space direction="vertical" style={{ width: '100%' }}>
+                        {fields.map((field) => (
+                          <div key={field.key} style={apiKeyInputRowStyle}>
+                            <Form.Item {...field} style={{ flex: 1 }}>
+                              <Input.Password placeholder={t('settings.multiple_api_keys_placeholder')} />
+                            </Form.Item>
+                            <Button danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                          </div>
+                        ))}
+                        <Button type="dashed" icon={<PlusOutlined />} onClick={() => add()}>
+                          {t('settings.add_api_key')}
+                        </Button>
+                      </Space>
+                    )}
+                  </Form.List>
+                  <Form.Item label={t('settings.test_query')}>
+                    <Input
+                      value={dataSourceTestQueries.tavily}
+                      style={dataSourceInputStyle}
+                      onChange={(event) => setDataSourceTestQueries((prev) => ({ ...prev, tavily: event.target.value }))}
+                    />
+                  </Form.Item>
+                  {dataSourceTestOutputs.tavily && (
+                    <pre style={diagnosticPanelStyle}>{dataSourceTestOutputs.tavily}</pre>
+                  )}
+                </Card>
+
+                <Card
+                  title="NewsAPI API Key"
+                  extra={(
+                    <Button
+                      onClick={() => void handleTestDataSourceConfig('newsapi')}
+                      loading={!!dataSourceTestLoading.newsapi}
+                    >
+                      {t('settings.test_config')}
+                    </Button>
+                  )}
+                >
+                  <Form.List name="news_api_key">
+                    {(fields, { add, remove }) => (
+                      <Space direction="vertical" style={{ width: '100%' }}>
+                        {fields.map((field) => (
+                          <div key={field.key} style={apiKeyInputRowStyle}>
+                            <Form.Item {...field} style={{ flex: 1 }}>
+                              <Input.Password placeholder={t('settings.multiple_api_keys_placeholder')} />
+                            </Form.Item>
+                            <Button danger icon={<DeleteOutlined />} onClick={() => remove(field.name)} />
+                          </div>
+                        ))}
+                        <Button type="dashed" icon={<PlusOutlined />} onClick={() => add()}>
+                          {t('settings.add_api_key')}
+                        </Button>
+                      </Space>
+                    )}
+                  </Form.List>
+                  <Form.Item label={t('settings.test_query')}>
+                    <Input
+                      value={dataSourceTestQueries.newsapi}
+                      style={dataSourceInputStyle}
+                      onChange={(event) => setDataSourceTestQueries((prev) => ({ ...prev, newsapi: event.target.value }))}
+                    />
+                  </Form.Item>
+                  {dataSourceTestOutputs.newsapi && (
+                    <pre style={diagnosticPanelStyle}>{dataSourceTestOutputs.newsapi}</pre>
+                  )}
+                </Card>
+
+                <Form.Item>
+                  <Button type="primary" htmlType="submit" loading={tushareLoading}>
+                    {t('settings.save_config')}
+                  </Button>
+                </Form.Item>
+              </Form>
 
             </div>
           )

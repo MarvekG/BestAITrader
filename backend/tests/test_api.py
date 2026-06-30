@@ -100,14 +100,14 @@ class TestAuthAPI:
                 "password": "password123",
             },
         )
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         assert response.json()["token_type"] == "bearer"
 
 
 class TestStockWarehouseAPI:
     def test_get_warehouse_list(self, client, auth_headers):
         response = client.get("/api/v1/stock-warehouse/", headers=auth_headers)
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         assert response.json() == []
 
     def test_add_stock(self, client, auth_headers, db_session):
@@ -145,7 +145,7 @@ class TestStockWarehouseAPI:
             headers=auth_headers,
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         payload = response.json()
         assert payload["auto_analysis_enabled"] is True
         assert payload["auto_analysis_frequency"] == "weekly"
@@ -221,6 +221,135 @@ class TestSourcesAPI:
         payload = response.json()
         assert "sources" in payload
         assert "default_source" in payload
+
+    def test_data_source_config_persists_to_system_settings(self, client, auth_headers, db_session):
+        from app.models.system_setting import SystemSetting
+
+        response = client.post(
+            "/api/v1/sources/config",
+            headers=auth_headers,
+            json={
+                "tushare_token": "tushare-secret",
+                "tushare_api_url": "https://api.example.com/tushare",
+                "tavily_api_key": ["tavily-secret"],
+                "news_api_key": ["news-secret"],
+            },
+        )
+
+        assert response.status_code == 200, response.text
+        values = {
+            row.key: row.value
+            for row in db_session.query(SystemSetting).filter(
+                SystemSetting.key.in_(
+                    [
+                        "data_sources.tushare.token",
+                        "data_sources.tushare.api_url",
+                        "data_sources.tavily.api_key",
+                        "data_sources.newsapi.api_key",
+                    ]
+                )
+            )
+        }
+        assert values == {
+            "data_sources.tushare.token": "tushare-secret",
+            "data_sources.tushare.api_url": "https://api.example.com/tushare",
+            "data_sources.tavily.api_key": ["tavily-secret"],
+            "data_sources.newsapi.api_key": ["news-secret"],
+        }
+
+        config_response = client.get("/api/v1/sources/config", headers=auth_headers)
+
+        assert config_response.status_code == 200
+        assert config_response.json()["config"] == {
+            "tushare_api_url": "https://api.example.com/tushare",
+            "tushare_token": "tushare-secret",
+            "tavily_api_key": ["tavily-secret"],
+            "news_api_key": ["news-secret"],
+        }
+
+    def test_data_source_config_cache_invalidates_after_update(self, client, auth_headers):
+        first_response = client.post(
+            "/api/v1/sources/config",
+            headers=auth_headers,
+            json={"tavily_api_key": ["first-key"]},
+        )
+        assert first_response.status_code == 200, first_response.text
+
+        first_config = client.get("/api/v1/sources/config", headers=auth_headers)
+        assert first_config.status_code == 200
+        assert first_config.json()["config"]["tavily_api_key"] == ["first-key"]
+
+        second_response = client.post(
+            "/api/v1/sources/config",
+            headers=auth_headers,
+            json={"tavily_api_key": ["second-secret"]},
+        )
+        assert second_response.status_code == 200, second_response.text
+
+        second_config = client.get("/api/v1/sources/config", headers=auth_headers)
+        assert second_config.status_code == 200
+        assert second_config.json()["config"]["tavily_api_key"] == ["second-secret"]
+
+    def test_data_source_config_test_endpoints_passthrough(self, client, auth_headers):
+        class FakeTushareClient:
+            def stock_basic(self, **kwargs):
+                return [{"ok": True, "params": kwargs}]
+
+        config_response = client.post(
+            "/api/v1/sources/config",
+            headers=auth_headers,
+            json={
+                "tushare_token": "tushare-token",
+                "tushare_api_url": "https://api.example.com/tushare",
+                "tavily_api_key": ["tavily-token-a", "tavily-token-b"],
+                "news_api_key": ["news-token-a", "news-token-b"],
+            },
+        )
+        assert config_response.status_code == 200, config_response.text
+
+        with (
+            patch(
+                "app.api.endpoints.sources.TushareIngestor.get_pro_client",
+                return_value=FakeTushareClient(),
+            ),
+            patch(
+                "app.api.endpoints.sources.tavily.search_with_api_keys",
+                AsyncMock(return_value=[{"title": "tavily result", "source": "tavily"}]),
+            ) as tavily_search,
+            patch(
+                "app.api.endpoints.sources.newsapi.search_with_api_keys",
+                AsyncMock(return_value=[{"title": "newsapi result", "source": "newsapi"}]),
+            ) as newsapi_search,
+        ):
+            tushare_response = client.post("/api/v1/sources/config/test/tushare", headers=auth_headers)
+            tavily_response = client.post(
+                "/api/v1/sources/config/test/tavily",
+                headers=auth_headers,
+                json={"query": "AI"},
+            )
+            newsapi_response = client.post(
+                "/api/v1/sources/config/test/newsapi",
+                headers=auth_headers,
+                json={"query": "AI"},
+            )
+
+        assert tushare_response.status_code == 200
+        assert tushare_response.json()["status"] == "success"
+        assert tushare_response.json()["data"][0]["params"]["ts_code"] == "000001.SZ"
+        assert tushare_response.json()["data"][0]["params"]["fields"] == "ts_code,symbol,name,area,industry,list_date"
+
+        for response in [tavily_response, newsapi_response]:
+            assert response.status_code == 200
+            assert response.json()["status"] == "completed"
+            assert len(response.json()["results"]) == 2
+            for item in response.json()["results"]:
+                assert item["status"] == "success"
+                assert item["data"]
+
+        assert [call.args[0] for call in tavily_search.await_args_list] == [["tavily-token-a"], ["tavily-token-b"]]
+        assert [call.args[1] for call in tavily_search.await_args_list] == ["AI", "AI"]
+        assert [call.args[0] for call in newsapi_search.await_args_list] == [["news-token-a"], ["news-token-b"]]
+        assert [call.args[1] for call in newsapi_search.await_args_list] == ["AI", "AI"]
 
 
 class TestSessionAPI:

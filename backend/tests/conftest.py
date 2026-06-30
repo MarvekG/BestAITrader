@@ -234,6 +234,7 @@ def sqlite_test_schema(sqlite_test_engine):
 def test_db(sqlite_test_schema, sqlite_session_factory):
     from app.core.config import settings
     import app.core.database as db_module
+    from app.core.data_source_config_cache import invalidate_data_source_config_cache
     from app.core.database import get_db
 
     original_system_language = settings.SYSTEM_LANGUAGE
@@ -263,6 +264,7 @@ def test_db(sqlite_test_schema, sqlite_session_factory):
             db.close()
 
     _clear_sqlite_tables(sqlite_session_factory)
+    invalidate_data_source_config_cache()
     app.dependency_overrides[get_db] = override_get_db
 
     try:
@@ -276,6 +278,7 @@ def test_db(sqlite_test_schema, sqlite_session_factory):
         db_module.SessionLocal = original_db_session_local
         settings.SYSTEM_LANGUAGE = original_system_language
         _clear_sqlite_tables(sqlite_session_factory)
+        invalidate_data_source_config_cache()
 
 
 @pytest.fixture

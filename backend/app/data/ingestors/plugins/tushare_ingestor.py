@@ -2,9 +2,14 @@ import tushare as ts
 import asyncio
 import pandas as pd
 from datetime import datetime, timedelta
-from typing import Dict, Optional, Any
+from typing import Optional
 from app.data.ingestion.service import DataIngestionService
 from app.core.config import settings
+from app.core.data_source_settings import (
+    TUSHARE_API_SETTING_KEY,
+    TUSHARE_TOKEN_SETTING_KEY,
+)
+from app.core.data_source_config_cache import get_data_source_config_value
 from app.data.ingestors.base_ingestor import BaseIngestor
 from app.data.ingestors.plugins.column_mapping import ColumnMapper
 from app.data.ingestors.rate_limiter import LeakyBucketRateLimiter
@@ -27,7 +32,6 @@ class TushareIngestor(BaseIngestor):
     def __init__(self):
         self.ingestion_service = DataIngestionService()
         self.source = self.get_source_name()
-        self.pro = self.get_pro_client() if settings.TUSHARE_TOKEN else None
         self._stock_info_cache = {}  # Cache for shares and financial data
 
         # 初始化限流器（单例模式）
@@ -41,11 +45,23 @@ class TushareIngestor(BaseIngestor):
         logger.info(
             "TushareIngestor initialized",
             extra={
-                "config": self.get_tushare_config(),
                 "rate_limit": f"{self.rate_limiter.max_calls_per_minute} calls/min",
                 "rate_limit_timeout_seconds": settings.DATA_SOURCE_RATE_LIMIT_TIMEOUT_SECONDS,
             }
         )
+
+    @property
+    def pro(self):
+        """
+        基于数据库中的最新 Tushare 配置创建 Pro 客户端。
+
+        Returns:
+            Tushare Pro 客户端。
+
+        Raises:
+            ValueError: 未配置 Tushare Token。
+        """
+        return self.get_pro_client()
 
     async def _run_in_executor(self, func, *args, use_cache: bool = True, cache_ttl: int = 60, **kwargs):
         """
@@ -78,54 +94,35 @@ class TushareIngestor(BaseIngestor):
 
     @staticmethod
     def get_pro_client():
-        if settings.TUSHARE_API:
-            TushareIngestor.update_tushare_config(api_url=settings.TUSHARE_API)
-        if not settings.TUSHARE_TOKEN:
-            raise ValueError("Tushare token is not configured")
-        return ts.pro_api(settings.TUSHARE_TOKEN)
-
-    def update_token(self, token: str):
-        """Update Tushare token at runtime"""
-        if token:
-            self.pro = ts.pro_api(token)
-            settings.TUSHARE_TOKEN = token
-            logger.info("Tushare token updated at runtime")
-
-    @staticmethod
-    def update_tushare_config(
-            token: Optional[str] = None, api_url: Optional[str] = None) -> Dict[str, Any]:
-        """
-        更新Tushare配置 (Deprecated mechanism, use EnvManager in API layer)
-        This method is kept for compatibility but token persistence happens in API layer.
-        """
-        from tushare.pro.client import DataApi
-        result = {}
-
-        # 更新API地址
+        api_url = TushareIngestor.get_tushare_api_url()
+        token = TushareIngestor.get_tushare_token()
         if api_url:
-            logger.info(f"before updating Tushare config: {DataApi._DataApi__http_url}")
+            from tushare.pro.client import DataApi
+
             DataApi._DataApi__http_url = api_url
-            logger.info(f"after updating Tushare config: ${DataApi._DataApi__http_url}")
-            result["api_url"] = api_url
-
-        # 更新token
-        if token:
-            result["token"] = token
-            # Note: Persistence is now handled by EnvManager in the API endpoint
-
-        return result
+        if not token:
+            raise ValueError("Tushare token is not configured")
+        return ts.pro_api(token)
 
     @staticmethod
-    def get_tushare_config() -> Dict[str, Any]:
-        """获取当前Tushare配置"""
-        from tushare.pro.client import DataApi
-        return {
-            "api_url": getattr(
-                DataApi,
-                "_DataApi__http_url",
-                "http://api.waditu.com/dataapi"),
-            "token": f"...{settings.TUSHARE_TOKEN[-3:]}" if settings.TUSHARE_TOKEN else None
-        }
+    def get_tushare_token() -> str:
+        """
+        读取当前 Tushare Token。
+
+        Returns:
+            system_settings 中配置的 Token；未配置时返回空字符串。
+        """
+        return get_data_source_config_value(TUSHARE_TOKEN_SETTING_KEY)
+
+    @staticmethod
+    def get_tushare_api_url() -> str:
+        """
+        读取当前 Tushare API URL。
+
+        Returns:
+            system_settings 中配置的 API URL；未配置时返回空字符串。
+        """
+        return get_data_source_config_value(TUSHARE_API_SETTING_KEY)
 
     async def fetch_and_ingest_stock_kline(
             self,
@@ -155,7 +152,7 @@ class TushareIngestor(BaseIngestor):
         try:
             if not self.pro:
                 return {"success": False, "data": [], "count": 0}
-                
+
             # Map period to Tushare API and frequency
             period_map = {
                 "daily": (self.pro.daily, "D", "daily"),
@@ -165,7 +162,7 @@ class TushareIngestor(BaseIngestor):
             if period not in period_map:
                 logger.warning(f"Unsupported period {period} for Tushare kline. Using daily.")
                 period = "daily"
-                
+
             api_func, freq, api_name = period_map[period]
 
             # Ensure stock code has suffix (e.g. 000001.SZ) for Tushare API
@@ -323,7 +320,9 @@ class TushareIngestor(BaseIngestor):
             # Unit conversion:
             # Tushare total_mv/circ_mv are in 万元 -> convert to 元
             # Tushare total_share/float_share are in 万股 -> convert to 股
-            val_unit_cols = ['total_market_value', 'circulating_market_value', 'total_share', 'float_share', 'free_share']
+            val_unit_cols = [
+                'total_market_value', 'circulating_market_value', 'total_share', 'float_share', 'free_share'
+            ]
             for col in val_unit_cols:
                 if col in df.columns:
                     df[col] = pd.to_numeric(df[col], errors='coerce') * 10000
@@ -388,7 +387,11 @@ class TushareIngestor(BaseIngestor):
             code = StockCodeStandardizer.standardize(stock_code)
             logger.info(f"Fetching financial indicators for {code}")
             today = datetime.now().date()
-            parsed_start_date = pd.to_datetime(start_date, errors='coerce') if start_date else pd.Timestamp(today - timedelta(days=365))
+            parsed_start_date = (
+                pd.to_datetime(start_date, errors='coerce')
+                if start_date
+                else pd.Timestamp(today - timedelta(days=365))
+            )
             parsed_end_date = pd.to_datetime(end_date, errors='coerce') if end_date else pd.Timestamp(today)
             if pd.isna(parsed_start_date):
                 logger.error(f"Invalid start_date for financial indicators sync: {start_date}")
@@ -1483,7 +1486,6 @@ class TushareIngestor(BaseIngestor):
             logger.error(f"Failed to ingest pledge summary (Tushare) for {stock_code or 'All'}: {e}")
             return {"success": False, "data": [], "count": 0}
 
-
     async def fetch_and_ingest_stock_lockup_release(self, stock_code: str) -> Optional[dict]:
         """
         采集单只股票未来限售股解禁数据并写入解禁表。
@@ -1878,6 +1880,7 @@ class TushareIngestor(BaseIngestor):
         except Exception as e:
             logger.error(f"Failed to ingest stock_zhaban_pool: {e}")
             return {"success": False, "data": [], "count": 0}
+
     async def fetch_and_ingest_stock_insider_trading(self, stock_code: str) -> Optional[dict]:
         """
         采集高管及相关人员持股变动数据并写入内部人交易表。
@@ -2094,7 +2097,7 @@ class TushareIngestor(BaseIngestor):
             if df is None or df.empty:
                 return {"success": False, "data": [], "count": 0}
 
-            # Rename columns to match filter if necessary (ColumnMapper will do it later for DB, but we need it now for filter)
+            # Rename columns to match filter before ColumnMapper prepares DB columns.
             # TuShare moneyflow_ind_dc returns 'name'
             if 'name' in df.columns:
                 df = df[df['name'] == industry]
@@ -2246,7 +2249,11 @@ class TushareIngestor(BaseIngestor):
 
             code = StockCodeStandardizer.standardize(stock_code)
             today = datetime.now().date()
-            normalized_start_date = normalize_compact_date(start_date) if start_date else (today - timedelta(days=365)).strftime('%Y%m%d')
+            normalized_start_date = (
+                normalize_compact_date(start_date)
+                if start_date
+                else (today - timedelta(days=365)).strftime('%Y%m%d')
+            )
             normalized_end_date = normalize_compact_date(end_date) if end_date else today.strftime('%Y%m%d')
             params = {'ts_code': code}
             params['start_date'] = normalized_start_date
@@ -2524,7 +2531,9 @@ class TushareIngestor(BaseIngestor):
             today = datetime.now().date()
             normalized_start_date = normalize_compact_date(start_date)
             normalized_end_date = normalize_compact_date(end_date)
-            table_mapping = ColumnMapper.get_table_mapping('data.stock_cashflow_statement', 'tushare_cashflow_statement')
+            table_mapping = ColumnMapper.get_table_mapping(
+                'data.stock_cashflow_statement', 'tushare_cashflow_statement'
+            )
             params = {
                 'ts_code': code,
                 'start_date': normalized_start_date,

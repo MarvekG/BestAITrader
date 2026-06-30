@@ -25,6 +25,8 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.core.data_source_config_cache import get_data_source_config_list
+from app.core.data_source_settings import TAVILY_API_KEY_SETTING_KEY
 from app.core.logger import get_logger
 
 from app.ai.agentic.tooling.news_plugins.base import format_error
@@ -139,7 +141,31 @@ async def search(
     Returns:
         Normalized Tavily search results.
     """
-    if not settings.TAVILY_API_KEY:
+    api_keys = get_data_source_config_list(TAVILY_API_KEY_SETTING_KEY)
+    return await search_with_api_keys(api_keys, keyword, limit, from_date, to_date)
+
+
+async def search_with_api_keys(
+    api_keys: list[str],
+    keyword: str,
+    limit: int = 10,
+    from_date: str = "",
+    to_date: str = "",
+) -> list[dict[str, Any]]:
+    """
+    使用指定 API Key 列表执行 Tavily 搜索。
+
+    Args:
+        api_keys: API Key 列表。
+        keyword: 搜索关键词。
+        limit: 最大返回结果数。
+        from_date: 开始日期。
+        to_date: 结束日期。
+
+    Returns:
+        标准化后的 Tavily 搜索结果。
+    """
+    if not api_keys:
         logger.warning("TAVILY_API_KEY is not configured.")
         return format_error("TAVILY_API_KEY is not configured", PLUGIN_ID, fatal=True)
 
@@ -164,7 +190,7 @@ async def search(
                     request_payload = {**payload, "api_key": api_key}
                     return await client.post("https://api.tavily.com/search", json=request_payload)
 
-                response = await request_with_key_failover("Tavily", settings.TAVILY_API_KEY, request_once)
+                response = await request_with_key_failover("Tavily", api_keys, request_once)
                 if response is None:
                     return format_error("TAVILY_API_KEY is not configured", PLUGIN_ID, fatal=True)
                 data = response.json()
