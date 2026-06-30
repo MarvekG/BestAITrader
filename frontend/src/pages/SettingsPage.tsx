@@ -219,7 +219,11 @@ export const SettingsPage: React.FC = () => {
     alignItems: 'baseline',
     display: 'flex',
     gap: 8,
-    maxWidth: 672,
+    maxWidth: 538,
+    width: '100%',
+  };
+  const dataSourceInputStyle: React.CSSProperties = {
+    maxWidth: 538,
     width: '100%',
   };
   const activeSettingsTab = SETTINGS_TAB_KEYS.has(settingsSearchParams.get('tab') || '')
@@ -2066,10 +2070,10 @@ export const SettingsPage: React.FC = () => {
                   )}
                 >
                   <Form.Item label={t('settings.api_url')} name="tushare_api_url">
-                    <Input placeholder="https://api.tushare.pro" />
+                    <Input placeholder="https://api.tushare.pro" style={dataSourceInputStyle} />
                   </Form.Item>
                   <Form.Item label={t('settings.api_token')} name="tushare_token">
-                    <Input.Password placeholder={t('settings.enter_tushare_token')} />
+                    <Input.Password placeholder={t('settings.enter_tushare_token')} style={dataSourceInputStyle} />
                   </Form.Item>
                   {dataSourceTestOutputs.tushare && (
                     <pre style={diagnosticPanelStyle}>{dataSourceTestOutputs.tushare}</pre>
@@ -2107,6 +2111,7 @@ export const SettingsPage: React.FC = () => {
                   <Form.Item label={t('settings.test_query')}>
                     <Input
                       value={dataSourceTestQueries.tavily}
+                      style={dataSourceInputStyle}
                       onChange={(event) => setDataSourceTestQueries((prev) => ({ ...prev, tavily: event.target.value }))}
                     />
                   </Form.Item>
@@ -2146,6 +2151,7 @@ export const SettingsPage: React.FC = () => {
                   <Form.Item label={t('settings.test_query')}>
                     <Input
                       value={dataSourceTestQueries.newsapi}
+                      style={dataSourceInputStyle}
                       onChange={(event) => setDataSourceTestQueries((prev) => ({ ...prev, newsapi: event.target.value }))}
                     />
                   </Form.Item>
