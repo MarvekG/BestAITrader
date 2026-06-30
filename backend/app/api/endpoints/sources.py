@@ -213,8 +213,15 @@ async def test_tushare_config_key(request: Optional[DataSourceConfigTestRequest]
     Returns:
         Tushare 测试结果。
     """
+    original_api_url = None
+    should_restore_api_url = False
     try:
         config = request.config if request else None
+        if config and config.tushare_api_url is not None:
+            from tushare.pro.client import DataApi
+
+            original_api_url = DataApi._DataApi__http_url
+            should_restore_api_url = True
         data = TushareIngestor.get_pro_client(
             token=config.tushare_token if config else None,
             api_url=config.tushare_api_url if config else None,
@@ -225,6 +232,9 @@ async def test_tushare_config_key(request: Optional[DataSourceConfigTestRequest]
         return _build_tushare_test_result(data)
     except Exception as exc:
         return {"status": "error", "error": str(exc)}
+    finally:
+        if should_restore_api_url:
+            DataApi._DataApi__http_url = original_api_url
 
 
 @router.post("/config/test/tavily", response_model=Dict[str, Any])

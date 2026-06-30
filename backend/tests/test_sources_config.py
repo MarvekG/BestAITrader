@@ -62,6 +62,9 @@ async def test_newsapi_config_test_uses_unsaved_request_config(monkeypatch):
 @pytest.mark.asyncio
 async def test_tushare_config_test_uses_unsaved_request_config(monkeypatch):
     captured = {}
+    from tushare.pro.client import DataApi
+
+    original_api_url = DataApi._DataApi__http_url
 
     class FakeProClient:
         def stock_basic(self, **kwargs):
@@ -71,6 +74,7 @@ async def test_tushare_config_test_uses_unsaved_request_config(monkeypatch):
     def fake_get_pro_client(token=None, api_url=None):
         captured["token"] = token
         captured["api_url"] = api_url
+        DataApi._DataApi__http_url = api_url
         return FakeProClient()
 
     monkeypatch.setattr(sources.TushareIngestor, "get_pro_client", staticmethod(fake_get_pro_client))
@@ -93,3 +97,4 @@ async def test_tushare_config_test_uses_unsaved_request_config(monkeypatch):
             "fields": "ts_code,symbol,name,area,industry,list_date",
         },
     }
+    assert DataApi._DataApi__http_url == original_api_url
