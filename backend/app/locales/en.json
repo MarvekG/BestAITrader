@@ -1102,7 +1102,7 @@
     "source_take_profit": "Take Profit",
     "delete_active_error": "Cannot delete an active analysis session",
     "batch_delete_active_warning": "Automatically skipped {{count}} active analysis sessions",
-    "analysis_sessions_tab": "AI Analysis Session Management",
+    "analysis_sessions_tab": "AI Research Debate",
     "stock_analysis_tab": "AI Research Analysis",
     "stock_analysis_run": "Start Research Analysis",
     "stock_analysis_stock_placeholder": "Optional target/stock",
@@ -1490,6 +1490,15 @@
   "settings": {
     "title": "Settings",
     "data_sources": "Data Sources",
+    "runtime_settings": "Runtime Settings",
+    "refresh_runtime_settings": "Refresh Runtime Settings",
+    "runtime_saved": "Runtime settings saved",
+    "runtime_load_failed": "Failed to load runtime settings",
+    "runtime_save_failed": "Failed to save runtime settings",
+    "ai_debate_max_concurrent": "AI Research Debate Max Concurrency",
+    "ai_debate_max_concurrent_tip": "Limits the number of AI research debate tasks that can be pending or running at the same time. Default is 5, used to control LLM and data-source resource usage.",
+    "ai_debate_max_concurrent_required": "Enter the AI research debate max concurrency",
+    "ai_debate_max_concurrent_range": "Concurrency must be between 1 and 100",
     "automation": "Automation",
     "experience_scheduler_title": "Experience Analyst Schedule",
     "experience_scheduler_enabled": "Enable automatic experience reviews",
@@ -1988,6 +1997,7 @@
   "tasks": {
     "submission_success": "Async task submitted successfully, Task ID: {task_id}",
     "already_in_progress": "Task already in progress, Task ID: {task_id}",
+    "ai_debate_concurrency_limit_reached": "AI research debate concurrency limit reached ({running_count}/{max_concurrent}). Please wait for running debates to complete.",
     "names": {
       "stock_basic_sync": "Stock Basic Sync ({info})",
       "dragon_tiger_sync": "Dragon Tiger Sync ({dates})",

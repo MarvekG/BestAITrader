@@ -93,9 +93,22 @@ class TushareIngestor(BaseIngestor):
         return await super()._run_in_executor(func, *args, use_cache=use_cache, cache_ttl=cache_ttl, **kwargs)
 
     @staticmethod
-    def get_pro_client():
-        api_url = TushareIngestor.get_tushare_api_url()
-        token = TushareIngestor.get_tushare_token()
+    def get_pro_client(token: Optional[str] = None, api_url: Optional[str] = None):
+        """
+        创建 Tushare Pro 客户端，支持用临时配置覆盖已保存配置。
+
+        Args:
+            token: 可选临时 Token；未提供时读取已保存配置。
+            api_url: 可选临时 API URL；未提供时读取已保存配置。
+
+        Returns:
+            Tushare Pro 客户端。
+
+        Raises:
+            ValueError: 未配置 Tushare Token。
+        """
+        api_url = TushareIngestor.get_tushare_api_url() if api_url is None else api_url
+        token = TushareIngestor.get_tushare_token() if token is None else token
         if api_url:
             from tushare.pro.client import DataApi
 

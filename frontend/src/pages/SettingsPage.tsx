@@ -9,6 +9,7 @@ import {
   Col,
   Form,
   Input,
+  InputNumber,
   List,
   Modal,
   Popconfirm,
@@ -26,7 +27,8 @@ import {
 } from 'antd';
 import type { RcFile, UploadFile } from 'antd/es/upload/interface';
 import type { ColumnsType } from 'antd/es/table';
-import { DataSourceConfigTestKey, sourcesApi } from '../api/settings';
+import { DataSourceConfigTestKey, runtimeSettingsApi, sourcesApi } from '../api/settings';
+import type { RuntimeSettings } from '../api/settings';
 import { PromptStats, UsageBreakdownEntry, promptApi } from '../api/prompt';
 import { testingApi } from '../api/testing';
 import type {
@@ -108,6 +110,8 @@ type MCPServerFormValues = {
   allowed_tools?: string[];
 };
 
+type RuntimeSettingsFormValues = RuntimeSettings;
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
@@ -151,6 +155,7 @@ const formatApiOutput = (value: unknown): string => {
 
 const SETTINGS_TAB_KEYS = new Set([
   'datasources',
+  'runtime',
   'prompts',
   'news_plugins',
   'mcp',
@@ -243,6 +248,9 @@ export const SettingsPage: React.FC = () => {
 
   // Tushare Config State
   const [tushareForm] = Form.useForm();
+  const [runtimeSettingsForm] = Form.useForm<RuntimeSettingsFormValues>();
+  const [runtimeSettingsLoading, setRuntimeSettingsLoading] = useState(false);
+  const [runtimeSettingsSaving, setRuntimeSettingsSaving] = useState(false);
   const [tushareLoading, setTushareLoading] = useState(false);
   const [dataSourceTestLoading, setDataSourceTestLoading] = useState<Partial<Record<DataSourceConfigTestKey, boolean>>>({});
   const [dataSourceTestOutputs, setDataSourceTestOutputs] = useState<Partial<Record<DataSourceConfigTestKey, string>>>({});
@@ -1812,6 +1820,18 @@ export const SettingsPage: React.FC = () => {
     }
   }, [tushareForm]);
 
+  const loadRuntimeSettings = useCallback(async () => {
+    setRuntimeSettingsLoading(true);
+    try {
+      const settings = await runtimeSettingsApi.getRuntimeSettings();
+      runtimeSettingsForm.setFieldsValue(settings);
+    } catch (error) {
+      message.error(getApiErrorMessage(error, t('settings.runtime_load_failed')));
+    } finally {
+      setRuntimeSettingsLoading(false);
+    }
+  }, [message, runtimeSettingsForm, t]);
+
   const loadPrompts = useCallback(async () => {
     try {
       const data = await promptApi.getAllPrompts();
@@ -1823,6 +1843,7 @@ export const SettingsPage: React.FC = () => {
 
   useEffect(() => {
     loadTushareConfig();
+    loadRuntimeSettings();
     loadPrompts();
     loadStats();
     loadNewsPlugins();
@@ -1837,6 +1858,7 @@ export const SettingsPage: React.FC = () => {
     loadNewsPlugins,
     loadNewsTestTools,
     loadPrompts,
+    loadRuntimeSettings,
     loadSkillPrompt,
     loadSkills,
     loadStats,
@@ -1858,11 +1880,30 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  const handleSaveRuntimeSettings = async (values: RuntimeSettingsFormValues) => {
+    setRuntimeSettingsSaving(true);
+    try {
+      const updated = await runtimeSettingsApi.updateRuntimeSettings(values);
+      runtimeSettingsForm.setFieldsValue(updated);
+      message.success(t('settings.runtime_saved'));
+    } catch (error) {
+      message.error(getApiErrorMessage(error, t('settings.runtime_save_failed')));
+    } finally {
+      setRuntimeSettingsSaving(false);
+    }
+  };
+
   const handleTestDataSourceConfig = async (key: DataSourceConfigTestKey) => {
     setDataSourceTestLoading((prev) => ({ ...prev, [key]: true }));
     try {
       const query = key === 'tavily' || key === 'newsapi' ? dataSourceTestQueries[key] : undefined;
-      const result = await sourcesApi.testDataSourceConfig(key, query);
+      const values = tushareForm.getFieldsValue();
+      const config = {
+        ...values,
+        tavily_api_key: normalizeApiKeyList(values.tavily_api_key),
+        news_api_key: normalizeApiKeyList(values.news_api_key),
+      };
+      const result = await sourcesApi.testDataSourceConfig(key, config, query);
       setDataSourceTestOutputs((prev) => ({ ...prev, [key]: formatApiOutput(result) }));
       if (result.status === 'success') {
         message.success(t('settings.data_source_test_completed'));
@@ -2168,6 +2209,46 @@ export const SettingsPage: React.FC = () => {
               </Form>
 
             </div>
+          )
+        },
+        {
+          key: 'runtime',
+          label: t('settings.runtime_settings'),
+          children: (
+            <Card
+              title={t('settings.runtime_settings')}
+              extra={(
+                <Button onClick={() => void loadRuntimeSettings()} loading={runtimeSettingsLoading}>
+                  {t('settings.refresh_runtime_settings')}
+                </Button>
+              )}
+            >
+              <Spin spinning={runtimeSettingsLoading}>
+                <Form
+                  form={runtimeSettingsForm}
+                  layout="vertical"
+                  onFinish={handleSaveRuntimeSettings}
+                  initialValues={{ ai_debate_max_concurrent: 5 }}
+                >
+                  <Form.Item
+                    label={t('settings.ai_debate_max_concurrent')}
+                    name="ai_debate_max_concurrent"
+                    extra={t('settings.ai_debate_max_concurrent_tip')}
+                    rules={[
+                      { required: true, message: t('settings.ai_debate_max_concurrent_required') },
+                      { type: 'number', min: 1, max: 100, message: t('settings.ai_debate_max_concurrent_range') },
+                    ]}
+                  >
+                    <InputNumber min={1} max={100} precision={0} style={{ width: 240 }} />
+                  </Form.Item>
+                  <Form.Item>
+                    <Button type="primary" htmlType="submit" loading={runtimeSettingsSaving}>
+                      {t('settings.save_config')}
+                    </Button>
+                  </Form.Item>
+                </Form>
+              </Spin>
+            </Card>
           )
         },
         {

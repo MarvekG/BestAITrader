@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.i18n import i18n_service
+from app.core.runtime_settings import RuntimeSettings, get_runtime_settings, update_runtime_settings
 from app.core.security import get_current_user
 from app.core.system_language import (
     SUPPORTED_SYSTEM_LANGUAGES,
@@ -28,6 +29,10 @@ class SystemLanguageResponse(BaseModel):
 
     language: str
     supported_languages: list[str]
+
+
+class RuntimeSettingsUpdate(RuntimeSettings):
+    """Runtime settings update payload."""
 
 
 @router.get("/i18n/{lang}", response_model=Dict[str, Any])
@@ -101,3 +106,41 @@ async def update_system_language(
         language=language,
         supported_languages=list(SUPPORTED_SYSTEM_LANGUAGES),
     )
+
+
+@router.get("/runtime-settings", response_model=RuntimeSettings)
+async def read_runtime_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RuntimeSettings:
+    """Get system runtime settings.
+
+    Args:
+        db: Database session.
+        current_user: Authenticated user.
+
+    Returns:
+        Current system runtime settings.
+    """
+    del current_user
+    return get_runtime_settings(db)
+
+
+@router.put("/runtime-settings", response_model=RuntimeSettings)
+async def save_runtime_settings(
+    payload: RuntimeSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> RuntimeSettings:
+    """Update system runtime settings.
+
+    Args:
+        payload: Runtime settings update payload.
+        db: Database session.
+        current_user: Authenticated user.
+
+    Returns:
+        Updated system runtime settings.
+    """
+    del current_user
+    return update_runtime_settings(db, payload)

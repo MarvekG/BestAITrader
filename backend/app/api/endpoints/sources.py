@@ -69,6 +69,7 @@ class DataSourceConfigUpdate(BaseModel):
 
 class DataSourceConfigTestRequest(BaseModel):
     query: str = "AI"
+    config: Optional[DataSourceConfigUpdate] = None
 
 
 @router.get("/config", response_model=Dict[str, Any])
@@ -202,10 +203,22 @@ def _build_tushare_test_result(data: Any) -> Dict[str, Any]:
 
 
 @router.post("/config/test/tushare", response_model=Dict[str, Any])
-async def test_tushare_config_key():
-    """测试当前 Tushare 配置。"""
+async def test_tushare_config_key(request: Optional[DataSourceConfigTestRequest] = None):
+    """
+    测试 Tushare 配置，优先使用请求体中的临时配置。
+
+    Args:
+        request: 可选测试请求；包含未保存的临时数据源配置。
+
+    Returns:
+        Tushare 测试结果。
+    """
     try:
-        data = TushareIngestor().pro.stock_basic(
+        config = request.config if request else None
+        data = TushareIngestor.get_pro_client(
+            token=config.tushare_token if config else None,
+            api_url=config.tushare_api_url if config else None,
+        ).stock_basic(
             ts_code="000001.SZ",
             fields="ts_code,symbol,name,area,industry,list_date",
         )
@@ -216,10 +229,22 @@ async def test_tushare_config_key():
 
 @router.post("/config/test/tavily", response_model=Dict[str, Any])
 async def test_tavily_config_key(request: Optional[DataSourceConfigTestRequest] = None):
-    """测试当前 Tavily 配置。"""
+    """
+    测试 Tavily 配置，优先使用请求体中的临时配置。
+
+    Args:
+        request: 可选测试请求；包含查询词和未保存的临时数据源配置。
+
+    Returns:
+        Tavily 测试结果。
+    """
     query = request.query if request else "AI"
-    data_source_config = get_cached_data_source_config()
-    raw_api_keys = data_source_config.get(TAVILY_API_KEY_SETTING_KEY, [])
+    config = request.config if request else None
+    if config and config.tavily_api_key is not None:
+        raw_api_keys = _normalize_secret_list(config.tavily_api_key)
+    else:
+        data_source_config = get_cached_data_source_config()
+        raw_api_keys = data_source_config.get(TAVILY_API_KEY_SETTING_KEY, [])
     api_keys = raw_api_keys if isinstance(raw_api_keys, list) else []
     api_keys = api_keys or [""]
     return {
@@ -237,10 +262,22 @@ async def test_tavily_config_key(request: Optional[DataSourceConfigTestRequest] 
 
 @router.post("/config/test/newsapi", response_model=Dict[str, Any])
 async def test_newsapi_config_key(request: Optional[DataSourceConfigTestRequest] = None):
-    """测试当前 NewsAPI 配置。"""
+    """
+    测试 NewsAPI 配置，优先使用请求体中的临时配置。
+
+    Args:
+        request: 可选测试请求；包含查询词和未保存的临时数据源配置。
+
+    Returns:
+        NewsAPI 测试结果。
+    """
     query = request.query if request else "AI"
-    data_source_config = get_cached_data_source_config()
-    raw_api_keys = data_source_config.get(NEWS_API_KEY_SETTING_KEY, [])
+    config = request.config if request else None
+    if config and config.news_api_key is not None:
+        raw_api_keys = _normalize_secret_list(config.news_api_key)
+    else:
+        data_source_config = get_cached_data_source_config()
+        raw_api_keys = data_source_config.get(NEWS_API_KEY_SETTING_KEY, [])
     api_keys = raw_api_keys if isinstance(raw_api_keys, list) else []
     api_keys = api_keys or [""]
     results = []

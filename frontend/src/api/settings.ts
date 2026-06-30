@@ -18,6 +18,10 @@ export interface DataSourceConfigTestResult {
 
 export type DataSourceConfigTestKey = 'tushare' | 'tavily' | 'newsapi';
 
+export interface RuntimeSettings {
+  ai_debate_max_concurrent: number;
+}
+
 interface DataSourceConfigResponse {
   config: DataSourceConfig;
 }
@@ -32,7 +36,17 @@ export const sourcesApi = {
     return apiClient.post('/sources/config', config);
   },
 
-  testDataSourceConfig: async (key: DataSourceConfigTestKey, query?: string) => {
-    return apiClient.post<DataSourceConfigTestResult>(`/sources/config/test/${key}`, query ? { query } : undefined);
+  testDataSourceConfig: async (key: DataSourceConfigTestKey, config: DataSourceConfig, query?: string) => {
+    return apiClient.post<DataSourceConfigTestResult>(`/sources/config/test/${key}`, { query, config });
+  }
+};
+
+export const runtimeSettingsApi = {
+  getRuntimeSettings: async () => {
+    return apiClient.get<RuntimeSettings>('/general/runtime-settings');
+  },
+
+  updateRuntimeSettings: async (settings: RuntimeSettings) => {
+    return apiClient.put<RuntimeSettings>('/general/runtime-settings', settings);
   }
 };

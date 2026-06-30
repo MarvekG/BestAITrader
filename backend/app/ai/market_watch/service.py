@@ -11,6 +11,10 @@ from zoneinfo import ZoneInfo
 
 from fastapi import BackgroundTasks
 
+from app.ai.llm_engine.debate_concurrency import (
+    DebateConcurrencyLimitReached,
+    ensure_debate_concurrency_available,
+)
 from app.ai.llm_engine.runner import run_analysis_task
 from app.crud.session import crud_session
 from app.core import database as database_module
@@ -800,6 +804,28 @@ async def _maybe_launch_debate(
             background_tasks=background_tasks,
             session_source=session_source,
         )
+    except DebateConcurrencyLimitReached as exc:
+        logger.info(
+            "Market watch debate launch skipped",
+            extra={
+                "user_id": user_id,
+                "stock_code": stock_code,
+                "reason": "concurrency_limit",
+                "running_count": exc.running_count,
+                "max_concurrent": exc.max_concurrent,
+            },
+        )
+        await _audit_debate_skip(
+            user_id=user_id,
+            decision=decision,
+            reason="concurrency_limit",
+        )
+        return {
+            "status": "skipped",
+            "reason": "concurrency_limit",
+            "stock_code": stock_code,
+            "error": str(exc),
+        }
     except LaunchSchedulingError as exc:
         logger.exception(
             "Market watch debate launch scheduling failed",
@@ -962,6 +988,7 @@ async def _create_and_schedule_debate(
     trading_frequency = trading_frequency_label(parameters.trading_frequency)
     trading_strategy = trading_strategy_label(parameters.trading_strategy)
     with database_module.SessionLocal() as db:
+        ensure_debate_concurrency_available(db)
         session = crud_session.create(
             db,
             obj_in=SessionCreate(
