@@ -28,6 +28,9 @@ git submodule update --init --recursive
 - LLM API Base URL、API Key、供应商真实模型名：要求兼容 OpenAI `chat/completions` 接口。
 - LiteLLM provider/model 写法：例如 DeepSeek 可填 `deepseek/deepseek-v4-flash`；系统默认暴露固定别名
   `gpt-4o-mini`、`openai-compatible` 和 `openai-compatible-thinking`。
+
+Tushare、Tavily、NewsAPI 配置不在部署阶段采集。部署完成后进入 UI 系统设置 > 数据源设置填写：
+
 - Tushare Token：用于 A 股数据接入，建议确认已有足够接口权限。
 - Tavily API Key：用于搜索。
 - NewsAPI API Key：用于新闻检索。
@@ -48,9 +51,8 @@ python3 deploy.py
 
 脚本会执行以下步骤：
 
-1. 交互式读取初始用户、LLM、Tushare、Tavily 和 NewsAPI 配置。
-2. 调用对应服务验证 Key 是否可用；验证失败会要求重新输入。
-   Tushare 默认用低门槛 `daily` 日线接口校验；如果返回频率超限，脚本会视为 Token 已被服务端识别但当前暂时限流，并允许继续。
+1. 交互式读取初始用户和 LLM 配置。
+2. 调用 OpenAI-compatible `chat/completions` 接口验证 LLM Key 和模型是否可用；验证失败会要求重新输入。
 3. 生成 `backend/.env`、`memo/.env`、`litellm/config.yaml`。
 4. 执行 `docker compose pull`、`docker compose up -d`、`docker compose ps`。
 5. 检查 backend、sandbox、webfetch 和 memo 健康状态，并用生成的 LiteLLM master key 调用 `openai-compatible` 模型别名。
@@ -80,8 +82,7 @@ python3 deploy.py --no-health-check
 - 主系统：`http://localhost`
 - LiteLLM 管理系统：`http://localhost:4000/ui`
 
-默认生成的后端配置会关闭运行时扩展和 OpenAPI 文档。`/api/v1/testing/*` 仍按后端鉴权边界挂载。需要临时安装
-Skill 或新闻插件时，手动修改 `backend/.env` 后重建后端容器。
+默认生成的后端配置会关闭 OpenAPI 文档。`/api/v1/testing/*`、新闻插件和 Skills 管理仍按后端鉴权边界挂载。
 
 ## 5. 常用命令
 
