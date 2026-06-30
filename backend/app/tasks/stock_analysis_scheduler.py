@@ -6,6 +6,7 @@ from typing import Any
 import pytz
 from sqlalchemy.orm import Session
 
+from app.ai.llm_engine.debate_concurrency import ensure_debate_concurrency_available
 from app.ai.llm_engine.runner import run_analysis_task
 from app.core.database import SessionLocal
 from app.core.logger import get_logger
@@ -211,6 +212,7 @@ async def _launch_analysis(
             stock = _load_launchable_stock(db, stock_id, launched_at)
             if not stock:
                 return None
+            ensure_debate_concurrency_available(db)
 
             session = crud_session.create(
                 db=db,

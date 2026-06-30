@@ -4,6 +4,7 @@ import pytest
 
 from app.models.async_task import AsyncTask
 from app.models.stock_warehouse import StockWarehouse
+from app.models.system_setting import SystemSetting
 from app.models.user import User
 from app.tasks import stock_analysis_scheduler
 from app.tasks.stock_analysis_scheduler import is_due_for_auto_analysis
@@ -136,3 +137,47 @@ async def test_auto_analysis_task_records_owner_user_id(db_session, monkeypatch)
 
     task = db_session.query(AsyncTask).filter(AsyncTask.task_id == launch_info["task_id"]).one()
     assert task.user_id == stock.user_id
+
+
+@pytest.mark.asyncio
+async def test_auto_analysis_respects_global_debate_concurrency_limit(db_session, monkeypatch):
+    user = User(username="auto_analysis_limit", email="auto_analysis_limit@example.com", password_hash="hash")
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    stock = _warehouse_stock(auto_analysis_run_immediately=True, user_id=user.id, stock_code="000002.SZ")
+    db_session.add_all([
+        stock,
+        SystemSetting(key="ai_debate.max_concurrent", value=1, description="test"),
+        AsyncTask(
+            task_name="AI Analysis - 000001.SZ",
+            task_type="ai_analysis",
+            status="running",
+            allow_concurrent=False,
+            parameters={"stock_code": "000001.SZ"},
+            user_id=user.id,
+        ),
+    ])
+    db_session.commit()
+    db_session.refresh(stock)
+
+    class _SessionContext:
+        def __enter__(self):
+            return db_session
+
+        def __exit__(self, exc_type, exc, tb):
+            del exc_type, exc, tb
+
+    async def _noop_sync(_stock_code):
+        return True
+
+    monkeypatch.setattr(stock_analysis_scheduler, "SessionLocal", lambda: _SessionContext())
+    monkeypatch.setattr(stock_analysis_scheduler, "sync_stock_data_before_analysis", _noop_sync)
+
+    launch_info = await stock_analysis_scheduler._launch_analysis(stock.id, datetime(2026, 5, 11, 9, 40))
+
+    assert launch_info is None
+    assert db_session.query(AsyncTask).count() == 1
+    db_session.refresh(stock)
+    assert "AI投研辩论并发数已达上限" in stock.last_auto_analysis_error
