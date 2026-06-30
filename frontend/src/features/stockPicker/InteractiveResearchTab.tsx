@@ -699,7 +699,14 @@ export const InteractiveResearchTab: React.FC = () => {
       runs.map((run) => ({
         value: run.run_id,
         label: (
-          <Tooltip title={`${getStatusLabel(run.status)} · ${run.title || run.raw_requirement}`}>
+          <Tooltip
+            title={(
+              <div className="interactive-research-run-tooltip-content">
+                {getStatusLabel(run.status)} · {run.raw_requirement || run.title}
+              </div>
+            )}
+            classNames={{ root: 'interactive-research-run-tooltip' }}
+          >
             <span className="interactive-research-run-option">
               {getStatusLabel(run.status)} · {run.title || run.raw_requirement}
             </span>
