@@ -7,7 +7,7 @@ from app.data.analytics.core_index import get_core_index_constituent_codes
 
 
 def test_get_core_index_constituent_codes_raises_without_tushare_token():
-    with patch("app.data.analytics.core_index.settings.TUSHARE_TOKEN", ""):
+    with patch("app.data.analytics.core_index.get_data_source_config_value", return_value=""):
         with pytest.raises(RuntimeError, match="Tushare token is required"):
             get_core_index_constituent_codes(["000300.SH"])
 
@@ -22,7 +22,7 @@ def test_get_core_index_constituent_codes_uses_latest_trade_date():
         }
     )
 
-    with patch("app.data.analytics.core_index.settings.TUSHARE_TOKEN", "test-token"), \
+    with patch("app.data.analytics.core_index.get_data_source_config_value", return_value="test-token"), \
          patch("app.data.analytics.core_index.ts.pro_api", return_value=mock_pro):
         codes = get_core_index_constituent_codes(["000300.SH"])
 

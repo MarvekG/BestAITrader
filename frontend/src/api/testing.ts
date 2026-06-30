@@ -3,6 +3,7 @@ import { apiClient } from './client';
 export interface TestResult {
   status: 'success' | 'error';
   message: string;
+  error?: string;
   elapsed_ms?: number;
   total?: number;
   limit?: number;

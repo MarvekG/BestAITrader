@@ -1586,6 +1586,7 @@
     "redis_test_title": "Redis Connection Test",
     "db_test_title": "Database Connection Test",
     "tushare_test_title": "TuShare API Test",
+    "tushare_test_success": "Tushare config test succeeded",
     "execute_test": "Execute Test",
     "search_keyword": "Search keyword",
     "test_result": "Test Result",

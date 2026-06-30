@@ -110,13 +110,9 @@ class Settings(BaseSettings):
     ]
 
     # Data Source Config
-    TUSHARE_TOKEN: str = ""
-    TUSHARE_API: str = ""
     TUSHARE_MAX_CALLS_PER_MINUTE: int = 120
     DATA_SOURCE_RATE_LIMIT_TIMEOUT_SECONDS: float = 60.0
     AKSHARE_MAX_CALLS_PER_MINUTE: int = 60
-    TAVILY_API_KEY: str = ""
-    NEWS_API_KEY: str = ""
     DEFAULT_DATA_SOURCE: str = "tushare"
     DEFAULT_HTTP_TIMEOUT: int = 120
     ENABLE_DATA_SOURCE_FAILOVER: bool = False
