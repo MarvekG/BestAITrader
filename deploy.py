@@ -25,6 +25,10 @@ LITELLM_CONFIG = ROOT_DIR / "litellm" / "config.yaml"
 HTTP_TIMEOUT_SECONDS = 30
 LITELLM_GATEWAY_RETRY_SECONDS = 5
 LITELLM_GATEWAY_RETRY_ATTEMPTS = 12
+DEFAULT_HTTP_HEADERS = {
+    "Accept": "application/json",
+    "User-Agent": "OpenAI/Python 1.0.0",
+}
 
 
 def prompt_text(label: str, default: str | None = None, secret: bool = False) -> str:
@@ -135,7 +139,7 @@ def post_json(url: str, payload: dict[str, Any], headers: dict[str, str] | None 
     Returns:
         请求成功状态和响应内容或错误说明
     """
-    request_headers = {"Content-Type": "application/json", **(headers or {})}
+    request_headers = {**DEFAULT_HTTP_HEADERS, "Content-Type": "application/json", **(headers or {})}
     request = Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
@@ -156,7 +160,7 @@ def get_json(url: str, headers: dict[str, str] | None = None) -> tuple[bool, Any
     Returns:
         请求成功状态和响应内容或错误说明
     """
-    request = Request(url, headers=headers or {}, method="GET")
+    request = Request(url, headers={**DEFAULT_HTTP_HEADERS, **(headers or {})}, method="GET")
     return read_json_response(request)
 
 
