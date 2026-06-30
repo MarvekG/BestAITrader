@@ -523,18 +523,18 @@ async def test_realtime_update_pushes_markdown_display_message(db_session, monke
     plan_message = service.get_messages(run.run_id, user_id)[1]
     pushed_payload = {}
 
-    async def fake_send_stock_picker_update(**kwargs):
+    async def fake_send_interactive_stock_picker_update(**kwargs):
         """记录 WebSocket 推送参数。
 
         Args:
-            kwargs: send_stock_picker_update 收到的关键字参数。
+            kwargs: send_interactive_stock_picker_update 收到的关键字参数。
         """
         pushed_payload.update(kwargs)
 
     monkeypatch.setattr(
         websocket_manager_module.ws_manager,
-        "send_stock_picker_update",
-        fake_send_stock_picker_update,
+        "send_interactive_stock_picker_update",
+        fake_send_interactive_stock_picker_update,
     )
 
     await service._push_realtime_update(

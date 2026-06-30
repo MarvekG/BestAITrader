@@ -104,7 +104,7 @@ backend/app/ai/agentic/skills_loader/skills/tushare-data/
 LLM 是否能选到上传后的 Skill：
 
 - 能。`discover_skills()` 每次运行时扫描内置 Skill 目录和 `/runtime/skills/`，不依赖服务重启。
-- Debate、AI 智能选股、经验复盘等已接入 Skills Loader 的链路，会在下一次任务启动时看到新的 catalog 摘要。
+- Debate、交互式选股、经验复盘等已接入 Skills Loader 的链路，会在下一次任务启动时看到新的 catalog 摘要。
 - Agent 只会先看到 `skill_id`、`name`、`description`、references 和 scripts 清单；真正使用前仍应调用 `load_skill` 读取完整 `SKILL.md`。
 - 如果当前问题和 Skill 描述不相关，LLM 可能不会主动选择该 Skill。这是预期行为。
 

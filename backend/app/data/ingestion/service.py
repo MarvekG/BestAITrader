@@ -1,7 +1,6 @@
 import pandas as pd
 from datetime import datetime
 from typing import Optional, List, Dict
-from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.core.database import engine
 from app.core.utils.formatters import StockCodeStandardizer
@@ -70,9 +69,6 @@ class DataIngestionService:
             'data.stock_top_holders': StockTopHolders
         }
         # 确保表存在
-        if self.engine.dialect.name.startswith("postgresql"):
-            with self.engine.begin() as conn:
-                conn.execute(text("CREATE SCHEMA IF NOT EXISTS stock_picker;"))
         Base.metadata.create_all(self.engine)
 
     def write_dataframe(

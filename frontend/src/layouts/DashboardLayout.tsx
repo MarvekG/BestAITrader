@@ -143,7 +143,7 @@ export const DashboardLayout: React.FC = () => {
   });
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
+    <Layout style={{ minHeight: '100vh', background: colorBgLayout }}>
       <GlobalTaskNotifications />
       <Sider
         width={240}
@@ -257,13 +257,13 @@ export const DashboardLayout: React.FC = () => {
       </Modal>
 
       <Layout style={{ background: colorBgLayout }}>
-        <Content style={{ margin: '16px', overflow: 'hidden' }}>
+        <Content style={{ margin: '1px', overflow: 'hidden' }}>
           <div style={{
             height: '100%',
             overflow: 'auto',
             background: colorBgContainer,
             borderRadius: borderRadiusLG,
-            padding: 24
+            padding: 10
           }}>
             <Outlet />
           </div>

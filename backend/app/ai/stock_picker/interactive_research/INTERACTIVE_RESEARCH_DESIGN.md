@@ -8,7 +8,7 @@
 - LLM 根据聊天上下文和非交易工具证据决定研究方向，不预构造基础股票池、候选列表或本地评分。
 - 运行中用户输入不打断当前工具调用；消息先排队，工具结束后的安全点进入下一轮上下文。
 - 需要用户确认时，由当轮 LLM 输出决定提问，workflow 停在 `awaiting_user_input`，用户回答后继续。
-- 不新增独立 interactive WebSocket；后端复用现有全局 WebSocket 的 `stock_picker_update` 通道推送事件。
+- 后端复用现有全局 WebSocket 连接，通过 `interactive_stock_picker_update` 通道推送交互式选股事件。
 - 前端收到 `domain=interactive_research` 的推送后刷新当前 run 和 messages；轮询保留为兜底。
 
 ## 不做
@@ -170,9 +170,9 @@ Run 状态：
    - 如果 workflow 抛出异常，service 写入 `failed` 状态、错误消息和失败 checkpoint。
 
 9. 实时推送。
-   - 后台 workflow 每写入关键消息后提交当前事务，并通过 `ws_manager.send_stock_picker_update()` 推送。
+   - 后台 workflow 每写入关键消息后提交当前事务，并通过 `ws_manager.send_interactive_stock_picker_update()` 推送。
    - 推送 payload 中 `domain=interactive_research`，并包含本次 `message` 和当前 `run` 摘要。
-   - 前端订阅 `stock_picker_update`，收到当前 run 的 interactive 事件后立即静默刷新消息流，方便用户及时看到 `assistant_question` 并输入。
+   - 前端订阅 `interactive_stock_picker_update`，收到当前 run 的 interactive 事件后立即静默刷新消息流，方便用户及时看到 `assistant_question` 并输入。
 
 ## 前端
 

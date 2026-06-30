@@ -113,10 +113,10 @@ npx skills add https://github.com/waditu-tushare/skills.git --skill tushare-data
 ## 接入范围
 
 - 辩论分析：`BaseAgent` 的 system prompt 追加 catalog，工具列表追加 skills loader tools。
-- AI 智能选股：`StockPickerService._request_llm_research` 追加 catalog 和 tools。
+- 交互式选股：研究 Agent 追加 catalog 和 tools。
 - 经验复盘：`review_debate_conclusion` 保留 memory tools，并追加 catalog 和 skills loader tools。
 
 ## 测试策略
 
 - 单元测试覆盖 skill 扫描、manifest 校验、catalog 生成、文件读取、脚本执行和路径逃逸拒绝。
-- 回归测试覆盖现有 LLM orchestration、AI 智能选股和经验复盘的工具绑定不被破坏。
+- 回归测试覆盖现有 LLM orchestration、交互式选股和经验复盘的工具绑定不被破坏。

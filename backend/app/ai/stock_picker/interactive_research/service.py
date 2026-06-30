@@ -361,7 +361,7 @@ class InteractiveResearchService:
             or payload.get("event")
             or ""
         )
-        await ws_manager.send_stock_picker_update(
+        await ws_manager.send_interactive_stock_picker_update(
             run_id=str(run_payload.get("run_id") or ""),
             stage=str(run_payload.get("current_stage") or ""),
             status=str(run_payload.get("status") or ""),

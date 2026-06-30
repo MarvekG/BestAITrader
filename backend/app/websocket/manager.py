@@ -548,7 +548,7 @@ class WebSocketManager:
             if "agentic" in subs:
                 await self.broadcast_to_session(update_msg, session_id)
 
-    async def send_stock_picker_update(
+    async def send_interactive_stock_picker_update(
         self,
         run_id: str,
         stage: str,
@@ -557,7 +557,7 @@ class WebSocketManager:
         payload: Optional[Dict[str, Any]] = None,
     ):
         update_msg = {
-            "type": "stock_picker_update",
+            "type": "interactive_stock_picker_update",
             "data": {
                 "run_id": run_id,
                 "stage": stage,
@@ -568,7 +568,7 @@ class WebSocketManager:
             },
         }
         for session_id, subs in self.subscriptions.items():
-            if "stock_picker" in subs:
+            if "interactive_stock_picker" in subs:
                 await self.broadcast_to_session(update_msg, session_id)
 
     async def send_experience_review_update(
@@ -581,7 +581,7 @@ class WebSocketManager:
         payload: Optional[Dict[str, Any]] = None,
         message_key: Optional[str] = None,
         message_params: Optional[Dict[str, Any]] = None,
-        ):
+    ):
         update_msg = {
             "type": "experience_review_update",
             "data": {

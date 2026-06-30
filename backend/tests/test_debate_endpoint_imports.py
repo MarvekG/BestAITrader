@@ -9,7 +9,6 @@ def test_api_package_import_does_not_load_endpoint_modules() -> None:
         "import sys; "
         "import app.api; "
         "print(('app.api.endpoints.debate' in sys.modules), "
-        "('app.ai.stock_picker.api' in sys.modules), "
         "('app.ai.experience.api' in sys.modules))"
     )
 
@@ -21,7 +20,7 @@ def test_api_package_import_does_not_load_endpoint_modules() -> None:
         text=True,
     )
 
-    assert result.stdout.strip().splitlines()[-1] == "False False False"
+    assert result.stdout.strip().splitlines()[-1] == "False False"
 
 
 def test_main_module_import_does_not_build_full_api_routes() -> None:
@@ -30,7 +29,6 @@ def test_main_module_import_does_not_build_full_api_routes() -> None:
         "import sys; "
         "import app.main; "
         "print(('app.api.endpoints.debate' in sys.modules), "
-        "('app.ai.stock_picker.api' in sys.modules), "
         "('app.ai.experience.api' in sys.modules))"
     )
 
@@ -42,7 +40,7 @@ def test_main_module_import_does_not_build_full_api_routes() -> None:
         text=True,
     )
 
-    assert result.stdout.strip().splitlines()[-1] == "False False False"
+    assert result.stdout.strip().splitlines()[-1] == "False False"
 
 
 def test_main_module_import_does_not_load_database_or_security_layers() -> None:

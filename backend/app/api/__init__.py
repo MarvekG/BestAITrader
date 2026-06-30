@@ -37,7 +37,6 @@ def register_api_routes(app: FastAPI) -> None:
     from app.ai.experience.api import router as experience_router
     from app.ai.stock_analysis.api import router as stock_analysis_router
     from app.ai.stock_picker.interactive_research.api import router as interactive_stock_picker_router
-    from app.ai.stock_picker.api import router as stock_picker_router
 
     prefix = settings.API_V1_STR
     authenticated = [Depends(get_current_user)]
@@ -62,7 +61,12 @@ def register_api_routes(app: FastAPI) -> None:
     app.include_router(llm.router, prefix=f"{prefix}/llm", tags=["llm"], dependencies=authenticated)
     app.include_router(debate_ws.router, prefix=f"{prefix}/debate", tags=["debate-websocket"])
     app.include_router(general.router, prefix=f"{prefix}/general", tags=["general"])
-    app.include_router(performance.router, prefix=f"{prefix}/performance", tags=["performance"], dependencies=authenticated)
+    app.include_router(
+        performance.router,
+        prefix=f"{prefix}/performance",
+        tags=["performance"],
+        dependencies=authenticated,
+    )
     app.include_router(portfolio.router, prefix=f"{prefix}/portfolio", tags=["portfolio"], dependencies=authenticated)
     app.include_router(
         risk_control.router,
@@ -88,15 +92,14 @@ def register_api_routes(app: FastAPI) -> None:
         app.include_router(skills.router, prefix=f"{prefix}/skills", tags=["skills"], dependencies=authenticated)
         app.include_router(mcp.router, prefix=f"{prefix}/mcp", tags=["mcp"], dependencies=authenticated)
     app.include_router(
-        stock_picker_router,
-        prefix=f"{prefix}/ai-stock-picker",
-        tags=["ai-stock-picker"],
-        dependencies=authenticated,
-    )
-    app.include_router(
         interactive_stock_picker_router,
         prefix=f"{prefix}/ai-stock-picker/interactive",
         tags=["ai-stock-picker-interactive"],
         dependencies=authenticated,
     )
-    app.include_router(experience_router, prefix=f"{prefix}/experience", tags=["experience"], dependencies=authenticated)
+    app.include_router(
+        experience_router,
+        prefix=f"{prefix}/experience",
+        tags=["experience"],
+        dependencies=authenticated,
+    )

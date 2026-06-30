@@ -125,15 +125,6 @@ async def lifespan(app: Any):
     except Exception as e:
         logger.error(f"Failed to reset active sessions: {e}")
 
-    # Reset interrupted AI stock picker runs to failed upon restart
-    try:
-        from app.ai.stock_picker.service import stock_picker_service
-        cleaned_runs = stock_picker_service.cleanup_interrupted_runs()
-        if cleaned_runs:
-            logger.info(f"Found {cleaned_runs} interrupted stock picker runs on startup. Marked them as failed.")
-    except Exception as e:
-        logger.error(f"Failed to reset interrupted stock picker runs: {e}")
-
     # Reset interrupted experience review runs to failed upon restart
     try:
         from app.ai.experience.service import experience_service

@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import JSON, create_engine, event
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -104,11 +104,6 @@ def _patch_ingestor_import_side_effects() -> None:
 def _sqlite_test_tables():
     from app.models.account import Account
     from app.models.account_equity_snapshot import AccountEquitySnapshot
-    from app.ai.stock_picker.models import (
-        StockSelectionCandidate,
-        StockSelectionEvent,
-        StockSelectionRun,
-    )
     from app.ai.stock_picker.interactive_research.models import (
         InteractiveResearchMessage,
         InteractiveResearchRun,
@@ -135,7 +130,6 @@ def _sqlite_test_tables():
     from app.models.trade_record import TradeRecord
     from app.models.user import User
 
-
     return [
         User.__table__,
         Session.__table__,
@@ -158,9 +152,6 @@ def _sqlite_test_tables():
         StockRealtimeMarket.__table__,
         StockValuationHistory.__table__,
         StockIndicators.__table__,
-        StockSelectionRun.__table__,
-        StockSelectionEvent.__table__,
-        StockSelectionCandidate.__table__,
         InteractiveResearchRun.__table__,
         InteractiveResearchMessage.__table__,
     ]
@@ -196,11 +187,6 @@ def sqlite_test_engine():
         cursor.execute("PRAGMA foreign_keys=ON")
         try:
             cursor.execute("ATTACH DATABASE ':memory:' AS data")
-        except sqlite3.OperationalError as exc:
-            if "already in use" not in str(exc):
-                raise
-        try:
-            cursor.execute("ATTACH DATABASE ':memory:' AS stock_picker")
         except sqlite3.OperationalError as exc:
             if "already in use" not in str(exc):
                 raise
@@ -244,7 +230,6 @@ def test_db(sqlite_test_schema, sqlite_session_factory):
     from app.main import app
     import app.main as app_main_module
     import app.ai.experience.service as experience_service_module
-    import app.ai.stock_picker.service as stock_picker_service_module
     import app.tasks.async_task_runner as async_task_runner_module
 
     original_main_session_local = app_main_module.SessionLocal
@@ -253,8 +238,6 @@ def test_db(sqlite_test_schema, sqlite_session_factory):
     async_task_runner_module.SessionLocal = sqlite_session_factory
     original_experience_session_local = experience_service_module.SessionLocal
     experience_service_module.SessionLocal = sqlite_session_factory
-    original_stock_picker_session_local = stock_picker_service_module.SessionLocal
-    stock_picker_service_module.SessionLocal = sqlite_session_factory
 
     def override_get_db():
         db = sqlite_session_factory()
@@ -271,7 +254,6 @@ def test_db(sqlite_test_schema, sqlite_session_factory):
         yield sqlite_session_factory
     finally:
         app.dependency_overrides.pop(get_db, None)
-        stock_picker_service_module.SessionLocal = original_stock_picker_session_local
         experience_service_module.SessionLocal = original_experience_session_local
         async_task_runner_module.SessionLocal = original_async_task_runner_session_local
         app_main_module.SessionLocal = original_main_session_local
