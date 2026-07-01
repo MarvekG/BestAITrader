@@ -530,7 +530,7 @@
         "start_date": "pledge_date",
         "release_date": "release_date",
         "p_total_ratio": "pledge_ratio_to_total",
-        "h_total_ratio": "h_total_ratio",
+        "h_total_ratio": "pledge_ratio_to_holder",
         "holding_amount": "holding_amount",
         "is_buyback": "is_buyback",
         "is_release": "is_release",
