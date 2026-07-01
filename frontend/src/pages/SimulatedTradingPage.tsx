@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
     Card,
@@ -102,7 +102,7 @@ export const SimulatedTradingPage: React.FC = () => {
     ];
 
     // Data Loading
-    const loadData = async (showLoading = true) => {
+    const loadData = useCallback(async (showLoading = true) => {
         if (showLoading) setLoading(true);
         try {
             const [accRes, posRes, ordRes] = await Promise.all([
@@ -119,7 +119,7 @@ export const SimulatedTradingPage: React.FC = () => {
         } finally {
             if (showLoading) setLoading(false);
         }
-    };
+    }, [message]);
 
     const loadRiskControlConfig = async () => {
         try {
@@ -141,7 +141,7 @@ export const SimulatedTradingPage: React.FC = () => {
 
     useEffect(() => {
         loadData();
-    }, []);
+    }, [loadData]);
 
     // Handle initial stock_code from URL
     useEffect(() => {
