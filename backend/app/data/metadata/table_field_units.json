@@ -977,6 +977,9 @@
     }
   },
   "risk.insider": {
+    "shares": {
+      "$ref": "shares"
+    },
     "ratio": {
       "zh": {
         "unit": "units.percent",
@@ -987,6 +990,12 @@
         "scale": 1
       },
       "precision": 2
+    },
+    "avg_price": {
+      "$ref": "cny"
+    },
+    "shares_after": {
+      "$ref": "shares"
     }
   },
   "risk.lockup_release": {
@@ -1000,6 +1009,15 @@
         "scale": 1
       },
       "precision": 0
+    },
+    "ratio": {
+      "$ref": "percent"
+    },
+    "ratio_float": {
+      "$ref": "percent"
+    },
+    "market_value": {
+      "$ref": "ten_thousand_cny"
     }
   },
   "risk.shareholder": {

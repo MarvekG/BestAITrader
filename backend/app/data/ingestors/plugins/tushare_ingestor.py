@@ -960,6 +960,19 @@ class TushareIngestor(BaseIngestor):
                         # Standardize stock code
                         df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
 
+                        # Tushare top_list amount and market-cap fields use 万元; model stores CNY.
+                        amount_cols = [
+                            'net_buy_amount',
+                            'buy_amount',
+                            'sell_amount',
+                            'total_trade_amount',
+                            'market_total_trade_amount',
+                            'floating_market_capitalization',
+                        ]
+                        for col in amount_cols:
+                            if col in df.columns:
+                                df[col] = pd.to_numeric(df[col], errors='coerce') * 10000
+
                         # Set data source
                         df['data_source'] = self.source
 
@@ -1538,8 +1551,8 @@ class TushareIngestor(BaseIngestor):
                 if 'release_date' in df.columns:
                     df['release_date'] = pd.to_datetime(df['release_date'], errors='coerce')
                 if 'release_shares' in df.columns:
-                    # Tushare share_float.float_share already uses raw shares.
-                    df['release_shares'] = pd.to_numeric(df['release_shares'], errors='coerce')
+                    # Tushare share_float.float_share uses 万股; model stores raw shares.
+                    df['release_shares'] = pd.to_numeric(df['release_shares'], errors='coerce') * 10000
 
                 await self._run_in_executor(
                     self.ingestion_service.write_dataframe,
@@ -1678,13 +1691,14 @@ class TushareIngestor(BaseIngestor):
                     'limit_up_price',
                     'pct_chg',
                     'turnover',
-                    'circ_mv',
-                    'total_mv',
                     'turnover_rate',
                     'fund_amount']
                 for col in numeric_cols:
                     if col in df.columns:
                         df[col] = pd.to_numeric(df[col], errors='coerce')
+                for col in ['circ_mv', 'total_mv']:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce') * 10000
 
                 await self._run_in_executor(
                     self.ingestion_service.write_dataframe,
@@ -1771,13 +1785,14 @@ class TushareIngestor(BaseIngestor):
                     'limit_down_price',
                     'pct_chg',
                     'turnover',
-                    'circ_mv',
-                    'total_mv',
                     'turnover_rate',
                     'fund_amount']
                 for col in numeric_cols:
                     if col in df.columns:
                         df[col] = pd.to_numeric(df[col], errors='coerce')
+                for col in ['circ_mv', 'total_mv']:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce') * 10000
 
                 await self._run_in_executor(
                     self.ingestion_service.write_dataframe,
@@ -1865,12 +1880,13 @@ class TushareIngestor(BaseIngestor):
                     'limit_up_price',
                     'pct_chg',
                     'turnover',
-                    'circ_mv',
-                    'total_mv',
                     'turnover_rate']
                 for col in numeric_cols:
                     if col in df.columns:
                         df[col] = pd.to_numeric(df[col], errors='coerce')
+                for col in ['circ_mv', 'total_mv']:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce') * 10000
 
                 await self._run_in_executor(
                     self.ingestion_service.write_dataframe,
@@ -2137,6 +2153,18 @@ class TushareIngestor(BaseIngestor):
             # Map main_net_inflow from net_inflow if not present
             if 'main_net_inflow' not in df.columns and 'net_inflow' in df.columns:
                 df['main_net_inflow'] = df['net_inflow']
+
+            amount_cols = [
+                'net_inflow',
+                'main_net_inflow',
+                'huge_net_inflow',
+                'large_net_inflow',
+                'medium_net_inflow',
+                'small_net_inflow',
+            ]
+            for col in amount_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce') * 10000
 
             if 'trade_date' in df.columns:
                 df['trade_date'] = pd.to_datetime(df['trade_date']).dt.date

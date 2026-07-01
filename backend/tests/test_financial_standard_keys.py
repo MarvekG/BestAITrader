@@ -398,6 +398,39 @@ def test_format_payload_values_formats_akshare_pledge_units(monkeypatch):
     assert en_result["market_value"] == "456.79 million CNY"
 
 
+def test_format_payload_values_formats_legacy_risk_units(monkeypatch):
+    """旧版 Risk 上下文直接读库时应按数据库基准单位补齐后缀。"""
+    monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "zh")
+
+    insider = format_payload_values(
+        "risk.insider",
+        {
+            "shares": 123456,
+            "ratio": 0.56,
+            "avg_price": 12.34,
+            "shares_after": 987654,
+        },
+    )
+    lockup = format_payload_values(
+        "risk.lockup_release",
+        {
+            "shares": 5_000_000,
+            "ratio": 2.5,
+            "ratio_float": 3.2,
+            "market_value": 120_000,
+        },
+    )
+
+    assert insider["shares"] == "123456股"
+    assert insider["ratio"] == "0.56%"
+    assert insider["avg_price"] == "12.34元"
+    assert insider["shares_after"] == "987654股"
+    assert lockup["shares"] == "5000000股"
+    assert lockup["ratio"] == "2.5%"
+    assert lockup["ratio_float"] == "3.2%"
+    assert lockup["market_value"] == "120000万元"
+
+
 def test_format_payload_values_formats_stock_picker_units(monkeypatch):
     monkeypatch.setattr("app.core.config.settings.SYSTEM_LANGUAGE", "zh")
 
