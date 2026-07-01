@@ -4,6 +4,7 @@ import enUS from 'antd/locale/en_US';
 import zhCN from 'antd/locale/zh_CN';
 import i18n from '../i18n/config';
 import { normalizeLanguage } from '../i18n/language';
+import { NotificationCanvas } from '../components/NotificationCanvas';
 import { ThemeContext } from './themeContext';
 import type { ThemeMode } from './themeContext';
 
@@ -87,7 +88,10 @@ export const AppThemeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   return (
     <ThemeContext.Provider value={contextValue}>
       <ConfigProvider locale={antdLocale} theme={themeConfig}>
-        <AntdApp>{children}</AntdApp>
+        <AntdApp>
+          <NotificationCanvas />
+          {children}
+        </AntdApp>
       </ConfigProvider>
     </ThemeContext.Provider>
   );
