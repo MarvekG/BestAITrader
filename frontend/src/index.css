@@ -64,6 +64,39 @@ code {
   justify-content: center;
 }
 
+.ant-notification .ant-notification-notice {
+  padding: 6px 28px 6px 12px !important;
+  width: max-content !important;
+  max-width: calc(100vw - 48px) !important;
+}
+
+.ant-notification .ant-notification-notice-message {
+  line-height: 20px !important;
+  margin-bottom: 0 !important;
+}
+
+.ant-notification .ant-notification-notice-description {
+  line-height: 20px !important;
+  margin-top: 4px !important;
+}
+
+.ant-notification .ant-notification-notice-icon {
+  line-height: 20px !important;
+  top: 6px !important;
+}
+
+.ant-notification .ant-notification-notice-close {
+  top: 6px !important;
+}
+
+.app-feedback-line {
+  display: block;
+  max-width: calc(100vw - 120px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .experience-scroll-panel {
   overflow-y: auto;
   padding-right: 8px;

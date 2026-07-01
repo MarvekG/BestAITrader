@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   Alert,
-  App as AntdApp,
   Button,
   Card,
   DatePicker,
@@ -29,6 +28,7 @@ import {
 } from '../../api/experience';
 import { formatErrorMessage, getApiErrorDetail } from '../../utils/errorUtils';
 import { ReviewTriadCards } from './ReviewTriadCards';
+import { useFeedback } from '../../hooks/useFeedback';
 
 const { Paragraph, Text, Title } = Typography;
 const { RangePicker } = DatePicker;
@@ -64,7 +64,7 @@ interface ExperienceLibraryPanelProps {
 
 export const ExperienceLibraryPanel: React.FC<ExperienceLibraryPanelProps> = ({ onOpenReview }) => {
   const { t } = useTranslation();
-  const { message } = AntdApp.useApp();
+  const message = useFeedback();
   const [form] = Form.useForm<FilterValues>();
   const [loading, setLoading] = React.useState(false);
   const [rebuilding, setRebuilding] = React.useState(false);

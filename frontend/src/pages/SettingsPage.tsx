@@ -52,6 +52,7 @@ import { getApiErrorMessage, getApiErrorResponseData } from '../utils/errorUtils
 import { useSearchParams } from 'react-router-dom';
 import { TaskCompletedMessage, WebSocketMessage } from '../services/websocket';
 import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
+import { useFeedback } from '../hooks/useFeedback';
 
 const AI_FUNCTION_SCENARIOS: Array<{ key: AiFunctionScenario; titleKey: string; placeholderKey: string }> = [
   {
@@ -193,7 +194,8 @@ const normalizeApiKeyList = (value: unknown): string[] => {
 
 export const SettingsPage: React.FC = () => {
   const { t } = useTranslation();
-  const { message, modal } = AntdApp.useApp();
+  const { modal } = AntdApp.useApp();
+  const message = useFeedback();
   const [settingsSearchParams, setSettingsSearchParams] = useSearchParams();
   const diagnosticPanelStyle: React.CSSProperties = {
     backgroundColor: 'var(--app-bg-muted)',

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   App as AntdApp,
   AutoComplete,
@@ -39,6 +39,7 @@ import { useTranslation } from 'react-i18next';
 import { formatErrorMessage } from '../utils/errorUtils';
 import { DebateManagementPanel, StockResearchAnalysisPanel } from './warehouse/AnalysisPanels';
 import { StockDataPage } from './StockDataPage';
+import { useFeedback } from '../hooks/useFeedback';
 
 type ApiError = {
   response?: {
@@ -87,6 +88,7 @@ export const StockWarehousePage: React.FC = () => {
   const [tradingStrategy, setTradingStrategy] = useState(t('warehouse.strategy_value'));
   const [syncBeforeAnalysis, setSyncBeforeAnalysis] = useState(true);
   const [isBatchAnalysis, setIsBatchAnalysis] = useState(false);
+  const aiAnalysisSubmittingRef = useRef(false);
   const [isAutoConfigModalOpen, setIsAutoConfigModalOpen] = useState(false);
   const [selectedStockForAutoConfig, setSelectedStockForAutoConfig] = useState<StockInfo | null>(null);
   const [autoConfigForm] = Form.useForm();
@@ -99,7 +101,8 @@ export const StockWarehousePage: React.FC = () => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
 
 
-  const { message, modal } = AntdApp.useApp();
+  const { modal } = AntdApp.useApp();
+  const message = useFeedback();
   const { createSession, setActiveSession } = useSessionStore();
   const navigate = useNavigate();
   const activeTab = searchParams.get('tab') || 'warehouse';
@@ -226,7 +229,7 @@ export const StockWarehousePage: React.FC = () => {
       setLoading(true);
       message.loading({ content: t('common.syncing'), key: 'sync_data' });
       await marketApi.syncDbData(code);
-      message.success({ content: t('common.sync_success'), key: 'sync_data' });
+      message.success({ content: t('common.sync_start_success'), key: 'sync_data' });
       fetchStocks();
     } catch (error: unknown) {
       const detail = getApiErrorDetail(error);
@@ -421,6 +424,9 @@ export const StockWarehousePage: React.FC = () => {
   };
 
   const handleConfirmAiAnalysis = async () => {
+    if (aiAnalysisSubmittingRef.current) return;
+    aiAnalysisSubmittingRef.current = true;
+
     try {
       setIsAiAnalysisModalOpen(false);
       setLoading(true);
@@ -495,6 +501,7 @@ export const StockWarehousePage: React.FC = () => {
       const msgKey = isBatchAnalysis ? 'batch_process' : 'ai_analysis';
       message.error({ content: errorMessage, key: msgKey });
     } finally {
+      aiAnalysisSubmittingRef.current = false;
       setLoading(false);
       setSelectedStockForAnalysis(null);
       setIsBatchAnalysis(false);
@@ -723,9 +730,14 @@ export const StockWarehousePage: React.FC = () => {
         title={t('warehouse.analysis_settings_title')}
         open={isAiAnalysisModalOpen}
         onOk={handleConfirmAiAnalysis}
-        onCancel={() => setIsAiAnalysisModalOpen(false)}
+        onCancel={() => {
+          if (aiAnalysisSubmittingRef.current) return;
+          setIsAiAnalysisModalOpen(false);
+        }}
         okText={t('common.confirm')}
         cancelText={t('common.cancel')}
+        confirmLoading={loading}
+        cancelButtonProps={{ disabled: loading }}
       >
         <Form layout="vertical">
           <Form.Item label={t('warehouse.trading_frequency')}>

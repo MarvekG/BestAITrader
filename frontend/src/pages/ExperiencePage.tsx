@@ -45,6 +45,7 @@ import { WrittenMemoryCards } from './experience/WrittenMemoryCards';
 import { WebSocketMessage } from '../services/websocket';
 import { useResourceSubscription } from '../hooks/useWebSocketSubscription';
 import { formatErrorMessage, getApiErrorDetail, getApiErrorMessage } from '../utils/errorUtils';
+import { useFeedback } from '../hooks/useFeedback';
 
 const { Text, Title, Paragraph } = Typography;
 
@@ -89,7 +90,8 @@ const getToolName = (payload?: Record<string, unknown> | null) => {
 
 export const ExperiencePage: React.FC = () => {
   const { t } = useTranslation();
-  const { message, modal } = AntdApp.useApp();
+  const { modal } = AntdApp.useApp();
+  const message = useFeedback();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [selectedSessionId, setSelectedSessionId] = React.useState<string | undefined>(

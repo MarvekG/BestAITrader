@@ -1,10 +1,11 @@
 import React from 'react';
-import { App as AntdApp, Button, Tooltip } from 'antd';
+import { Button, Tooltip } from 'antd';
 import { useTranslation } from 'react-i18next';
 import { Globe } from 'lucide-react';
 import { systemApi } from '../api/system';
 import type { AppLanguage } from '../i18n/language';
 import { normalizeLanguage, storeLanguage } from '../i18n/language';
+import { useFeedback } from '../hooks/useFeedback';
 
 interface LanguageSwitcherProps {
     block?: boolean;
@@ -12,7 +13,7 @@ interface LanguageSwitcherProps {
 
 const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ block = false }) => {
     const { t, i18n } = useTranslation();
-    const { message } = AntdApp.useApp();
+    const message = useFeedback();
     const [language, setLanguage] = React.useState<AppLanguage>(
         normalizeLanguage(i18n.resolvedLanguage || i18n.language)
     );

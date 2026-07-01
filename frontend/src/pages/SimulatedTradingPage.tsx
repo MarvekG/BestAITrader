@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import {
     Card,
     Table,
     Button,
-    message,
     Tag,
     Space,
     Modal,
@@ -36,6 +35,7 @@ import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
 import { getApiErrorMessage } from '../utils/errorUtils';
 import { PerformanceTab } from '../features/trading/PerformanceTab';
 import { PortfolioOverviewTab } from '../features/trading/PortfolioOverviewTab';
+import { useFeedback } from '../hooks/useFeedback';
 
 interface OrderFormValues {
     action: 'buy' | 'sell';
@@ -63,6 +63,7 @@ const formatScanTime = (value?: Dayjs | string | null) => {
 
 export const SimulatedTradingPage: React.FC = () => {
     const { t } = useTranslation();
+    const message = useFeedback();
     const location = useLocation();
     const {
         token: {
@@ -101,7 +102,7 @@ export const SimulatedTradingPage: React.FC = () => {
     ];
 
     // Data Loading
-    const loadData = async (showLoading = true) => {
+    const loadData = useCallback(async (showLoading = true) => {
         if (showLoading) setLoading(true);
         try {
             const [accRes, posRes, ordRes] = await Promise.all([
@@ -118,7 +119,7 @@ export const SimulatedTradingPage: React.FC = () => {
         } finally {
             if (showLoading) setLoading(false);
         }
-    };
+    }, [message]);
 
     const loadRiskControlConfig = async () => {
         try {
@@ -140,7 +141,7 @@ export const SimulatedTradingPage: React.FC = () => {
 
     useEffect(() => {
         loadData();
-    }, []);
+    }, [loadData]);
 
     // Handle initial stock_code from URL
     useEffect(() => {

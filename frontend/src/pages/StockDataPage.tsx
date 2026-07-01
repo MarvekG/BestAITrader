@@ -1,5 +1,5 @@
 import React, { useCallback, useState, useEffect } from 'react';
-import { Card, Select, Tabs, Spin, Empty, message, Typography, DatePicker, Space } from 'antd';
+import { Card, Select, Tabs, Spin, Empty, Typography, DatePicker, Space } from 'antd';
 import dayjs from 'dayjs';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
@@ -8,6 +8,7 @@ import type { AIContext } from '../api/market';
 import { StockWarehouse, warehouseApi } from '../api/warehouse';
 import { getApiErrorMessage } from '../utils/errorUtils';
 import { KlineChart } from '../features/market/KlineChart';
+import { useFeedback } from '../hooks/useFeedback';
 
 import { useTranslation } from 'react-i18next';
 
@@ -15,6 +16,7 @@ const { Text } = Typography;
 
 export const StockDataPage: React.FC = () => {
     const { t } = useTranslation();
+    const message = useFeedback();
     const [searchParams, setSearchParams] = useSearchParams();
     const [stockCode, setStockCode] = useState<string | undefined>(searchParams.get('stock_code') || undefined);
     const [stockList, setStockList] = useState<StockWarehouse[]>([]);
@@ -49,7 +51,7 @@ export const StockDataPage: React.FC = () => {
         } finally {
             setLoading(false);
         }
-    }, [t]);
+    }, [message, t]);
 
     // 当股票代码变化时加载数据
     useEffect(() => {

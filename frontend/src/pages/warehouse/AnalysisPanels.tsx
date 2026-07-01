@@ -33,6 +33,7 @@ import { AsyncTaskRecord, tasksApi } from '../../api/tasks';
 import { DecisionAuditLog } from '../../features/brain/DecisionAuditLog';
 import { useSessionStore } from '../../store/useSessionStore';
 import { getApiErrorMessage } from '../../utils/errorUtils';
+import { useFeedback } from '../../hooks/useFeedback';
 
 const STOCK_ANALYSIS_TASK_TYPE = 'stock_analysis';
 const FINISHED_TASK_STATUS = new Set(['completed', 'failed', 'cancelled']);
@@ -133,7 +134,8 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
   );
   const { setActiveSession } = useSessionStore();
   const navigate = useNavigate();
-  const { message, modal } = AntdApp.useApp();
+  const { modal } = AntdApp.useApp();
+  const message = useFeedback();
 
   const fetchSessions = useCallback(async (page: number, pageSize: number) => {
     setLoading(true);
@@ -447,7 +449,8 @@ export const StockResearchAnalysisPanel: React.FC<StockResearchAnalysisPanelProp
   const [analysisHistoryTotal, setAnalysisHistoryTotal] = useState(0);
   const [analysisHistoryPage, setAnalysisHistoryPage] = useState(1);
   const [analysisHistoryPageSize, setAnalysisHistoryPageSize] = useState(STOCK_ANALYSIS_HISTORY_PAGE_SIZE);
-  const { message, modal } = AntdApp.useApp();
+  const { modal } = AntdApp.useApp();
+  const message = useFeedback();
 
   const loadAnalysisHistory = useCallback(async (page: number, pageSize: number, preferredTaskId?: string) => {
     setLoadingLatestAnalysis(true);

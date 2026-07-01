@@ -25,6 +25,7 @@
     "refreshing": "Syncing data in background...",
     "syncing": "Syncing...",
     "sync_success": "Data sync successful",
+    "sync_start_success": "Data sync started successfully",
     "sync_failed": "Data sync failed",
     "sync_insider": "Sync Insider Trading",
     "sync_lockup": "Sync Lockup",
@@ -1998,6 +1999,10 @@
     "submission_success": "Async task submitted successfully, Task ID: {task_id}",
     "already_in_progress": "Task already in progress, Task ID: {task_id}",
     "ai_debate_concurrency_limit_reached": "AI research debate concurrency limit reached ({running_count}/{max_concurrent}). Please wait for running debates to complete.",
+    "ai_analysis_stock_already_running": "An AI analysis task for stock {stock_code} is already running (Task ID: {task_id}). Please wait for it to complete.",
+    "ai_analysis_already_running": "AI analysis is already running, Task ID: {task_id}",
+    "ai_debate_session_not_active": "Session status is {session_status}. Only active sessions can start debates.",
+    "ai_debate_session_already_completed": "Session {session_id} already has a completed debate. Cannot start another debate in the same session.",
     "names": {
       "stock_basic_sync": "Stock Basic Sync ({info})",
       "dragon_tiger_sync": "Dragon Tiger Sync ({dates})",

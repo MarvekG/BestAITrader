@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Card, Statistic, Row, Col, Button, Modal, InputNumber, App as AntdApp } from 'antd';
+import { Card, Statistic, Row, Col, Button, Modal, InputNumber } from 'antd';
 import { EditOutlined } from '@ant-design/icons';
 import { tradeApi, AccountAssets } from '../../api/trade';
 import { useSessionStore } from '../../store/useSessionStore';
 import { useTranslation } from 'react-i18next';
+import { useFeedback } from '../../hooks/useFeedback';
 
 export const AccountOverview: React.FC = () => {
   const { t } = useTranslation();
@@ -11,7 +12,7 @@ export const AccountOverview: React.FC = () => {
   const [assets, setAssets] = useState<AccountAssets | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newFunds, setNewFunds] = useState<number>(0);
-  const { message } = AntdApp.useApp();
+  const message = useFeedback();
 
   const fetchAssets = useCallback(() => {
     if (activeSession) {

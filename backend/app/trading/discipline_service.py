@@ -9,7 +9,10 @@ from fastapi import BackgroundTasks
 
 from app.ai.llm_engine.debate_concurrency import (
     DebateConcurrencyLimitReached,
-    ensure_debate_concurrency_available,
+    DebateStockTaskAlreadyRunning,
+    ensure_debate_launch_available,
+    find_running_debate_task_for_stock,
+    format_ai_analysis_task_name,
 )
 from app.ai.market_watch.schemas import DebateParameters, WatchAiDecision
 from app.ai.llm_engine.runner import run_analysis_task
@@ -200,6 +203,13 @@ async def _handle_position_discipline_trigger(
             session_source=PM_DISCIPLINE_SESSION_SOURCES.get(item["trigger"], "market_watch"),
             discipline_trigger=discipline_trigger,
         )
+    except DebateStockTaskAlreadyRunning as exc:
+        return {
+            "status": "skipped",
+            "reason": "existing_task",
+            "stock_code": item["stock_code"],
+            "task_id": exc.task_id,
+        }
     except DebateConcurrencyLimitReached as exc:
         return {
             "status": "skipped",
@@ -229,16 +239,7 @@ def _find_existing_stock_task(stock_code: str) -> bool:
         存在同股票待执行或运行中任务时返回 True。
     """
     with database_module.SessionLocal() as db:
-        tasks = (
-            db.query(AsyncTask)
-            .filter(AsyncTask.task_type == "ai_analysis", AsyncTask.status.in_(["pending", "running"]))
-            .all()
-        )
-        for task in tasks:
-            parameters = task.parameters or {}
-            if task.task_name == f"AI Analysis - {stock_code}" or parameters.get("stock_code") == stock_code:
-                return True
-    return False
+        return find_running_debate_task_for_stock(db, stock_code) is not None
 
 
 async def _create_and_schedule_position_discipline_debate(
@@ -268,7 +269,7 @@ async def _create_and_schedule_position_discipline_debate(
     trading_frequency = trading_frequency_label(parameters.trading_frequency)
     trading_strategy = trading_strategy_label(parameters.trading_strategy)
     with database_module.SessionLocal() as db:
-        ensure_debate_concurrency_available(db)
+        ensure_debate_launch_available(db, stock_code)
         session = crud_session.create(
             db,
             obj_in=SessionCreate(
@@ -289,7 +290,7 @@ async def _create_and_schedule_position_discipline_debate(
         }
         task_info = task_manager.submit_task(
             db=db,
-            task_name=f"AI Analysis - {stock_code}",
+            task_name=format_ai_analysis_task_name(stock_code),
             task_type="ai_analysis",
             parameters=task_parameters,
             allow_concurrent=False,

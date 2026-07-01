@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   Alert,
-  App as AntdApp,
   Button,
   Card,
   Descriptions,
@@ -45,6 +44,7 @@ import {
 import { useWebSocketSubscription } from '../../hooks/useWebSocketSubscription';
 import { InteractiveStockPickerUpdateMessage, WebSocketMessage } from '../../services/websocket';
 import { formatErrorMessage, getApiErrorDetail } from '../../utils/errorUtils';
+import { useFeedback } from '../../hooks/useFeedback';
 import './InteractiveResearchTab.css';
 
 const { Text } = Typography;
@@ -231,7 +231,7 @@ const getExecutionStatusColor = (status: string) => {
 
 export const InteractiveResearchTab: React.FC = () => {
   const { t } = useTranslation();
-  const { message } = AntdApp.useApp();
+  const message = useFeedback();
   const { token } = theme.useToken();
   const [messageForm] = Form.useForm<TextFormValues>();
   const [runs, setRuns] = React.useState<InteractiveResearchRunSummary[]>([]);

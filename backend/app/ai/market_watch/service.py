@@ -13,7 +13,10 @@ from fastapi import BackgroundTasks
 
 from app.ai.llm_engine.debate_concurrency import (
     DebateConcurrencyLimitReached,
-    ensure_debate_concurrency_available,
+    DebateStockTaskAlreadyRunning,
+    ensure_debate_launch_available,
+    find_running_debate_task_for_stock,
+    format_ai_analysis_task_name,
 )
 from app.ai.llm_engine.runner import run_analysis_task
 from app.crud.session import crud_session
@@ -804,6 +807,22 @@ async def _maybe_launch_debate(
             background_tasks=background_tasks,
             session_source=session_source,
         )
+    except DebateStockTaskAlreadyRunning as exc:
+        logger.info(
+            "Market watch debate launch skipped",
+            extra={
+                "user_id": user_id,
+                "stock_code": stock_code,
+                "reason": "existing_task",
+                "task_id": exc.task_id,
+            },
+        )
+        await _audit_debate_skip(
+            user_id=user_id,
+            decision=decision,
+            reason="existing_task",
+        )
+        return {"status": "skipped", "reason": "existing_task", "stock_code": stock_code, "task_id": exc.task_id}
     except DebateConcurrencyLimitReached as exc:
         logger.info(
             "Market watch debate launch skipped",
@@ -896,16 +915,7 @@ def _can_break_cooldown(decision: Any, settings: dict[str, Any]) -> bool:
 
 def _find_existing_stock_task(stock_code: str) -> bool:
     with database_module.SessionLocal() as db:
-        tasks = (
-            db.query(AsyncTask)
-            .filter(AsyncTask.task_type == "ai_analysis", AsyncTask.status.in_(["pending", "running"]))
-            .all()
-        )
-        for task in tasks:
-            parameters = task.parameters or {}
-            if task.task_name == f"AI Analysis - {stock_code}" or parameters.get("stock_code") == stock_code:
-                return True
-    return False
+        return find_running_debate_task_for_stock(db, stock_code) is not None
 
 
 def _apply_stock_debate_preferences(
@@ -988,7 +998,7 @@ async def _create_and_schedule_debate(
     trading_frequency = trading_frequency_label(parameters.trading_frequency)
     trading_strategy = trading_strategy_label(parameters.trading_strategy)
     with database_module.SessionLocal() as db:
-        ensure_debate_concurrency_available(db)
+        ensure_debate_launch_available(db, stock_code)
         session = crud_session.create(
             db,
             obj_in=SessionCreate(
@@ -1008,7 +1018,7 @@ async def _create_and_schedule_debate(
         }
         task_info = task_manager.submit_task(
             db=db,
-            task_name=f"AI Analysis - {stock_code}",
+            task_name=format_ai_analysis_task_name(stock_code),
             task_type="ai_analysis",
             parameters=task_parameters,
             allow_concurrent=False,

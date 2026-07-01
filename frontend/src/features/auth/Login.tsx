@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card, Form, Input, Button, Typography, App as AntdApp, theme } from 'antd';
+import { Card, Form, Input, Button, Typography, theme } from 'antd';
 import { UserOutlined, LockOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { authApi } from '../../api/auth';
@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next';
 import LanguageSwitcher from '../../components/LanguageSwitcher';
 import ThemeSwitcher from '../../components/ThemeSwitcher';
 import { getApiErrorStatus } from '../../utils/errorUtils';
+import { useFeedback } from '../../hooks/useFeedback';
 
 const { Title, Text } = Typography;
 
@@ -33,7 +34,7 @@ export const Login: React.FC = () => {
     token: { colorBgContainer, colorBgLayout, colorBorderSecondary, colorPrimary, colorText, colorTextQuaternary },
   } = theme.useToken();
   const [loading, setLoading] = React.useState(false);
-  const { message } = AntdApp.useApp();
+  const message = useFeedback();
   const navigate = useNavigate();
 
   const handleSubmit = async (values: LoginFormValues) => {
