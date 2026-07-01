@@ -20,19 +20,21 @@ import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
 import { useTranslation } from 'react-i18next';
 import { apiHistory } from '../utils/apiHistory';
 import { getApiErrorDetail } from '../utils/errorUtils';
-import { Modal, Form, Input, message } from 'antd';
+import { Modal, Form, Input } from 'antd';
 import { authApi } from '../api/auth';
 import { GlobalTaskNotifications } from '../components/GlobalTaskNotifications';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import ThemeSwitcher from '../components/ThemeSwitcher';
 import { useThemeMode } from '../theme/useThemeMode';
 import { clearAuthSession } from '../services/authSession';
+import { useFeedback } from '../hooks/useFeedback';
 
 const { Sider, Content } = Layout;
 
 
 export const DashboardLayout: React.FC = () => {
   const { t } = useTranslation();
+  const message = useFeedback();
   const { mode } = useThemeMode();
   const navigate = useNavigate();
   const location = useLocation();

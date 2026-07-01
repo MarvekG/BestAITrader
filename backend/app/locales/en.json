@@ -25,6 +25,7 @@
     "refreshing": "Syncing data in background...",
     "syncing": "Syncing...",
     "sync_success": "Data sync successful",
+    "sync_start_success": "Data sync started successfully",
     "sync_failed": "Data sync failed",
     "sync_insider": "Sync Insider Trading",
     "sync_lockup": "Sync Lockup",

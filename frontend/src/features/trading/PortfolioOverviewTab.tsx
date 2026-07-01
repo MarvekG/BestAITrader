@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Button, Card, Col, Empty, Row, Spin, Statistic, Table, Tag, Tooltip, message } from 'antd';
+import { Button, Card, Col, Empty, Row, Spin, Statistic, Table, Tag, Tooltip } from 'antd';
 import { ExclamationCircleOutlined, SyncOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useFeedback } from '../../hooks/useFeedback';
 
 import {
   IndustryAllocation,
@@ -42,6 +43,7 @@ const renderTitleWithTip = (label: string, tip: string) => (
 
 export const PortfolioOverviewTab: React.FC = () => {
   const { t } = useTranslation();
+  const message = useFeedback();
   const [loading, setLoading] = useState(false);
   const [overview, setOverview] = useState<PortfolioOverview | null>(null);
 
@@ -56,7 +58,7 @@ export const PortfolioOverviewTab: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [message, t]);
 
   useEffect(() => {
     void loadOverview();

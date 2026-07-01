@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Table, Card, Button, Tag, Space, Input, Select, Modal, Typography, App } from 'antd';
+import { Table, Card, Button, Tag, Space, Input, Select, Modal, Typography } from 'antd';
 import { DeleteOutlined, ReloadOutlined, SearchOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import { apiHistory, ApiHistoryRecord } from '../utils/apiHistory';
 import dayjs from 'dayjs';
+import { useFeedback } from '../hooks/useFeedback';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -13,7 +14,7 @@ const hasObjectContent = (value: unknown): value is Record<string, unknown> =>
 
 export const ApiHistoryPage: React.FC = () => {
     const { t } = useTranslation();
-    const { message } = App.useApp();
+    const message = useFeedback();
     const [records, setRecords] = useState<ApiHistoryRecord[]>(() => apiHistory.getRecords());
     const [searchKeyword, setSearchKeyword] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('all');

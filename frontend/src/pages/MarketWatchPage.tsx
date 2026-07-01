@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  App as AntdApp,
   Button,
   Card,
   Col,
@@ -43,6 +42,7 @@ import {
 } from '../api/marketWatch';
 import { websocketTicketApi } from '../api/websocketTicket';
 import { formatErrorMessage } from '../utils/errorUtils';
+import { useFeedback } from '../hooks/useFeedback';
 
 const { Text } = Typography;
 
@@ -278,7 +278,7 @@ const settingLabel = (label: string, tooltip: string) => (
 );
 
 export const MarketWatchPage: React.FC = () => {
-  const { message } = AntdApp.useApp();
+  const message = useFeedback();
   const { t } = useTranslation();
   const [settingsForm] = Form.useForm<MarketWatchSettingsFormValues>();
   const [sourcePreviewForm] = Form.useForm<MarketWatchSourcePreviewFormValues>();

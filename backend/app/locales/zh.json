@@ -25,6 +25,7 @@
     "refreshing": "正在后台同步数据...",
     "syncing": "同步中...",
     "sync_success": "数据同步成功",
+    "sync_start_success": "启动数据同步成功",
     "sync_failed": "数据同步失败",
     "sync_insider": "同步高管持股",
     "sync_lockup": "同步限售解禁",

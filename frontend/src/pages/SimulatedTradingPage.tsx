@@ -4,7 +4,6 @@ import {
     Card,
     Table,
     Button,
-    message,
     Tag,
     Space,
     Modal,
@@ -36,6 +35,7 @@ import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
 import { getApiErrorMessage } from '../utils/errorUtils';
 import { PerformanceTab } from '../features/trading/PerformanceTab';
 import { PortfolioOverviewTab } from '../features/trading/PortfolioOverviewTab';
+import { useFeedback } from '../hooks/useFeedback';
 
 interface OrderFormValues {
     action: 'buy' | 'sell';
@@ -63,6 +63,7 @@ const formatScanTime = (value?: Dayjs | string | null) => {
 
 export const SimulatedTradingPage: React.FC = () => {
     const { t } = useTranslation();
+    const message = useFeedback();
     const location = useLocation();
     const {
         token: {

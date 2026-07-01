@@ -39,6 +39,7 @@ import { useTranslation } from 'react-i18next';
 import { formatErrorMessage } from '../utils/errorUtils';
 import { DebateManagementPanel, StockResearchAnalysisPanel } from './warehouse/AnalysisPanels';
 import { StockDataPage } from './StockDataPage';
+import { useFeedback } from '../hooks/useFeedback';
 
 type ApiError = {
   response?: {
@@ -100,7 +101,8 @@ export const StockWarehousePage: React.FC = () => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
 
 
-  const { message, modal } = AntdApp.useApp();
+  const { modal } = AntdApp.useApp();
+  const message = useFeedback();
   const { createSession, setActiveSession } = useSessionStore();
   const navigate = useNavigate();
   const activeTab = searchParams.get('tab') || 'warehouse';
@@ -227,7 +229,7 @@ export const StockWarehousePage: React.FC = () => {
       setLoading(true);
       message.loading({ content: t('common.syncing'), key: 'sync_data' });
       await marketApi.syncDbData(code);
-      message.success({ content: t('common.sync_success'), key: 'sync_data' });
+      message.success({ content: t('common.sync_start_success'), key: 'sync_data' });
       fetchStocks();
     } catch (error: unknown) {
       const detail = getApiErrorDetail(error);

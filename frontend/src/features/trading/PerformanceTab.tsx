@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Card, Col, Empty, Row, Spin, Statistic, Table, message, theme } from 'antd';
+import { Button, Card, Col, Empty, Row, Spin, Statistic, Table, theme } from 'antd';
 import { SyncOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
+import { useFeedback } from '../../hooks/useFeedback';
 
 import { EquityCurveItem, EquityCurveResponse, PerformanceSummary, performanceApi } from '../../api/performance';
 import { echarts, type ECharts } from '../market/echartsCore';
@@ -23,6 +24,7 @@ const getReturnColor = (value: number | null | undefined) => {
 
 export const PerformanceTab: React.FC = () => {
   const { t } = useTranslation();
+  const message = useFeedback();
   const { token } = theme.useToken();
   const chartRef = useRef<HTMLDivElement>(null);
   const chartInstance = useRef<ECharts | null>(null);
@@ -45,7 +47,7 @@ export const PerformanceTab: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [message, t]);
 
   useEffect(() => {
     void loadPerformance();

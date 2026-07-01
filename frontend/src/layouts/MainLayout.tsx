@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layout, Menu, Button, Modal, Form, Input, App, Select, theme } from 'antd';
+import { Layout, Menu, Button, Modal, Form, Input, Select, theme } from 'antd';
 import { ThunderboltOutlined, PlusOutlined, LogoutOutlined } from '@ant-design/icons';
 import { useSessionStore } from '../store/useSessionStore';
 import { Session } from '../api/session';
@@ -8,6 +8,7 @@ import { clearAuthSession } from '../services/authSession';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import ThemeSwitcher from '../components/ThemeSwitcher';
 import { useThemeMode } from '../theme/useThemeMode';
+import { useFeedback } from '../hooks/useFeedback';
 
 import { useTranslation } from 'react-i18next';
 
@@ -35,9 +36,7 @@ export const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }
   const siderBackground = isDarkMode ? 'var(--app-sider-bg)' : colorBgContainer;
   const siderBorderColor = isDarkMode ? 'var(--app-sider-border)' : colorBorder;
   const siderTextColor = isDarkMode ? '#ffffff' : colorText;
-
-  // Use Ant Design's useApp hook to access context-aware message/notification
-  const { message } = App.useApp();
+  const message = useFeedback();
 
   React.useEffect(() => {
     fetchSessions();

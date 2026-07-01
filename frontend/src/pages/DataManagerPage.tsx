@@ -7,6 +7,7 @@ import { TaskCompletedMessage, WebSocketMessage } from '../services/websocket';
 import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
 import { getApiErrorMessage } from '../utils/errorUtils';
 import dayjs from 'dayjs';
+import { useFeedback } from '../hooks/useFeedback';
 
 const { Text } = Typography;
 
@@ -20,7 +21,8 @@ const formatNumber = (value: number | null | undefined, precision = 2) => {
 
 export const DataManagerPage: React.FC = () => {
     const { t } = useTranslation();
-    const { message, notification } = App.useApp();
+    const { notification } = App.useApp();
+    const message = useFeedback();
     const [loading, setLoading] = useState(false);
     const [syncing, setSyncing] = useState(false);
     const [dragonTigerSyncing, setDragonTigerSyncing] = useState(false);

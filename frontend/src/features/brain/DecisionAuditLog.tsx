@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { App as AntdApp, Avatar, Button, Card, Descriptions, Dropdown, Empty, Space, Spin, Steps, Tag, Tooltip, Typography } from 'antd';
+import { Avatar, Button, Card, Descriptions, Dropdown, Empty, Space, Spin, Steps, Tag, Tooltip, Typography } from 'antd';
 import { useSessionStore } from '../../store/useSessionStore';
 import { DebateThread, PMDecisionRecord, debateApi } from '../../api/debate';
 import { sessionApi, Session } from '../../api/session';
@@ -7,6 +7,7 @@ import { AuditOutlined, BarChartOutlined, MessageOutlined, FileSearchOutlined, R
 import { useTranslation } from 'react-i18next';
 import { getRoleConfig } from './roleConfig';
 import { DebateMarkdown } from './DebateMarkdown';
+import { useFeedback } from '../../hooks/useFeedback';
 
 import type { MenuProps } from 'antd';
 
@@ -63,7 +64,7 @@ const formatPrice = (value?: number | null) => (value && value > 0 ? `¥${value.
 
 export const DecisionAuditLog: React.FC<DecisionAuditLogProps> = ({ sessionId, isActive = true }) => {
   const { t } = useTranslation();
-  const { message } = AntdApp.useApp();
+  const message = useFeedback();
   const { activeSession } = useSessionStore();
   const [localSession, setLocalSession] = useState<Session | null>(null);
   const [messages, setMessages] = useState<AuditMessage[]>([]);

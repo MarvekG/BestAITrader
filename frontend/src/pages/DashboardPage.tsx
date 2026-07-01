@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Row, Col, Card, Button, App as AntdApp, Tabs, Badge, Tooltip, theme, Spin } from 'antd';
+import { Row, Col, Card, Button, Tabs, Badge, Tooltip, theme, Spin } from 'antd';
 import { DebateArena, DebateMessage } from '../features/brain/DebateArena';
 import { DecisionAuditLog } from '../features/brain/DecisionAuditLog';
 
@@ -10,6 +10,7 @@ import { websocketTicketApi } from '../api/websocketTicket';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { getApiErrorMessage } from '../utils/errorUtils';
+import { useFeedback } from '../hooks/useFeedback';
 
 const debateProgressMessageKey = 'dashboard_debate_progress';
 const debateSessionsRefreshEvent = 'debate-sessions-refresh';
@@ -20,7 +21,7 @@ export const DashboardPage: React.FC = () => {
     token: { colorText, colorTextSecondary },
   } = theme.useToken();
   const { activeSession, setActiveSession, clearActiveSession } = useSessionStore();
-  const { message } = AntdApp.useApp();
+  const message = useFeedback();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const routeSessionId = searchParams.get('session_id');
