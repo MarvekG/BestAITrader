@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   App as AntdApp,
   AutoComplete,
@@ -87,6 +87,7 @@ export const StockWarehousePage: React.FC = () => {
   const [tradingStrategy, setTradingStrategy] = useState(t('warehouse.strategy_value'));
   const [syncBeforeAnalysis, setSyncBeforeAnalysis] = useState(true);
   const [isBatchAnalysis, setIsBatchAnalysis] = useState(false);
+  const aiAnalysisSubmittingRef = useRef(false);
   const [isAutoConfigModalOpen, setIsAutoConfigModalOpen] = useState(false);
   const [selectedStockForAutoConfig, setSelectedStockForAutoConfig] = useState<StockInfo | null>(null);
   const [autoConfigForm] = Form.useForm();
@@ -421,6 +422,9 @@ export const StockWarehousePage: React.FC = () => {
   };
 
   const handleConfirmAiAnalysis = async () => {
+    if (aiAnalysisSubmittingRef.current) return;
+    aiAnalysisSubmittingRef.current = true;
+
     try {
       setIsAiAnalysisModalOpen(false);
       setLoading(true);
@@ -495,6 +499,7 @@ export const StockWarehousePage: React.FC = () => {
       const msgKey = isBatchAnalysis ? 'batch_process' : 'ai_analysis';
       message.error({ content: errorMessage, key: msgKey });
     } finally {
+      aiAnalysisSubmittingRef.current = false;
       setLoading(false);
       setSelectedStockForAnalysis(null);
       setIsBatchAnalysis(false);
@@ -723,9 +728,14 @@ export const StockWarehousePage: React.FC = () => {
         title={t('warehouse.analysis_settings_title')}
         open={isAiAnalysisModalOpen}
         onOk={handleConfirmAiAnalysis}
-        onCancel={() => setIsAiAnalysisModalOpen(false)}
+        onCancel={() => {
+          if (aiAnalysisSubmittingRef.current) return;
+          setIsAiAnalysisModalOpen(false);
+        }}
         okText={t('common.confirm')}
         cancelText={t('common.cancel')}
+        confirmLoading={loading}
+        cancelButtonProps={{ disabled: loading }}
       >
         <Form layout="vertical">
           <Form.Item label={t('warehouse.trading_frequency')}>

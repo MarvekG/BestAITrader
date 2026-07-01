@@ -6,7 +6,13 @@ from typing import Any
 import pytz
 from sqlalchemy.orm import Session
 
-from app.ai.llm_engine.debate_concurrency import ensure_debate_concurrency_available
+from app.ai.llm_engine.debate_concurrency import (
+    DebateConcurrencyLimitReached,
+    DebateStockTaskAlreadyRunning,
+    ensure_debate_launch_available,
+    find_running_debate_task_for_stock,
+    format_ai_analysis_task_name,
+)
 from app.ai.llm_engine.runner import run_analysis_task
 from app.core.database import SessionLocal
 from app.core.logger import get_logger
@@ -174,22 +180,8 @@ def _load_due_auto_analysis_candidates(db: Session, now: datetime) -> list[AutoA
 
 
 def _has_running_analysis_task(db: Session, stock: StockWarehouse) -> bool:
-    """Return whether the same user's stock already has a running analysis task."""
-    running_tasks = (
-        db.query(AsyncTask)
-        .filter(
-            AsyncTask.task_name == f"AI Analysis - {stock.stock_code}",
-            AsyncTask.task_type == "ai_analysis",
-            AsyncTask.status.in_(["pending", "running"]),
-        )
-        .all()
-    )
-    for task in running_tasks:
-        parameters = task.parameters if isinstance(task.parameters, dict) else {}
-        task_user_id = parameters.get("user_id")
-        if task_user_id is None or int(task_user_id) == stock.user_id:
-            return True
-    return False
+    """Return whether the stock already has a running analysis task globally."""
+    return find_running_debate_task_for_stock(db, stock.stock_code) is not None
 
 
 async def _launch_analysis(
@@ -212,35 +204,42 @@ async def _launch_analysis(
             stock = _load_launchable_stock(db, stock_id, launched_at)
             if not stock:
                 return None
-            ensure_debate_concurrency_available(db)
+            try:
+                ensure_debate_launch_available(db, stock.stock_code)
 
-            session = crud_session.create(
-                db=db,
-                obj_in=SessionCreate(
+                session = crud_session.create(
+                    db=db,
+                    obj_in=SessionCreate(
+                        user_id=stock.user_id,
+                        stock_code=stock.stock_code,
+                        trading_frequency=stock.auto_analysis_trading_frequency or DEFAULT_TRADING_FREQUENCY,
+                        trading_strategy=stock.auto_analysis_trading_strategy or DEFAULT_TRADING_STRATEGY,
+                        source="scheduled",
+                    ),
+                )
+                task_info = task_manager.submit_task(
+                    db=db,
+                    task_name=format_ai_analysis_task_name(stock.stock_code),
+                    task_type="ai_analysis",
+                    parameters={
+                        "session_id": str(session.session_id),
+                        "stock_code": stock.stock_code,
+                        "trading_frequency": session.trading_frequency,
+                        "trading_strategy": session.trading_strategy,
+                        "source": AUTO_ANALYSIS_SOURCE,
+                        "warehouse_id": stock.id,
+                        "user_id": stock.user_id,
+                    },
+                    allow_concurrent=False,
                     user_id=stock.user_id,
-                    stock_code=stock.stock_code,
-                    trading_frequency=stock.auto_analysis_trading_frequency or DEFAULT_TRADING_FREQUENCY,
-                    trading_strategy=stock.auto_analysis_trading_strategy or DEFAULT_TRADING_STRATEGY,
-                    source="scheduled",
-                ),
-            )
-            task_info = task_manager.submit_task(
-                db=db,
-                task_name=f"AI Analysis - {stock.stock_code}",
-                task_type="ai_analysis",
-                parameters={
-                    "session_id": str(session.session_id),
-                    "stock_code": stock.stock_code,
-                    "trading_frequency": session.trading_frequency,
-                    "trading_strategy": session.trading_strategy,
-                    "source": AUTO_ANALYSIS_SOURCE,
-                    "warehouse_id": stock.id,
-                    "user_id": stock.user_id,
-                },
-                allow_concurrent=False,
-                user_id=stock.user_id,
-            )
-            if not task_info.get("new_task", True):
+                )
+                if not task_info.get("new_task", True):
+                    return None
+            except (DebateConcurrencyLimitReached, DebateStockTaskAlreadyRunning) as exc:
+                logger.info("Auto analysis skipped for %s: %s", stock.stock_code, exc)
+                stock.last_auto_analysis_error = str(exc)[:1000]
+                db.add(stock)
+                db.commit()
                 return None
 
             stock.last_auto_analysis_at = launched_at

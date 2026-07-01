@@ -1998,6 +1998,10 @@
     "submission_success": "异步任务提交成功，任务ID: {task_id}",
     "already_in_progress": "任务已在进行中，任务ID: {task_id}",
     "ai_debate_concurrency_limit_reached": "AI投研辩论并发数已达上限（{running_count}/{max_concurrent}），请等待当前辩论完成后再试。",
+    "ai_analysis_stock_already_running": "股票 {stock_code} 已有 AI 分析任务正在运行（任务ID: {task_id}），请等待当前任务完成后再试。",
+    "ai_analysis_already_running": "AI 分析任务已在运行，任务ID: {task_id}",
+    "ai_debate_session_not_active": "当前会话状态为 {session_status}，只有 active 状态的会话可以启动辩论。",
+    "ai_debate_session_already_completed": "会话 {session_id} 已完成辩论，不能在同一会话中重复启动。",
     "names": {
       "stock_basic_sync": "股票基础信息同步 ({info})",
       "dragon_tiger_sync": "龙虎榜同步 ({dates})",
