@@ -5,6 +5,7 @@ from importlib import import_module
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock
 
+import psycopg2
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
@@ -14,6 +15,20 @@ from sqlalchemy.pool import StaticPool
 # 必须在导入 app 任何模块之前设置，避免 Settings 校验失败。
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest")
 os.environ.setdefault("FIRST_SUPERUSER_PASSWORD", "test-password-for-pytest")
+
+
+_ORIGINAL_PSYCOPG2_CONNECT = psycopg2.connect
+
+
+def _fail_on_postgres_host_connect(*args, **kwargs):
+    dsn = str(args[0]) if args else str(kwargs.get("dsn", ""))
+    host = str(kwargs.get("host", ""))
+    if "host=postgres" in dsn or host == "postgres":
+        raise AssertionError("Tests must not connect to postgres host; use sqlite_test_engine instead")
+    return _ORIGINAL_PSYCOPG2_CONNECT(*args, **kwargs)
+
+
+psycopg2.connect = _fail_on_postgres_host_connect
 
 
 sys.modules.setdefault("tushare", MagicMock())
@@ -204,6 +219,18 @@ def sqlite_test_engine():
 @pytest.fixture(scope="session")
 def sqlite_session_factory(sqlite_test_engine):
     return sessionmaker(autocommit=False, autoflush=False, bind=sqlite_test_engine)
+
+
+@pytest.fixture(scope="session", autouse=True)
+def sqlite_session_local(sqlite_session_factory):
+    import app.core.database as db_module
+
+    original_db_session_local = db_module.SessionLocal
+    db_module.SessionLocal = sqlite_session_factory
+    try:
+        yield
+    finally:
+        db_module.SessionLocal = original_db_session_local
 
 
 @pytest.fixture(scope="session", autouse=True)
