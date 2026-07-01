@@ -24,7 +24,6 @@ logger = get_logger(__name__)
 class TushareIngestor(BaseIngestor):
     source_name = "tushare"
     display_name = "Tushare"
-    required_settings = ("TUSHARE_TOKEN",)
 
     # 类级别的限流器实例（所有 Tushare 实例共享）
     _shared_rate_limiter: Optional[LeakyBucketRateLimiter] = None

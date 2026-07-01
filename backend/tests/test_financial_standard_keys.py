@@ -1,4 +1,3 @@
-import os
 import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -6,9 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-
-os.environ.setdefault("TUSHARE_TOKEN", "test-token")
-os.environ.setdefault("TUSHARE_API", "http://test.invalid")
 
 from app.core.config import settings  # noqa: E402
 from app.data.metadata.field_units import format_payload_values  # noqa: E402

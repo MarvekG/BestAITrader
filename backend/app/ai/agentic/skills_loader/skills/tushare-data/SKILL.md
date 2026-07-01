@@ -210,15 +210,11 @@ python scripts/fetch_sdk_docs.py --url https://tushare.pro/document/2 --output-p
 
 1. 检查 Python 是否可用， 版本要求 3.7+
 2. 检查 `tushare` 包是否已安装·
-3. 检查 `TUSHARE_TOKEN` 是否存在.
+3. 检查后端数据源配置 `data_sources.tushare.token` 是否存在；脚本运行时会由 `run_skill_script` 注入为 `TUSHARE_TOKEN`。
 4. 必要时做一次轻量接口冒烟测试（如交易日历 / 基础接口）
 5. 如用户请求高权限接口，提前提示可能存在积分/权限限制
 
-若缺失 token，直接提示最短修复路径，例如：
-
-```bash
-export TUSHARE_TOKEN=your_token
-```
+若缺失 token，提示用户在数据源配置页保存 Tushare Token，不要要求用户手工导出环境变量。
 
 不要等到主查询跑失败了才暴露环境问题。
 

@@ -66,8 +66,9 @@ npx skills add https://github.com/waditu-tushare/skills.git --skill tushare-data
   - 如果 skill 要求 stdin JSON，由 LLM 把 JSON 序列化成字符串传给 `stdin`。
 - 脚本输出由执行器统一捕获，返回 `exit_code`、`stdout`、`stderr` 和 `timed_out`。
 - 脚本使用当前后端 Python 解释器执行，`cwd` 为 skill 根目录，默认超时 120 秒。
-- 脚本子进程只继承白名单环境变量。为支持内置 `tushare-data`，会透传 `TUSHARE_API` 和 `TUSHARE_TOKEN`；
-  不继承后端完整环境变量或 `LLM_API_KEY`、`TAVILY_API_KEY`、`SECRET_KEY` 等敏感配置。
+- 脚本子进程只继承白名单环境变量。为支持内置 `tushare-data`，执行器会从数据库数据源配置读取
+  `data_sources.tushare.api_url` 和 `data_sources.tushare.token`，再注入为子进程的 `TUSHARE_API` 和
+  `TUSHARE_TOKEN`；不继承后端完整环境变量或 `LLM_API_KEY`、`TAVILY_API_KEY`、`SECRET_KEY` 等敏感配置。
 - 外部 skill 不获得交易执行权限；下单仍只走现有 Portfolio Manager 工具。
 
 ### `run_skill_script` 推荐用法

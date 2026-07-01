@@ -9,7 +9,6 @@ import pytest
 import pandas as pd
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, Mock, patch
-from app.core.config import settings
 from app.data.ingestors.plugins.akshare_ingestor import AkshareIngestor
 from app.data.ingestors.manager import ingestor_manager
 from app.data.ingestors.plugins.tushare_ingestor import TushareIngestor
@@ -311,60 +310,6 @@ class TestFailoverMechanism:
 
         with patch('app.data.ingestors.manager.settings.ENABLE_DATA_SOURCE_FAILOVER', True):
             with patch.object(ingestor_manager, 'default_source', 'removed_source'):
-                with patch.object(settings, 'TUSHARE_TOKEN', 'test-token'):
-                    with patch.object(
-                        tushare_ingestor,
-                        'fetch_and_ingest_stock_kline',
-                        return_value=True
-                    ) as mock_tushare:
-                        result = await ingestor_manager.fetch_and_ingest_stock_kline(
-                            stock_code=test_stock_code,
-                            start_date=start_date,
-                            end_date=end_date,
-                            adjust="qfq"
-                        )
-
-                        mock_tushare.assert_called_once()
-                        assert result is True, "tushare 应该在默认源不可用时可用"
-
-    @pytest.mark.asyncio
-    async def test_failover_all_sources_failed(
-        self, test_stock_code, test_date_range
-    ):
-        """测试所有数据源都失败的情况"""
-        start_date, end_date = test_date_range
-
-        tushare_ingestor = ingestor_manager.get_ingestor('tushare')
-
-        with patch('app.data.ingestors.manager.settings.ENABLE_DATA_SOURCE_FAILOVER', True):
-            with patch.object(ingestor_manager, 'default_source', 'tushare'):
-                with patch.object(settings, 'TUSHARE_TOKEN', 'test-token'):
-                    with patch.object(
-                        tushare_ingestor,
-                        'fetch_and_ingest_stock_kline',
-                        return_value=False
-                    ):
-                        result = await ingestor_manager.fetch_and_ingest_stock_kline(
-                            stock_code=test_stock_code,
-                            start_date=start_date,
-                            end_date=end_date,
-                            adjust="qfq"
-                        )
-
-                        assert result is False, "所有数据源失败应该返回 False"
-
-    @pytest.mark.asyncio
-    async def test_failover_first_source_success(
-        self, test_stock_code, test_date_range
-    ):
-        """测试第一个数据源成功，不需要切换"""
-        start_date, end_date = test_date_range
-
-        tushare_ingestor = ingestor_manager.get_ingestor('tushare')
-
-        # 模拟 tushare 成功
-        with patch.object(ingestor_manager, 'default_source', 'tushare'):
-            with patch.object(settings, 'TUSHARE_TOKEN', 'test-token'):
                 with patch.object(
                     tushare_ingestor,
                     'fetch_and_ingest_stock_kline',
@@ -378,23 +323,24 @@ class TestFailoverMechanism:
                     )
 
                     mock_tushare.assert_called_once()
-                    assert result is True, "第一个数据源成功应该返回 True"
+                    assert result is True, "tushare 应该在默认源不可用时可用"
 
     @pytest.mark.asyncio
-    async def test_failover_skips_unavailable_source(
+    async def test_failover_all_sources_failed(
         self, test_stock_code, test_date_range
     ):
-        """测试缺少配置时 manager 会跳过不可用数据源"""
+        """测试所有数据源都失败的情况"""
         start_date, end_date = test_date_range
+
         tushare_ingestor = ingestor_manager.get_ingestor('tushare')
 
-        with patch.object(ingestor_manager, 'default_source', 'tushare'):
-            with patch.object(settings, 'TUSHARE_TOKEN', ''):
+        with patch('app.data.ingestors.manager.settings.ENABLE_DATA_SOURCE_FAILOVER', True):
+            with patch.object(ingestor_manager, 'default_source', 'tushare'):
                 with patch.object(
                     tushare_ingestor,
                     'fetch_and_ingest_stock_kline',
-                    return_value=True
-                ) as mock_tushare:
+                    return_value=False
+                ):
                     result = await ingestor_manager.fetch_and_ingest_stock_kline(
                         stock_code=test_stock_code,
                         start_date=start_date,
@@ -402,8 +348,33 @@ class TestFailoverMechanism:
                         adjust="qfq"
                     )
 
-                    mock_tushare.assert_not_called()
-                    assert result is False, "不可用数据源应被跳过"
+                    assert result is False, "所有数据源失败应该返回 False"
+
+    @pytest.mark.asyncio
+    async def test_failover_first_source_success(
+        self, test_stock_code, test_date_range
+    ):
+        """测试第一个数据源成功，不需要切换"""
+        start_date, end_date = test_date_range
+
+        tushare_ingestor = ingestor_manager.get_ingestor('tushare')
+
+        # 模拟 tushare 成功
+        with patch.object(ingestor_manager, 'default_source', 'tushare'):
+            with patch.object(
+                tushare_ingestor,
+                'fetch_and_ingest_stock_kline',
+                return_value=True
+            ) as mock_tushare:
+                result = await ingestor_manager.fetch_and_ingest_stock_kline(
+                    stock_code=test_stock_code,
+                    start_date=start_date,
+                    end_date=end_date,
+                    adjust="qfq"
+                )
+
+                mock_tushare.assert_called_once()
+                assert result is True, "第一个数据源成功应该返回 True"
 
 
 if __name__ == "__main__":
