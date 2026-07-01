@@ -1,11 +1,16 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from datetime import datetime, timedelta
 
 import pytest
 
 from app.models.data_storage import StockBasic, StockRealtimeMarket
-from app.tasks.task_functions import cleanup_stock_realtime_market_history, sync_stock_data_func, _process_single_stock
+from app.tasks.task_functions import (
+    cleanup_stock_realtime_market_history,
+    sync_bulk_tables_func,
+    sync_stock_data_func,
+    _process_single_stock,
+)
 
 
 @pytest.mark.asyncio
@@ -64,7 +69,7 @@ async def test_process_single_stock_syncs_kline_and_indicators():
         "600519.SH",
         start_date="2025-03-30",
         end_date="2026-03-30",
-        adjust="",
+        adjust="qfq",
     )
 
 
@@ -111,7 +116,16 @@ async def test_sync_stock_data_func_does_not_sync_concept_boards():
         def __exit__(self, exc_type, exc_value, traceback):
             return False
 
-    with patch("app.data.ingestors.manager.ingestor_manager", mock_ingestor), patch(
+    def _date_range(task_type: str = "normal"):
+        if task_type == "kline_base_info":
+            return "2025-07-01", "2026-07-01"
+        if task_type == "margin":
+            return "2026-06-15", "2026-07-01"
+        return "2026-06-28", "2026-07-01"
+
+    with patch("app.tasks.task_functions.get_sync_date_range", side_effect=_date_range), patch(
+        "app.data.ingestors.manager.ingestor_manager", mock_ingestor
+    ), patch(
         "app.core.database.SessionLocal", return_value=DummySessionLocal()
     ), patch(
         "app.tasks.task_functions.calculate_indicators_func",
@@ -124,6 +138,12 @@ async def test_sync_stock_data_func_does_not_sync_concept_boards():
     assert "sector_money_flow" in calls
     assert "technical_indicators" in calls
     mock_ingestor.fetch_and_ingest_board_concept.assert_not_awaited()
+    mock_ingestor.fetch_and_ingest_stock_kline.assert_awaited_once_with(
+        "600519.SH",
+        start_date="2025-07-01",
+        end_date="2026-07-01",
+        adjust="qfq",
+    )
 
 
 @pytest.mark.asyncio
@@ -164,6 +184,45 @@ async def test_sync_stock_data_func_stores_only_step_statuses():
     assert set(result["details"].values()) == {True}
     assert "large interface data" not in str(result)
     assert "indicator data" not in str(result)
+
+
+@pytest.mark.asyncio
+async def test_sync_bulk_tables_kline_uses_qfq_adjustment():
+    mock_ingestor = SimpleNamespace(
+        _get_all_stock_codes=Mock(return_value=["600519.SH"]),
+        _get_all_stock_codes_from_stock_basic=Mock(return_value=["600519.SH"]),
+        fetch_and_ingest_stock_kline=AsyncMock(return_value=True),
+        fetch_and_ingest_all_stock_basic=AsyncMock(),
+        fetch_and_ingest_index_daily=AsyncMock(),
+        fetch_and_ingest_stock_valuation=AsyncMock(),
+        fetch_and_ingest_realtime_market=AsyncMock(),
+        fetch_and_ingest_board_industry=AsyncMock(),
+        fetch_and_ingest_northbound=AsyncMock(),
+        fetch_and_ingest_dragon_tiger=AsyncMock(),
+        fetch_and_ingest_stock_money_flow=AsyncMock(),
+        fetch_and_ingest_sector_money_flow=AsyncMock(),
+        fetch_and_ingest_stock_block_trade=AsyncMock(),
+        fetch_and_ingest_stock_margin_data=AsyncMock(),
+        fetch_and_ingest_stock_limit_up_pool=AsyncMock(),
+        fetch_and_ingest_stock_limit_down_pool=AsyncMock(),
+        fetch_and_ingest_stock_zhaban_pool=AsyncMock(),
+        fetch_and_ingest_stock_shareholder_count=AsyncMock(),
+        fetch_and_ingest_stock_pledge_risk=AsyncMock(),
+        fetch_and_ingest_all_pledge_summary=AsyncMock(),
+        fetch_and_ingest_stock_insider_trading=AsyncMock(),
+        fetch_and_ingest_stock_lockup_release=AsyncMock(),
+        fetch_and_ingest_stock_top_holders=AsyncMock(),
+    )
+    with patch("app.data.ingestors.manager.ingestor_manager", mock_ingestor):
+        result = await sync_bulk_tables_func(tables=["kline"], start_date="2025-07-01", end_date="2026-07-01")
+
+    assert result["status"] == "success"
+    mock_ingestor.fetch_and_ingest_stock_kline.assert_awaited_once_with(
+        stock_code="600519.SH",
+        start_date="2025-07-01",
+        end_date="2026-07-01",
+        adjust="qfq",
+    )
 
 
 @pytest.mark.asyncio

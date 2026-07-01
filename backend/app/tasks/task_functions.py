@@ -99,10 +99,12 @@ async def sync_stock_data_func(
         return start_date or default_start, end_date or default_end
 
     normal_start_date, normal_end_date = resolve_date_range("normal")
+    kline_start_date, kline_end_date = resolve_date_range("kline_base_info")
     margin_start_date, margin_end_date = resolve_date_range("margin")
     logger.info(
         f"Starting sync task for stock_code: {stock_code}, task_id: {task_id}, "
         f"normal_range=({normal_start_date}, {normal_end_date}), "
+        f"kline_range=({kline_start_date}, {kline_end_date}), "
         f"margin_range=({margin_start_date}, {margin_end_date})"
     )
 
@@ -111,7 +113,7 @@ async def sync_stock_data_func(
     steps = [
         # Phase 1
         {"name": i18n_service.t("market.data_manager.stock_basics"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_info(stock_code)},
-        {"name": i18n_service.t("market.data_manager.daily_kline"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_kline(stock_code, start_date=normal_start_date, end_date=normal_end_date, adjust="")},
+        {"name": i18n_service.t("market.data_manager.daily_kline"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_kline(stock_code, start_date=kline_start_date, end_date=kline_end_date, adjust="qfq")},
         {"name": i18n_service.t("common.realtime_quote"), "func": lambda: ingestor_manager.fetch_and_ingest_realtime_market(stock_code)},
         {"name": i18n_service.t("market.valuation_metrics"), "func": lambda: ingestor_manager.fetch_and_ingest_stock_valuation(stock_code, start_date=normal_start_date, end_date=normal_end_date)},  # Note: assuming missing dates
         {"name": i18n_service.t("market.data_manager.industry"), "func": lambda: ingestor_manager.fetch_and_ingest_board_industry()},
@@ -299,7 +301,7 @@ async def sync_bulk_tables_func(
         default_end = end_date if end_date else now.strftime("%Y-%m-%d")
 
         if table_key == 'kline':
-            kwargs.update({'start_date': default_start, 'end_date': default_end})
+            kwargs.update({'start_date': default_start, 'end_date': default_end, 'adjust': 'qfq'})
         elif table_key == 'dragontiger':
             kwargs.update({'start_date': default_start, 'end_date': default_end})
         elif table_key == 'stock_block_trade':
@@ -1121,7 +1123,7 @@ async def _process_single_stock(single_code: str, current_task_id: str) -> Dict[
              single_code,
              start_date=kline_start_date,
              end_date=kline_end_date,
-             adjust=""
+             adjust="qfq"
          )},
         {"name": i18n_service.t("market.valuation_metrics"), "key": "valuation",
          "func": lambda: ingestor_manager.fetch_and_ingest_stock_valuation(single_code)},

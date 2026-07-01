@@ -146,6 +146,7 @@ class IndicatorService:
             return
 
         formatted_code = StockCodeStandardizer.standardize(stock_code)
+        df = df.replace([np.inf, -np.inf], np.nan).astype(object).where(pd.notnull(df), None)
         
         records = []
         for _, row in df.iterrows():
@@ -205,7 +206,12 @@ class IndicatorService:
     @classmethod
     def process_stock(cls, db: Session, stock_code: str, force_update: bool = False):
         """
-        Main entry point: Fetch data -> Calculate -> Save
+        基于日线行情重新计算并保存单只股票的技术指标。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+            force_update: 是否强制更新，当前保留参数未使用。
         """
         # 1. Fetch Kline Data
         formatted_code = StockCodeStandardizer.standardize(stock_code)
@@ -214,7 +220,8 @@ class IndicatorService:
         # Fetching strictly from DB.
         
         query = db.query(KlineData).filter(
-            KlineData.stock_code == formatted_code
+            KlineData.stock_code == formatted_code,
+            KlineData.freq == "D"
         ).order_by(KlineData.date.asc())
         
         kline_records = query.all()
