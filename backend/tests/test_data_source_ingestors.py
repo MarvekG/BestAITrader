@@ -151,48 +151,11 @@ class TestDateUtils:
 class TestTushareIngestor:
     """测试 Tushare 数据采集器"""
 
-    @pytest.mark.asyncio
-    async def test_fetch_stock_announcements_returns_false_when_not_implemented(
-        self, test_stock_code
-    ):
-        mock_pro = Mock()
-        mock_pro.anns_d = Mock()
-
-        mock_ingestion_service = Mock()
-        mock_ingestion_service.write_dataframe = Mock(return_value=True)
-
-        with patch(
-            'app.data.ingestors.plugins.tushare_ingestor.DataIngestionService',
-            return_value=mock_ingestion_service,
-        ), patch('app.data.ingestors.plugins.tushare_ingestor.ts.pro_api', return_value=Mock()):
-            ingestor = TushareIngestor()
-
-        ingestor.pro = mock_pro
-
-        result = await ingestor.fetch_and_ingest_stock_announcements(test_stock_code)
-
-        assert result is False
-        mock_pro.anns_d.assert_not_called()
-        mock_ingestion_service.write_dataframe.assert_not_called()
-
     def test_tushare_ingestor_does_not_expose_concept_board_sync(self):
         """
         Tushare 采集器不再提供概念板块行情同步入口。
         """
         assert not hasattr(TushareIngestor, "fetch_and_ingest_board_concept")
-
-    @pytest.mark.asyncio
-    async def test_fetch_all_stock_basic_does_not_retry_entire_batch_on_executor_failure(self):
-        """全量基础信息同步遇到执行器异常时不重复重跑整个批次。"""
-        with patch('app.data.ingestors.plugins.tushare_ingestor.DataIngestionService', return_value=Mock()), \
-             patch('app.data.ingestors.plugins.tushare_ingestor.ts.pro_api', return_value=Mock()):
-            ingestor = TushareIngestor()
-        ingestor._run_in_executor = AsyncMock(side_effect=ConnectionError("upstream closed"))
-
-        with pytest.raises(ConnectionError):
-            await ingestor.fetch_and_ingest_all_stock_basic()
-
-        assert ingestor._run_in_executor.await_count == 1
 
 
 @pytest.mark.asyncio

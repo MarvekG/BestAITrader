@@ -110,6 +110,7 @@ async def test_base_agent_summarizes_long_news_tool_output_with_shared_helper():
          patch("app.ai.llm_engine.agents.base.get_all_tools", return_value=[_FakeTool()]), \
          patch("app.ai.llm_engine.agents.base.build_memory_tools", return_value=[]), \
          patch("app.ai.llm_engine.agents.base.record_llm_usage"), \
+         patch.object(BaseAgent, "_get_min_iterations", return_value=1), \
          patch("app.ai.llm_engine.agents.base.summarize_tool_output", new=_fake_summarize_tool_output):
         agent = _DummyLLMEngineAgent(role_name="Dummy Analyst")
         result = await agent.run({"stock_code": "000001.SZ"})
@@ -181,6 +182,7 @@ async def test_base_agent_skips_summary_after_compacted_news_output_is_small():
          patch("app.ai.llm_engine.agents.base.get_all_tools", return_value=[_FakeTool()]), \
          patch("app.ai.llm_engine.agents.base.build_memory_tools", return_value=[]), \
          patch("app.ai.llm_engine.agents.base.record_llm_usage"), \
+         patch.object(BaseAgent, "_get_min_iterations", return_value=1), \
          patch("app.ai.llm_engine.agents.base.summarize_tool_output", new=summary):
         agent = _DummyLLMEngineAgent(role_name="Dummy Analyst")
         result = await agent.run({"stock_code": "000001.SZ"})
@@ -250,6 +252,7 @@ async def test_base_agent_drops_invalid_tool_calls_from_replayed_history():
     with _patch_base_agent_llm_provider(mock_raw_llm), \
          patch("app.ai.llm_engine.agents.base.get_all_tools", return_value=[]), \
          patch("app.ai.llm_engine.agents.base.build_memory_tools", return_value=[]), \
+         patch.object(BaseAgent, "_get_min_iterations", return_value=1), \
          patch("app.ai.llm_engine.agents.base.record_llm_usage"):
         agent = _DummyLLMEngineAgent(role_name="Dummy Analyst")
         result = await agent.run({"stock_code": "000001.SZ"})
@@ -324,7 +327,7 @@ async def test_base_agent_forces_final_answer_after_iteration_limit():
     with _patch_base_agent_llm_provider(mock_raw_llm), \
          patch("app.ai.llm_engine.agents.base.get_all_tools", return_value=[tool]), \
          patch("app.ai.llm_engine.agents.base.build_memory_tools", return_value=[]), \
-        patch("app.ai.llm_engine.agents.base.record_llm_usage"):
+         patch("app.ai.llm_engine.agents.base.record_llm_usage"):
         agent = _DummyLLMEngineAgent(role_name="Dummy Analyst")
         result = await agent.run({"stock_code": "000001.SZ"})
 
@@ -369,7 +372,16 @@ async def test_base_agent_accepts_pm_markdown_final_output_without_json_repair()
     tool_response.usage_metadata = {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
 
     markdown_response = MagicMock()
-    markdown_response.content = "# PM report\n\n## 1. Verdict\nExecuted a 15% pilot buy.\n\n## 2. Evidence\nConfirmed."
+    markdown_response.content = (
+        "# PM report\n\n"
+        "## 1. Verdict\n"
+        "Executed a 15% pilot buy after checking the trading context.\n\n"
+        "The action remains bounded by risk controls and evidence quality.\n\n"
+        "## 2. Evidence\n"
+        "Confirmed relevant context from the available tool result.\n\n"
+        "## 3. Risk Control\n"
+        "Position sizing remains limited, with follow-up review required if conditions change."
+    )
     markdown_response.tool_calls = []
     markdown_response.usage_metadata = {"input_tokens": 20, "output_tokens": 30, "total_tokens": 50}
 
@@ -382,6 +394,7 @@ async def test_base_agent_accepts_pm_markdown_final_output_without_json_repair()
     with _patch_base_agent_llm_provider(mock_raw_llm), \
          patch("app.ai.llm_engine.agents.base.get_all_tools", return_value=[tool]), \
          patch("app.ai.llm_engine.agents.base.build_memory_tools", return_value=[]), \
+         patch.object(BaseAgent, "_get_min_iterations", return_value=1), \
          patch("app.ai.llm_engine.agents.base.record_llm_usage"):
         agent = _DummyStructuredLLMEngineAgent(role_name="Portfolio Manager")
         result = await agent.run({"stock_code": "601888.SH"})
@@ -398,7 +411,6 @@ async def test_base_agent_accepts_pm_markdown_final_output_without_json_repair()
     ]
     assert any(content.startswith("STATIC_CONTEXT:\n") for content in initial_human_messages)
     assert any(content.startswith("RUNTIME_CONTEXT:\n") for content in initial_human_messages)
-
 
 
 @pytest.mark.asyncio
@@ -799,7 +811,10 @@ async def test_recall_memory_tool_surfaces_memory_backend_failure():
     recall_tool = next(tool for tool in tools if tool.name == "recall_memory")
 
     with patch("app.ai.agentic.memory_tools.memory_client.recall", new=AsyncMock(return_value={})), \
-         patch("app.ai.agentic.memory_tools.memory_client.get_last_error", return_value={"message": "memory backend timeout"}):
+         patch(
+             "app.ai.agentic.memory_tools.memory_client.get_last_error",
+             return_value={"message": "memory backend timeout"},
+         ):
         result = await recall_tool.ainvoke({"query": "history lesson"})
 
     assert result["data"] == {}
@@ -986,7 +1001,10 @@ async def test_write_memory_tool_surfaces_memory_backend_failure():
     write_tool = next(tool for tool in tools if tool.name == "write_memory")
 
     with patch("app.ai.agentic.memory_tools.memory_client.write_memory", new=AsyncMock(return_value={})), \
-         patch("app.ai.agentic.memory_tools.memory_client.get_last_error", return_value={"message": "memory backend timeout"}):
+         patch(
+             "app.ai.agentic.memory_tools.memory_client.get_last_error",
+             return_value={"message": "memory backend timeout"},
+         ):
         result = await write_tool.ainvoke({
             "content": "high value lesson",
             "importance": "high",
@@ -1494,6 +1512,7 @@ async def test_agentic_tools_final_push_suite():
             end_time="2024-12-31 23:59:59",
         )
 
+
 @pytest.mark.asyncio
 async def test_unified_agentic_tools():
     from app.ai.agentic.tools import query_stock_data, query_market_data, sync_market_data
@@ -1574,6 +1593,7 @@ async def test_llm_engine_agent_retries_when_final_text_is_too_short():
     mock_raw_llm = MagicMock()
     mock_raw_llm.bind_tools.return_value = mock_llm_with_tools
     with _patch_base_agent_llm_provider(mock_raw_llm), \
+         patch.object(BaseAgent, "_get_min_iterations", return_value=1), \
          patch("app.ai.llm_engine.agents.base.record_llm_usage"):
         agent = _DummyLLMEngineAgent(role_name="Dummy Analyst")
         result = await agent.run({"stock_code": "000001.SZ"})

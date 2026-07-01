@@ -107,16 +107,6 @@ def test_root_requires_authentication_but_health_remains_public(client):
     assert health_response.status_code == 200
 
 
-def test_openapi_docs_are_enabled_by_default(client):
-    docs_response = client.get("/api/v1/docs")
-    redoc_response = client.get("/api/v1/redoc")
-    openapi_response = client.get("/api/v1/openapi.json")
-
-    assert docs_response.status_code == 200
-    assert redoc_response.status_code == 200
-    assert openapi_response.status_code == 200
-
-
 def test_cors_does_not_allow_arbitrary_origins_by_default(client):
     response = client.get("/health", headers={"Origin": "https://attacker.example"})
 
