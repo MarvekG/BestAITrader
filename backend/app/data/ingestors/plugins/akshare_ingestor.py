@@ -71,7 +71,6 @@ class AkshareIngestor(BaseIngestor):
 
     source_name = "akshare"
     display_name = "AKShare"
-    required_settings = ()  # AKShare 无需配置
 
     # 类级别的限流器实例（所有 AKShare 实例共享）
     _shared_rate_limiter: Optional[LeakyBucketRateLimiter] = None

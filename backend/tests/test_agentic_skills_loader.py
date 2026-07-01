@@ -362,11 +362,23 @@ async def test_run_skill_script_uses_whitelisted_environment(skills_root, monkey
     )
     monkeypatch.setenv("PATH", "/usr/bin")
     monkeypatch.setenv("LANG", "C.UTF-8")
-    monkeypatch.setenv("TUSHARE_API", "https://api.tushare.pro")
-    monkeypatch.setenv("TUSHARE_TOKEN", "tushare-token")
+    monkeypatch.setenv("TUSHARE_API", "https://env.example.invalid")
+    monkeypatch.setenv("TUSHARE_TOKEN", "env-token")
     monkeypatch.setenv("SECRET_KEY", "backend-secret")
     monkeypatch.setenv("LLM_API_KEY", "llm-secret")
     monkeypatch.setenv("TAVILY_API_KEY", "tavily-secret")
+
+    def _fake_data_source_config(key: str) -> str:
+        values = {
+            "data_sources.tushare.api_url": "https://db.example.invalid",
+            "data_sources.tushare.token": "db-token",
+        }
+        return values.get(key, "")
+
+    monkeypatch.setattr(
+        "app.ai.agentic.skills_loader.skill_tools.get_data_source_config_value",
+        _fake_data_source_config,
+    )
 
     result = await run_skill_script.ainvoke(
         {
@@ -379,8 +391,8 @@ async def test_run_skill_script_uses_whitelisted_environment(skills_root, monkey
     payload = json.loads(result["stdout"])
     assert payload["PATH"] == "/usr/bin"
     assert payload["LANG"] == "C.UTF-8"
-    assert payload["TUSHARE_API"] == "https://api.tushare.pro"
-    assert payload["TUSHARE_TOKEN"] == "tushare-token"
+    assert payload["TUSHARE_API"] == "https://db.example.invalid"
+    assert payload["TUSHARE_TOKEN"] == "db-token"
     assert payload["SECRET_KEY"] is None
     assert payload["LLM_API_KEY"] is None
     assert payload["TAVILY_API_KEY"] is None

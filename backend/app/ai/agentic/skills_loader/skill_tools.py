@@ -14,6 +14,8 @@ from app.ai.agentic.skills_loader.loader import (
     read_skill_markdown,
     resolve_skill_relative_path,
 )
+from app.core.data_source_config_cache import get_data_source_config_value
+from app.core.data_source_settings import TUSHARE_API_SETTING_KEY, TUSHARE_TOKEN_SETTING_KEY
 from app.core.logger import get_logger
 
 logger = get_logger(__name__)
@@ -26,8 +28,6 @@ SKILL_SCRIPT_ENV_ALLOWLIST = (
     "LC_ALL",
     "TZ",
     "PYTHONIOENCODING",
-    "TUSHARE_API",
-    "TUSHARE_TOKEN",
 )
 PYTHON_COMMANDS = {"python", "python3", Path(sys.executable).name, sys.executable}
 SHELL_COMMANDS = {"bash", "sh", "/bin/bash", "/bin/sh"}
@@ -179,11 +179,23 @@ def _validate_command_argv(command_argv: List[str]) -> None:
 
 
 def _build_skill_script_env() -> Dict[str, str]:
+    """
+    构建 skill 脚本子进程环境变量。
+
+    Returns:
+        仅包含安全白名单变量和数据库中 Tushare 配置的子进程环境。
+    """
     env = {
         key: value
         for key in SKILL_SCRIPT_ENV_ALLOWLIST
         if (value := os.environ.get(key)) is not None
     }
+    tushare_api_url = get_data_source_config_value(TUSHARE_API_SETTING_KEY)
+    tushare_token = get_data_source_config_value(TUSHARE_TOKEN_SETTING_KEY)
+    if tushare_api_url:
+        env["TUSHARE_API"] = tushare_api_url
+    if tushare_token:
+        env["TUSHARE_TOKEN"] = tushare_token
     env.setdefault("PYTHONIOENCODING", "utf-8")
     return env
 

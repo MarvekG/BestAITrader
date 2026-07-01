@@ -16,7 +16,6 @@ class ExampleIngestor(BaseIngestor):
 
     source_name = "example"
     display_name = "Example"
-    required_settings = ()
 
     API_BASE_URL = "https://api.example.com"
     API_TOKEN = ""

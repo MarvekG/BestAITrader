@@ -103,7 +103,7 @@ class IngestorManager(BaseIngestor):
         for name in self.ingestors.keys():
             if name not in priority_list:
                 priority_list.append(name)
-        
+
         logger.debug(
             "prioritized data sources resolved",
             extra={
@@ -122,8 +122,8 @@ class IngestorManager(BaseIngestor):
 
         # Check if failover is enabled
         if not settings.ENABLE_DATA_SOURCE_FAILOVER:
-            # If failover is disabled, only use the first available source (the default one)
-            # We still get the prioritized list to find which is the "primary" available one,
+            # If failover is disabled, only use the first prioritized source (the default one).
+            # We still get the prioritized list to find which is the primary one,
             # but we truncate it to 1.
             # Assuming get_prioritized_sources puts the default source first.
             if priority_list:
@@ -145,14 +145,6 @@ class IngestorManager(BaseIngestor):
         for source_name in priority_list:
             ingestor = self.get_ingestor(source_name)
             if not ingestor:
-                continue
-            if not ingestor.is_available():
-                logger.warning(
-                    "[%s] Skipping unavailable source %s, missing_settings=%s",
-                    method_name,
-                    source_name,
-                    ingestor.validate_config(),
-                )
                 continue
             method = getattr(ingestor, method_name, None)
             if not method:
@@ -206,8 +198,22 @@ class IngestorManager(BaseIngestor):
     async def fetch_and_ingest_stock_info(self, stock_code: str) -> bool:
         return await self._execute_with_failover('fetch_and_ingest_stock_info', stock_code)
 
-    async def fetch_and_ingest_stock_kline(self, stock_code: str, start_date: str, end_date: str, period: str = "daily", adjust: str = "qfq") -> bool:
-        return await self._execute_with_failover('fetch_and_ingest_stock_kline', stock_code, start_date, end_date, period=period, adjust=adjust)
+    async def fetch_and_ingest_stock_kline(
+        self,
+        stock_code: str,
+        start_date: str,
+        end_date: str,
+        period: str = "daily",
+        adjust: str = "qfq",
+    ) -> bool:
+        return await self._execute_with_failover(
+            'fetch_and_ingest_stock_kline',
+            stock_code,
+            start_date,
+            end_date,
+            period=period,
+            adjust=adjust,
+        )
 
     async def fetch_and_ingest_stock_valuation(
             self,

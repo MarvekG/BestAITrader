@@ -8,7 +8,6 @@ import http.client
 import pandas as pd
 import requests
 import urllib3
-from app.core.config import settings
 from app.core.logger import get_logger
 from app.core.utils.backoff import backoff
 
@@ -24,7 +23,6 @@ class BaseIngestor(ABC):
 
     source_name: str = ""
     display_name: str = ""
-    required_settings: tuple[str, ...] = ()
 
     @classmethod
     def get_source_name(cls) -> str:
@@ -48,29 +46,6 @@ class BaseIngestor(ABC):
         """
         return cls.display_name or cls.get_source_name()
 
-    def validate_config(self) -> List[str]:
-        """
-        校验当前插件所需配置是否完整。
-
-        Returns:
-            缺失的配置项列表。
-        """
-        missing_settings: List[str] = []
-        for setting_name in self.required_settings:
-            if getattr(settings, setting_name, None):
-                continue
-            missing_settings.append(setting_name)
-        return missing_settings
-
-    def is_available(self) -> bool:
-        """
-        判断当前插件在运行时是否可用。
-
-        Returns:
-            配置完整时返回 True。
-        """
-        return not self.validate_config()
-
     def get_metadata(self) -> dict[str, Any]:
         """
         获取数据源插件元数据。
@@ -81,9 +56,6 @@ class BaseIngestor(ABC):
         return {
             "source_name": self.get_source_name(),
             "display_name": self.get_display_name(),
-            "required_settings": list(self.required_settings),
-            "missing_settings": self.validate_config(),
-            "available": self.is_available(),
         }
 
     def _get_func_name(self, func) -> str:
@@ -105,7 +77,7 @@ class BaseIngestor(ABC):
         """
         # Use JSON dump with sort_keys=True for deterministic hashing of dicts
         try:
-             # Helper to handle non-serializable objects (like functions/classes)
+            # Helper to handle non-serializable objects (like functions/classes)
             def default_serializer(obj):
                 if hasattr(obj, '__name__'):
                     return obj.__name__
@@ -115,17 +87,17 @@ class BaseIngestor(ABC):
                 "args": args,
                 "kwargs": kwargs
             }
-            
+
             # If func is a partial, include its bound arguments in the cache key
             if hasattr(func, 'func') and hasattr(func, 'args') and hasattr(func, 'keywords'):
                 arg_data['partial_args'] = func.args
                 arg_data['partial_kwargs'] = func.keywords
-                
+
             arg_str = json.dumps(arg_data, sort_keys=True, default=default_serializer, ensure_ascii=False)
         except Exception:
             # Fallback to string representation if json fails
             arg_str = f"{args}-{kwargs}"
-        
+
         arg_hash = hashlib.md5(arg_str.encode('utf-8')).hexdigest()
         source_name = getattr(self, 'source', 'unknown')
         func_name = self._get_func_name(func)
@@ -190,7 +162,7 @@ class BaseIngestor(ABC):
                     try:
                         # Try to parse as structured cache object
                         cache_obj = json.loads(cached_val)
-                        
+
                         # Check validity of structure
                         if isinstance(cache_obj, dict) and "type" in cache_obj and "data" in cache_obj:
                             data_type = cache_obj["type"]
@@ -200,7 +172,7 @@ class BaseIngestor(ABC):
                                 logger.info(f"Hit cache (DataFrame) for {self._get_func_name(func)}")
                                 # data_content is the serialized DF string
                                 return pd.read_json(io.StringIO(data_content), orient='split', convert_dates=False)
-                            
+
                             elif data_type == "full_response":
                                 logger.info(f"Hit cache (Response) for {self._get_func_name(func)}")
                                 # data_content is the JSON dict
@@ -212,8 +184,8 @@ class BaseIngestor(ABC):
                                 return resp
                         else:
                             # Accessing legacy string cache (Backward compatibility or ignore)
-                            # Let's try to interpret as DataFrame for legacy cache if it looks like one, 
-                            # or just ignore to enforce new structure. 
+                            # Let's try to interpret as DataFrame for legacy cache if it looks like one,
+                            # or just ignore to enforce new structure.
                             # User said "explicitly determine data type", so better to stick to new format.
                             pass
 
@@ -249,7 +221,7 @@ class BaseIngestor(ABC):
                         "type": "dataframe",
                         "data": df_json_str
                     }
-                
+
                 # Case B: requests.Response
                 elif isinstance(result, requests.Response):
                     if result.ok:
@@ -262,7 +234,7 @@ class BaseIngestor(ABC):
                                 }
                         except Exception:
                             pass
-                
+
                 if cache_obj:
                     # Store as JSON string
                     await redis_client.set(cache_key, json.dumps(cache_obj), expire=cache_ttl)

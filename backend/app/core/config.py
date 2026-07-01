@@ -115,7 +115,7 @@ class Settings(BaseSettings):
     AKSHARE_MAX_CALLS_PER_MINUTE: int = 60
     DEFAULT_DATA_SOURCE: str = "tushare"
     DEFAULT_HTTP_TIMEOUT: int = 120
-    ENABLE_DATA_SOURCE_FAILOVER: bool = False
+    ENABLE_DATA_SOURCE_FAILOVER: bool = True
 
     # Memory Service Config
     MEMORY_SERVICE_ENABLED: bool = True

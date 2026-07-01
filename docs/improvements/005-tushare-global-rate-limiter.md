@@ -18,13 +18,11 @@
 
 ## 配置方式
 
-在 `backend/.env` 中设置你的 Tushare 积分等级：
+Tushare Token 和 API URL 通过系统数据源配置页保存到数据库；限流参数在 `backend/.env` 中设置：
 
 ```bash
-# Tushare 配置
-TUSHARE_TOKEN=your-tushare-token
-TUSHARE_API=http://api.waditu.com/dataapi
-TUSHARE_CREDITS=5000  # 默认 5000 分
+# Tushare API 调用频率限制
+TUSHARE_MAX_CALLS_PER_MINUTE=500
 ```
 
 ## 实现原理
