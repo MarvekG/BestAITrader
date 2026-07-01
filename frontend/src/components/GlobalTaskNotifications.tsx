@@ -1,5 +1,6 @@
 import React from 'react';
 import { App } from 'antd';
+import { LoadingOutlined } from '@ant-design/icons';
 import axios from 'axios';
 import { useTranslation } from 'react-i18next';
 import { TaskCompletedMessage, WebSocketMessage } from '../services/websocket';
@@ -10,11 +11,11 @@ const runningTaskStatuses = new Set(['pending', 'running', 'started']);
 const completedTaskStatuses = new Set(['completed', 'success']);
 const failedTaskStatuses = new Set(['failed', 'error', 'cancelled']);
 const taskStatusPollIntervalMs = 60000;
-const runningTaskMessageDurationSeconds = 15;
+const taskNotificationPlacement = 'top';
 
 export const GlobalTaskNotifications: React.FC = () => {
   const { t } = useTranslation();
-  const { message, notification } = App.useApp();
+  const { notification } = App.useApp();
   const taskPollTimersRef = React.useRef<Map<string, number>>(new Map());
 
   const clearTaskPollTimer = React.useCallback((taskId?: string) => {
@@ -42,13 +43,14 @@ export const GlobalTaskNotifications: React.FC = () => {
         }
 
         clearTaskPollTimer(taskId);
-        message.destroy(taskId);
+        notification.destroy(taskId);
 
         if (completedTaskStatuses.has(task.status)) {
           notification.success({
             message: t('common.task_completed'),
             description: `${task.task_name || taskName || t('common.task')} (ID: ${taskId})`,
             duration: 5,
+            placement: taskNotificationPlacement,
           });
           return;
         }
@@ -58,16 +60,18 @@ export const GlobalTaskNotifications: React.FC = () => {
             message: t('common.task_failed'),
             description: `${task.task_name || taskName || t('common.task')} (ID: ${taskId})\n${t('common.error')}: ${task.error_message || t('common.error')}`,
             duration: 5,
+            placement: taskNotificationPlacement,
           });
         }
       } catch (error) {
         if (axios.isAxiosError(error) && error.response?.status === 404) {
           clearTaskPollTimer(taskId);
-          message.destroy(taskId);
+          notification.destroy(taskId);
           notification.error({
             message: t('common.task_failed'),
             description: `${taskName || t('common.task')} (ID: ${taskId})\n${t('common.error')}: ${t('common.error')}`,
             duration: 5,
+            placement: taskNotificationPlacement,
           });
           return;
         }
@@ -77,7 +81,7 @@ export const GlobalTaskNotifications: React.FC = () => {
     }, taskStatusPollIntervalMs);
 
     taskPollTimersRef.current.set(taskId, timer);
-  }, [clearTaskPollTimer, message, notification, t]);
+  }, [clearTaskPollTimer, notification, t]);
 
   React.useEffect(() => () => {
     taskPollTimersRef.current.forEach((timer) => window.clearInterval(timer));
@@ -103,10 +107,13 @@ export const GlobalTaskNotifications: React.FC = () => {
           ? total !== undefined ? ` (${progress}/${total})` : ` (${progress})`
           : '';
 
-        message.loading({
-          content: `${taskName}: ${currentStep || t('common.processing')}${progressText}`,
+        notification.open({
+          icon: <LoadingOutlined />,
           key: taskId || taskName,
-          duration: runningTaskMessageDurationSeconds,
+          message: taskName,
+          description: `${currentStep || t('common.processing')}${progressText}`,
+          duration: 0,
+          placement: taskNotificationPlacement,
         });
         startTaskStatusPolling(taskId, taskName);
         return;
@@ -114,7 +121,7 @@ export const GlobalTaskNotifications: React.FC = () => {
 
       if (taskId) {
         clearTaskPollTimer(taskId);
-        message.destroy(taskId);
+        notification.destroy(taskId);
       }
 
       if (status && completedTaskStatuses.has(status)) {
@@ -122,6 +129,7 @@ export const GlobalTaskNotifications: React.FC = () => {
           message: t('common.task_completed'),
           description: `${taskName} (ID: ${taskId || '-'})`,
           duration: 5,
+          placement: taskNotificationPlacement,
         });
         return;
       }
@@ -132,6 +140,7 @@ export const GlobalTaskNotifications: React.FC = () => {
           message: t('common.task_failed'),
           description: `${taskName} (ID: ${taskId || '-'})\n${t('common.error')}: ${errorMessage}`,
           duration: 5,
+          placement: taskNotificationPlacement,
         });
       }
   });
