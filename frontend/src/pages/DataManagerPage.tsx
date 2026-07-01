@@ -73,7 +73,7 @@ export const DataManagerPage: React.FC = () => {
     const [isDataSourceModalVisible, setIsDataSourceModalVisible] = useState(false);
     const [isDailySyncModalVisible, setIsDailySyncModalVisible] = useState(false);
     const [dailySyncDateRange, setDailySyncDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null]>([dayjs().subtract(3, 'month'), dayjs()]);
-    const [dailySyncAdjust, setDailySyncAdjust] = useState<string>('None');
+    const [dailySyncAdjust, setDailySyncAdjust] = useState<string>('qfq');
 
     // Clear Data State
     const [isClearDataModalVisible, setIsClearDataModalVisible] = useState(false);
@@ -1724,7 +1724,7 @@ export const DataManagerPage: React.FC = () => {
                             options={[
                                 { value: 'qfq', label: t('market.data_manager.adjustment_qfq') },
                                 { value: 'hfq', label: t('market.data_manager.adjustment_hfq') },
-                                { value: 'None', label: t('market.data_manager.adjustment_none') },
+                                { value: '', label: t('market.data_manager.adjustment_none') },
                             ]}
                         />
                     </div>
