@@ -12,6 +12,21 @@ const completedTaskStatuses = new Set(['completed', 'success']);
 const failedTaskStatuses = new Set(['failed', 'error', 'cancelled']);
 const taskStatusPollIntervalMs = 60000;
 const taskNotificationPlacement = 'top';
+const taskNotificationStyle = { width: 'max-content', maxWidth: 'calc(100vw - 48px)' };
+
+const renderTaskNotificationLine = (text: string) => (
+  <span
+    style={{
+      display: 'block',
+      maxWidth: 'calc(100vw - 120px)',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    }}
+  >
+    {text}
+  </span>
+);
 
 export const GlobalTaskNotifications: React.FC = () => {
   const { t } = useTranslation();
@@ -47,20 +62,24 @@ export const GlobalTaskNotifications: React.FC = () => {
 
         if (completedTaskStatuses.has(task.status)) {
           notification.success({
-            message: t('common.task_completed'),
-            description: `${task.task_name || taskName || t('common.task')} (ID: ${taskId})`,
+            message: renderTaskNotificationLine(
+              `${t('common.task_completed')}: ${task.task_name || taskName || t('common.task')} (ID: ${taskId})`,
+            ),
             duration: 5,
             placement: taskNotificationPlacement,
+            style: taskNotificationStyle,
           });
           return;
         }
 
         if (failedTaskStatuses.has(task.status)) {
           notification.error({
-            message: t('common.task_failed'),
-            description: `${task.task_name || taskName || t('common.task')} (ID: ${taskId})\n${t('common.error')}: ${task.error_message || t('common.error')}`,
+            message: renderTaskNotificationLine(
+              `${t('common.task_failed')}: ${task.task_name || taskName || t('common.task')} (ID: ${taskId}) - ${t('common.error')}: ${task.error_message || t('common.error')}`,
+            ),
             duration: 5,
             placement: taskNotificationPlacement,
+            style: taskNotificationStyle,
           });
         }
       } catch (error) {
@@ -68,10 +87,12 @@ export const GlobalTaskNotifications: React.FC = () => {
           clearTaskPollTimer(taskId);
           notification.destroy(taskId);
           notification.error({
-            message: t('common.task_failed'),
-            description: `${taskName || t('common.task')} (ID: ${taskId})\n${t('common.error')}: ${t('common.error')}`,
+            message: renderTaskNotificationLine(
+              `${t('common.task_failed')}: ${taskName || t('common.task')} (ID: ${taskId}) - ${t('common.error')}: ${t('common.error')}`,
+            ),
             duration: 5,
             placement: taskNotificationPlacement,
+            style: taskNotificationStyle,
           });
           return;
         }
@@ -110,10 +131,10 @@ export const GlobalTaskNotifications: React.FC = () => {
         notification.open({
           icon: <LoadingOutlined />,
           key: taskId || taskName,
-          message: taskName,
-          description: `${currentStep || t('common.processing')}${progressText}`,
+          message: renderTaskNotificationLine(`${taskName}: ${currentStep || t('common.processing')}${progressText}`),
           duration: 0,
           placement: taskNotificationPlacement,
+          style: taskNotificationStyle,
         });
         startTaskStatusPolling(taskId, taskName);
         return;
@@ -126,10 +147,10 @@ export const GlobalTaskNotifications: React.FC = () => {
 
       if (status && completedTaskStatuses.has(status)) {
         notification.success({
-          message: t('common.task_completed'),
-          description: `${taskName} (ID: ${taskId || '-'})`,
+          message: renderTaskNotificationLine(`${t('common.task_completed')}: ${taskName} (ID: ${taskId || '-'})`),
           duration: 5,
           placement: taskNotificationPlacement,
+          style: taskNotificationStyle,
         });
         return;
       }
@@ -137,10 +158,12 @@ export const GlobalTaskNotifications: React.FC = () => {
       if (status && failedTaskStatuses.has(status)) {
         const errorMessage = data.error_message || data.error || t('common.error');
         notification.error({
-          message: t('common.task_failed'),
-          description: `${taskName} (ID: ${taskId || '-'})\n${t('common.error')}: ${errorMessage}`,
+          message: renderTaskNotificationLine(
+            `${t('common.task_failed')}: ${taskName} (ID: ${taskId || '-'}) - ${t('common.error')}: ${errorMessage}`,
+          ),
           duration: 5,
           placement: taskNotificationPlacement,
+          style: taskNotificationStyle,
         });
       }
   });
