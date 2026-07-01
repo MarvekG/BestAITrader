@@ -32,6 +32,8 @@ export const GlobalTaskNotifications: React.FC = () => {
   const { t } = useTranslation();
   const { notification } = App.useApp();
   const taskPollTimersRef = React.useRef<Map<string, number>>(new Map());
+  const dismissedRunningTasksRef = React.useRef<Set<string>>(new Set());
+  const programmaticClosingTasksRef = React.useRef<Set<string>>(new Set());
 
   const clearTaskPollTimer = React.useCallback((taskId?: string) => {
     if (!taskId) {
@@ -44,6 +46,15 @@ export const GlobalTaskNotifications: React.FC = () => {
       taskPollTimersRef.current.delete(taskId);
     }
   }, []);
+
+  const closeRunningTaskNotification = React.useCallback((taskId?: string) => {
+    if (!taskId) {
+      return;
+    }
+
+    programmaticClosingTasksRef.current.add(taskId);
+    notification.destroy(taskId);
+  }, [notification]);
 
   const startTaskStatusPolling = React.useCallback((taskId?: string, taskName?: string) => {
     if (!taskId || taskPollTimersRef.current.has(taskId)) {
@@ -58,7 +69,8 @@ export const GlobalTaskNotifications: React.FC = () => {
         }
 
         clearTaskPollTimer(taskId);
-        notification.destroy(taskId);
+        dismissedRunningTasksRef.current.delete(taskId);
+        closeRunningTaskNotification(taskId);
 
         if (completedTaskStatuses.has(task.status)) {
           notification.success({
@@ -85,7 +97,8 @@ export const GlobalTaskNotifications: React.FC = () => {
       } catch (error) {
         if (axios.isAxiosError(error) && error.response?.status === 404) {
           clearTaskPollTimer(taskId);
-          notification.destroy(taskId);
+          dismissedRunningTasksRef.current.delete(taskId);
+          closeRunningTaskNotification(taskId);
           notification.error({
             message: renderTaskNotificationLine(
               `${t('common.task_failed')}: ${taskName || t('common.task')} (ID: ${taskId}) - ${t('common.error')}: ${t('common.error')}`,
@@ -102,7 +115,7 @@ export const GlobalTaskNotifications: React.FC = () => {
     }, taskStatusPollIntervalMs);
 
     taskPollTimersRef.current.set(taskId, timer);
-  }, [clearTaskPollTimer, notification, t]);
+  }, [clearTaskPollTimer, closeRunningTaskNotification, notification, t]);
 
   React.useEffect(() => () => {
     taskPollTimersRef.current.forEach((timer) => window.clearInterval(timer));
@@ -120,6 +133,8 @@ export const GlobalTaskNotifications: React.FC = () => {
       const status = data.status;
 
       if (status && runningTaskStatuses.has(status)) {
+        const notificationKey = taskId || taskName;
+
         const result = data.result || {};
         const progress = result.progress;
         const total = result.total;
@@ -128,21 +143,33 @@ export const GlobalTaskNotifications: React.FC = () => {
           ? total !== undefined ? ` (${progress}/${total})` : ` (${progress})`
           : '';
 
-        notification.open({
-          icon: <LoadingOutlined />,
-          key: taskId || taskName,
-          message: renderTaskNotificationLine(`${taskName}: ${currentStep || t('common.processing')}${progressText}`),
-          duration: 0,
-          placement: taskNotificationPlacement,
-          style: taskNotificationStyle,
-        });
+        if (!dismissedRunningTasksRef.current.has(notificationKey)) {
+          notification.open({
+            icon: <LoadingOutlined />,
+            key: notificationKey,
+            message: renderTaskNotificationLine(`${taskName}: ${currentStep || t('common.processing')}${progressText}`),
+            duration: 0,
+            placement: taskNotificationPlacement,
+            style: taskNotificationStyle,
+            onClose: () => {
+              if (programmaticClosingTasksRef.current.has(notificationKey)) {
+                programmaticClosingTasksRef.current.delete(notificationKey);
+                return;
+              }
+
+              dismissedRunningTasksRef.current.add(notificationKey);
+            },
+          });
+        }
+
         startTaskStatusPolling(taskId, taskName);
         return;
       }
 
       if (taskId) {
         clearTaskPollTimer(taskId);
-        notification.destroy(taskId);
+        dismissedRunningTasksRef.current.delete(taskId);
+        closeRunningTaskNotification(taskId);
       }
 
       if (status && completedTaskStatuses.has(status)) {
