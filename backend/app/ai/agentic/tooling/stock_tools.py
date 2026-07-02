@@ -1,6 +1,7 @@
 from typing import List, Dict, Any
 from app.data.ingestors.manager import ingestor_manager
 import app.core.database as database_module
+from app.ai.agentic.tooling.db_utils import coerce_filter_value_for_column
 from app.models.data_storage import (
     StockBasic, StockValuationHistory,
     StockTopHolders, KlineData
@@ -241,13 +242,14 @@ class StockTools:
 
             if applied_date_col:
                 col_attr = getattr(model, applied_date_col)
+                col_obj = col_attr.property.columns[0]
                 # 保存原始查询以便回溯 (Save original query for fallback)
                 base_query = query
                 
                 if start_time:
-                    query = query.where(col_attr >= start_time)
+                    query = query.where(col_attr >= coerce_filter_value_for_column(col_obj, start_time))
                 if end_time:
-                    query = query.where(col_attr <= end_time)
+                    query = query.where(col_attr <= coerce_filter_value_for_column(col_obj, end_time))
 
                 # 根据该日期字段倒序排列
                 query = query.order_by(desc(col_attr))

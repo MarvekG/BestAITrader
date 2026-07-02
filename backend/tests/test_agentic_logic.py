@@ -1137,6 +1137,43 @@ async def test_get_generic_db_data_selects_requested_columns(async_db_session):
 
 
 @pytest.mark.asyncio
+async def test_get_generic_db_data_accepts_datetime_string_for_date_filters(async_db_session):
+    from app.ai.agentic.tooling.stock_tools import StockTools
+    from app.models.data_storage import KlineData, StockBasic
+
+    async_db_session.add(
+        StockBasic(
+            stock_code="000001.SZ",
+            name="平安银行",
+            industry="银行",
+            market="SZ",
+        )
+    )
+    await async_db_session.commit()
+    async_db_session.add(
+        KlineData(
+            stock_code="000001.SZ",
+            date=date(2026, 7, 2),
+            close=10.5,
+            change_percent=1.2,
+            turnover=123456.0,
+        )
+    )
+    await async_db_session.commit()
+
+    rows = await StockTools.get_generic_db_data(
+        "KlineData",
+        "000001.SZ",
+        limit=20,
+        start_time="2026-07-01 00:00:00",
+        end_time="2026-07-02 23:59:59",
+        columns=["date", "close"],
+    )
+
+    assert rows == [{"date": date(2026, 7, 2), "close": 10.5}]
+
+
+@pytest.mark.asyncio
 async def test_get_stock_basic_info_returns_share_fields(async_db_session):
     from app.ai.agentic.tooling.stock_tools import StockTools
     from app.models.data_storage import StockBasic, StockValuationHistory
