@@ -2423,6 +2423,17 @@
     ],
     "total_share": {
       "$ref": "cny_to_hundred_million"
+    },
+    "per_share_net_cash": {
+      "zh": {
+        "unit": "units.cny_per_share",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.cny_per_share",
+        "scale": 1
+      },
+      "precision": 2
     }
   },
   "data.stock_cashflow_statement": {

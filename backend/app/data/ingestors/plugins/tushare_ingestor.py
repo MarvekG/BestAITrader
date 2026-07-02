@@ -50,6 +50,24 @@ class TushareIngestor(BaseIngestor):
             }
         )
 
+    @staticmethod
+    def _add_balance_sheet_derived_metrics(data: dict) -> None:
+        """在资产负债表源头用原始数值计算派生指标。
+
+        Args:
+            data: 已完成字段映射、尚未展示格式化的资产负债表数据。
+        """
+        money_cap = data.get('money_cap')
+        if money_cap is None:
+            return
+
+        net_cash = money_cap - (data.get('st_borr') or 0) - (data.get('lt_borr') or 0)
+        data['net_cash'] = net_cash
+
+        total_share = data.get('total_share')
+        if total_share:
+            data['per_share_net_cash'] = net_cash / total_share
+
     async def ensure_pro(self):
         """
         确保当前实例已初始化 Tushare Pro 客户端。
@@ -2460,6 +2478,7 @@ class TushareIngestor(BaseIngestor):
                         standardized_data[key] = None
                     else:
                         standardized_data[key] = value
+                self._add_balance_sheet_derived_metrics(standardized_data)
                 standardized_data = format_payload_values(
                     'data.stock_balance_sheet',
                     standardized_data,
