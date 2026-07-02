@@ -13,6 +13,7 @@ from app.ai.stock_picker.interactive_research.persistence import (
     fail_run_record,
     synthesize_final_message_record,
 )
+from app.ai.stock_picker.interactive_research.schemas import InteractiveResearchRunCreate
 from app.ai.stock_picker.interactive_research.service import InteractiveResearchService
 from app.crud.user import get_password_hash
 from app.models.user import User
@@ -373,6 +374,14 @@ def _service_with_fake_runner():
         fake_llm,
         fake_tool,
     )
+
+
+def test_interactive_research_run_create_allows_short_requirement():
+    """创建 run 时允许少于 5 个字符的需求。"""
+
+    payload = InteractiveResearchRunCreate(requirement="AI")
+
+    assert payload.requirement == "AI"
 
 
 async def _message_types(async_db_session, run_id):

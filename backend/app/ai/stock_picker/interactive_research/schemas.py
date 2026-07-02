@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 class InteractiveResearchRunCreate(BaseModel):
     """聊天式 Deep Research run 创建请求。"""
 
-    requirement: str = Field(..., min_length=5, max_length=4000)
+    requirement: str = Field(..., max_length=4000)
     scope: str = Field(default="core", pattern="^(warehouse|core|all)$")
     research_depth: str = Field(default="standard", pattern="^(light|standard|deep)$")
     expected_count: int = Field(default=5, ge=1, le=8)
