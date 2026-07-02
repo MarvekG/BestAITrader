@@ -1,19 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timedelta
 from typing import Iterable, List, Optional
 
 import pandas as pd
-import tushare as ts
 
 from app.core.config import settings
-from app.core.data_source_settings import (
-    TUSHARE_API_SETTING_KEY,
-    TUSHARE_TOKEN_SETTING_KEY,
-)
-from app.core.data_source_config_cache import get_data_source_config_value
 from app.core.logger import get_logger
 from app.core.utils.formatters import StockCodeStandardizer
+from app.data.ingestors.plugins.tushare_ingestor import TushareIngestor
 
 logger = get_logger(__name__)
 
@@ -40,42 +36,26 @@ def _build_candidate_ranges(as_of: Optional[date] = None) -> List[tuple[str, str
     return ranges
 
 
-async def _get_tushare_pro_client():
-    """Create a Tushare pro client using current runtime settings."""
-    token = await get_data_source_config_value(TUSHARE_TOKEN_SETTING_KEY)
-    api_url = await get_data_source_config_value(TUSHARE_API_SETTING_KEY)
-    if not token:
-        raise RuntimeError("Tushare token is required for core index constituent queries")
-
-    if api_url:
-        from tushare.pro.client import DataApi
-
-        DataApi._DataApi__http_url = api_url
-
-    return ts.pro_api(token)
-
-
 async def get_core_index_constituent_codes(
     index_codes: Optional[Iterable[str]] = None,
     *,
     as_of: Optional[date] = None,
 ) -> List[str]:
-    """
-    Fetch constituent stock codes for configured core indices via Tushare.
+    """通过 Tushare 获取核心指数成分股代码。
 
     Tushare `index_weight` provides monthly constituent/weight snapshots.
     We query recent month windows only and raise immediately if no usable data
     is returned.
 
     Args:
-        index_codes: Index code iterable. Defaults to settings.CORE_INDICES.
-        as_of: Reference date for choosing recent month windows.
+        index_codes: 指数代码列表；为空时使用 settings.CORE_INDICES。
+        as_of: 用于选择最近月度窗口的参考日期。
 
     Returns:
-        Sorted standardized stock codes.
+        排序后的标准化股票代码列表。
     """
     resolved_index_codes = list(index_codes or settings.CORE_INDICES)
-    pro = await _get_tushare_pro_client()
+    pro = await TushareIngestor.get_pro_client()
     ranges = _build_candidate_ranges(as_of=as_of)
     resolved_codes = set()
 
@@ -85,7 +65,8 @@ async def get_core_index_constituent_codes(
 
         for start_date, end_date in ranges:
             try:
-                df = pro.index_weight(
+                df = await asyncio.to_thread(
+                    pro.index_weight,
                     index_code=index_code,
                     start_date=start_date,
                     end_date=end_date,

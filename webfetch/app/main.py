@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import time
@@ -34,6 +35,28 @@ def _elapsed_ms(started_at: float) -> int:
         请求耗时毫秒数。
     """
     return max(0, round((time.perf_counter() - started_at) * 1000))
+
+
+def _convert_rendered_html_to_markdown(
+    html: str,
+    title: str,
+    source_url: str,
+    compiled_patterns: list[re.Pattern[str]],
+) -> str:
+    """
+    将渲染后的 HTML 转换并清理为 Markdown。
+
+    Args:
+        html: 渲染后的 HTML。
+        title: 页面标题。
+        source_url: 最终来源 URL。
+        compiled_patterns: 已编译的 Markdown 清理正则。
+
+    Returns:
+        清理后的 Markdown 文本。
+    """
+    markdown = convert_html_to_markdown(html, title, source_url)
+    return clean_markdown(markdown, compiled_patterns)
 
 
 class EngineRegistry:
@@ -247,8 +270,13 @@ async def fetch_page(request: FetchRequest) -> FetchResponse:
 
     html_length = len(rendered.html)
     if request.return_type == ReturnType.MARKDOWN:
-        markdown = convert_html_to_markdown(rendered.html, rendered.title, rendered.final_url)
-        markdown = clean_markdown(markdown, compiled_patterns)
+        markdown = await asyncio.to_thread(
+            _convert_rendered_html_to_markdown,
+            rendered.html,
+            rendered.title,
+            rendered.final_url,
+            compiled_patterns,
+        )
         response = FetchResponse(
             success=True,
             url=normalized_url,

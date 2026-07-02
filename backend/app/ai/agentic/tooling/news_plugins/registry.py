@@ -3,7 +3,7 @@ import importlib.util
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
-from inspect import isawaitable
+from inspect import iscoroutinefunction
 from pathlib import Path
 from typing import Any, Callable, Dict, List
 
@@ -105,6 +105,10 @@ def get_news_plugins() -> Dict[str, NewsPlugin]:
             logger.warning("Skipping news plugin %s due to invalid metadata", module_name)
             continue
 
+        if not iscoroutinefunction(search):
+            logger.warning("Skipping news plugin %s because search must be async", module_name)
+            continue
+
         if plugin_id in plugins:
             logger.warning(
                 "Skipping duplicated news plugin id '%s' from %s",
@@ -160,9 +164,7 @@ async def invoke_news_plugin(source: str, keyword: str, limit: int = 10, **kwarg
         }]
 
     try:
-        result = plugin.search(keyword=keyword, limit=limit, **kwargs)
-        if isawaitable(result):
-            result = await result
+        result = await plugin.search(keyword=keyword, limit=limit, **kwargs)
         return ensure_source(result, plugin.plugin_id)
     except Exception as exc:
         logger.exception("News plugin '%s' failed: %s", source, exc)

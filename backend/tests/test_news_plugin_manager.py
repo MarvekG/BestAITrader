@@ -66,7 +66,7 @@ async def test_create_news_plugin_writes_file_and_probes_search(isolated_news_pl
             'TOOL_NAME = "Custom News Tool"\n'
             'NEWS_TYPES = ["market"]\n'
             'KEYWORD_EXAMPLES = ["AI"]\n'
-            "def search(**kwargs):\n"
+            "async def search(**kwargs):\n"
             "    return []\n"
         ),
     )
@@ -95,7 +95,7 @@ async def test_create_news_plugin_rolls_back_when_probe_fails(isolated_news_plug
             'TOOL_NAME = "Custom News Tool"\n'
             'NEWS_TYPES = ["market"]\n'
             'KEYWORD_EXAMPLES = ["AI"]\n'
-            "def search(**kwargs):\n"
+            "async def search(**kwargs):\n"
             "    return []\n"
         ),
     )
@@ -145,7 +145,7 @@ def test_registry_loads_external_plugins_from_runtime_dir(tmp_path, monkeypatch)
         'TOOL_NAME = "Custom News Tool"\n'
         'NEWS_TYPES = ["market"]\n'
         'KEYWORD_EXAMPLES = ["AI"]\n'
-        'def search(**kwargs):\n'
+        'async def search(**kwargs):\n'
         '    return []\n',
         encoding="utf-8",
     )
@@ -174,6 +174,20 @@ def test_registry_skips_builtin_provider_client_helper():
 def test_validate_news_plugin_content_rejects_invalid_python():
     with pytest.raises(ValueError):
         manager.validate_news_plugin_content("def broken(:\n    pass\n")
+
+
+def test_validate_news_plugin_content_rejects_sync_search():
+    with pytest.raises(ValueError) as exc_info:
+        manager.validate_news_plugin_content(
+            'NAME = "Custom News"\n'
+            'PLUGIN_ID = "custom_source"\n'
+            'TOOL_NAME = "Custom News Tool"\n'
+            'NEWS_TYPES = ["market"]\n'
+            'KEYWORD_EXAMPLES = ["AI"]\n'
+            "def search(**kwargs):\n"
+            "    return []\n"
+        )
+    assert str(exc_info.value)
 
 
 def test_extract_news_plugin_requirements_from_constant():
@@ -272,7 +286,7 @@ async def test_create_news_plugin_installs_declared_requirements(isolated_news_p
             'TOOL_NAME = "Custom News Tool"\n'
             'NEWS_TYPES = ["market"]\n'
             'KEYWORD_EXAMPLES = ["AI"]\n'
-            "def search(**kwargs):\n"
+            "async def search(**kwargs):\n"
             "    return []\n"
         ),
     )
@@ -312,7 +326,7 @@ async def test_create_news_plugin_stops_when_dependency_install_fails(isolated_n
             'TOOL_NAME = "Custom News Tool"\n'
             'NEWS_TYPES = ["market"]\n'
             'KEYWORD_EXAMPLES = ["AI"]\n'
-            "def search(**kwargs):\n"
+            "async def search(**kwargs):\n"
             "    return []\n"
         ),
     )

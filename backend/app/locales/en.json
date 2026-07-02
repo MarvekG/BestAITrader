@@ -2340,6 +2340,7 @@
     "reserved_module_name": "Plugin filename is reserved: {module_name}",
     "content_empty": "Plugin file content cannot be empty",
     "syntax_invalid": "Plugin Python syntax is invalid: {error}",
+    "async_search_required": "News plugins must provide async def search(...). Synchronous search interfaces are not allowed.",
     "not_registered": "Plugin file was rolled back because no valid plugin was registered: {module_name}",
     "saved": "News plugin saved: {plugin_id}",
     "not_found": "Deletable news plugin not found: {plugin_key}",
