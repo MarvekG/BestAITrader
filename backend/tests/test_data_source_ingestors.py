@@ -9,7 +9,7 @@ import pytest
 import pandas as pd
 import numpy as np
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import AsyncMock, Mock, patch
 from app.data.ingestion.service import DataIngestionService
 from app.data.ingestors.plugins.akshare_ingestor import AkshareIngestor
@@ -17,7 +17,7 @@ from app.data.ingestors.manager import ingestor_manager
 from app.data.ingestors.plugins.column_mapping import ColumnMapper
 from app.data.ingestors.plugins.tushare_ingestor import TushareIngestor
 from app.core.utils.date_utils import normalize_compact_date
-from app.models.data_storage import StockRealtimeMarket
+from app.models.data_storage import IndexDaily, StockLimitUpPool, StockRealtimeMarket, StockTopHolders
 
 
 @pytest.fixture
@@ -248,6 +248,56 @@ def test_data_ingestion_normalizes_dedicated_table_bind_values():
     assert isinstance(records[0]["current_price"], float)
     assert isinstance(records[0]["main_net_inflow_rank_today"], int)
     assert records[0]["change_percent"] is None
+
+
+def test_data_ingestion_normalizes_values_by_column_type():
+    """专用表应按 SQLAlchemy 列类型转换日期、字符串和数值字段。"""
+    service = DataIngestionService()
+
+    index_records = service._prepare_records(
+        pd.DataFrame([{"index_code": "000001.SH", "trade_date": "20240105", "close": np.float64(2929.18)}]),
+        IndexDaily,
+        api_name="index_daily",
+        source="tushare",
+    )
+    limit_records = service._prepare_records(
+        pd.DataFrame([{"stock_code": "000001.SZ", "update_date": "2024-01-02", "limit_up_days": np.int64(2)}]),
+        StockLimitUpPool,
+        api_name="limit_list_d",
+        source="tushare",
+    )
+    holder_records = service._prepare_records(
+        pd.DataFrame([{"stock_code": "000001.SZ", "report_date": "20250823", "change": np.float64(0.0)}]),
+        StockTopHolders,
+        api_name="top10_holders",
+        source="tushare",
+    )
+
+    assert index_records[0]["trade_date"] == date(2024, 1, 5)
+    assert isinstance(index_records[0]["close"], float)
+    assert limit_records[0]["update_date"] == date(2024, 1, 2)
+    assert limit_records[0]["limit_up_days"] == "2"
+    assert holder_records[0]["report_date"] == date(2025, 8, 23)
+    assert holder_records[0]["change"] == "0.0"
+
+
+@pytest.mark.asyncio
+async def test_bulk_upsert_splits_large_batches_before_asyncpg_parameter_limit(monkeypatch):
+    """批量 upsert 应按参数上限分片，避免 asyncpg 32767 参数限制。"""
+    service = DataIngestionService()
+    chunk_sizes = []
+
+    async def fake_bulk_upsert_chunk(_model, records):
+        chunk_sizes.append(len(records))
+
+    monkeypatch.setattr(service, "_bulk_upsert_chunk", fake_bulk_upsert_chunk)
+    records = [{"stock_code": "000001.SZ", "trade_date": date(2024, 1, 1), **{f"v{i}": i for i in range(13)}} for _ in range(2500)]
+
+    await service._bulk_upsert(StockRealtimeMarket, records)
+
+    assert len(chunk_sizes) == 2
+    assert max(chunk_sizes) * len(records[0]) <= 30000
+    assert sum(chunk_sizes) == len(records)
 
 
 @pytest.mark.asyncio
