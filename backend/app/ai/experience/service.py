@@ -738,17 +738,10 @@ class ExperienceService:
                 "analysis_payload": normalized_payload,
                 "tool_trace": result_state.get("tool_trace") or [],
             }
-            await self._push_review_update(
-                debate_session_id=str(session_obj.session_id),
-                review_run_id=review_run_id,
-                stage="experience_review",
-                status="completed",
-                message_key="experience.live_messages.completed",
-                payload=self._build_completed_event_payload(
-                    result=result,
-                    recommended_action=normalized_payload.get("recommended_action"),
-                    debate_correctness=normalized_payload.get("debate_correctness"),
-                ),
+            completed_payload = self._build_completed_event_payload(
+                result=result,
+                recommended_action=normalized_payload.get("recommended_action"),
+                debate_correctness=normalized_payload.get("debate_correctness"),
             )
             async with database_module.AsyncSessionLocal() as db:
                 await self._persist_review_event(
@@ -759,12 +752,16 @@ class ExperienceService:
                     stage="experience_review",
                     status="completed",
                     message_key="experience.live_messages.completed",
-                    payload=self._build_completed_event_payload(
-                        result=result,
-                        recommended_action=normalized_payload.get("recommended_action"),
-                        debate_correctness=normalized_payload.get("debate_correctness"),
-                    ),
+                    payload=completed_payload,
                 )
+            await self._push_review_update(
+                debate_session_id=str(session_obj.session_id),
+                review_run_id=review_run_id,
+                stage="experience_review",
+                status="completed",
+                message_key="experience.live_messages.completed",
+                payload=completed_payload,
+            )
             try:
                 async with database_module.AsyncSessionLocal() as db:
                     await experience_index_service.sync_from_review_result(db, user_id=user_id, result=result)

@@ -9,11 +9,13 @@ import pytest
 import pandas as pd
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, Mock, patch
+from app.data.ingestion.service import DataIngestionService
 from app.data.ingestors.plugins.akshare_ingestor import AkshareIngestor
 from app.data.ingestors.manager import ingestor_manager
 from app.data.ingestors.plugins.column_mapping import ColumnMapper
 from app.data.ingestors.plugins.tushare_ingestor import TushareIngestor
 from app.core.utils.date_utils import normalize_compact_date
+from app.models.data_storage import StockRealtimeMarket
 
 
 @pytest.fixture
@@ -157,6 +159,87 @@ class TestTushareIngestor:
         Tushare 采集器不再提供概念板块行情同步入口。
         """
         assert not hasattr(TushareIngestor, "fetch_and_ingest_board_concept")
+
+
+@pytest.mark.asyncio
+async def test_tushare_realtime_market_normalizes_numeric_strings():
+    """Tushare 实时行情字符串数值应在写入实时行情表前转为数值类型。"""
+    ingestor = TushareIngestor.__new__(TushareIngestor)
+    ingestor.source = "tushare"
+    ingestor.ingestion_service = Mock()
+    ingestor.ingestion_service.write_dataframe = AsyncMock(return_value=True)
+    source_df = pd.DataFrame(
+        [
+            {
+                "code": "000001",
+                "name": "平安银行",
+                "date": "2026-07-02",
+                "time": "10:12:23",
+                "price": "12.34",
+                "pre_close": "12.00",
+                "volume": "13236539",
+                "amount": "15406199797.180",
+                "high": "12.50",
+                "low": "12.10",
+                "open": "12.20",
+                "bid": "12.33",
+                "ask": "12.34",
+                "b1_v": "100",
+                "b1_p": "12.33",
+                "b2_v": "200",
+                "b2_p": "12.32",
+                "b3_v": "300",
+                "b3_p": "12.31",
+                "b4_v": "400",
+                "b4_p": "12.30",
+                "b5_v": "500",
+                "b5_p": "12.29",
+                "a1_v": "100",
+                "a1_p": "12.34",
+                "a2_v": "200",
+                "a2_p": "12.35",
+                "a3_v": "300",
+                "a3_p": "12.36",
+                "a4_v": "400",
+                "a4_p": "12.37",
+                "a5_v": "500",
+                "a5_p": "12.38",
+            }
+        ]
+    )
+    ingestor._run_in_executor = AsyncMock(return_value=source_df)
+
+    result = await ingestor.fetch_and_ingest_realtime_market("000001.SZ")
+
+    written_df = ingestor.ingestion_service.write_dataframe.await_args.args[1]
+    assert result["success"] is True
+    for column in ["current_price", "prev_close", "volume", "turnover", "high", "low", "open"]:
+        assert pd.api.types.is_numeric_dtype(written_df[column])
+    assert written_df.iloc[0]["volume"] == 13_236_539
+    assert isinstance(result["data"][0]["timestamp"], pd.Timestamp)
+
+
+def test_data_ingestion_preserves_datetime_for_dedicated_tables():
+    """专用表写入应保留 datetime 类型，避免 asyncpg TIMESTAMP bind 失败。"""
+    timestamp = pd.Timestamp("2026-07-02T10:20:39.379941")
+    df = pd.DataFrame(
+        [
+            {
+                "stock_code": "000001.SZ",
+                "current_price": 12.34,
+                "timestamp": timestamp,
+            }
+        ]
+    )
+
+    records = DataIngestionService()._prepare_records(
+        df,
+        StockRealtimeMarket,
+        api_name="tushare_realtime",
+        source="tushare",
+    )
+
+    assert records[0]["timestamp"] == timestamp.to_pydatetime()
 
 
 @pytest.mark.asyncio

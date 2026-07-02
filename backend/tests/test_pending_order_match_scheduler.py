@@ -4,6 +4,7 @@ from uuid import uuid4
 import pytest
 
 from app.models.order import Order
+from app.models.account import Account
 from app.tasks import pending_order_match_scheduler as scheduler
 
 
@@ -48,3 +49,15 @@ async def test_match_pending_order_awaits_market_price(monkeypatch):
     assert result["matched"] is False
     assert result["reason"] == "limit_price_not_triggered"
     assert result["latest_price"] == 10.5
+
+
+def test_scheduler_account_total_assets_recompute_includes_frozen_cash():
+    account = Account(
+        available_cash=Decimal("100.00"),
+        frozen_cash=Decimal("20.00"),
+        market_value=Decimal("30.00"),
+    )
+
+    scheduler._recompute_account_total_assets(account)
+
+    assert account.total_assets == Decimal("150.00")

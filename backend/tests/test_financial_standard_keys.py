@@ -60,7 +60,7 @@ class FakeSession:
         self.records = records
 
     def query(self, model):
-        return FakeQuery(self.records)
+        raise AssertionError("Async DB tests must use execute(), not query().")
 
     async def execute(self, statement):
         return FakeResult.from_statement(statement, self.records)
@@ -117,7 +117,7 @@ class ModelMapSession:
         self.records_by_model = records_by_model
 
     def query(self, model):
-        return FakeQuery(self.records_by_model.get(model, []))
+        raise AssertionError("Async DB tests must use execute(), not query().")
 
     async def execute(self, statement):
         model = None
@@ -602,27 +602,7 @@ class FundHoldingFakeSession:
         self._holding_query_count = 0
 
     def query(self, model):
-        if model is StockFundHolding.report_date:
-            unique_dates = []
-            seen = set()
-            for holding in sorted(self.holdings, key=lambda item: item.report_date, reverse=True):
-                if holding.report_date not in seen:
-                    seen.add(holding.report_date)
-                    unique_dates.append((holding.report_date,))
-            return FakeQuery(unique_dates)
-        if model is StockFundHolding:
-            self._holding_query_count += 1
-            sorted_holdings = sorted(self.holdings, key=lambda item: item.report_date, reverse=True)
-            latest_date = sorted_holdings[0].report_date
-            prev_date = next(
-                (item.report_date for item in sorted_holdings if item.report_date != latest_date),
-                None,
-            )
-            if self._holding_query_count == 1:
-                return FakeQuery([item for item in self.holdings if item.report_date == latest_date])
-            if self._holding_query_count == 2 and prev_date is not None:
-                return FakeQuery([item for item in self.holdings if item.report_date == prev_date])
-        return FakeQuery(self.holdings)
+        raise AssertionError("Async DB tests must use execute(), not query().")
 
     async def execute(self, statement):
         model = None
@@ -659,20 +639,7 @@ class TopHoldersFakeSession:
         self._holder_query_count = 0
 
     def query(self, model):
-        if model is StockTopHolders.report_date:
-            unique_dates = []
-            seen = set()
-            for holder in sorted(self.holders, key=lambda item: item.report_date, reverse=True):
-                if holder.report_date not in seen:
-                    seen.add(holder.report_date)
-                    unique_dates.append((holder.report_date,))
-            return FakeQuery(unique_dates)
-        if model is StockTopHolders:
-            self._holder_query_count += 1
-            latest_date = max(holder.report_date for holder in self.holders)
-            if self._holder_query_count >= 1:
-                return FakeQuery([holder for holder in self.holders if holder.report_date == latest_date])
-        return FakeQuery(self.holders)
+        raise AssertionError("Async DB tests must use execute(), not query().")
 
     async def execute(self, statement):
         model = None

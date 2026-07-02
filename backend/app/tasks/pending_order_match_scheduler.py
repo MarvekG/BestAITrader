@@ -17,6 +17,7 @@ from app.trading.service import _extract_pending_order_stop_loss
 from app.trading.service import _limit_order_triggered
 from app.trading.service import _merge_purchase_details_with_stop_loss
 from app.trading.service import _order_remaining_shares
+from app.trading.service import _recompute_account_total_assets
 from app.trading.service import _resolve_order_price
 from app.trading.service import trading_service
 from app.data.market_utils import is_trading_time
@@ -259,7 +260,7 @@ async def _match_pending_order(db, order_id: UUID) -> dict[str, Any]:
         select(func.sum(Position.market_value)).where(Position.account_id == account.account_id)
     )
     account.market_value = Decimal(str(total_mv_result.scalar() or 0))
-    account.total_assets = account.available_cash + account.market_value
+    _recompute_account_total_assets(account)
     await db.commit()
     return {"success": True, "matched": True, "order": locked_order, "trade_result": trade_result}
 

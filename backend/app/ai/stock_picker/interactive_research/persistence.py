@@ -54,6 +54,7 @@ async def create_run_record(
         ValueError: 当前用户已有活跃 run 时抛出。
     """
     async with database_module.AsyncSessionLocal() as db:
+        await _lock_user_active_runs(db, user_id)
         active_run = (await db.execute(
             select(InteractiveResearchRun)
             .where(
@@ -61,6 +62,7 @@ async def create_run_record(
                 InteractiveResearchRun.status.in_(ACTIVE_RESEARCH_STATUSES),
             )
             .order_by(InteractiveResearchRun.created_at.desc())
+            .with_for_update()
             .limit(1)
         )).scalar_one_or_none()
         if active_run:
@@ -749,38 +751,66 @@ async def build_recent_chat_messages_record(run_id: UUID) -> List[Dict[str, Any]
         ]
 
 
-async def _get_run(db: AsyncSession, run_id: UUID) -> Optional[InteractiveResearchRun]:
+async def _get_run(
+    db: AsyncSession,
+    run_id: UUID,
+    *,
+    for_update: bool = False,
+) -> Optional[InteractiveResearchRun]:
     """在当前会话中按 ID 查询 run。
 
     Args:
         db: 数据库会话。
         run_id: 研究 run ID。
+        for_update: 是否锁定 run 行用于后续写入。
 
     Returns:
         找到时返回 run，否则返回 None。
     """
+    query = select(InteractiveResearchRun).where(InteractiveResearchRun.run_id == run_id)
+    if for_update:
+        query = query.with_for_update()
     return (await db.execute(
-        select(InteractiveResearchRun).where(InteractiveResearchRun.run_id == run_id)
+        query
     )).scalar_one_or_none()
 
 
-async def _get_user_run(db: AsyncSession, run_id: UUID, user_id: int) -> Optional[InteractiveResearchRun]:
+async def _get_user_run(
+    db: AsyncSession,
+    run_id: UUID,
+    user_id: int,
+    *,
+    for_update: bool = False,
+) -> Optional[InteractiveResearchRun]:
     """在当前会话中查询用户拥有的 run。
 
     Args:
         db: 数据库会话。
         run_id: 研究 run ID。
         user_id: 当前用户 ID。
+        for_update: 是否锁定 run 行用于后续写入。
 
     Returns:
         找到时返回 run，否则返回 None。
     """
+    query = select(InteractiveResearchRun).where(
+        InteractiveResearchRun.run_id == run_id,
+        InteractiveResearchRun.user_id == user_id,
+    )
+    if for_update:
+        query = query.with_for_update()
     return (await db.execute(
-        select(InteractiveResearchRun).where(
-            InteractiveResearchRun.run_id == run_id,
-            InteractiveResearchRun.user_id == user_id,
-        )
+        query
     )).scalar_one_or_none()
+
+
+async def _lock_user_active_runs(db: AsyncSession, user_id: int) -> None:
+    """在 PostgreSQL 上序列化同一用户创建活跃研究 run 的检查。"""
+    bind = db.get_bind()
+    dialect_name = getattr(getattr(bind, "dialect", None), "name", None)
+    if dialect_name != "postgresql":
+        return
+    await db.execute(select(func.pg_advisory_xact_lock(user_id)))
 
 
 async def _load_plan_messages(db: AsyncSession, run: InteractiveResearchRun) -> List[Dict[str, str]]:
@@ -919,6 +949,7 @@ async def append_message(
     Returns:
         已写入数据库的消息对象。
     """
+    await _lock_run_for_message_sequence(db, run.run_id)
     message = InteractiveResearchMessage(
         run_id=run.run_id,
         role=role,
@@ -1095,3 +1126,12 @@ async def next_message_sequence(db: AsyncSession, run_id: UUID) -> int:
         select(func.max(InteractiveResearchMessage.sequence_no)).where(InteractiveResearchMessage.run_id == run_id)
     )).scalar_one_or_none()
     return int(current or 0) + 1
+
+
+async def _lock_run_for_message_sequence(db: AsyncSession, run_id: UUID) -> None:
+    """锁定父 run 行，序列化同一 run 内消息序号分配。"""
+    await db.execute(
+        select(InteractiveResearchRun.run_id)
+        .where(InteractiveResearchRun.run_id == run_id)
+        .with_for_update()
+    )

@@ -11,7 +11,7 @@ from app.models.order import Order
 from app.models.position import Position
 from app.models.trade_record import TradeRecord
 from app.models.user import User
-from app.trading.service import TradingService
+from app.trading.service import TradingService, _recompute_account_total_assets
 
 
 async def _seed_account(db, *, user_id: int = 42, cash: str = "100000") -> Account:
@@ -160,6 +160,10 @@ async def test_service_rejects_limit_buy_stop_loss_above_limit_price(async_db_se
 async def test_service_updates_market_order_price_to_actual_fill(monkeypatch, async_db_session):
     service = TradingService()
     account = await _seed_account(async_db_session)
+    account_id = account.account_id
+    account.frozen_cash = Decimal("500.00")
+    account.total_assets = Decimal("100500.00")
+    await async_db_session.commit()
     service.engine.execute_order = AsyncMock(
         return_value={
             "success": True,
@@ -211,14 +215,15 @@ async def test_service_updates_market_order_price_to_actual_fill(monkeypatch, as
         order_type="market",
     )
 
+    async_db_session.expire_all()
     persisted_order = (
-        await async_db_session.execute(select(Order).where(Order.account_id == account.account_id))
+        await async_db_session.execute(select(Order).where(Order.account_id == account_id))
     ).scalar_one()
     persisted_trade = (
-        await async_db_session.execute(select(TradeRecord).where(TradeRecord.account_id == account.account_id))
+        await async_db_session.execute(select(TradeRecord).where(TradeRecord.account_id == account_id))
     ).scalar_one()
     persisted_position = (
-        await async_db_session.execute(select(Position).where(Position.account_id == account.account_id))
+        await async_db_session.execute(select(Position).where(Position.account_id == account_id))
     ).scalar_one()
 
     assert result["success"] is True
@@ -227,6 +232,22 @@ async def test_service_updates_market_order_price_to_actual_fill(monkeypatch, as
     assert persisted_order.filled_at is not None
     assert float(persisted_trade.fill_price) == 10.23
     assert persisted_position.purchase_details["ledger"][0]["price"] == 10.23
+    persisted_account = await async_db_session.get(Account, account_id)
+    assert persisted_account is not None
+    assert float(persisted_account.total_assets) == pytest.approx(100494.98)
+
+
+def test_recompute_account_total_assets_includes_frozen_cash():
+    account = Account(
+        available_cash=Decimal("100.00"),
+        frozen_cash=Decimal("20.00"),
+        market_value=Decimal("30.00"),
+    )
+
+    total_assets = _recompute_account_total_assets(account)
+
+    assert total_assets == Decimal("150.00")
+    assert account.total_assets == Decimal("150.00")
 
 
 @pytest.mark.asyncio

@@ -724,6 +724,43 @@ async def test_analyze_defaults_to_highest_available_review_horizon(async_db_ses
 
 
 @pytest.mark.asyncio
+async def test_analyze_persists_completed_event_before_push(async_db_session, monkeypatch):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=21)
+    await _create_pm_decision(async_db_session, user, session)
+    calls = []
+    original_persist = experience_service._persist_review_event
+
+    class FakeWorkflow:
+        async def ainvoke(self, state):
+            return {
+                "errors": [],
+                "full_context": {},
+                "analysis_payload": {
+                    "recommended_action": "hold",
+                    "confidence_score": 80,
+                    "debate_correctness": "correct",
+                },
+                "tool_trace": [],
+            }
+
+    async def track_persist(db, **kwargs):
+        await original_persist(db, **kwargs)
+        calls.append(("persist", kwargs["status"]))
+
+    async def track_push(**kwargs):
+        calls.append(("push", kwargs["status"]))
+
+    monkeypatch.setattr(experience_service_module, "create_experience_workflow", lambda: FakeWorkflow())
+    monkeypatch.setattr(experience_service, "_persist_review_event", track_persist)
+    monkeypatch.setattr(experience_service, "_push_review_update", track_push)
+
+    await experience_service.analyze(user_id=user.id, session_id=session.session_id)
+
+    assert calls.index(("persist", "completed")) < calls.index(("push", "completed"))
+
+
+@pytest.mark.asyncio
 async def test_analyze_defaults_to_20d_before_60d_when_both_are_available(async_db_session, monkeypatch):
     user, session = await _create_user_and_session(async_db_session)
     await _create_stock_and_klines(async_db_session, count=61)

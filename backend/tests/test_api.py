@@ -708,6 +708,73 @@ class TestAccountAPI:
         assert put_response.status_code == 200
         assert float(put_response.json()["total_funds"]) == 200000.0
 
+    def test_set_my_total_funds_preserves_frozen_cash(self, client, auth_headers, test_db, run_async):
+        async def _seed_account_data():
+            async with test_db() as db:
+                result = await db.execute(select(User).where(User.username.like("test_%")))
+                user = result.scalars().first()
+                db.add(
+                    Account(
+                        user_id=user.id,
+                        total_assets=Decimal("100000.0000"),
+                        available_cash=Decimal("85000.0000"),
+                        frozen_cash=Decimal("5000.0000"),
+                        market_value=Decimal("10000.0000"),
+                        initial_capital=Decimal("100000.0000"),
+                        total_profit_loss=Decimal("0.0000"),
+                    )
+                )
+                await db.commit()
+
+        run_async(_seed_account_data())
+
+        response = client.put(
+            "/api/v1/accounts/my-total-funds",
+            json={"total_funds": 120000.0},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert float(payload["total_funds"]) == 120000.0
+        assert float(payload["cash_balance"]) == 105000.0
+        assert float(payload["frozen_cash"]) == 5000.0
+
+    def test_set_my_total_funds_rejects_less_than_market_value_plus_frozen_cash(
+        self,
+        client,
+        auth_headers,
+        test_db,
+        run_async,
+    ):
+        async def _seed_account_data():
+            async with test_db() as db:
+                result = await db.execute(select(User).where(User.username.like("test_%")))
+                user = result.scalars().first()
+                db.add(
+                    Account(
+                        user_id=user.id,
+                        total_assets=Decimal("100000.0000"),
+                        available_cash=Decimal("85000.0000"),
+                        frozen_cash=Decimal("5000.0000"),
+                        market_value=Decimal("10000.0000"),
+                        initial_capital=Decimal("100000.0000"),
+                        total_profit_loss=Decimal("0.0000"),
+                    )
+                )
+                await db.commit()
+
+        run_async(_seed_account_data())
+
+        response = client.put(
+            "/api/v1/accounts/my-total-funds",
+            json={"total_funds": 14999.0},
+            headers=auth_headers,
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Total funds cannot be less than market value plus frozen cash"
+
     def test_my_total_funds_uses_dynamic_portfolio_valuation(self, client, auth_headers, test_db, run_async):
         async def _seed_account_data():
             async with test_db() as db:

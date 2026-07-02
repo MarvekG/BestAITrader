@@ -218,15 +218,17 @@ async def run_analysis_task(
         # 4. Finalize status
         if final_state.get("errors"):
             logger.warning(f"Analysis task {task_id} completed with functional errors: {final_state['errors']}")
+            error_message = str(final_state["errors"])
             await _update_task_status(
                 task_id,
                 "failed",
                 result=final_state,
-                error_message=str(final_state["errors"])
+                error_message=error_message
             )
             if session_id:
                 await _update_session_status(session_id, "failed")
                 await send_debate_status(session_id, "error")
+            return {"status": "failed", "error": error_message, "result": final_state}
         else:
             logger.info(f"Analysis task {task_id} completed successfully")
             await _update_task_status(
@@ -237,6 +239,7 @@ async def run_analysis_task(
             if session_id:
                 await _update_session_status(session_id, "completed")
                 await send_debate_status(session_id, "completed")
+            return final_state
 
     except Exception as e:
         error_msg = f"{str(e)}\n{traceback.format_exc()}"
@@ -252,6 +255,7 @@ async def run_analysis_task(
                 await send_debate_status(session_id, "error")
             except Exception as ws_err:
                 logger.error(f"Failed to send error status via WS: {ws_err}")
+        return {"status": "failed", "error": error_msg}
     finally:
         clear_current_user_id(user_token)
         clear_request_id(request_token)

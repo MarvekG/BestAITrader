@@ -1,5 +1,4 @@
 import ast
-import re
 from pathlib import Path
 
 
@@ -10,27 +9,17 @@ SOURCE_ROOTS = [
     REPO_ROOT / "backend" / "tests",
 ]
 
-TEXT_PATTERNS = [
-    ("SessionLocal", re.compile(r"\bSessionLocal\b")),
-    ("get_db", re.compile(r"\bget_db\b")),
-    ("get_db_session", re.compile(r"\bget_db_session\b")),
-    ("create_engine", re.compile(r"\bcreate_engine\b")),
-    (
-        "from sqlalchemy.orm import Session",
-        re.compile(r"^\s*from\s+sqlalchemy\.orm\s+import\s+.*\bSession\b", re.MULTILINE),
-    ),
-    (
-        "from sqlalchemy.orm import sessionmaker",
-        re.compile(r"^\s*from\s+sqlalchemy\.orm\s+import\s+.*\bsessionmaker\b", re.MULTILINE),
-    ),
-    ("sqlalchemy.orm.sessionmaker", re.compile(r"\bsqlalchemy\.orm\.sessionmaker\b")),
-    ("sessionmaker", re.compile(r"\bsessionmaker\s*\(")),
-    (
-        "direct AsyncSessionLocal import",
-        re.compile(r"^\s*from\s+app\.core\.database\s+import\s+.*\bAsyncSessionLocal\b", re.MULTILINE),
-    ),
-]
-DB_QUERY_RECEIVER_NAMES = {"db", "db_session", "session"}
+FORBIDDEN_NAME_REFERENCES = {
+    "SessionLocal",
+    "get_db",
+    "get_db_session",
+    "create_engine",
+}
+FORBIDDEN_SQLALCHEMY_ORM_IMPORTS = {"Session", "sessionmaker"}
+QUERY_CALL_ALLOWLIST = {
+    # Tushare SDK exposes a non-database pro_client.query(interface, **params) fallback.
+    ("backend/app/ai/agentic/skills_loader/skills/tushare-data/scripts/call_tushare.py", 139),
+}
 
 ALLOWLIST = {
     # This guard has to mention the forbidden names it is looking for.
@@ -47,19 +36,43 @@ def _python_files() -> list[Path]:
     ]
 
 
-def _db_query_lines(path: Path) -> list[int]:
+def _attribute_name(node: ast.AST) -> str | None:
+    """把 ast.Attribute/Name 转成点分名称。"""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _attribute_name(node.value)
+        if parent:
+            return f"{parent}.{node.attr}"
+    return None
+
+
+def _ast_offenders(path: Path) -> list[tuple[int, str]]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    lines = []
+    relative_path = str(path.relative_to(REPO_ROOT))
+    offenders = []
 
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        if not isinstance(node.func, ast.Attribute) or node.func.attr != "query":
-            continue
-        if isinstance(node.func.value, ast.Name) and node.func.value.id in DB_QUERY_RECEIVER_NAMES:
-            lines.append(node.lineno)
+        if isinstance(node, ast.ImportFrom):
+            imported_names = {alias.name for alias in node.names}
+            if node.module == "sqlalchemy.orm":
+                for name in sorted(imported_names & FORBIDDEN_SQLALCHEMY_ORM_IMPORTS):
+                    offenders.append((node.lineno, f"from sqlalchemy.orm import {name}"))
+            if node.module == "app.core.database" and "AsyncSessionLocal" in imported_names:
+                offenders.append((node.lineno, "direct AsyncSessionLocal import"))
 
-    return lines
+        if isinstance(node, ast.Name) and node.id in FORBIDDEN_NAME_REFERENCES:
+            offenders.append((node.lineno, node.id))
+
+        if isinstance(node, ast.Call):
+            function_name = _attribute_name(node.func)
+            if function_name and (function_name == "sessionmaker" or function_name.endswith(".sessionmaker")):
+                offenders.append((node.lineno, "sessionmaker"))
+            if isinstance(node.func, ast.Attribute) and node.func.attr == "query":
+                if (relative_path, node.lineno) not in QUERY_CALL_ALLOWLIST:
+                    offenders.append((node.lineno, ".query()"))
+
+    return offenders
 
 
 def test_sync_db_infrastructure_does_not_return() -> None:
@@ -67,13 +80,7 @@ def test_sync_db_infrastructure_does_not_return() -> None:
 
     for path in _python_files():
         relative_path = path.relative_to(REPO_ROOT)
-        text = path.read_text(encoding="utf-8")
-        for pattern_name, pattern in TEXT_PATTERNS:
-            for match in pattern.finditer(text):
-                line_no = text.count("\n", 0, match.start()) + 1
-                offenders.append(f"{relative_path}:{line_no}: {pattern_name}")
-
-        for line_no in _db_query_lines(path):
-            offenders.append(f"{relative_path}:{line_no}: db.query")
+        for line_no, pattern_name in _ast_offenders(path):
+            offenders.append(f"{relative_path}:{line_no}: {pattern_name}")
 
     assert offenders == []

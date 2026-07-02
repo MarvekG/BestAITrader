@@ -96,6 +96,8 @@ class DataRefreshScheduler:
         if trading_time_only is None:
             trading_time_only = trigger_type == 'interval' and 'realtime' in task_name.lower()
 
+        job_id = f"auto_{task_name.lower().replace(' ', '_')}"
+
         async def job_wrapper():
             # 只有在交易时间才运行高频任务 (Only run high-frequency tasks during trading time if appropriate)
             if trading_time_only:
@@ -108,19 +110,21 @@ class DataRefreshScheduler:
             runner_task_kwargs.setdefault("task_name", f"[Auto] {task_name}")
 
             # 提交到应用内异步任务运行器，阻塞 I/O 由任务内部的 run_in_executor 处理。
-            async_task_runner.submit_task(
+            submitted = async_task_runner.submit_task(
                 task_id=task_id,
                 task_func=task_func,
                 task_kwargs=runner_task_kwargs,
                 request_id=task_id,
                 persist_status=False,
             )
+            if not submitted:
+                logger.error(f"Failed to submit scheduled task: {task_name} ({task_id})")
 
         trigger = CronTrigger(**trigger_args) if trigger_type == 'cron' else IntervalTrigger(**trigger_args)
         self.scheduler.add_job(
             job_wrapper,
             trigger=trigger,
-            id=f"auto_{task_name.lower().replace(' ', '_')}",
+            id=job_id,
             name=task_name,
             replace_existing=True
         )

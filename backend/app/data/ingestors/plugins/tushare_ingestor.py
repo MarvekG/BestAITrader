@@ -860,6 +860,20 @@ class TushareIngestor(BaseIngestor):
                 if df.empty:
                     return {"success": False, "data": [], "count": 0}
 
+            numeric_columns = [
+                'change_percent',
+                'change_amount',
+                'volume',
+                'turnover',
+                'high',
+                'low',
+                'open',
+                'prev_close',
+            ]
+            for col in numeric_columns:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+
             df['data_source'] = self.source
             df['timestamp'] = pd.Timestamp.now()
 

@@ -205,3 +205,35 @@ async def test_run_analysis_task_passes_discipline_trigger_to_initial_state(monk
     )
 
     assert captured["initial_state"]["static_context"]["discipline_trigger"] == discipline_trigger
+
+
+@pytest.mark.asyncio
+async def test_run_analysis_task_returns_soft_failure_when_workflow_has_errors(monkeypatch) -> None:
+    """工作流功能性失败时应返回软失败，避免外层运行器覆盖成完成。"""
+    import app.api.endpoints.debate_ws as debate_ws_module
+    import app.ai.llm_engine.runner as runner_module
+
+    class _FakeWorkflow:
+        async def ainvoke(self, initial_state):
+            """返回带功能性错误的最终状态。"""
+            return {**initial_state, "errors": ["analyst failed"]}
+
+    async def _fake_send_debate_status(*_args, **_kwargs):
+        """跳过 WebSocket 状态推送。"""
+        return None
+
+    monkeypatch.setattr(runner_module, "_resolve_session_user_id", AsyncMock(return_value=None))
+    monkeypatch.setattr(runner_module, "_update_task_status", AsyncMock())
+    monkeypatch.setattr(runner_module, "_update_session_status", AsyncMock())
+    monkeypatch.setattr(runner_module, "create_analyst_workflow", lambda: _FakeWorkflow())
+    monkeypatch.setattr(debate_ws_module, "send_debate_status", _fake_send_debate_status)
+
+    result = await run_analysis_task(
+        task_id="task-runner-functional-error",
+        stock_code="000001.SZ",
+        trading_frequency="daily",
+        trading_strategy="value",
+    )
+
+    assert result["status"] == "failed"
+    assert "analyst failed" in result["error"]

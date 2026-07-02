@@ -62,7 +62,8 @@ async def test_scheduled_task_submission_skips_status_persistence(monkeypatch) -
     async def _task_func() -> dict[str, str]:
         return {"status": "ok"}
 
-    monkeypatch.setattr("app.data.refresh_scheduler.async_task_runner", _FakeRunner())
+    fake_runner = _FakeRunner()
+    monkeypatch.setattr("app.data.refresh_scheduler.async_task_runner", fake_runner)
     monkeypatch.setattr("app.data.refresh_scheduler.is_trading_time", lambda: True)
 
     scheduler = DataRefreshScheduler.__new__(DataRefreshScheduler)

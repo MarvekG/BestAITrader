@@ -103,6 +103,25 @@ def _calculate_buy_reservation(engine: TradingEngine, price: float | Decimal, sh
     return turnover + Decimal(str(fee))
 
 
+def _recompute_account_total_assets(account: Account) -> Decimal:
+    """
+    根据可用现金、冻结现金和持仓市值重算账户总资产。
+
+    Args:
+        account: 账户模型。
+
+    Returns:
+        重算后的总资产。
+    """
+    total_assets = (
+        Decimal(str(account.available_cash or 0))
+        + Decimal(str(account.frozen_cash or 0))
+        + Decimal(str(account.market_value or 0))
+    )
+    account.total_assets = total_assets
+    return total_assets
+
+
 def _build_pending_order_remark(stop_loss: Decimal | None) -> str | None:
     """
     将挂单成交后需要恢复的轻量字段编码到订单备注。
@@ -926,7 +945,7 @@ class TradingService:
                 )
                 total_mv = total_mv_result.scalar() or 0
                 locked_account.market_value = Decimal(str(total_mv))
-                locked_account.total_assets = locked_account.available_cash + locked_account.market_value
+                _recompute_account_total_assets(locked_account)
                 await db.commit()
 
                 if should_notify:

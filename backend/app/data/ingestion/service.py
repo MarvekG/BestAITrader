@@ -232,9 +232,13 @@ class DataIngestionService:
             for k, v in row_dict.items():
                 if pd.isna(v):
                     clean_row[k] = None
-                else:
-                    # 使用递归序列化处理所有值，确保 JSON 字段内的日期也能正确转义
+                elif target_model == CommonData:
+                    # CommonData 的 data_payload 是 JSON，需要把日期递归转成可序列化值。
                     clean_row[k] = self._json_serializable(v)
+                elif isinstance(v, pd.Timestamp):
+                    clean_row[k] = v.to_pydatetime()
+                else:
+                    clean_row[k] = v
 
             if target_model == CommonData:
                 # CommonData 逻辑

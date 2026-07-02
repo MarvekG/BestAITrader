@@ -214,7 +214,7 @@ class _FakeRealtimeDB:
         self.rows = rows
 
     def query(self, _model):
-        return _FakeRealtimeQuery(self.rows)
+        raise AssertionError("Async DB tests must use execute(), not query().")
 
     async def execute(self, _statement):
         return _FakeRealtimeResult(sorted(self.rows, key=lambda row: row.timestamp, reverse=True))

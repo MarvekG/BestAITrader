@@ -223,14 +223,23 @@ async def set_my_total_funds(
     """
     try:
         account = await ensure_user_account(db, current_user)
+        total_funds_decimal = Decimal(str(total_funds))
+        market_value = account.market_value or Decimal("0.00")
+        frozen_cash = account.frozen_cash or Decimal("0.00")
+        available_cash = total_funds_decimal - market_value - frozen_cash
+        if available_cash < 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Total funds cannot be less than market value plus frozen cash",
+            )
 
         # Calculate funds change
-        funds_change = total_funds - float(account.total_assets)
+        funds_change = float(total_funds_decimal - (account.total_assets or Decimal("0.00")))
 
         # 更新账户总额和初始资金 (Sync initial_capital)
-        account.total_assets = Decimal(str(total_funds))
+        account.total_assets = total_funds_decimal
         account.initial_capital = account.total_assets
-        account.available_cash = account.total_assets - account.market_value
+        account.available_cash = available_cash
 
         await db.commit()
         await db.refresh(account)
@@ -239,6 +248,7 @@ async def set_my_total_funds(
             "user_id": current_user.id,
             "total_funds": account.total_assets,
             "cash_balance": account.available_cash,
+            "frozen_cash": account.frozen_cash,
             "market_value": account.market_value,
             "funds_change": funds_change
         }

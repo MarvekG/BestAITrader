@@ -1199,18 +1199,17 @@ async def sync_base_info_func(
     logger.info(f"Starting base info sync for {stock_code if stock_code else 'ALL (Filtered)'} (scope: {scope}), task_id: {task_id}")
     # 如果没有指定股票代码，则执行全量过滤同步 (Batch sync if no stock_code)
     if not stock_code:
-        async with database_module.AsyncSessionLocal() as db:
-            from app.models.data_storage import StockBasic
-            from app.models.async_task import AsyncTask
-            from app.models.stock_warehouse import StockWarehouse
-            from app.data.stock_filters import get_basic_stock_filter_conds
+        from app.models.data_storage import StockBasic
+        from app.models.async_task import AsyncTask
+        from app.models.stock_warehouse import StockWarehouse
+        from app.data.stock_filters import get_basic_stock_filter_conds
 
-            stock_list = []
-            start_index = 0
+        stock_list = []
+        start_index = 0
 
-            # 尝试从上次任务续传 (Try resume from last task)
-            if resume:
-                # ... [Keep resume logic the same, it depends on task_type] ...
+        # 尝试从上次任务续传 (Try resume from last task)
+        if resume:
+            async with database_module.AsyncSessionLocal() as db:
                 last_task_result = await db.execute(
                     select(AsyncTask)
                     .where(
@@ -1228,84 +1227,86 @@ async def sync_base_info_func(
                     start_index = last_task.result.get("last_processed_index", -1) + 1
                     logger.info(f"Resuming task {last_task.task_id} from index {start_index}")
 
-            if not stock_list:
-                # 1. 先同步一次 A 股基础列表 (Update master list first)
-                logger.info("Updating master stock list from ingestor...")
-                await ingestor_manager.fetch_and_ingest_all_stock_basic()
+        if not stock_list:
+            # 1. 先同步一次 A 股基础列表 (Update master list first)
+            logger.info("Updating master stock list from ingestor...")
+            await ingestor_manager.fetch_and_ingest_all_stock_basic()
 
-                # 2. 获取过滤后的股票列表 (Get filtered list)
-                if scope == "warehouse":
-                    logger.info("Sync scope: warehouse. Fetching active warehouse stocks...")
-                    warehouse_stocks = await db.execute(
-                        select(StockWarehouse.stock_code).where(StockWarehouse.is_active.is_(True))
-                    )
-                    stock_list = list(warehouse_stocks.scalars().all())
-                elif scope == "core":
-                    logger.info("Sync scope: core. Fetching core index constituents via Tushare...")
-                    stock_list = await get_core_index_constituent_codes()
-                else:
-                    logger.info("Sync scope: all. Fetching filtered basic stocks...")
-                    filtered_conds = get_basic_stock_filter_conds()
-                    stocks_to_sync = await db.execute(select(StockBasic.stock_code).where(filtered_conds))
-                    stock_list = list(stocks_to_sync.scalars().all())
-                
-                start_index = 0
-
-            total_stocks = len(stock_list)
-            logger.info(f"Filtered {total_stocks} stocks for batch base info sync (Start at: {start_index})")
-
-            # 初始化当前任务状态 (Initialize current task result with stock_list)
-            await task_manager.update_task_status(
-                    task_id=task_id,
-                status="running",
-                result={
-                    "progress": start_index,
-                    "total": total_stocks,
-                    "stock_list": stock_list,
-                    "last_processed_index": start_index - 1
-                }
-            )
-
-            if total_stocks == 0 or start_index >= total_stocks:
-                return {"status": "success", "message": "No stocks match the filter criteria or already completed."}
-
-            # 3. 循环调用自身同步每只股票 (Recurse for each stock)
-            success_count = 0
-            for idx in range(start_index, total_stocks):
-                code = stock_list[idx]
-                try:
-                    # 每同步 3 只或最后一只更新总进度 (Update overall progress every 3 stocks or at the end)
-                    if task_id and (idx % 3 == 0 or idx == total_stocks - 1):
-                        task_result = {
-                            "progress": idx + 1,
-                            "total": total_stocks,
-                            "current_step": f"Updating {code}",
-                            "last_processed_index": idx,
-                            "stock_list": stock_list
-                        }
-
-                        await task_manager.update_task_status(
-                            task_id=task_id,
-                            status="running",
-                            result=task_result
+            # 2. 获取过滤后的股票列表 (Get filtered list)
+            if scope == "core":
+                logger.info("Sync scope: core. Fetching core index constituents via Tushare...")
+                stock_list = await get_core_index_constituent_codes()
+            else:
+                async with database_module.AsyncSessionLocal() as db:
+                    if scope == "warehouse":
+                        logger.info("Sync scope: warehouse. Fetching active warehouse stocks...")
+                        warehouse_stocks = await db.execute(
+                            select(StockWarehouse.stock_code).where(StockWarehouse.is_active.is_(True))
                         )
+                        stock_list = list(warehouse_stocks.scalars().all())
+                    else:
+                        logger.info("Sync scope: all. Fetching filtered basic stocks...")
+                        filtered_conds = get_basic_stock_filter_conds()
+                        stocks_to_sync = await db.execute(select(StockBasic.stock_code).where(filtered_conds))
+                        stock_list = list(stocks_to_sync.scalars().all())
 
-                    # 执行单股同步步骤
-                    res = await _process_single_stock(code, task_id)
-                    if res.get("status") == "success":
-                        success_count += 1
-                except Exception as e:
-                    logger.error(f"Failed to sync stock {code} in batch: {e}")
+            start_index = 0
 
-            return {
-                "status": "success" if success_count > 0 else "failed",
-                "message": (
-                    f"Batch sync completed. {success_count}/{total_stocks - start_index} "
-                    f"stocks succeeded in this session."
-                ),
+        total_stocks = len(stock_list)
+        logger.info(f"Filtered {total_stocks} stocks for batch base info sync (Start at: {start_index})")
+
+        # 初始化当前任务状态 (Initialize current task result with stock_list)
+        await task_manager.update_task_status(
+            task_id=task_id,
+            status="running",
+            result={
+                "progress": start_index,
                 "total": total_stocks,
-                "success_count": success_count,
-                "resumed_from": start_index
+                "stock_list": stock_list,
+                "last_processed_index": start_index - 1
             }
+        )
+
+        if total_stocks == 0 or start_index >= total_stocks:
+            return {"status": "success", "message": "No stocks match the filter criteria or already completed."}
+
+        # 3. 循环调用自身同步每只股票 (Recurse for each stock)
+        success_count = 0
+        for idx in range(start_index, total_stocks):
+            code = stock_list[idx]
+            try:
+                # 每同步 3 只或最后一只更新总进度 (Update overall progress every 3 stocks or at the end)
+                if task_id and (idx % 3 == 0 or idx == total_stocks - 1):
+                    task_result = {
+                        "progress": idx + 1,
+                        "total": total_stocks,
+                        "current_step": f"Updating {code}",
+                        "last_processed_index": idx,
+                        "stock_list": stock_list
+                    }
+
+                    await task_manager.update_task_status(
+                        task_id=task_id,
+                        status="running",
+                        result=task_result
+                    )
+
+                # 执行单股同步步骤
+                res = await _process_single_stock(code, task_id)
+                if res.get("status") == "success":
+                    success_count += 1
+            except Exception as e:
+                logger.error(f"Failed to sync stock {code} in batch: {e}")
+
+        return {
+            "status": "success" if success_count > 0 else "failed",
+            "message": (
+                f"Batch sync completed. {success_count}/{total_stocks - start_index} "
+                f"stocks succeeded in this session."
+            ),
+            "total": total_stocks,
+            "success_count": success_count,
+            "resumed_from": start_index
+        }
 
     return await _process_single_stock(stock_code, task_id)
