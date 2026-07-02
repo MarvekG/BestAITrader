@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 from langchain.tools import tool
 
 from app.ai.agentic.tooling.browser_tool import browse_web_page_html
+from app.ai.agentic.tooling.db_utils import coerce_filter_value_for_column
 from app.ai.agentic.tooling.news_tool import search_news
 from app.ai.agentic.tooling.pdf_tool import parse_pdf_to_markdown
 from app.ai.agentic.tooling.python_sandbox import execute_python_in_sandbox
@@ -19,6 +20,26 @@ from app.trading.trading_engine import TradingEngine
 
 logger = get_logger(__name__)
 trading_engine = TradingEngine()
+
+
+def _get_agentic_db_models() -> Dict[str, Any]:
+    """获取 Agent 数据库工具可访问的 SQLAlchemy 模型映射。"""
+    import app.models.data_storage as storage_models
+    import app.models.stock_indicators as indicator_models
+
+    model_modules = (storage_models, indicator_models)
+    models = {
+        name: obj
+        for module in model_modules
+        for name, obj in vars(module).items()
+        if isinstance(obj, type) and hasattr(obj, "__tablename__")
+    }
+    return models
+
+
+def _resolve_agentic_db_model(table_name: str) -> Any:
+    """按模型名或兼容别名解析 Agent 数据库工具可访问的模型。"""
+    return _get_agentic_db_models().get(table_name)
 
 
 @tool
@@ -580,9 +601,11 @@ async def query_stock_data(
     参数:
     - stock_code: 股票代码，如 '000001.SZ'
     - data_configs: 字典形式，Key 为数据类型，Value 为包含 limit, start_time, end_time, columns 的子字典。
+      columns 必须使用 SQLAlchemy/数据库模型的真实列名；不接受展示层或数据源原始别名。
+      例如 kline 使用 change_percent 和 turnover，不使用 pct_chg 或 amount。
       示例:
       {"kline": {"limit": 100, "start_time": "2024-01-01 00:00:00",
-      "end_time": "2024-03-01 23:59:59", "columns": ["date", "close"]}}
+      "end_time": "2024-03-01 23:59:59", "columns": ["date", "close", "change_percent", "turnover"]}}
       注意: 所有子查询均强制要求 start_time 和 end_time。
 
     支持的 Key (data_type):
@@ -698,7 +721,7 @@ async def query_market_data(
         - end_time: 必填，结束时间，格式 'YYYY-MM-DD HH:MM:SS'
         - identifier: 可选，对应 index_code / symbol / sector_name
         - limit: 可选，最大返回条数，默认为 20
-        - columns: 可选，返回列名列表；传入时仅查询并返回这些列
+        - columns: 可选，返回列名列表；传入时仅查询并返回这些列。必须使用数据库模型真实列名。
         - extra_params: 可选扩展参数字典，如 limit_pool 使用 {"pool_type": "up"}
 
     注意: 所有子查询均强制要求 start_time 和 end_time 契约。
@@ -1135,15 +1158,10 @@ async def get_database_schema() -> Dict[str, Any]:
 
     使用场景：在规划复杂的跨表查询、确认字段名称或理解数据维度之前调用。
     """
-    import app.models.data_storage as models
     from sqlalchemy import inspect
 
     try:
-        # 识别所有定义了 __tablename__ 的模型类
-        available_models = {
-            name: obj for name, obj in vars(models).items()
-            if isinstance(obj, type) and hasattr(obj, "__tablename__")
-        }
+        available_models = _get_agentic_db_models()
 
         all_schemas = {}
         all_field_units = {}
@@ -1256,11 +1274,10 @@ async def query_and_calculate(
     3. 工具将返回完整的计算执行报告（包含 success、stdout、stderr、error、metadata 等状态）。
     4. 注意：数据库中的某些数值可能为 null，请务必在代码中处理空值，确保健壮性。
     """
-    import app.models.data_storage as models
     import app.core.database as database_module
     from sqlalchemy import and_, select
 
-    model = getattr(models, table_name, None)
+    model = _resolve_agentic_db_model(table_name)
     if not model:
         return {"error": f"Table '{table_name}' not found."}
 
@@ -1293,7 +1310,11 @@ async def query_and_calculate(
                     return {"error": f"Unsupported operator: {op}"}
 
                 col_attr = getattr(model, col_name)
-                filter_clauses.append(ops[op](col_attr, val))
+                try:
+                    coerced_val = coerce_filter_value_for_column(col_attr.property.columns[0], val)
+                except ValueError:
+                    return {"error": f"Invalid value for column '{col_name}': {val}"}
+                filter_clauses.append(ops[op](col_attr, coerced_val))
 
             if filter_clauses:
                 query = query.where(and_(*filter_clauses))

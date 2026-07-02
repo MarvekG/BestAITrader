@@ -1,3 +1,5 @@
+from datetime import date
+
 import pytest
 
 import app.core.database as database_module
@@ -13,6 +15,7 @@ async def test_get_database_schema_returns_model_columns():
     assert "error" not in result
     assert "schemas" in result
     assert "KlineData" in result["schemas"]
+    assert "StockIndicators" in result["schemas"]
 
     kline_columns = {column["name"] for column in result["schemas"]["KlineData"]}
     assert {"stock_code", "date", "open", "close"}.issubset(kline_columns)
@@ -47,6 +50,12 @@ async def test_get_database_schema_returns_model_columns():
     assert sector_schema["close_price"]["display_name"] == "板块最新指数"
     assert sector_schema["close_price"]["unit"] == "点"
     assert result["field_units"]["SectorMoneyFlow"]["close_price"]["unit"] == "点"
+
+    indicators_schema = {column["name"]: column for column in result["schemas"]["StockIndicators"]}
+    assert {"stock_code", "trade_date", "ma5", "rsi_6"}.issubset(indicators_schema)
+
+    margin_schema = {column["name"]: column for column in result["schemas"]["StockMargin"]}
+    assert {"stock_code", "trade_date", "margin_balance"}.issubset(margin_schema)
 
 
 @pytest.mark.asyncio
@@ -102,6 +111,69 @@ async def test_query_and_calculate_closes_db_session_before_sandbox(test_db, mon
     )
 
     assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_query_and_calculate_resolves_stock_indicators(test_db, monkeypatch):
+    """计算工具应能解析独立模块中的技术指标模型。"""
+    async def fake_sandbox(_code):
+        return {"success": True, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(tools_module, "execute_python_in_sandbox", fake_sandbox)
+
+    result = await query_and_calculate.ainvoke(
+        {
+            "table_name": "StockIndicators",
+            "filters": [],
+            "compute_code": "result = {'row_count': len(data)}",
+            "limit": 0,
+        }
+    )
+
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_query_and_calculate_coerces_date_filter_values(test_db, monkeypatch):
+    """Date 字段过滤值应从字符串转换为 date，避免 PostgreSQL date/varchar 比较错误。"""
+    captured = {}
+
+    class FakeResult:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return []
+
+    class FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, query):
+            compiled = query.compile()
+            captured["value"] = next(iter(compiled.params.values()))
+            return FakeResult()
+
+    async def fake_sandbox(_code):
+        return {"success": True, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(database_module, "AsyncSessionLocal", FakeSession)
+    monkeypatch.setattr(tools_module, "execute_python_in_sandbox", fake_sandbox)
+
+    result = await query_and_calculate.ainvoke(
+        {
+            "table_name": "KlineData",
+            "filters": [{"column": "date", "op": ">=", "value": "2026-07-01 00:00:00"}],
+            "compute_code": "result = {'row_count': len(data)}",
+            "limit": 1,
+        }
+    )
+
+    assert result["success"] is True
+    assert captured["value"] == date(2026, 7, 1)
 
 
 @pytest.mark.asyncio

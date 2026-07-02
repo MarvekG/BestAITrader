@@ -132,6 +132,7 @@ def _sqlite_test_tables():
         IndexDaily,
         KlineData,
         StockBasic,
+        StockMargin,
         StockRealtimeMarket,
         StockValuationHistory,
     )
@@ -172,6 +173,7 @@ def _sqlite_test_tables():
         IndexDaily.__table__,
         StockRealtimeMarket.__table__,
         StockValuationHistory.__table__,
+        StockMargin.__table__,
         StockIndicators.__table__,
         InteractiveResearchRun.__table__,
         InteractiveResearchMessage.__table__,
