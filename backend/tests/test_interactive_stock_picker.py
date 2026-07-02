@@ -13,7 +13,11 @@ from app.ai.stock_picker.interactive_research.persistence import (
     fail_run_record,
     synthesize_final_message_record,
 )
-from app.ai.stock_picker.interactive_research.schemas import InteractiveResearchRunCreate
+from app.ai.stock_picker.interactive_research.schemas import (
+    InteractiveResearchActionRequest,
+    InteractiveResearchMessageCreate,
+    InteractiveResearchRunCreate,
+)
 from app.ai.stock_picker.interactive_research.service import InteractiveResearchService
 from app.crud.user import get_password_hash
 from app.models.user import User
@@ -382,6 +386,43 @@ def test_interactive_research_run_create_allows_short_requirement():
     payload = InteractiveResearchRunCreate(requirement="AI")
 
     assert payload.requirement == "AI"
+
+
+def test_interactive_research_run_create_allows_20000_character_requirement():
+    """创建 run 时允许 20000 字符以内的需求。"""
+
+    requirement = "A" * 20000
+
+    payload = InteractiveResearchRunCreate(requirement=requirement)
+
+    assert payload.requirement == requirement
+
+
+def test_interactive_research_run_create_rejects_empty_requirement():
+    """创建 run 时拒绝空需求。"""
+
+    with pytest.raises(ValueError):
+        InteractiveResearchRunCreate(requirement="")
+
+
+def test_interactive_research_message_create_allows_20000_character_content():
+    """追加消息时允许 20000 字符以内的内容。"""
+
+    content = "A" * 20000
+
+    payload = InteractiveResearchMessageCreate(content=content)
+
+    assert payload.content == content
+
+
+def test_interactive_research_action_request_allows_20000_character_content():
+    """执行 run 动作时允许 20000 字符以内的内容。"""
+
+    content = "A" * 20000
+
+    payload = InteractiveResearchActionRequest(action="cancel", content=content)
+
+    assert payload.content == content
 
 
 async def _message_types(async_db_session, run_id):

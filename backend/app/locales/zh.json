@@ -2511,6 +2511,7 @@
       },
       "validations": {
         "message_required": "请输入消息内容",
+        "message_max_length": "内容不能超过 20000 个字符",
         "max_iterations_min": "最大迭代次数不能低于 10"
       },
       "placeholders": {

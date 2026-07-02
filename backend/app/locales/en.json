@@ -2511,6 +2511,7 @@
       },
       "validations": {
         "message_required": "Enter message content",
+        "message_max_length": "Content cannot exceed 20000 characters",
         "max_iterations_min": "Max iterations cannot be lower than 10"
       },
       "placeholders": {
