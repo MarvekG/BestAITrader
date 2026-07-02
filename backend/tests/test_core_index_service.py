@@ -8,8 +8,12 @@ from app.data.analytics.core_index import get_core_index_constituent_codes
 
 @pytest.mark.asyncio
 async def test_get_core_index_constituent_codes_raises_without_tushare_token():
-    with patch("app.data.analytics.core_index.get_data_source_config_value", new_callable=AsyncMock, return_value=""):
-        with pytest.raises(RuntimeError, match="Tushare token is required"):
+    with patch(
+        "app.data.analytics.core_index.TushareIngestor.get_pro_client",
+        new_callable=AsyncMock,
+        side_effect=ValueError("Tushare token is not configured"),
+    ):
+        with pytest.raises(ValueError, match="Tushare token is not configured"):
             await get_core_index_constituent_codes(["000300.SH"])
 
 
@@ -24,8 +28,11 @@ async def test_get_core_index_constituent_codes_uses_latest_trade_date():
         }
     )
 
-    with patch("app.data.analytics.core_index.get_data_source_config_value", new_callable=AsyncMock, return_value="test-token"), \
-         patch("app.data.analytics.core_index.ts.pro_api", return_value=mock_pro):
+    with patch(
+        "app.data.analytics.core_index.TushareIngestor.get_pro_client",
+        new_callable=AsyncMock,
+        return_value=mock_pro,
+    ):
         codes = await get_core_index_constituent_codes(["000300.SH"])
 
     assert codes == ["000001.SZ", "600519.SH"]

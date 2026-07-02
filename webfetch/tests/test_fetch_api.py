@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app import main as webfetch_main
 from app.engines.camoufox_engine import CamoufoxEngine
 from app.engines.cloakbrowser_engine import CloakBrowserEngine
 from app.engines.patchright_engine import PatchrightEngine
@@ -153,6 +154,42 @@ def test_fetch_returns_markdown_and_applies_clean_regex() -> None:
             "wait_after_ms": 0,
         }
     ]
+
+
+def test_fetch_converts_markdown_in_thread(monkeypatch) -> None:
+    """Markdown 转换在线程中执行，避免阻塞 webfetch 事件循环。"""
+    fake_engine = FakeEngine()
+    original_engine = engine_registry._engines[EngineType.CLOAKBROWSER]
+    to_thread_calls = []
+
+    async def fake_to_thread(func, *args):
+        to_thread_calls.append((func, args))
+        return func(*args)
+
+    monkeypatch.setattr(webfetch_main.asyncio, "to_thread", fake_to_thread)
+    engine_registry._engines[EngineType.CLOAKBROWSER] = fake_engine
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/fetch",
+                json={
+                    "url": "example.com/page",
+                    "engine": "cloakbrowser",
+                    "return_type": "markdown",
+                    "wait_after_ms": 0,
+                },
+            )
+    finally:
+        engine_registry._engines[EngineType.CLOAKBROWSER] = original_engine
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+    assert len(to_thread_calls) == 1
+    func, args = to_thread_calls[0]
+    assert func is webfetch_main._convert_rendered_html_to_markdown
+    assert args[0] == "<main><h1>Example</h1><p>正文</p><p>广告内容结束</p></main>"
+    assert args[1] == "Example"
+    assert args[2] == "https://example.com/final"
 
 
 def test_fetch_returns_html() -> None:

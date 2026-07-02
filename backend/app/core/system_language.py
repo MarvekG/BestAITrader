@@ -4,6 +4,7 @@ from app.crud.system_setting import system_setting
 
 SYSTEM_LANGUAGE_SETTING_KEY = "system:language"
 SUPPORTED_SYSTEM_LANGUAGES = ("zh", "en")
+DEFAULT_SYSTEM_LANGUAGE = "zh"
 
 
 def normalize_system_language(language: str | None) -> str:
@@ -35,12 +36,12 @@ def get_runtime_system_language() -> str:
     Get the current runtime system language.
 
     Returns:
-        Normalized runtime system language, falling back to Chinese when settings are invalid.
+        Normalized runtime system language, falling back to the default language when settings are invalid.
     """
     try:
         return normalize_system_language(settings.SYSTEM_LANGUAGE)
     except ValueError:
-        return "zh"
+        return DEFAULT_SYSTEM_LANGUAGE
 
 
 async def get_persisted_system_language() -> str:

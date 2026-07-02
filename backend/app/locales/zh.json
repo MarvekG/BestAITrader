@@ -2340,6 +2340,7 @@
     "reserved_module_name": "插件文件名为系统保留名: {module_name}",
     "content_empty": "插件文件内容不能为空",
     "syntax_invalid": "插件 Python 语法无效: {error}",
+    "async_search_required": "新闻插件必须提供 async def search(...)，不允许同步 search 接口",
     "not_registered": "插件文件已回滚，未注册到有效插件: {module_name}",
     "saved": "新闻插件已保存: {plugin_id}",
     "not_found": "未找到可删除的新闻插件: {plugin_key}",

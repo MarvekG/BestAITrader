@@ -65,6 +65,12 @@ async def test_download_pdf_with_webfetch_rejects_pdf_viewer_html(monkeypatch):
 @pytest.mark.asyncio
 async def test_download_pdf_with_webfetch_writes_stream_to_temp_file(monkeypatch):
     """PDF 下载工具将响应流直接写入临时文件。"""
+    to_thread_calls = []
+
+    async def fake_to_thread(func, *args):
+        to_thread_calls.append((func, args))
+        return func(*args)
+
     class FakeResponse:
         status = 200
         status_code = 200
@@ -107,6 +113,7 @@ async def test_download_pdf_with_webfetch_writes_stream_to_temp_file(monkeypatch
             return FakeResponse()
 
     monkeypatch.setattr(pdf_tool.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(pdf_tool.asyncio, "to_thread", fake_to_thread)
 
     pdf_path, final_url, status, content_type = await pdf_tool._download_pdf_with_webfetch(
         "https://example.com/report.pdf",
@@ -118,6 +125,9 @@ async def test_download_pdf_with_webfetch_writes_stream_to_temp_file(monkeypatch
         assert content_type == "application/pdf"
         with open(pdf_path, "rb") as pdf_file:
             assert pdf_file.read() == b"%PDF-1.7 fake"
+        assert to_thread_calls[0][1] == (b"%P",)
+        assert to_thread_calls[1][1] == (b"DF-1.7 fake",)
+        assert len(to_thread_calls) == 2
     finally:
         if os.path.exists(pdf_path):
             os.remove(pdf_path)

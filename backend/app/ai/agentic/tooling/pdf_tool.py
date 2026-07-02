@@ -52,7 +52,7 @@ async def _download_pdf_with_webfetch(url: str, timeout: float) -> tuple[str, st
                             continue
                         if len(header_bytes) < 1024:
                             header_bytes += chunk[: 1024 - len(header_bytes)]
-                        pdf_file.write(chunk)
+                        await asyncio.to_thread(pdf_file.write, chunk)
                         bytes_written += len(chunk)
 
         final_url = response.headers.get("x-final-url") or str(response.url)

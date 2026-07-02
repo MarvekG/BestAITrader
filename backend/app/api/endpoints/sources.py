@@ -1,3 +1,4 @@
+import asyncio
 from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, HTTPException, status
@@ -46,8 +47,15 @@ async def list_data_sources():
 
 @router.post("/default", response_model=Dict[str, Any])
 async def set_default_data_source(source_name: str):
-    """设置默认数据源"""
-    if ingestor_manager.set_default_source(source_name):
+    """设置默认数据源。
+
+    Args:
+        source_name: 要设置为默认的数据源名称。
+
+    Returns:
+        设置成功时返回当前默认数据源信息。
+    """
+    if await asyncio.to_thread(ingestor_manager.set_default_source, source_name):
         return {
             "status": "success",
             "message": i18n_service.t("sources.default_set_success").format(source_name=source_name),
@@ -222,10 +230,12 @@ async def test_tushare_config_key(request: Optional[DataSourceConfigTestRequest]
 
             original_api_url = DataApi._DataApi__http_url
             should_restore_api_url = True
-        data = (await TushareIngestor.get_pro_client(
+        client = await TushareIngestor.get_pro_client(
             token=config.tushare_token if config else None,
             api_url=config.tushare_api_url if config else None,
-        )).stock_basic(
+        )
+        data = await asyncio.to_thread(
+            client.stock_basic,
             ts_code="000001.SZ",
             fields="ts_code,symbol,name,area,industry,list_date",
         )

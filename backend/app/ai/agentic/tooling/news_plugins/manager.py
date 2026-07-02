@@ -2,7 +2,6 @@ import ast
 import importlib
 import re
 from datetime import date, timedelta
-from inspect import isawaitable
 from pathlib import Path
 from typing import Any, Dict
 
@@ -241,9 +240,16 @@ def validate_news_plugin_content(content: str) -> str:
     if not normalized_content:
         raise ValueError(_t("content_empty"))
     try:
-        ast.parse(normalized_content, filename="<news_plugin>")
+        module_ast = ast.parse(normalized_content, filename="<news_plugin>")
     except SyntaxError as exc:
         raise ValueError(_t("syntax_invalid", error=str(exc))) from exc
+
+    if not any(
+        isinstance(node, ast.AsyncFunctionDef) and node.name == "search"
+        for node in module_ast.body
+    ):
+        raise ValueError(_t("async_search_required"))
+
     return f"{normalized_content}\n"
 
 
@@ -371,14 +377,12 @@ async def probe_news_plugin_search(plugin: NewsPlugin) -> Dict[str, Any]:
     to_date = date.today()
     from_date = to_date - timedelta(days=30)
     try:
-        result = plugin.search(
+        result = await plugin.search(
             keyword="AI",
             limit=3,
             from_date=from_date.isoformat(),
             to_date=to_date.isoformat(),
         )
-        if isawaitable(result):
-            result = await result
     except Exception as exc:
         return {
             "status": "error",
