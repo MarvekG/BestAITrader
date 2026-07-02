@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 class InteractiveResearchRunCreate(BaseModel):
     """聊天式 Deep Research run 创建请求。"""
 
-    requirement: str = Field(..., max_length=4000)
+    requirement: str = Field(..., min_length=1, max_length=20000)
     scope: str = Field(default="core", pattern="^(warehouse|core|all)$")
     research_depth: str = Field(default="standard", pattern="^(light|standard|deep)$")
     expected_count: int = Field(default=5, ge=1, le=8)
@@ -24,7 +24,7 @@ class InteractiveResearchRunCreate(BaseModel):
 class InteractiveResearchMessageCreate(BaseModel):
     """聊天消息追加请求。"""
 
-    content: str = Field(..., min_length=1, max_length=4000)
+    content: str = Field(..., min_length=1, max_length=20000)
     payload: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -32,7 +32,7 @@ class InteractiveResearchActionRequest(BaseModel):
     """run 动作请求。"""
 
     action: str = Field(..., pattern="^(approve|cancel)$")
-    content: Optional[str] = Field(default=None, max_length=4000)
+    content: Optional[str] = Field(default=None, max_length=20000)
     payload: Dict[str, Any] = Field(default_factory=dict)
 
 

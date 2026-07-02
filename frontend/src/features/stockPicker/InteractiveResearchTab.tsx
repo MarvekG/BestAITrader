@@ -780,12 +780,18 @@ export const InteractiveResearchTab: React.FC = () => {
         <Form className="interactive-research-input-form" form={messageForm} layout="vertical" initialValues={{ max_iterations: 60 }}>
           <Form.Item
             name="content"
-            rules={[{ required: true, message: t('ai_stock_picker.interactive.validations.message_required') }]}
+            rules={[
+              { required: true, whitespace: true, message: t('ai_stock_picker.interactive.validations.message_required') },
+              {
+                max: 20000,
+                message: t('ai_stock_picker.interactive.validations.message_max_length'),
+              },
+            ]}
             style={{ marginBottom: 8 }}
           >
             <Input.TextArea
               rows={2}
-              maxLength={4000}
+              maxLength={20000}
               showCount
               placeholder={t('ai_stock_picker.interactive.placeholders.message')}
               onPressEnter={(event) => {
