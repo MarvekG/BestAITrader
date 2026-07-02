@@ -1,17 +1,21 @@
 import uuid
-from contextlib import nullcontext
 
 import pytest
 from langchain_core.messages import AIMessage
+from sqlalchemy import func, select
 
-from app.ai.stock_picker.interactive_research import persistence as persistence_module
 from app.ai.stock_picker.interactive_research import service as service_module
 from app.ai.stock_picker.interactive_research import research_agent as research_agent_module
 from app.ai.stock_picker.interactive_research.flow_control import FLOW_CONTROL_TOOL_NAME, control_research_flow
-from app.ai.stock_picker.interactive_research.models import InteractiveResearchMessage
+from app.ai.stock_picker.interactive_research.models import InteractiveResearchMessage, InteractiveResearchRun
+from app.ai.stock_picker.interactive_research.persistence import (
+    append_tool_start_record,
+    fail_run_record,
+    synthesize_final_message_record,
+)
 from app.ai.stock_picker.interactive_research.service import InteractiveResearchService
-from app.crud.user import create_user
-from app.schemas.user import UserCreate
+from app.crud.user import get_password_hash
+from app.models.user import User
 
 
 class FakeInteractiveResearchTool:
@@ -283,24 +287,27 @@ async def test_interactive_tool_registry_reuses_agentic_tool_layers_and_filters_
     assert loaded_layers == ["normal", "skill", "mcp"]
 
 
-def _create_user_id(db_session) -> int:
+async def _create_user_id(async_db_session) -> int:
     """创建测试用户并返回用户 ID。
 
     Args:
-        db_session: SQLite 测试数据库会话。
+        async_db_session: SQLite 测试数据库会话。
 
     Returns:
         新建测试用户 ID。
     """
+    from app.crud.user import get_password_hash
+    from app.models.user import User
+
     username = f"interactive_{uuid.uuid4().hex[:8]}"
-    user = create_user(
-        db_session,
-        UserCreate(
-            username=username,
-            email=f"{username}@example.com",
-            password="password123",
-        ),
+    user = User(
+        username=username,
+        email=f"{username}@example.com",
+        password_hash=get_password_hash("password123"),
     )
+    async_db_session.add(user)
+    await async_db_session.commit()
+    await async_db_session.refresh(user)
     return user.id
 
 
@@ -368,46 +375,36 @@ def _service_with_fake_runner():
     )
 
 
-def _message_types(db_session, run_id):
+async def _message_types(async_db_session, run_id):
     """读取 run 的消息类型序列。
 
     Args:
-        db_session: SQLite 测试数据库会话。
+        async_db_session: SQLite 测试数据库会话。
         run_id: 研究 run ID。
 
     Returns:
         按 sequence_no 排列的消息类型列表。
     """
-    return [
-        message.message_type
-        for message in db_session.query(InteractiveResearchMessage)
-        .filter(InteractiveResearchMessage.run_id == run_id)
-        .order_by(InteractiveResearchMessage.sequence_no.asc())
-        .all()
-    ]
+    messages = (
+        await async_db_session.execute(
+            select(InteractiveResearchMessage)
+            .where(InteractiveResearchMessage.run_id == run_id)
+            .order_by(InteractiveResearchMessage.sequence_no.asc())
+        )
+    ).scalars().all()
+    return [message.message_type for message in messages]
 
 
-@pytest.fixture(autouse=True)
-def _interactive_research_session(db_session, monkeypatch):
-    """让交互式研究 service 在测试中使用同一个 SQLite 会话。
-
-    Args:
-        db_session: SQLite 测试数据库会话。
-        monkeypatch: pytest monkeypatch fixture。
-    """
-    monkeypatch.setattr(persistence_module, "SessionLocal", lambda: nullcontext(db_session))
-
-
-async def _execute_background(monkeypatch, service, db_session, run_id):
+async def _execute_background(monkeypatch, service, async_db_session, run_id):
     """通过真实后台入口驱动交互式研究 workflow。
 
     Args:
         monkeypatch: pytest monkeypatch fixture。
         service: 交互式研究服务。
-        db_session: SQLite 测试数据库会话。
+        async_db_session: SQLite 测试数据库会话。
         run_id: 研究 run ID。
     """
-    await service.execute_workflow_background(run_id, service._plan_agent.latest_plan_output(run_id))
+    await service.execute_workflow_background(run_id, await service._plan_agent.latest_plan_output(run_id))
 
 
 async def _create_run_with_plan(service, user_id, request_data):
@@ -424,18 +421,18 @@ async def _create_run_with_plan(service, user_id, request_data):
     background_tasks = FakeBackgroundTasks()
     run = await service.create_run(user_id, request_data, background_tasks)
     await background_tasks.run_all()
-    refreshed = service.get_run(run.run_id, user_id)
+    refreshed = await service.get_run(run.run_id, user_id)
     return refreshed or run
 
 
 @pytest.mark.asyncio
-async def test_create_run_writes_user_message_plan_card_and_checkpoint(db_session):
+async def test_create_run_writes_user_message_plan_card_and_checkpoint(async_db_session):
     """创建 run 只写聊天消息和 checkpoint，不依赖 artifact。"""
-    user_id = _create_user_id(db_session)
+    user_id = await _create_user_id(async_db_session)
     service, fake_llm, _ = _service_with_fake_runner()
 
     run = await _create_run_with_plan(service, user_id, _request_data())
-    messages = service.get_messages(run.run_id, user_id)
+    messages = await service.get_messages(run.run_id, user_id)
 
     assert run.status == "awaiting_plan_approval"
     assert [message.message_type for message in messages] == ["user_input", "plan_card"]
@@ -470,21 +467,21 @@ async def test_create_run_writes_user_message_plan_card_and_checkpoint(db_sessio
 
 
 @pytest.mark.asyncio
-async def test_plan_agent_runs_in_background_after_create_and_user_input(db_session):
+async def test_plan_agent_runs_in_background_after_create_and_user_input(async_db_session):
     """提交需求或补充要求时不等待计划 Agent，后台完成后再写入 plan_card。"""
-    user_id = _create_user_id(db_session)
+    user_id = await _create_user_id(async_db_session)
     service, fake_llm, _ = _service_with_fake_runner()
     background_tasks = FakeBackgroundTasks()
 
     run = await service.create_run(user_id, _request_data(), background_tasks)
-    messages = service.get_messages(run.run_id, user_id)
+    messages = await service.get_messages(run.run_id, user_id)
 
     assert [message.message_type for message in messages] == ["user_input"]
     assert fake_llm.plan_calls == 0
     assert len(background_tasks.tasks) == 1
 
     await background_tasks.run_all()
-    messages = service.get_messages(run.run_id, user_id)
+    messages = await service.get_messages(run.run_id, user_id)
     assert [message.message_type for message in messages] == ["user_input", "plan_card"]
     assert fake_llm.plan_calls == 1
 
@@ -495,32 +492,110 @@ async def test_plan_agent_runs_in_background_after_create_and_user_input(db_sess
         "Exclude banks and favor AI hardware",
         background_tasks=revise_tasks,
     )
-    messages = service.get_messages(run.run_id, user_id)
+    messages = await service.get_messages(run.run_id, user_id)
     assert message.status == "completed"
     assert [item.message_type for item in messages] == ["user_input", "plan_card", "user_input"]
     assert fake_llm.plan_calls == 1
 
     await revise_tasks.run_all()
-    messages = service.get_messages(run.run_id, user_id)
+    messages = await service.get_messages(run.run_id, user_id)
     plan_cards = [item for item in messages if item.message_type == "plan_card"]
     assert len(plan_cards) == 2
     assert fake_llm.plan_calls == 2
 
 
 @pytest.mark.asyncio
-async def test_realtime_update_pushes_markdown_display_message(db_session, monkeypatch):
+async def test_late_plan_background_task_does_not_overwrite_cancelled_run(async_db_session):
+    """取消后的计划后台任务不能再写 plan_card 或改写终态。"""
+    user_id = await _create_user_id(async_db_session)
+    service, fake_llm, _ = _service_with_fake_runner()
+    background_tasks = FakeBackgroundTasks()
+
+    run = await service.create_run(user_id, _request_data(), background_tasks)
+    cancelled = await service.process_action(
+        run.run_id,
+        user_id,
+        "cancel",
+        content="User stopped before plan finished",
+        background_tasks=FakeBackgroundTasks(),
+    )
+    await background_tasks.run_all()
+    refreshed = await service.get_run(run.run_id, user_id)
+    messages = await service.get_messages(run.run_id, user_id)
+
+    assert cancelled.status == "cancelled"
+    assert refreshed.status == "cancelled"
+    assert fake_llm.plan_calls == 0
+    assert [message.message_type for message in messages] == ["user_input", "system_status"]
+
+
+@pytest.mark.asyncio
+async def test_late_research_writes_do_not_overwrite_cancelled_run(async_db_session):
+    """取消后的研究后台写入不能追加消息或覆盖 cancelled。"""
+    user_id = await _create_user_id(async_db_session)
+    service, _, _ = _service_with_fake_runner()
+    run = await _create_run_with_plan(service, user_id, _request_data())
+    await service.process_action(run.run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
+    cancelled = await service.process_action(
+        run.run_id,
+        user_id,
+        "cancel",
+        content="User stopped during research",
+        background_tasks=FakeBackgroundTasks(),
+    )
+    before_messages = await service.get_messages(run.run_id, user_id)
+
+    start_result = await append_tool_start_record(run.run_id, "search_news", {}, "late-tool-call")
+    final_payloads = await synthesize_final_message_record(
+        run.run_id,
+        tool_trace=[],
+        final_content="Late final answer",
+        stopped_by_iteration_limit=False,
+        iteration_budget=10,
+    )
+    refreshed = await service.get_run(run.run_id, user_id)
+    after_messages = await service.get_messages(run.run_id, user_id)
+
+    assert cancelled.status == "cancelled"
+    assert refreshed.status == "cancelled"
+    assert start_result == {"message_id": "", "notification": None}
+    assert final_payloads == []
+    assert [message.message_id for message in after_messages] == [message.message_id for message in before_messages]
+
+
+@pytest.mark.asyncio
+async def test_late_fail_does_not_overwrite_completed_run(async_db_session, monkeypatch):
+    """已完成 run 收到后台异常回调时不能被改写为 failed。"""
+    user_id = await _create_user_id(async_db_session)
+    service, _, _ = _service_with_fake_runner()
+    run = await _create_run_with_plan(service, user_id, _request_data())
+    run_id = run.run_id
+
+    await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
+    await _execute_background(monkeypatch, service, async_db_session, run_id)
+    completed = await service.get_run(run_id, user_id)
+    await fail_run_record(run_id, "Late failure", "RuntimeError", "late")
+    refreshed = await service.get_run(run_id, user_id)
+
+    assert completed.status == "completed"
+    assert refreshed.status == "completed"
+    assert refreshed.error_message is None
+
+
+@pytest.mark.asyncio
+async def test_realtime_update_pushes_markdown_display_message(async_db_session, monkeypatch):
     """实时推送应携带三字段展示消息，顶层 message 使用 Markdown 正文。
 
     Args:
-        db_session: SQLite 测试数据库会话。
+        async_db_session: SQLite 测试数据库会话。
         monkeypatch: pytest monkeypatch fixture。
     """
     from app.websocket import manager as websocket_manager_module
 
-    user_id = _create_user_id(db_session)
+    user_id = await _create_user_id(async_db_session)
     service, fake_llm, _ = _service_with_fake_runner()
     run = await _create_run_with_plan(service, user_id, _request_data())
-    plan_message = service.get_messages(run.run_id, user_id)[1]
+    plan_message = (await service.get_messages(run.run_id, user_id))[1]
     pushed_payload = {}
 
     async def fake_send_interactive_stock_picker_update(**kwargs):
@@ -556,9 +631,9 @@ async def test_realtime_update_pushes_markdown_display_message(db_session, monke
 
 
 @pytest.mark.asyncio
-async def test_plan_stage_user_input_iterates_plan_card(db_session):
+async def test_plan_stage_user_input_iterates_plan_card(async_db_session):
     """计划确认阶段的普通聊天输入应迭代 plan，而不是走 revise action。"""
-    user_id = _create_user_id(db_session)
+    user_id = await _create_user_id(async_db_session)
     service, fake_llm, _ = _service_with_fake_runner()
     run = await _create_run_with_plan(service, user_id, _request_data())
 
@@ -570,7 +645,7 @@ async def test_plan_stage_user_input_iterates_plan_card(db_session):
         background_tasks=revise_tasks,
     )
     await revise_tasks.run_all()
-    messages = service.get_messages(run.run_id, user_id)
+    messages = await service.get_messages(run.run_id, user_id)
     plan_cards = [item for item in messages if item.message_type == "plan_card"]
 
     assert message.status == "completed"
@@ -584,20 +659,20 @@ async def test_plan_stage_user_input_iterates_plan_card(db_session):
 
 
 @pytest.mark.asyncio
-async def test_plan_agent_can_use_online_tool_before_writing_plan(db_session):
+async def test_plan_agent_can_use_online_tool_before_writing_plan(async_db_session):
     """计划阶段允许先调用联网工具，再把工具结果纳入计划卡。"""
-    user_id = _create_user_id(db_session)
+    user_id = await _create_user_id(async_db_session)
     service, fake_llm, fake_tool = _service_with_fake_runner()
     fake_llm.plan_uses_tool = True
 
     run = await _create_run_with_plan(service, user_id, _request_data())
-    messages = service.get_messages(run.run_id, user_id)
+    messages = await service.get_messages(run.run_id, user_id)
     plan_card = messages[-1]
 
     assert fake_tool.calls == [{"keyword": "AI hardware policy", "source": "interactive_research"}]
     assert fake_llm.plan_calls == 2
     assert [tool.name for tool in fake_llm.bound_tools] == ["search_news"]
-    assert _message_types(db_session, run.run_id) == [
+    assert await _message_types(async_db_session, run.run_id) == [
         "user_input",
         "tool_start",
         "tool_result",
@@ -608,9 +683,9 @@ async def test_plan_agent_can_use_online_tool_before_writing_plan(db_session):
 
 
 @pytest.mark.asyncio
-async def test_research_agent_receives_planning_conversation_in_order(db_session, monkeypatch):
+async def test_research_agent_receives_planning_conversation_in_order(async_db_session, monkeypatch):
     """研究阶段输入应包含计划阶段用户输入和计划卡顺序记录。"""
-    user_id = _create_user_id(db_session)
+    user_id = await _create_user_id(async_db_session)
     service, fake_llm, _ = _service_with_fake_runner()
     run = await _create_run_with_plan(service, user_id, _request_data())
     revise_tasks = FakeBackgroundTasks()
@@ -623,7 +698,7 @@ async def test_research_agent_receives_planning_conversation_in_order(db_session
     await revise_tasks.run_all()
 
     await service.process_action(run.run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
-    await _execute_background(monkeypatch, service, db_session, run.run_id)
+    await _execute_background(monkeypatch, service, async_db_session, run.run_id)
 
     first_research_context = "\n".join(fake_llm.research_message_snapshots[0])
     assert "第 1 轮用户输入" in first_research_context
@@ -650,9 +725,9 @@ def test_tool_result_success_false_marks_trace_failed():
 
 
 @pytest.mark.asyncio
-async def test_approve_plan_runs_single_chat_workflow_and_writes_final_result(db_session, monkeypatch):
+async def test_approve_plan_runs_single_chat_workflow_and_writes_final_result(async_db_session, monkeypatch):
     """确认计划后执行单 Agent 工具循环并把结果写入消息流。"""
-    user_id = _create_user_id(db_session)
+    user_id = await _create_user_id(async_db_session)
     service, fake_llm, fake_tool = _service_with_fake_runner()
     run = await _create_run_with_plan(service, user_id, _request_data())
     run_id = run.run_id
@@ -661,39 +736,46 @@ async def test_approve_plan_runs_single_chat_workflow_and_writes_final_result(db
     assert approved.status == "researching"
     assert fake_tool.calls == []
 
-    await _execute_background(monkeypatch, service, db_session, run_id)
-    completed = service.get_run(run_id, user_id)
+    await _execute_background(monkeypatch, service, async_db_session, run_id)
+    completed = await service.get_run(run_id, user_id)
     final_message = (
-        db_session.query(InteractiveResearchMessage)
-        .filter_by(run_id=run_id, message_type="final_result")
-        .one()
-    )
+        await async_db_session.execute(
+            select(InteractiveResearchMessage).where(
+                InteractiveResearchMessage.run_id == run_id,
+                InteractiveResearchMessage.message_type == "final_result",
+            )
+        )
+    ).scalar_one()
 
     assert completed.status == "completed"
     assert [tool.name for tool in fake_llm.bound_tools] == ["search_news", FLOW_CONTROL_TOOL_NAME]
     assert fake_tool.calls[0]["keyword"] == "semiconductor policy catalyst"
-    assert "tool_start" in _message_types(db_session, run_id)
-    assert "tool_result" in _message_types(db_session, run_id)
+    message_types = await _message_types(async_db_session, run_id)
+    assert "tool_start" in message_types
+    assert "tool_result" in message_types
     assert "Semiconductor equipment" in final_message.payload["answer_markdown"]
 
 
 @pytest.mark.asyncio
-async def test_invalid_flow_control_output_retries_before_completing(db_session, monkeypatch):
+async def test_invalid_flow_control_output_retries_before_completing(async_db_session, monkeypatch):
     """无工具调用且协议错误时应要求 LLM 重输，再按协议完成。"""
-    user_id = _create_user_id(db_session)
+    user_id = await _create_user_id(async_db_session)
     service, fake_llm, _ = _service_with_fake_runner()
     fake_llm.invalid_final_response_once = True
     run = await _create_run_with_plan(service, user_id, _request_data())
     run_id = run.run_id
 
     await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
-    await _execute_background(monkeypatch, service, db_session, run_id)
-    completed = service.get_run(run_id, user_id)
+    await _execute_background(monkeypatch, service, async_db_session, run_id)
+    completed = await service.get_run(run_id, user_id)
     final_message = (
-        db_session.query(InteractiveResearchMessage)
-        .filter_by(run_id=run_id, message_type="final_result")
-        .one()
-    )
+        await async_db_session.execute(
+            select(InteractiveResearchMessage).where(
+                InteractiveResearchMessage.run_id == run_id,
+                InteractiveResearchMessage.message_type == "final_result",
+            )
+        )
+    ).scalar_one()
 
     assert completed.status == "completed"
     assert fake_llm.invalid_final_returned is True
@@ -701,42 +783,48 @@ async def test_invalid_flow_control_output_retries_before_completing(db_session,
 
 
 @pytest.mark.asyncio
-async def test_multiple_flow_control_calls_use_last_decision(db_session, monkeypatch):
+async def test_multiple_flow_control_calls_use_last_decision(async_db_session, monkeypatch):
     """同轮多个流程控制工具调用时应使用最后一个决策。"""
-    user_id = _create_user_id(db_session)
+    user_id = await _create_user_id(async_db_session)
     service, fake_llm, _ = _service_with_fake_runner()
     fake_llm.multiple_final_control_calls = True
     run = await _create_run_with_plan(service, user_id, _request_data())
     run_id = run.run_id
 
     await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
-    await _execute_background(monkeypatch, service, db_session, run_id)
+    await _execute_background(monkeypatch, service, async_db_session, run_id)
     final_message = (
-        db_session.query(InteractiveResearchMessage)
-        .filter_by(run_id=run_id, message_type="final_result")
-        .one()
-    )
+        await async_db_session.execute(
+            select(InteractiveResearchMessage).where(
+                InteractiveResearchMessage.run_id == run_id,
+                InteractiveResearchMessage.message_type == "final_result",
+            )
+        )
+    ).scalar_one()
 
     assert "Last control decision should be used" in final_message.payload["answer_markdown"]
 
 
 @pytest.mark.asyncio
-async def test_mixed_evidence_and_flow_control_executes_tool_before_decision(db_session, monkeypatch):
+async def test_mixed_evidence_and_flow_control_executes_tool_before_decision(async_db_session, monkeypatch):
     """同轮同时有证据工具和流程控制时，应先执行证据工具再应用流程决策。"""
-    user_id = _create_user_id(db_session)
+    user_id = await _create_user_id(async_db_session)
     service, fake_llm, fake_tool = _service_with_fake_runner()
     fake_llm.mixed_tool_and_flow_control = True
     run = await _create_run_with_plan(service, user_id, _request_data())
     run_id = run.run_id
 
     await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
-    await _execute_background(monkeypatch, service, db_session, run_id)
-    completed = service.get_run(run_id, user_id)
+    await _execute_background(monkeypatch, service, async_db_session, run_id)
+    completed = await service.get_run(run_id, user_id)
     final_message = (
-        db_session.query(InteractiveResearchMessage)
-        .filter_by(run_id=run_id, message_type="final_result")
-        .one()
-    )
+        await async_db_session.execute(
+            select(InteractiveResearchMessage).where(
+                InteractiveResearchMessage.run_id == run_id,
+                InteractiveResearchMessage.message_type == "final_result",
+            )
+        )
+    ).scalar_one()
 
     assert completed.status == "completed"
     assert fake_tool.calls[0]["keyword"] == "semiconductor policy catalyst"
@@ -744,9 +832,9 @@ async def test_mixed_evidence_and_flow_control_executes_tool_before_decision(db_
 
 
 @pytest.mark.asyncio
-async def test_search_news_result_reuses_tool_output_summarizer(db_session, monkeypatch):
+async def test_search_news_result_reuses_tool_output_summarizer(async_db_session, monkeypatch):
     """新闻搜索结果进入 agent 上下文前应复用现有工具输出压缩链路。"""
-    user_id = _create_user_id(db_session)
+    user_id = await _create_user_id(async_db_session)
     service, _, _ = _service_with_fake_runner()
     run = await _create_run_with_plan(service, user_id, _request_data())
     run_id = run.run_id
@@ -763,27 +851,33 @@ async def test_search_news_result_reuses_tool_output_summarizer(db_session, monk
     monkeypatch.setattr(research_agent_module, "summarize_tool_output", fake_summarize_tool_output)
 
     await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
-    await _execute_background(monkeypatch, service, db_session, run_id)
+    await _execute_background(monkeypatch, service, async_db_session, run_id)
     tool_result = (
-        db_session.query(InteractiveResearchMessage)
-        .filter_by(run_id=run_id, message_type="tool_result")
-        .one()
-    )
+        await async_db_session.execute(
+            select(InteractiveResearchMessage).where(
+                InteractiveResearchMessage.run_id == run_id,
+                InteractiveResearchMessage.message_type == "tool_result",
+            )
+        )
+    ).scalar_one()
 
     assert "compressed policy catalyst facts" in tool_result.content
     assert "compressed policy catalyst facts" in tool_result.payload["result_preview"]
 
 
 @pytest.mark.asyncio
-async def test_running_user_input_is_queued_and_processed_after_tool_step(db_session, monkeypatch):
+async def test_running_user_input_is_queued_and_processed_after_tool_step(async_db_session, monkeypatch):
     """运行中插入的用户输入先排队，下一轮工具安全点后并入上下文。"""
-    user_id = _create_user_id(db_session)
+    user_id = await _create_user_id(async_db_session)
     service, _, _ = _service_with_fake_runner()
     run = await _create_run_with_plan(service, user_id, _request_data())
     run_id = run.run_id
-    run.status = "researching"
-    run.current_stage = "researching"
-    db_session.commit()
+    persisted_run = (
+        await async_db_session.execute(select(InteractiveResearchRun).where(InteractiveResearchRun.run_id == run_id))
+    ).scalar_one()
+    persisted_run.status = "researching"
+    persisted_run.current_stage = "researching"
+    await async_db_session.commit()
 
     message = await service.append_user_message(
         run_id,
@@ -794,19 +888,24 @@ async def test_running_user_input_is_queued_and_processed_after_tool_step(db_ses
     message_id = message.message_id
     assert message.status == "queued"
 
-    await _execute_background(monkeypatch, service, db_session, run_id)
-    completed = service.get_run(run_id, user_id)
-    message = db_session.query(InteractiveResearchMessage).filter_by(message_id=message_id).one()
+    await _execute_background(monkeypatch, service, async_db_session, run_id)
+    completed = await service.get_run(run_id, user_id)
+    message = (
+        await async_db_session.execute(
+            select(InteractiveResearchMessage).where(InteractiveResearchMessage.message_id == message_id)
+        )
+    ).scalar_one()
 
     assert message.status == "completed"
     assert completed.status == "completed"
-    assert "system_status" in _message_types(db_session, run_id)
+    message_types = await _message_types(async_db_session, run_id)
+    assert "system_status" in message_types
 
 
 @pytest.mark.asyncio
-async def test_research_iteration_budget_uses_frontend_max_iterations(db_session, monkeypatch):
+async def test_research_iteration_budget_uses_frontend_max_iterations(async_db_session, monkeypatch):
     """研究阶段最大迭代次数应使用创建 run 时前端传入的 max_iterations。"""
-    user_id = _create_user_id(db_session)
+    user_id = await _create_user_id(async_db_session)
     service, fake_llm, _ = _service_with_fake_runner()
     fake_llm.never_uses_tools = True
     run = await _create_run_with_plan(service, user_id, {**_request_data(), "max_iterations": 10})
@@ -815,21 +914,24 @@ async def test_research_iteration_budget_uses_frontend_max_iterations(db_session
     assert run.checkpoint_payload["run_config"]["max_iterations"] == 10
 
     await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
-    await _execute_background(monkeypatch, service, db_session, run_id)
+    await _execute_background(monkeypatch, service, async_db_session, run_id)
     final_message = (
-        db_session.query(InteractiveResearchMessage)
-        .filter_by(run_id=run_id, message_type="final_result")
-        .one()
-    )
+        await async_db_session.execute(
+            select(InteractiveResearchMessage).where(
+                InteractiveResearchMessage.run_id == run_id,
+                InteractiveResearchMessage.message_type == "final_result",
+            )
+        )
+    ).scalar_one()
 
     assert fake_llm.research_calls == 11
     assert final_message.payload["iteration_budget"] == 10
 
 
 @pytest.mark.asyncio
-async def test_answer_pending_question_writes_parented_user_message_and_continues(db_session, monkeypatch):
+async def test_answer_pending_question_writes_parented_user_message_and_continues(async_db_session, monkeypatch):
     """awaiting_user_input 的回答应关联问题并继续执行 workflow。"""
-    user_id = _create_user_id(db_session)
+    user_id = await _create_user_id(async_db_session)
     service, fake_llm, _ = _service_with_fake_runner()
     run = await _create_run_with_plan(service, user_id, _request_data())
     run_id = run.run_id
@@ -838,8 +940,8 @@ async def test_answer_pending_question_writes_parented_user_message_and_continue
     approved = await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
     assert approved.status == "researching"
 
-    await _execute_background(monkeypatch, service, db_session, run_id)
-    paused = service.get_run(run_id, user_id)
+    await _execute_background(monkeypatch, service, async_db_session, run_id)
+    paused = await service.get_run(run_id, user_id)
     assert paused.status == "awaiting_user_input"
     pending_message_id = paused.pending_message_id
 
@@ -849,21 +951,21 @@ async def test_answer_pending_question_writes_parented_user_message_and_continue
         "Focus on semiconductor equipment only",
         background_tasks=FakeBackgroundTasks(),
     )
-    paused = service.get_run(run_id, user_id)
+    paused = await service.get_run(run_id, user_id)
     assert answer.parent_message_id == pending_message_id
     assert paused.status == "researching"
 
-    await _execute_background(monkeypatch, service, db_session, run_id)
-    completed = service.get_run(run_id, user_id)
+    await _execute_background(monkeypatch, service, async_db_session, run_id)
+    completed = await service.get_run(run_id, user_id)
 
     assert completed.status == "completed"
     assert completed.pending_message_id is None
 
 
 @pytest.mark.asyncio
-async def test_cancel_run_marks_terminal_without_artifacts(db_session):
+async def test_cancel_run_marks_terminal_without_artifacts(async_db_session):
     """cancel 立即终止 run 且只写系统消息。"""
-    user_id = _create_user_id(db_session)
+    user_id = await _create_user_id(async_db_session)
     service, _, _ = _service_with_fake_runner()
     run = await _create_run_with_plan(service, user_id, _request_data())
 
@@ -877,7 +979,8 @@ async def test_cancel_run_marks_terminal_without_artifacts(db_session):
 
     assert cancelled.status == "cancelled"
     assert cancelled.finished_at is not None
-    assert "system_status" in _message_types(db_session, run.run_id)
+    message_types = await _message_types(async_db_session, run.run_id)
+    assert "system_status" in message_types
 
 
 def test_interactive_http_contract_is_chat_only(client, auth_headers, monkeypatch):
@@ -918,10 +1021,11 @@ def test_interactive_http_contract_is_chat_only(client, auth_headers, monkeypatc
     assert revise_response.status_code == 422
 
 
-def test_delete_interactive_research_run_removes_messages_and_is_user_scoped(
+@pytest.mark.asyncio
+async def test_delete_interactive_research_run_removes_messages_and_is_user_scoped(
     client,
     auth_headers,
-    db_session,
+    async_db_session,
     monkeypatch,
 ):
     """删除 Deep Research run 时应按用户隔离，并级联删除消息。"""
@@ -940,14 +1044,14 @@ def test_delete_interactive_research_run_removes_messages_and_is_user_scoped(
     run_id = create_response.json()["run"]["run_id"]
 
     other_username = f"interactive_other_{uuid.uuid4().hex[:8]}"
-    create_user(
-        db_session,
-        UserCreate(
+    async_db_session.add(
+        User(
             username=other_username,
             email=f"{other_username}@example.com",
-            password="password123",
-        ),
+            password_hash=get_password_hash("password123"),
+        )
     )
+    await async_db_session.commit()
     login_response = client.post(
         "/api/v1/auth/login",
         data={"username": other_username, "password": "password123"},
@@ -963,7 +1067,11 @@ def test_delete_interactive_research_run_removes_messages_and_is_user_scoped(
         headers=auth_headers,
     )
     missing_response = client.get(f"/api/v1/ai-stock-picker/interactive/runs/{run_id}", headers=auth_headers)
-    messages_count = db_session.query(InteractiveResearchMessage).filter_by(run_id=uuid.UUID(run_id)).count()
+    messages_count = await async_db_session.scalar(
+        select(func.count()).select_from(InteractiveResearchMessage).where(
+            InteractiveResearchMessage.run_id == uuid.UUID(run_id)
+        )
+    )
 
     assert forbidden_response.status_code == 404
     assert delete_response.status_code == 200

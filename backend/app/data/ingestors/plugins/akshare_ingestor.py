@@ -323,8 +323,7 @@ class AkshareIngestor(BaseIngestor):
                 df['volume'] = df['volume'] / 100
 
             # 写入数据库
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'stock_zh_a_daily', df, source=self.source, target_table='kline_data'
             )
 
@@ -381,8 +380,7 @@ class AkshareIngestor(BaseIngestor):
             }])
             result_df['list_date'] = result_df['list_date'].dt.date
 
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'stock_individual_info', result_df, source=self.source, target_table='stock_basic'
             )
 
@@ -425,8 +423,7 @@ class AkshareIngestor(BaseIngestor):
             df['market'] = df['stock_code'].apply(StockCodeStandardizer.get_market)
             df['data_source'] = self.source
 
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'stock_info_a_code_name', df, source=self.source, target_table='stock_basic'
             )
 
@@ -527,8 +524,7 @@ class AkshareIngestor(BaseIngestor):
                 return {"success": False, "data": [], "count": 0}
 
             # 写入数据库（全量）
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'stock_zh_a_spot', df, source=self.source, target_table='data.stock_realtime_market'
             )
 
@@ -609,8 +605,7 @@ class AkshareIngestor(BaseIngestor):
                 df['volume'] = pd.to_numeric(df['volume'], errors='coerce') / 100
 
             # 写入数据库
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'stock_zh_index_daily', df, source=self.source, target_table='index_daily'
             )
 
@@ -733,8 +728,7 @@ class AkshareIngestor(BaseIngestor):
                 df['hold_ratio'] = pd.to_numeric(df['hold_ratio'], errors='coerce') / 100
             df['data_source'] = self.source
 
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'northbound', df, source=self.source, target_table='northbound_data'
             )
 
@@ -760,8 +754,7 @@ class AkshareIngestor(BaseIngestor):
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['update_date'] = datetime.now().date()
             df['data_source'] = self.source
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'stock_profile_cninfo', df, source=self.source
             )
 
@@ -808,8 +801,7 @@ class AkshareIngestor(BaseIngestor):
                 df['total_trade_amount'] = pd.to_numeric(df['total_trade_amount'], errors='coerce') * 10000
             df['data_source'] = self.source
 
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'dragon_tiger', df, source=self.source, target_table='dragon_tiger_data'
             )
 
@@ -864,8 +856,7 @@ class AkshareIngestor(BaseIngestor):
 
             df['data_source'] = self.source
             df['timestamp'] = pd.Timestamp.now()
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'board_industry', df, source=self.source, target_table='industry_data'
             )
 
@@ -914,8 +905,7 @@ class AkshareIngestor(BaseIngestor):
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['data_source'] = self.source
 
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'money_flow', df, source=self.source, target_table='stock_money_flow'
             )
 
@@ -967,8 +957,7 @@ class AkshareIngestor(BaseIngestor):
             df['stock_code'] = df['stock_code'].apply(lambda x: StockCodeStandardizer.standardize(x))
             df['data_source'] = self.source
 
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'shareholder_count', df, source=self.source, target_table='stock_shareholder_count'
             )
 
@@ -1049,8 +1038,7 @@ class AkshareIngestor(BaseIngestor):
                 df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
 
             df['data_source'] = self.source
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'pledge_summary', df, source=self.source, target_table='stock_pledge_summary'
             )
 
@@ -1097,8 +1085,7 @@ class AkshareIngestor(BaseIngestor):
                     df[col] = pd.to_numeric(df[col], errors='coerce') * 100
             df['data_source'] = self.source
 
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'lockup_release', df, source=self.source, target_table='stock_lockup_release'
             )
 
@@ -1176,8 +1163,7 @@ class AkshareIngestor(BaseIngestor):
             df['stock_code'] = df['stock_code'].apply(lambda x: StockCodeStandardizer.standardize(x))
             df['data_source'] = self.source
 
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'margin_data', df, source=self.source, target_table='stock_margin_data'
             )
 
@@ -1227,8 +1213,7 @@ class AkshareIngestor(BaseIngestor):
 
             df['data_source'] = self.source
             df['update_date'] = pd.to_datetime(date_str).date()
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'limit_up_pool', df, source=self.source, target_table='stock_limit_up_pool'
             )
 
@@ -1278,8 +1263,7 @@ class AkshareIngestor(BaseIngestor):
 
             df['data_source'] = self.source
             df['update_date'] = pd.to_datetime(date_str).date()
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'limit_down_pool', df, source=self.source, target_table='stock_limit_down_pool'
             )
 
@@ -1329,8 +1313,7 @@ class AkshareIngestor(BaseIngestor):
 
             df['data_source'] = self.source
             df['update_date'] = pd.to_datetime(date_str).date()
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'zhaban_pool', df, source=self.source, target_table='stock_zhaban_pool'
             )
 
@@ -1391,8 +1374,7 @@ class AkshareIngestor(BaseIngestor):
             if 'amount' in df.columns:
                 df['amount'] = df['amount'] / 10000
             df['data_source'] = self.source
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'block_trade', df, source=self.source, target_table='stock_block_trade'
             )
 
@@ -1444,8 +1426,7 @@ class AkshareIngestor(BaseIngestor):
                 df[unavailable_col] = None
             df['trade_date'] = datetime.now().date()
             df['data_source'] = self.source
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'sector_money_flow', df, source=self.source, target_table='sector_money_flow'
             )
 
@@ -1503,8 +1484,7 @@ class AkshareIngestor(BaseIngestor):
             df['stock_code'] = StockCodeStandardizer.standardize(stock_code)
             df['report_date'] = pd.to_datetime(report_date, format='%Y%m%d').date()
             df['data_source'] = self.source
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'top_holders', df, source=self.source, target_table='stock_top_holders'
             )
 

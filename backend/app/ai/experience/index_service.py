@@ -4,10 +4,10 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy import or_, select
 
 from app.core.utils.converters import safe_string, safe_uuid
+from app.core import database as database_module
 from app.models.experience_index import ExperienceIndex
 from app.models.experience_review_event import ExperienceReviewEvent
 
@@ -98,7 +98,7 @@ class ExperienceIndexService:
             return "profit" if absolute_return >= 0 else "loss"
         return "inconclusive"
 
-    def _find_existing(self, db: Session, *, user_id: int, memory: dict[str, Any]) -> ExperienceIndex | None:
+    async def _find_existing(self, db, *, user_id: int, memory: dict[str, Any]) -> ExperienceIndex | None:
         """按 Memory 标识查找已有经验索引。
 
         Args:
@@ -118,7 +118,8 @@ class ExperienceIndexService:
             filters.append(ExperienceIndex.memory_source_id == source_id)
         if not filters:
             return None
-        return db.query(ExperienceIndex).filter(ExperienceIndex.user_id == user_id, or_(*filters)).first()
+        result = await db.execute(select(ExperienceIndex).where(ExperienceIndex.user_id == user_id, or_(*filters)))
+        return result.scalars().first()
 
     def _row_payload(self, *, user_id: int, result: dict[str, Any], memory: dict[str, Any]) -> dict[str, Any]:
         """构建经验索引行字段。
@@ -150,7 +151,7 @@ class ExperienceIndexService:
             "tags": self._normalize_tags(payload.get("experience_tags")),
         }
 
-    def sync_from_review_result(self, db: Session, *, user_id: int, result: dict[str, Any]) -> dict[str, int]:
+    async def sync_from_review_result(self, db, *, user_id: int, result: dict[str, Any]) -> dict[str, int]:
         """从复盘结果同步成功写入 Memory 的经验索引。
 
         Args:
@@ -174,7 +175,7 @@ class ExperienceIndexService:
             ):
                 stats["skipped"] += 1
                 continue
-            row = self._find_existing(db, user_id=user_id, memory=memory)
+            row = await self._find_existing(db, user_id=user_id, memory=memory)
             if row:
                 for key, value in row_payload.items():
                     setattr(row, key, value)
@@ -183,7 +184,7 @@ class ExperienceIndexService:
             else:
                 db.add(ExperienceIndex(**row_payload))
                 stats["created"] += 1
-        db.commit()
+        await db.commit()
         return stats
 
     def _serialize_item(self, row: ExperienceIndex) -> dict[str, Any]:
@@ -301,9 +302,8 @@ class ExperienceIndexService:
         """
         return self._matches_tag(row, keyword)
 
-    def list_items(
+    async def list_items(
         self,
-        db: Session,
         *,
         user_id: int,
         stock_code: str | None = None,
@@ -340,7 +340,7 @@ class ExperienceIndexService:
         Returns:
             分页后的经验索引列表和统计信息。
         """
-        query = db.query(ExperienceIndex).filter(ExperienceIndex.user_id == user_id)
+        stmt = select(ExperienceIndex).where(ExperienceIndex.user_id == user_id)
         fuzzy_filters = (
             (ExperienceIndex.stock_code, stock_code),
             (ExperienceIndex.industry, industry),
@@ -352,12 +352,13 @@ class ExperienceIndexService:
         for column, value in fuzzy_filters:
             pattern = self._fuzzy_pattern(value)
             if pattern:
-                query = query.filter(column.ilike(pattern))
+                stmt = stmt.where(column.ilike(pattern))
         if created_from:
-            query = query.filter(ExperienceIndex.created_at >= created_from)
+            stmt = stmt.where(ExperienceIndex.created_at >= created_from)
         if created_to:
-            query = query.filter(ExperienceIndex.created_at <= created_to)
-        rows = query.order_by(ExperienceIndex.created_at.desc()).all()
+            stmt = stmt.where(ExperienceIndex.created_at <= created_to)
+        async with database_module.AsyncSessionLocal() as db:
+            rows = (await db.execute(stmt.order_by(ExperienceIndex.created_at.desc()))).scalars().all()
         if tag:
             rows = [row for row in rows if self._matches_tag(row, tag)]
         keyword_text = safe_string(keyword)
@@ -380,7 +381,7 @@ class ExperienceIndexService:
             "summary": {"total": total},
         }
 
-    def get_detail(self, db: Session, *, user_id: int, index_id: UUID) -> dict[str, Any] | None:
+    async def get_detail(self, *, user_id: int, index_id: UUID) -> dict[str, Any] | None:
         """获取经验索引详情。
 
         Args:
@@ -391,19 +392,25 @@ class ExperienceIndexService:
         Returns:
             经验详情；不存在时返回 ``None``。
         """
-        row = db.query(ExperienceIndex).filter(ExperienceIndex.user_id == user_id, ExperienceIndex.id == index_id).first()
-        if row is None:
-            return None
-        event = (
-            db.query(ExperienceReviewEvent)
-            .filter(
-                ExperienceReviewEvent.user_id == user_id,
-                ExperienceReviewEvent.review_run_id == row.review_run_id,
-                ExperienceReviewEvent.status == "completed",
-            )
-            .order_by(ExperienceReviewEvent.created_at.desc())
-            .first()
-        )
+        async with database_module.AsyncSessionLocal() as db:
+            row = (
+                await db.execute(
+                    select(ExperienceIndex).where(ExperienceIndex.user_id == user_id, ExperienceIndex.id == index_id)
+                )
+            ).scalars().first()
+            if row is None:
+                return None
+            event = (
+                await db.execute(
+                    select(ExperienceReviewEvent)
+                    .where(
+                        ExperienceReviewEvent.user_id == user_id,
+                        ExperienceReviewEvent.review_run_id == row.review_run_id,
+                        ExperienceReviewEvent.status == "completed",
+                    )
+                    .order_by(ExperienceReviewEvent.created_at.desc())
+                )
+            ).scalars().first()
         result = (event.payload or {}).get("result") if event and isinstance(event.payload, dict) else {}
         payload = result.get("analysis_payload") if isinstance(result, dict) and isinstance(result.get("analysis_payload"), dict) else {}
         memories = payload.get("written_memories") if isinstance(payload.get("written_memories"), list) else []
@@ -431,38 +438,39 @@ class ExperienceIndexService:
         )
         return detail
 
-    def rebuild_for_user(self, db: Session, *, user_id: int) -> dict[str, int]:
+    async def rebuild_for_user(self, *, user_id: int) -> dict[str, int]:
         """从历史已完成复盘事件重建当前用户的经验索引。
 
         Args:
-            db: 数据库会话。
             user_id: 用户 ID。
 
         Returns:
             包含创建、更新、跳过和失败数量的重建摘要。
         """
         stats = {"created": 0, "updated": 0, "skipped": 0, "failed": 0}
-        events = (
-            db.query(ExperienceReviewEvent)
-            .filter(
-                ExperienceReviewEvent.user_id == user_id,
-                ExperienceReviewEvent.stage == "experience_review",
-                ExperienceReviewEvent.status == "completed",
-            )
-            .order_by(ExperienceReviewEvent.created_at.asc())
-            .all()
-        )
-        for event in events:
-            try:
-                result = (event.payload or {}).get("result") if isinstance(event.payload, dict) else None
-                if not isinstance(result, dict):
-                    stats["skipped"] += 1
-                    continue
-                item_stats = self.sync_from_review_result(db, user_id=user_id, result=result)
-                for key in ("created", "updated", "skipped"):
-                    stats[key] += item_stats[key]
-            except Exception:
-                stats["failed"] += 1
+        async with database_module.AsyncSessionLocal() as db:
+            events = (
+                await db.execute(
+                    select(ExperienceReviewEvent)
+                    .where(
+                        ExperienceReviewEvent.user_id == user_id,
+                        ExperienceReviewEvent.stage == "experience_review",
+                        ExperienceReviewEvent.status == "completed",
+                    )
+                    .order_by(ExperienceReviewEvent.created_at.asc())
+                )
+            ).scalars().all()
+            for event in events:
+                try:
+                    result = (event.payload or {}).get("result") if isinstance(event.payload, dict) else None
+                    if not isinstance(result, dict):
+                        stats["skipped"] += 1
+                        continue
+                    item_stats = await self.sync_from_review_result(db, user_id=user_id, result=result)
+                    for key in ("created", "updated", "skipped"):
+                        stats[key] += item_stats[key]
+                except Exception:
+                    stats["failed"] += 1
         return stats
 
 

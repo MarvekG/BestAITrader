@@ -2,17 +2,17 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from sqlalchemy import desc, select
+
 from app.ai.llm_engine.context.canonical_metrics import CanonicalMetricsProvider
 from app.ai.llm_engine.context.portfolio import build_portfolio_risk_control_context
 from app.ai.llm_engine.context.runtime import merge_status
 from app.ai.llm_engine.context.types import AIContextLayer, AIContextPayload
-from app.crud.account import ensure_user_account
 from app.models.user import User
 from app.data.metadata.field_units import format_payload_values
 from app.models.data_storage import StockValuationHistory
 from app.performance.service import get_latest_performance_summary
 from app.portfolio.service import get_portfolio_overview
-from sqlalchemy import desc
 
 
 def _csv_value(value: Any) -> str:
@@ -100,7 +100,7 @@ def _items_payload(items: Any, *, empty_status: str = "missing", **extra: Any) -
 class MetadataProvider:
     name = "metadata"
 
-    def _latest_valuation(self, db: Any, stock_code: str) -> Any:
+    async def _latest_valuation(self, db: Any, stock_code: str) -> Any:
         """读取最新估值记录。
 
         Args:
@@ -110,14 +110,17 @@ class MetadataProvider:
         Returns:
             最新估值记录；不存在时返回 None。
         """
-        return db.query(StockValuationHistory).filter(
-            StockValuationHistory.stock_code == stock_code,
-        ).order_by(desc(StockValuationHistory.data_date)).first()
+        result = await db.execute(
+            select(StockValuationHistory)
+            .where(StockValuationHistory.stock_code == stock_code)
+            .order_by(desc(StockValuationHistory.data_date))
+        )
+        return result.scalars().first()
 
     async def build(self, runtime: Any, sections: Mapping[str, AIContextPayload]) -> AIContextLayer:
-        with runtime.db_session() as db:
-            stock = runtime.get_stock_basic(db)
-            latest_valuation = self._latest_valuation(db, runtime.stock_code)
+        async with runtime.async_session() as db:
+            stock = await runtime.get_stock_basic(db)
+            latest_valuation = await self._latest_valuation(db, runtime.stock_code)
             total_share = latest_valuation.total_share if latest_valuation else None
             float_share = latest_valuation.float_share if latest_valuation else None
             company = {
@@ -133,7 +136,7 @@ class MetadataProvider:
                 "status": "available" if stock else "missing",
                 "generated_at": runtime.generated_at.isoformat(),
                 "stock_code": runtime.stock_code,
-                "stock_name": runtime.stock_name(db),
+                "stock_name": await runtime.stock_name(db),
                 "company": company,
             }
             return AIContextLayer(self.name, payload)
@@ -164,8 +167,9 @@ class PortfolioProvider:
                 },
             )
 
-        with runtime.db_session() as db:
-            user = db.query(User).filter(User.id == user_id).first()
+        async with runtime.async_session() as db:
+            result = await db.execute(select(User).where(User.id == user_id))
+            user = result.scalars().first()
             if user is None:
                 return AIContextLayer(
                     self.name,
@@ -179,12 +183,12 @@ class PortfolioProvider:
 
             payload = {
                 "status": "available",
-                "overview": format_payload_values("portfolio.overview", get_portfolio_overview(db, user=user)),
+                "overview": format_payload_values("portfolio.overview", await get_portfolio_overview(user=user)),
                 "performance": format_payload_values(
                     "portfolio.performance",
-                    get_latest_performance_summary(db, user_id=user_id),
+                    await get_latest_performance_summary(user_id=user_id),
                 ),
-                "risk_control": build_portfolio_risk_control_context(db, ensure_user_account(db, user)),
+                "risk_control": await build_portfolio_risk_control_context(user=user),
             }
             return AIContextLayer(self.name, payload)
 
@@ -195,11 +199,11 @@ class RealtimeProvider:
     async def build(self, runtime: Any, sections: Mapping[str, AIContextPayload]) -> AIContextLayer:
         technical = runtime.readers.technical
         capital_flow = runtime.readers.capital_flow
-        with runtime.db_session() as db:
-            market = _wrap_dict(technical, technical.realtime_market(db, runtime.stock_code))
-            indicators = _wrap_dict(technical, technical.latest_indicators(db, runtime.stock_code))
-            money_flow = capital_flow.money_flow(db, runtime.stock_code)
-            index_reference = _wrap_dict(technical, technical.index_context(db))
+        async with runtime.async_session() as db:
+            market = _wrap_dict(technical, await technical.realtime_market(db, runtime.stock_code))
+            indicators = _wrap_dict(technical, await technical.latest_indicators(db, runtime.stock_code))
+            money_flow = await capital_flow.money_flow(db, runtime.stock_code)
+            index_reference = _wrap_dict(technical, await technical.index_context(db))
             payload = {
                 "status": merge_status(market, indicators, money_flow, index_reference),
                 "market": market,
@@ -226,9 +230,9 @@ class SnapshotProvider:
         fundamental = runtime.readers.fundamental
         financial = runtime.readers.financial
         capital_flow = runtime.readers.capital_flow
-        with runtime.db_session() as db:
-            basic_info = fundamental.basic_info(db, runtime.stock_code)
-            industry_rank = fundamental.industry_rank(db, runtime.stock_code)
+        async with runtime.async_session() as db:
+            basic_info = await fundamental.basic_info(db, runtime.stock_code)
+            industry_rank = await fundamental.industry_rank(db, runtime.stock_code)
             company = {
                 "status": merge_status(basic_info, industry_rank),
                 "basic": _wrap_dict(fundamental, basic_info),
@@ -258,19 +262,19 @@ class SnapshotProvider:
                     item_count=len(cashflow_records),
                 ),
             }
-            valuation = _wrap_dict(fundamental, fundamental.valuation(db, runtime.stock_code))
-            northbound = _wrap_dict(fundamental, fundamental.northbound_flow(db, runtime.stock_code))
+            valuation = _wrap_dict(fundamental, await fundamental.valuation(db, runtime.stock_code))
+            northbound = _wrap_dict(fundamental, await fundamental.northbound_flow(db, runtime.stock_code))
 
-            top_holders = fundamental.top_holders(db, runtime.stock_code)
-            fund_holding = fundamental.fund_holding(db, runtime.stock_code)
+            top_holders = await fundamental.top_holders(db, runtime.stock_code)
+            fund_holding = await fundamental.fund_holding(db, runtime.stock_code)
             ownership = {
                 "status": merge_status(top_holders, fund_holding),
                 "top_holders": _wrap_dict(fundamental, top_holders),
                 "fund_holding": _wrap_dict(fundamental, fund_holding),
             }
 
-            flow_northbound = capital_flow.northbound(db, runtime.stock_code)
-            dragon_tiger = capital_flow.dragon_tiger(db, runtime.stock_code)
+            flow_northbound = await capital_flow.northbound(db, runtime.stock_code)
+            dragon_tiger = await capital_flow.dragon_tiger(db, runtime.stock_code)
             flow_snapshot = {
                 "status": merge_status(flow_northbound, dragon_tiger),
                 "northbound": flow_northbound,
@@ -314,12 +318,12 @@ class HistoryProvider:
         technical = runtime.readers.technical
         capital_flow = runtime.readers.capital_flow
         fundamental = runtime.readers.fundamental
-        with runtime.db_session() as db:
-            kline_items = technical.recent_klines(db, runtime.stock_code, days=30)
-            money_flow_trend_items = capital_flow.money_flow_trend(db, runtime.stock_code)
-            northbound_trend = capital_flow.northbound_trend(db, runtime.stock_code)
-            insider_activity = fundamental.insider_activity(db, runtime.stock_code)
-            seo_history = fundamental.seo_history(db, runtime.stock_code)
+        async with runtime.async_session() as db:
+            kline_items = await technical.recent_klines(db, runtime.stock_code, days=30)
+            money_flow_trend_items = await capital_flow.money_flow_trend(db, runtime.stock_code)
+            northbound_trend = await capital_flow.northbound_trend(db, runtime.stock_code)
+            insider_activity = await fundamental.insider_activity(db, runtime.stock_code)
+            seo_history = await fundamental.seo_history(db, runtime.stock_code)
             kline = _compact_series_payload(
                 kline_items,
                 columns=self.KLINE_COLUMNS,
@@ -362,14 +366,14 @@ class SignalsProvider:
         risk = runtime.readers.risk
         capital_flow = runtime.readers.capital_flow
         fundamental = runtime.readers.fundamental
-        with runtime.db_session() as db:
-            hot_rank = sentiment.hot_rank(db, runtime.stock_code)
+        async with runtime.async_session() as db:
+            hot_rank = await sentiment.hot_rank(db, runtime.stock_code)
             hot_rank_signal = _wrap_dict(sentiment, hot_rank)
 
-            pledge = risk.pledge(db, runtime.stock_code)
-            insider = risk.insider(db, runtime.stock_code)
-            shareholder = risk.shareholder(db, runtime.stock_code)
-            shareholder_trend = risk.shareholder_trend(db, runtime.stock_code)
+            pledge = await risk.pledge(db, runtime.stock_code)
+            insider = await risk.insider(db, runtime.stock_code)
+            shareholder = await risk.shareholder(db, runtime.stock_code)
+            shareholder_trend = await risk.shareholder_trend(db, runtime.stock_code)
             risk_signals = {
                 "status": merge_status(pledge, insider, shareholder, shareholder_trend),
                 "pledge": _wrap_dict(risk, pledge),
@@ -378,11 +382,11 @@ class SignalsProvider:
                 "shareholder_trend": _wrap_dict(risk, shareholder_trend),
             }
 
-            dragon_tiger_effect = capital_flow.dragon_tiger_effect(db, runtime.stock_code)
-            sector_flow = capital_flow.sector_flow(db, runtime.stock_code)
-            block_trade = capital_flow.block_trade(db, runtime.stock_code)
-            margin = capital_flow.margin(db, runtime.stock_code)
-            margin_analysis = fundamental.margin_analysis(db, runtime.stock_code)
+            dragon_tiger_effect = await capital_flow.dragon_tiger_effect(db, runtime.stock_code)
+            sector_flow = await capital_flow.sector_flow(db, runtime.stock_code)
+            block_trade = await capital_flow.block_trade(db, runtime.stock_code)
+            margin = await capital_flow.margin(db, runtime.stock_code)
+            margin_analysis = await fundamental.margin_analysis(db, runtime.stock_code)
             flow_signals = {
                 "status": merge_status(dragon_tiger_effect, sector_flow, block_trade, margin, margin_analysis),
                 "dragon_tiger_effect": dragon_tiger_effect,
@@ -405,9 +409,9 @@ class EventsProvider:
 
     async def build(self, runtime: Any, sections: Mapping[str, AIContextPayload]) -> AIContextLayer:
         risk = runtime.readers.risk
-        with runtime.db_session() as db:
-            earnings = runtime.build_earnings_countdown(db)
-            lockup_items = risk.lockup(db, runtime.stock_code)
+        async with runtime.async_session() as db:
+            earnings = await runtime.build_earnings_countdown(db)
+            lockup_items = await risk.lockup(db, runtime.stock_code)
             lockup = _wrap_list(risk, lockup_items)
             payload = {
                 "status": merge_status(earnings, lockup),

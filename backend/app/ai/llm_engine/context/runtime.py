@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, Dict, Generator, Optional
+from typing import Any, Dict, Optional
 
-from app.core.database import SessionLocal
+from sqlalchemy import select
+
+from app.core import database as database_module
 from app.core.request_context import get_current_user_id
 from app.ai.llm_engine.context.readers import ContextReaders
 from app.data.metadata.field_units import format_payload_values
@@ -54,30 +55,26 @@ class AIContextRuntime:
         self._stock_basic: Optional[StockBasic] = None
         self.readers = ContextReaders()
 
-    @contextmanager
-    def db_session(self) -> Generator[Any, None, None]:
-        db = SessionLocal()
-        try:
-            yield db
-        finally:
-            db.close()
-
-    def get_stock_basic(self, db: Any) -> Optional[StockBasic]:
+    async def get_stock_basic(self, db: Any) -> Optional[StockBasic]:
         if self._stock_basic is None:
-            self._stock_basic = db.query(StockBasic).filter(
-                StockBasic.stock_code == self.stock_code
-            ).first()
+            result = await db.execute(select(StockBasic).where(StockBasic.stock_code == self.stock_code))
+            self._stock_basic = result.scalars().first()
         return self._stock_basic
 
-    def stock_name(self, db: Any) -> str:
-        stock = self.get_stock_basic(db)
+    async def stock_name(self, db: Any) -> str:
+        stock = await self.get_stock_basic(db)
         return stock.name if stock and stock.name else "Unknown"
 
-    def build_earnings_countdown(self, db: Any) -> Dict[str, Any]:
-        next_event = db.query(FinancialCalendar).filter(
-            FinancialCalendar.stock_code == self.stock_code,
-            FinancialCalendar.actual_date >= self.generated_at.date(),
-        ).order_by(FinancialCalendar.actual_date).first()
+    async def build_earnings_countdown(self, db: Any) -> Dict[str, Any]:
+        result = await db.execute(
+            select(FinancialCalendar)
+            .where(
+                FinancialCalendar.stock_code == self.stock_code,
+                FinancialCalendar.actual_date >= self.generated_at.date(),
+            )
+            .order_by(FinancialCalendar.actual_date)
+        )
+        next_event = result.scalars().first()
 
         if not next_event:
             return {"status": "missing"}
@@ -93,3 +90,6 @@ class AIContextRuntime:
 
     def record_error(self, provider: str, exc: Exception) -> None:
         self.errors.append({"provider": provider, "message": str(exc)})
+
+    def async_session(self) -> Any:
+        return database_module.AsyncSessionLocal()

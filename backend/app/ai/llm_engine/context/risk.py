@@ -1,6 +1,6 @@
 from typing import Dict, Any, List
-from sqlalchemy import desc
-from sqlalchemy.orm import Session
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.i18n import i18n_service
 from app.ai.llm_engine.context.section_wrappers import status_payload
 from app.data.metadata.field_units import format_payload_values
@@ -23,17 +23,23 @@ class RiskSource:
     def status_payload(data_status: str, **kwargs: Any) -> Dict[str, Any]:
         return status_payload(data_status, **kwargs)
 
-    def _get_pledge(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_pledge(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """获取质押信息，优先使用汇总数据，并辅以明细数据"""
         # 1. 获取最新的汇总数据 (Summary)
-        summary = db.query(StockPledgeSummary).filter(
-            StockPledgeSummary.stock_code == stock_code
-        ).order_by(desc(StockPledgeSummary.trade_date)).first()
+        summary_result = await db.execute(
+            select(StockPledgeSummary)
+            .where(StockPledgeSummary.stock_code == stock_code)
+            .order_by(desc(StockPledgeSummary.trade_date))
+        )
+        summary = summary_result.scalars().first()
 
         # 2. 获取明细数据 (Pledge Detail) - 虽慢但包含质押日期等
-        pledge_detail = db.query(StockPledge).filter(
-            StockPledge.stock_code == stock_code
-        ).order_by(desc(StockPledge.ann_date)).first()
+        detail_result = await db.execute(
+            select(StockPledge)
+            .where(StockPledge.stock_code == stock_code)
+            .order_by(desc(StockPledge.ann_date))
+        )
+        pledge_detail = detail_result.scalars().first()
 
         if not summary and not pledge_detail:
             return {}
@@ -64,12 +70,16 @@ class RiskSource:
         }
         return format_payload_values("risk.pledge", res)
 
-    def _get_insider(self, db: Session,
+    async def _get_insider(self, db: AsyncSession,
                      stock_code: str) -> List[Dict[str, Any]]:
         # Get recent insider trading (last 3 months/records)
-        insiders = db.query(StockInsider).filter(
-            StockInsider.stock_code == stock_code
-        ).order_by(desc(StockInsider.trade_date)).limit(5).all()
+        result = await db.execute(
+            select(StockInsider)
+            .where(StockInsider.stock_code == stock_code)
+            .order_by(desc(StockInsider.trade_date))
+            .limit(5)
+        )
+        insiders = result.scalars().all()
 
         results = []
         for i in insiders:
@@ -85,18 +95,24 @@ class RiskSource:
             })
         return format_payload_values("risk.insider", results)
 
-    def _get_lockup(self, db: Session,
+    async def _get_lockup(self, db: AsyncSession,
                     stock_code: str) -> List[Dict[str, Any]]:
         # Get upcoming releases (Window extended to 12 months)
         from datetime import datetime, timedelta
         today = datetime.now().date()
         one_year_later = today + timedelta(days=365)
 
-        releases = db.query(StockRelease).filter(
-            StockRelease.stock_code == stock_code,
-            StockRelease.release_date >= today,
-            StockRelease.release_date <= one_year_later
-        ).order_by(StockRelease.release_date).limit(5).all()
+        result = await db.execute(
+            select(StockRelease)
+            .where(
+                StockRelease.stock_code == stock_code,
+                StockRelease.release_date >= today,
+                StockRelease.release_date <= one_year_later,
+            )
+            .order_by(StockRelease.release_date)
+            .limit(5)
+        )
+        releases = result.scalars().all()
 
         results = []
         for r in releases:
@@ -110,10 +126,13 @@ class RiskSource:
             })
         return format_payload_values("risk.lockup_release", results)
 
-    def _get_shareholder(self, db: Session, stock_code: str) -> Dict[str, Any]:
-        sh = db.query(StockShareholder).filter(
-            StockShareholder.stock_code == stock_code
-        ).order_by(desc(StockShareholder.end_date)).first()
+    async def _get_shareholder(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
+        result = await db.execute(
+            select(StockShareholder)
+            .where(StockShareholder.stock_code == stock_code)
+            .order_by(desc(StockShareholder.end_date))
+        )
+        sh = result.scalars().first()
 
         if not sh:
             return {}
@@ -126,16 +145,20 @@ class RiskSource:
         }
         return format_payload_values("risk.shareholder", payload)
 
-    def _get_shareholder_trend(
-            self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_shareholder_trend(
+            self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """
         分析股东户数变化趋势
         Analyze shareholder count trend (concentration signal)
         """
         # 获取最近4个季度的股东数据
-        shareholders = db.query(StockShareholder).filter(
-            StockShareholder.stock_code == stock_code
-        ).order_by(desc(StockShareholder.end_date)).limit(8).all()
+        result = await db.execute(
+            select(StockShareholder)
+            .where(StockShareholder.stock_code == stock_code)
+            .order_by(desc(StockShareholder.end_date))
+            .limit(8)
+        )
+        shareholders = result.scalars().all()
 
         if len(shareholders) < 2:
             return {}

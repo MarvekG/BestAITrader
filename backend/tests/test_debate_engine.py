@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
 from app.ai.llm_engine.agents.governance import PortfolioManagerAgent
 from app.ai.llm_engine.orchestrator import (
@@ -73,7 +74,8 @@ def _saved_pm_record():
     return SimpleNamespace(to_dict=lambda: {"confidence_score": 90, "target_position": 0.0})
 
 
-def test_save_pm_decision_record_persists_minimal_fields(db_session):
+@pytest.mark.asyncio
+async def test_save_pm_decision_record_persists_minimal_fields(async_db_session):
     """PM 结构化决策保存到独立表，且同会话再次保存会更新原记录。"""
     from app.ai.llm_engine.pm_decision_service import save_pm_decision_record
 
@@ -82,34 +84,36 @@ def test_save_pm_decision_record_persists_minimal_fields(db_session):
         email="pm_decision_user@example.com",
         password_hash="hashed",
     )
-    db_session.add(user)
-    db_session.flush()
+    async_db_session.add(user)
+    await async_db_session.flush()
     session_obj = DebateSession(
         user_id=user.id,
         stock_code="000001.SZ",
         trading_frequency="swing",
         trading_strategy="momentum",
     )
-    db_session.add(session_obj)
-    db_session.commit()
+    async_db_session.add(session_obj)
+    await async_db_session.commit()
+    session_id = session_obj.session_id
 
-    with patch("app.ai.llm_engine.pm_decision_service.SessionLocal", return_value=_SessionLocalContext(db_session)), \
-            patch("app.ai.llm_engine.pm_decision_service.sync_pm_discipline_to_position"):
-        first = save_pm_decision_record(
-            session_id=session_obj.session_id,
+    with patch("app.ai.llm_engine.pm_decision_service.sync_pm_discipline_to_position", new_callable=AsyncMock):
+        first = await save_pm_decision_record(
+            session_id=session_id,
             target_position=0.3,
             confidence_score=80,
             stop_loss=9.5,
             take_profit=12.0,
             holding_horizon_days=20,
         )
-        second = save_pm_decision_record(
-            session_id=session_obj.session_id,
+        second = await save_pm_decision_record(
+            session_id=session_id,
             target_position=0.3,
             confidence_score=65,
         )
 
-    rows = db_session.query(PMDecisionRecord).filter(PMDecisionRecord.session_id == session_obj.session_id).all()
+    rows = (
+        await async_db_session.execute(select(PMDecisionRecord).where(PMDecisionRecord.session_id == session_id))
+    ).scalars().all()
     assert len(rows) == 1
     assert first["decision_id"] == second["decision_id"]
     assert rows[0].confidence_score == 65
@@ -143,19 +147,21 @@ async def test_current_workflow_runs_with_mocked_agents(initial_state):
     """
     当前辩论流程由 llm_engine.orchestrator 的 LangGraph workflow 驱动。
     """
+    fake_db = MagicMock()
+    fake_db.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: None)
     with patch("app.ai.llm_engine.orchestrator.AIContextService") as mock_context_service, \
             patch("app.ai.llm_engine.agents.base.BaseAgent.run", new_callable=AsyncMock) as mock_agent_run, \
             patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock) as mock_persist, \
+            patch("app.core.database.AsyncSessionLocal", return_value=_AsyncSessionLocalContext(fake_db)), \
             patch(
                 "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
-                return_value=_saved_pm_record(),
+                new_callable=AsyncMock,
+                return_value=_saved_pm_record().to_dict(),
             ), \
-            patch("app.core.database.SessionLocal") as mock_session_local, \
-            patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={}):
+            patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", new_callable=AsyncMock, return_value={}), \
+            patch("app.ai.llm_engine.orchestrator._get_same_stock_history", new_callable=AsyncMock, return_value={}), \
+            patch("app.ai.llm_engine.orchestrator._get_pending_orders_for_pm", new_callable=AsyncMock, return_value=[]):
         mock_context_service.return_value.build = AsyncMock(return_value=MOCK_CONTEXT)
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.first.return_value = None
-        mock_session_local.return_value.__enter__.return_value = mock_db
 
         def agent_result(static_context, context=None):
             assert static_context == _expected_static_context()
@@ -183,19 +189,21 @@ async def test_analyst_workflow_preserves_market_watch_trigger_context(initial_s
     }
     initial_state["static_context"] = {"market_watch_trigger": trigger_context}
 
+    fake_db = MagicMock()
+    fake_db.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: None)
     with patch("app.ai.llm_engine.orchestrator.AIContextService") as mock_context_service, \
             patch("app.ai.llm_engine.agents.base.BaseAgent.run", new_callable=AsyncMock) as mock_agent_run, \
             patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock), \
+            patch("app.core.database.AsyncSessionLocal", return_value=_AsyncSessionLocalContext(fake_db)), \
             patch(
                 "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
-                return_value=_saved_pm_record(),
+                new_callable=AsyncMock,
+                return_value=_saved_pm_record().to_dict(),
             ), \
-            patch("app.core.database.SessionLocal") as mock_session_local, \
-            patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={}):
+            patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", new_callable=AsyncMock, return_value={}), \
+            patch("app.ai.llm_engine.orchestrator._get_same_stock_history", new_callable=AsyncMock, return_value={}), \
+            patch("app.ai.llm_engine.orchestrator._get_pending_orders_for_pm", new_callable=AsyncMock, return_value=[]):
         mock_context_service.return_value.build = AsyncMock(return_value=MOCK_CONTEXT)
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.first.return_value = None
-        mock_session_local.return_value.__enter__.return_value = mock_db
 
         def agent_result(static_context, context=None):
             assert static_context["market_watch_trigger"] == trigger_context
@@ -233,19 +241,21 @@ async def test_analyst_workflow_allows_agent_calls_in_parallel_by_default(initia
             return "# PM Decision"
         return "Mock agent report"
 
+    fake_db = MagicMock()
+    fake_db.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: None)
     with patch("app.ai.llm_engine.orchestrator.AIContextService") as mock_context_service, \
             patch("app.ai.llm_engine.agents.base.BaseAgent.run", new_callable=AsyncMock) as mock_agent_run, \
             patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock), \
+            patch("app.core.database.AsyncSessionLocal", return_value=_AsyncSessionLocalContext(fake_db)), \
             patch(
                 "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
-                return_value=_saved_pm_record(),
+                new_callable=AsyncMock,
+                return_value=_saved_pm_record().to_dict(),
             ), \
-            patch("app.core.database.SessionLocal") as mock_session_local, \
-            patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={}):
+            patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", new_callable=AsyncMock, return_value={}), \
+            patch("app.ai.llm_engine.orchestrator._get_same_stock_history", new_callable=AsyncMock, return_value={}), \
+            patch("app.ai.llm_engine.orchestrator._get_pending_orders_for_pm", new_callable=AsyncMock, return_value=[]):
         mock_context_service.return_value.build = AsyncMock(return_value=MOCK_CONTEXT)
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.first.return_value = None
-        mock_session_local.return_value.__enter__.return_value = mock_db
         mock_agent_run.side_effect = agent_result
 
         final_state = await create_analyst_workflow().ainvoke(initial_state)
@@ -275,19 +285,21 @@ async def test_analyst_workflow_runs_agent_calls_serially_when_env_parallel_disa
             return "# PM Decision"
         return "Mock agent report"
 
+    fake_db = MagicMock()
+    fake_db.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: None)
     with patch("app.ai.llm_engine.orchestrator.AIContextService") as mock_context_service, \
             patch("app.ai.llm_engine.agents.base.BaseAgent.run", new_callable=AsyncMock) as mock_agent_run, \
             patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock), \
+            patch("app.core.database.AsyncSessionLocal", return_value=_AsyncSessionLocalContext(fake_db)), \
             patch(
                 "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
-                return_value=_saved_pm_record(),
+                new_callable=AsyncMock,
+                return_value=_saved_pm_record().to_dict(),
             ), \
-            patch("app.core.database.SessionLocal") as mock_session_local, \
-            patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={}):
+            patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", new_callable=AsyncMock, return_value={}), \
+            patch("app.ai.llm_engine.orchestrator._get_same_stock_history", new_callable=AsyncMock, return_value={}), \
+            patch("app.ai.llm_engine.orchestrator._get_pending_orders_for_pm", new_callable=AsyncMock, return_value=[]):
         mock_context_service.return_value.build = AsyncMock(return_value=MOCK_CONTEXT)
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.first.return_value = None
-        mock_session_local.return_value.__enter__.return_value = mock_db
         mock_agent_run.side_effect = agent_result
 
         final_state = await create_analyst_workflow().ainvoke(initial_state)
@@ -314,12 +326,12 @@ async def test_portfolio_management_returns_saved_pm_decision(initial_state):
             patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock) as mock_persist, \
             patch(
                 "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
-                return_value=saved_pm_decision,
+                new_callable=AsyncMock,
+                return_value=saved_pm_decision.to_dict(),
             ), \
-            patch("app.core.database.SessionLocal"), \
-            patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={"decision": "hold"}), \
-            patch("app.ai.llm_engine.orchestrator._get_same_stock_history", return_value={}), \
-            patch("app.ai.llm_engine.orchestrator._get_pending_orders_for_pm", return_value=[]):
+            patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", new_callable=AsyncMock, return_value={"decision": "hold"}), \
+            patch("app.ai.llm_engine.orchestrator._get_same_stock_history", new_callable=AsyncMock, return_value={}), \
+            patch("app.ai.llm_engine.orchestrator._get_pending_orders_for_pm", new_callable=AsyncMock, return_value=[]):
         agent = mock_pm_agent.return_value
         agent.last_prompt = "pm prompt"
         agent.run = AsyncMock(return_value="# Sell")
@@ -340,9 +352,9 @@ async def test_portfolio_management_reports_pm_agent_errors(initial_state):
 
     with patch("app.ai.llm_engine.orchestrator.PortfolioManagerAgent") as mock_pm_agent, \
             patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock), \
-            patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={}), \
-            patch("app.ai.llm_engine.orchestrator._get_same_stock_history", return_value={}), \
-            patch("app.ai.llm_engine.orchestrator._get_pending_orders_for_pm", return_value=[]):
+            patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", new_callable=AsyncMock, return_value={}), \
+            patch("app.ai.llm_engine.orchestrator._get_same_stock_history", new_callable=AsyncMock, return_value={}), \
+            patch("app.ai.llm_engine.orchestrator._get_pending_orders_for_pm", new_callable=AsyncMock, return_value=[]):
         agent = mock_pm_agent.return_value
         agent.last_prompt = "pm prompt"
         agent.run = AsyncMock(side_effect=ValueError("PM structured decision requires session_id"))
@@ -357,8 +369,7 @@ async def test_pm_agent_requests_save_tool_before_accepting_final_output():
     """PM Agent 接受最终 Markdown 前会要求模型先调用 save_pm_decision。"""
     agent = PortfolioManagerAgent(state={"session_id": str(uuid4())})
 
-    with patch("app.core.database.SessionLocal"), \
-            patch("app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session", return_value=None):
+    with patch("app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session", new_callable=AsyncMock, return_value=None):
         feedback = await agent.get_final_output_feedback("# PM Decision")
 
     assert feedback is not None
@@ -371,7 +382,7 @@ async def test_pm_agent_save_decision_tool_injects_session_id(monkeypatch):
     session_id = str(uuid4())
     captured = {}
 
-    def fake_save_pm_decision_record(**kwargs):
+    async def fake_save_pm_decision_record(**kwargs):
         captured.update(kwargs)
         return kwargs
 
@@ -418,7 +429,7 @@ class _PersistDb:
         self.added = []
 
     def query(self, *_args, **_kwargs):
-        return _PersistQuery(self.session_obj)
+        raise AssertionError("Legacy sync .query() must not be used by async persistence tests")
 
     def add(self, obj):
         self.added.append(obj)
@@ -432,6 +443,9 @@ class _PersistDb:
     def rollback(self):
         return None
 
+    def execute(self, _statement):
+        return SimpleNamespace(scalar_one_or_none=lambda: self.session_obj.session_id)
+
 
 class _SessionLocalContext:
     def __init__(self, db):
@@ -442,6 +456,29 @@ class _SessionLocalContext:
 
     def __exit__(self, exc_type, exc, tb):
         return False
+
+
+class _AsyncSessionLocalContext:
+    def __init__(self, db):
+        self.db = db
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def execute(self, statement):
+        return self.db.execute(statement)
+
+    def add(self, obj):
+        self.db.add(obj)
+
+    async def commit(self):
+        self.db.commit()
+
+    async def refresh(self, obj):
+        self.db.refresh(obj)
 
 
 @pytest.mark.asyncio
@@ -462,9 +499,10 @@ async def test_persist_agent_report_saves_pm_markdown_and_saved_decision_snapsho
         },
     )
 
-    with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(fake_db)), \
+    with patch("app.core.database.AsyncSessionLocal", return_value=_AsyncSessionLocalContext(fake_db)), \
             patch(
                 "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
+                new_callable=AsyncMock,
                 return_value=saved_pm_decision,
             ), \
             patch("app.api.endpoints.debate_ws.send_debate_message", new_callable=AsyncMock):

@@ -7,10 +7,11 @@ import logging
 from typing import Dict, List
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import get_async_db
 from app.core.security import get_current_user
 from app.core.websocket_ticket import (
     WEBSOCKET_TICKET_TTL_SECONDS,
@@ -18,6 +19,7 @@ from app.core.websocket_ticket import (
     create_websocket_ticket,
 )
 from app.models.debate_message import DebateMessage
+from app.models.session import Session as DebateSession
 from app.models.user import User
 
 router = APIRouter()
@@ -87,25 +89,59 @@ manager = ConnectionManager()
 @router.post("/ws-ticket/{session_id}")
 async def create_debate_websocket_ticket(
     session_id: str,
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, int | str]:
     """Create a short-lived ticket for a debate WebSocket connection."""
+    session_uuid = _parse_session_uuid(session_id)
+    if session_uuid is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Debate session not found")
+
+    if not await _user_owns_debate_session(db, session_id=session_uuid, user_id=current_user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Debate session not found")
+
     return {
-        "ticket": create_websocket_ticket(current_user.id, "debate", session_id),
+        "ticket": create_websocket_ticket(current_user.id, "debate", str(session_uuid)),
         "expires_in": WEBSOCKET_TICKET_TTL_SECONDS,
     }
 
 
-def _authenticate_debate_websocket(
-    db: Session,
+def _parse_session_uuid(session_id: str) -> UUID | None:
+    try:
+        return UUID(session_id)
+    except ValueError:
+        return None
+
+
+async def _user_owns_debate_session(db: AsyncSession, *, session_id: UUID, user_id: int) -> bool:
+    result = await db.execute(
+        select(DebateSession.session_id).where(
+            DebateSession.session_id == session_id,
+            DebateSession.user_id == user_id,
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def _authenticate_debate_websocket(
+    db: AsyncSession,
     *,
     ticket: str | None,
     session_id: str,
 ) -> User | None:
-    ticket_user_id = consume_websocket_ticket(ticket, "debate", session_id)
-    if ticket_user_id is not None:
-        return db.query(User).filter(User.id == ticket_user_id).first()
-    return None
+    session_uuid = _parse_session_uuid(session_id)
+    if session_uuid is None:
+        return None
+
+    ticket_user_id = consume_websocket_ticket(ticket, "debate", str(session_uuid))
+    if ticket_user_id is None:
+        return None
+
+    if not await _user_owns_debate_session(db, session_id=session_uuid, user_id=ticket_user_id):
+        return None
+
+    result = await db.execute(select(User).where(User.id == ticket_user_id))
+    return result.scalar_one_or_none()
 
 
 @router.websocket("/ws/{session_id}")
@@ -113,14 +149,14 @@ async def debate_websocket(
     websocket: WebSocket,
     session_id: str,
     ticket: str | None = Query(None),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     辩论WebSocket端点
 
     客户端连接后会接收辩论过程中的实时消息
     """
-    current_user = _authenticate_debate_websocket(
+    current_user = await _authenticate_debate_websocket(
         db,
         ticket=ticket,
         session_id=session_id,
@@ -142,11 +178,16 @@ async def debate_websocket(
 
         # 发送历史消息(如果有)
         try:
-            session_uuid = UUID(session_id)
-            history_messages = db.query(DebateMessage)\
-                .filter(DebateMessage.session_id == session_uuid)\
-                .order_by(DebateMessage.created_at.asc())\
-                .all()
+            session_uuid = _parse_session_uuid(session_id)
+            if session_uuid is None:
+                await websocket.close(code=1008)
+                return
+            result = await db.execute(
+                select(DebateMessage)
+                .where(DebateMessage.session_id == session_uuid)
+                .order_by(DebateMessage.created_at.asc())
+            )
+            history_messages = result.scalars().all()
 
             if history_messages:
                 await websocket.send_json({

@@ -422,6 +422,22 @@ async def test_memory_client_close_resets_reused_async_client(monkeypatch):
     assert client._client is None
 
 
+@pytest.mark.asyncio
+async def test_memory_client_close_resets_client_without_aclose(monkeypatch):
+    client = MemoryServiceClient()
+
+    class _NonClosableAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+    monkeypatch.setattr("app.ai.memory_client.httpx.AsyncClient", _NonClosableAsyncClient)
+
+    client._get_client()
+    await client.close()
+
+    assert client._client is None
+
+
 def test_record_error_uses_stable_http_status_message():
     client = MemoryServiceClient()
     request = httpx.Request("POST", "http://memoflux/v1/recall")

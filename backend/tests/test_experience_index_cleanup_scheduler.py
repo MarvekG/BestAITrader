@@ -1,6 +1,9 @@
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
+from sqlalchemy import select
+
 from app.models.experience_index import ExperienceIndex
 from app.models.experience_review_event import ExperienceReviewEvent
 from app.models.session import Session as DebateSession
@@ -9,15 +12,15 @@ from app.tasks import experience_index_cleanup_scheduler as scheduler_module
 from app.tasks import scheduled_task_registry
 
 
-def _create_user_and_session(db_session):
+async def _create_user_and_session(db):
     user = User(
         username="experience_index_cleanup",
         email="experience_index_cleanup@example.com",
         password_hash="hashed",
     )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
 
     session = DebateSession(
         user_id=user.id,
@@ -26,13 +29,13 @@ def _create_user_and_session(db_session):
         trading_strategy="trend",
         status="completed",
     )
-    db_session.add(session)
-    db_session.commit()
-    db_session.refresh(session)
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
     return user, session
 
 
-def _add_index(db_session, user, session, *, memory_observation_id: str, created_at: datetime) -> ExperienceIndex:
+async def _add_index(db, user, session, *, memory_observation_id: str, created_at: datetime) -> ExperienceIndex:
     row = ExperienceIndex(
         user_id=user.id,
         memory_observation_id=memory_observation_id,
@@ -52,12 +55,12 @@ def _add_index(db_session, user, session, *, memory_observation_id: str, created
         created_at=created_at,
         updated_at=created_at,
     )
-    db_session.add(row)
-    db_session.commit()
+    db.add(row)
+    await db.commit()
     return row
 
 
-def _add_review_event(db_session, user, session, *, review_run_id: str, created_at: datetime) -> ExperienceReviewEvent:
+async def _add_review_event(db, user, session, *, review_run_id: str, created_at: datetime) -> ExperienceReviewEvent:
     row = ExperienceReviewEvent(
         review_run_id=review_run_id,
         session_id=session.session_id,
@@ -68,8 +71,8 @@ def _add_review_event(db_session, user, session, *, review_run_id: str, created_
         payload={"review_run_id": review_run_id},
         created_at=created_at,
     )
-    db_session.add(row)
-    db_session.commit()
+    db.add(row)
+    await db.commit()
     return row
 
 
@@ -106,65 +109,59 @@ def test_get_experience_cleanup_config_uses_config_settings(monkeypatch) -> None
     }
 
 
-def test_experience_index_cleanup_deletes_records_older_than_configured_retention(db_session, monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_experience_index_cleanup_deletes_records_older_than_configured_retention(async_db_session, monkeypatch) -> None:
     now = datetime(2026, 5, 22, 12, 0)
-    user, session = _create_user_and_session(db_session)
-    _add_index(db_session, user, session, memory_observation_id="old", created_at=now - timedelta(days=8))
-    _add_index(db_session, user, session, memory_observation_id="recent", created_at=now - timedelta(days=6))
+    user, session = await _create_user_and_session(async_db_session)
+    await _add_index(async_db_session, user, session, memory_observation_id="old", created_at=now - timedelta(days=8))
+    await _add_index(async_db_session, user, session, memory_observation_id="recent", created_at=now - timedelta(days=6))
 
     monkeypatch.setattr(scheduler_module, "_now", lambda: now)
-    monkeypatch.setattr(scheduler_module, "SessionLocal", lambda: db_session)
     monkeypatch.setattr(scheduler_module, "settings", _settings(EXPERIENCE_INDEX_RETENTION_DAYS=7))
 
-    result = scheduler_module.cleanup_old_experience_indexes()
+    result = await scheduler_module.cleanup_old_experience_indexes()
 
-    remaining_observation_ids = [
-        memory_observation_id
-        for memory_observation_id, in db_session.query(ExperienceIndex.memory_observation_id)
-        .order_by(ExperienceIndex.memory_observation_id)
-        .all()
-    ]
+    remaining_observation_ids = list((await async_db_session.execute(
+        select(ExperienceIndex.memory_observation_id).order_by(ExperienceIndex.memory_observation_id)
+    )).scalars().all())
     assert result == {"deleted": 1, "retention_days": 7}
     assert remaining_observation_ids == ["recent"]
 
 
-def test_experience_cleanup_deletes_review_events_older_than_month(db_session, monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_experience_cleanup_deletes_review_events_older_than_month(async_db_session, monkeypatch) -> None:
     now = datetime(2026, 5, 22, 12, 0)
-    user, session = _create_user_and_session(db_session)
-    _add_review_event(db_session, user, session, review_run_id="old-review", created_at=now - timedelta(days=31))
-    _add_review_event(db_session, user, session, review_run_id="recent-review", created_at=now - timedelta(days=29))
+    user, session = await _create_user_and_session(async_db_session)
+    await _add_review_event(async_db_session, user, session, review_run_id="old-review", created_at=now - timedelta(days=31))
+    await _add_review_event(async_db_session, user, session, review_run_id="recent-review", created_at=now - timedelta(days=29))
 
     monkeypatch.setattr(scheduler_module, "_now", lambda: now)
-    monkeypatch.setattr(scheduler_module, "SessionLocal", lambda: db_session)
     monkeypatch.setattr(scheduler_module, "settings", _settings(EXPERIENCE_REVIEW_EVENT_RETENTION_DAYS=30))
 
-    result = scheduler_module.cleanup_old_experience_review_events()
+    result = await scheduler_module.cleanup_old_experience_review_events()
 
-    remaining_review_run_ids = [
-        review_run_id
-        for review_run_id, in db_session.query(ExperienceReviewEvent.review_run_id)
-        .order_by(ExperienceReviewEvent.review_run_id)
-        .all()
-    ]
+    remaining_review_run_ids = list((await async_db_session.execute(
+        select(ExperienceReviewEvent.review_run_id).order_by(ExperienceReviewEvent.review_run_id)
+    )).scalars().all())
     assert result == {"deleted": 1, "retention_days": 30}
     assert remaining_review_run_ids == ["recent-review"]
 
 
-def test_experience_cleanup_scheduler_deletes_indexes_and_review_events(db_session, monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_experience_cleanup_scheduler_deletes_indexes_and_review_events(async_db_session, monkeypatch) -> None:
     now = datetime(2026, 5, 22, 12, 0)
-    user, session = _create_user_and_session(db_session)
-    _add_index(db_session, user, session, memory_observation_id="old-index", created_at=now - timedelta(days=8))
-    _add_review_event(db_session, user, session, review_run_id="old-review", created_at=now - timedelta(days=31))
+    user, session = await _create_user_and_session(async_db_session)
+    await _add_index(async_db_session, user, session, memory_observation_id="old-index", created_at=now - timedelta(days=8))
+    await _add_review_event(async_db_session, user, session, review_run_id="old-review", created_at=now - timedelta(days=31))
 
     monkeypatch.setattr(scheduler_module, "_now", lambda: now)
-    monkeypatch.setattr(scheduler_module, "SessionLocal", lambda: db_session)
     monkeypatch.setattr(
         scheduler_module,
         "settings",
         _settings(EXPERIENCE_INDEX_RETENTION_DAYS=7, EXPERIENCE_REVIEW_EVENT_RETENTION_DAYS=30),
     )
 
-    result = scheduler_module.cleanup_old_experience_records()
+    result = await scheduler_module.cleanup_old_experience_records()
 
     assert result == {
         "experience_indexes_deleted": 1,
@@ -174,24 +171,21 @@ def test_experience_cleanup_scheduler_deletes_indexes_and_review_events(db_sessi
     }
 
 
-def test_experience_index_cleanup_uses_config_settings_retention_days(db_session, monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_experience_index_cleanup_uses_config_settings_retention_days(async_db_session, monkeypatch) -> None:
     now = datetime(2026, 5, 22, 12, 0)
-    user, session = _create_user_and_session(db_session)
-    _add_index(db_session, user, session, memory_observation_id="five-days", created_at=now - timedelta(days=5))
-    _add_index(db_session, user, session, memory_observation_id="two-days", created_at=now - timedelta(days=2))
+    user, session = await _create_user_and_session(async_db_session)
+    await _add_index(async_db_session, user, session, memory_observation_id="five-days", created_at=now - timedelta(days=5))
+    await _add_index(async_db_session, user, session, memory_observation_id="two-days", created_at=now - timedelta(days=2))
 
     monkeypatch.setattr(scheduler_module, "_now", lambda: now)
-    monkeypatch.setattr(scheduler_module, "SessionLocal", lambda: db_session)
     monkeypatch.setattr(scheduler_module, "settings", _settings(EXPERIENCE_INDEX_RETENTION_DAYS=3))
 
-    result = scheduler_module.cleanup_old_experience_indexes()
+    result = await scheduler_module.cleanup_old_experience_indexes()
 
-    remaining_observation_ids = [
-        memory_observation_id
-        for memory_observation_id, in db_session.query(ExperienceIndex.memory_observation_id)
-        .order_by(ExperienceIndex.memory_observation_id)
-        .all()
-    ]
+    remaining_observation_ids = list((await async_db_session.execute(
+        select(ExperienceIndex.memory_observation_id).order_by(ExperienceIndex.memory_observation_id)
+    )).scalars().all())
     assert result == {"deleted": 1, "retention_days": 3}
     assert remaining_observation_ids == ["two-days"]
 
@@ -218,12 +212,7 @@ def test_experience_index_cleanup_scheduler_registers_configured_daily_job(monke
     assert task.task_kwargs == {"index_retention_days": 5, "review_event_retention_days": 45}
 
 
-def test_scheduled_task_registry_includes_experience_index_cleanup_job(db_session, monkeypatch) -> None:
-    from app.tasks import experience_review_scheduler
-
-    monkeypatch.setattr(experience_review_scheduler, "SessionLocal", lambda: db_session)
-    monkeypatch.setattr(scheduler_module, "SessionLocal", lambda: db_session)
-
+def test_scheduled_task_registry_includes_experience_index_cleanup_job() -> None:
     snapshot = scheduled_task_registry.load_scheduled_tasks()
 
     job_ids = {task.job_id for task in snapshot.tasks}

@@ -4,11 +4,13 @@ from operator import add
 from typing import Annotated, Dict, Any, TypedDict, List, Optional
 from uuid import UUID
 from langgraph.graph import StateGraph, END
+from sqlalchemy import desc, or_, select
 
 from app.ai.llm_routing import should_run_debate_agents_in_parallel
 from app.ai.llm_engine.context import (
     AIContextService,
 )
+from app.core import database as database_module
 from app.data.metadata.field_units import format_payload_values
 from app.core.config import settings
 from app.core.i18n import i18n_service
@@ -81,7 +83,7 @@ def _build_portfolio_field_descriptions() -> Dict[str, str]:
     }
 
 
-def _get_latest_position_price(db: Any, stock_code: str, fallback_price: float) -> tuple[float, str, str | None]:
+async def _get_latest_position_price(db: Any, stock_code: str, fallback_price: float) -> tuple[float, str, str | None]:
     """获取用于 PM 持仓重估的最新可用价格。
 
     Args:
@@ -92,18 +94,24 @@ def _get_latest_position_price(db: Any, stock_code: str, fallback_price: float) 
     Returns:
         ``(价格, 来源, 来源时间)``；优先使用新于最新日 K 的实时行情，其次最新日 K 收盘价，最后使用持仓快照价。
     """
-    from sqlalchemy import desc
-
     from app.models.data_storage import KlineData, StockRealtimeMarket
 
-    latest_market = db.query(StockRealtimeMarket).filter(
-        StockRealtimeMarket.stock_code == stock_code
-    ).order_by(desc(StockRealtimeMarket.timestamp)).first()
+    latest_market_result = await db.execute(
+        select(StockRealtimeMarket)
+        .where(StockRealtimeMarket.stock_code == stock_code)
+        .order_by(desc(StockRealtimeMarket.timestamp))
+    )
+    latest_market = latest_market_result.scalars().first()
 
-    latest_kline = db.query(KlineData).filter(
-        KlineData.stock_code == stock_code,
-        KlineData.freq == "D",
-    ).order_by(desc(KlineData.date)).first()
+    latest_kline_result = await db.execute(
+        select(KlineData)
+        .where(
+            KlineData.stock_code == stock_code,
+            KlineData.freq == "D",
+        )
+        .order_by(desc(KlineData.date))
+    )
+    latest_kline = latest_kline_result.scalars().first()
 
     close_price = None
     kline_date = None
@@ -248,17 +256,16 @@ async def persist_agent_report(
         logger.warning(f"Skipping persistence: session_id={session_id}")
         return
 
-    from app.core.database import SessionLocal
     from app.models.debate_message import DebateMessage
     from app.api.endpoints.debate_ws import send_debate_message
+    from app.models.session import Session as SessionModel
 
-    with SessionLocal() as db:
-        try:
-            from app.models.session import Session as SessionModel
+    try:
+        async with database_module.AsyncSessionLocal() as db:
             # 预先检查 Session 是否存在，避免外键冲突
             # Pre-check if session exists to avoid ForeignKeyViolation
-            session_obj = db.query(SessionModel).filter(SessionModel.session_id == session_id).first()
-            if not session_obj:
+            result = await db.execute(select(SessionModel.session_id).where(SessionModel.session_id == session_id))
+            if result.scalar_one_or_none() is None:
                 logger.warning(f"Session {session_id} not found, probably deleted. Aborting persistence.")
                 return
 
@@ -276,17 +283,17 @@ async def persist_agent_report(
             )
 
             db.add(debate_msg)
-            db.commit()
-            db.refresh(debate_msg)
+            await db.commit()
+            await db.refresh(debate_msg)
+            message_payload = debate_msg.to_dict(exclude_prompt=True)
 
-            logger.info(f"✅ Saved {agent_role} report to database: {debate_msg.message_id}")
+            logger.info(f"Saved {agent_role} report to database: {debate_msg.message_id}")
 
-            # 推送到 WebSocket
-            await send_debate_message(str(session_id), debate_msg.to_dict(exclude_prompt=True))
+        # 推送到 WebSocket
+        await send_debate_message(str(session_id), message_payload)
 
-        except Exception:
-            logger.exception("Persistence failed")
-            db.rollback()
+    except Exception:
+        logger.exception("Persistence failed")
 
 
 def _build_error_message(agent_name: str, exc: Exception) -> str:
@@ -333,17 +340,18 @@ async def fetch_context(state: AnalystState) -> Dict[str, Any]:
 
         if session_id:
             # 获取账户和持仓信息
-            from app.core.database import SessionLocal
             from app.models.session import Session as SessionModel
             from app.models.account import Account
             from app.models.position import Position
 
-            with SessionLocal() as db:
-                session_obj = db.query(SessionModel).filter(SessionModel.session_id == session_id).first()
+            async with database_module.AsyncSessionLocal() as db:
+                session_result = await db.execute(select(SessionModel).where(SessionModel.session_id == session_id))
+                session_obj = session_result.scalar_one_or_none()
                 if session_obj:
                     user_id = session_obj.user_id
                     # 获取账户信息
-                    account = db.query(Account).filter(Account.user_id == session_obj.user_id).first()
+                    account_result = await db.execute(select(Account).where(Account.user_id == session_obj.user_id))
+                    account = account_result.scalar_one_or_none()
                     if account:
                         portfolio_overview = ai_context_snapshot.get("portfolio", {}).get("overview", {})
                         portfolio_summary = (
@@ -362,10 +370,13 @@ async def fetch_context(state: AnalystState) -> Dict[str, Any]:
                         )
 
                         # 获取当前股票持仓信息
-                        position = db.query(Position).filter(
-                            Position.account_id == account.account_id,
-                            Position.stock_code == stock_code
-                        ).first()
+                        position_result = await db.execute(
+                            select(Position).where(
+                                Position.account_id == account.account_id,
+                                Position.stock_code == stock_code,
+                            )
+                        )
+                        position = position_result.scalar_one_or_none()
                         if position:
                             # PM 的价格、仓位和盈亏主口径来自 portfolio.overview，避免与组合快照不一致。
                             overview_position = _find_portfolio_overview_position(ai_context_snapshot, stock_code)
@@ -479,7 +490,7 @@ def _build_layer1_reports(
     return layer1_reports
 
 
-def _build_previous_execution_summary(db, session_id: UUID) -> Dict[str, Any]:
+async def _build_previous_execution_summary(db, session_id: UUID) -> Dict[str, Any]:
     """构建上一轮 PM 决策关联的最小交易执行摘要。
 
     Args:
@@ -492,18 +503,18 @@ def _build_previous_execution_summary(db, session_id: UUID) -> Dict[str, Any]:
     from app.models.order import Order
     from app.models.trade_record import TradeRecord
 
-    orders = (
-        db.query(Order)
-        .filter(Order.session_id == session_id)
+    orders_result = await db.execute(
+        select(Order)
+        .where(Order.session_id == session_id)
         .order_by(Order.created_at.asc(), Order.order_id.asc())
-        .all()
     )
-    trades = (
-        db.query(TradeRecord)
-        .filter(TradeRecord.session_id == session_id)
+    orders = list(orders_result.scalars().all())
+    trades_result = await db.execute(
+        select(TradeRecord)
+        .where(TradeRecord.session_id == session_id)
         .order_by(TradeRecord.trade_time.asc(), TradeRecord.created_at.asc())
-        .all()
     )
+    trades = list(trades_result.scalars().all())
     total_quantity = sum(int(item.quantity or 0) for item in trades)
     total_fill_amount = sum(
         int(item.quantity or 0) * float(item.fill_price)
@@ -685,7 +696,7 @@ def _build_pm_review_focus() -> list[str]:
     ]
 
 
-def _get_same_stock_history(
+async def _get_same_stock_history(
     session_id: Optional[UUID],
     stock_code: str,
     *,
@@ -708,9 +719,6 @@ def _get_same_stock_history(
     if not session_id:
         return {}
 
-    from sqlalchemy import or_
-
-    from app.core.database import SessionLocal
     from app.models.account import Account
     from app.models.debate_message import DebateMessage
     from app.models.order import Order
@@ -718,45 +726,49 @@ def _get_same_stock_history(
     from app.models.session import Session as SessionModel
     from app.models.trade_record import TradeRecord
 
-    with SessionLocal() as db:
+    async with database_module.AsyncSessionLocal() as db:
         try:
-            current_session = db.query(SessionModel).filter(SessionModel.session_id == session_id).first()
+            current_result = await db.execute(select(SessionModel).where(SessionModel.session_id == session_id))
+            current_session = current_result.scalar_one_or_none()
             if not current_session:
                 return {}
 
-            previous_sessions = db.query(SessionModel).filter(
+            previous_result = await db.execute(select(SessionModel).where(
                 SessionModel.user_id == current_session.user_id,
                 SessionModel.stock_code == stock_code,
                 SessionModel.session_id != session_id,
-            ).all()
+            ))
+            previous_sessions = list(previous_result.scalars().all())
             previous_session_ids = [item.session_id for item in previous_sessions]
+            account_result = await db.execute(select(Account.account_id).where(Account.user_id == current_session.user_id))
             account_ids = [
-                item.account_id
-                for item in db.query(Account).filter(Account.user_id == current_session.user_id).all()
+                item
+                for item in account_result.scalars().all()
             ]
 
             pm_rows = []
             if previous_session_ids:
-                pm_rows = db.query(PMDecisionRecord, DebateMessage, SessionModel).join(
-                    DebateMessage,
-                    DebateMessage.session_id == PMDecisionRecord.session_id,
-                ).join(
-                    SessionModel,
-                    SessionModel.session_id == PMDecisionRecord.session_id,
-                ).filter(
-                    PMDecisionRecord.session_id.in_(previous_session_ids),
-                    DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
-                ).order_by(DebateMessage.created_at.desc()).limit(decision_limit).all()
+                pm_result = await db.execute(
+                    select(PMDecisionRecord, DebateMessage, SessionModel)
+                    .join(DebateMessage, DebateMessage.session_id == PMDecisionRecord.session_id)
+                    .join(SessionModel, SessionModel.session_id == PMDecisionRecord.session_id)
+                    .where(
+                        PMDecisionRecord.session_id.in_(previous_session_ids),
+                        DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
+                    )
+                    .order_by(DebateMessage.created_at.desc())
+                    .limit(decision_limit)
+                )
+                pm_rows = pm_result.all()
 
-            recent_pm_decisions = [
-                _build_pm_history_item(
+            recent_pm_decisions = []
+            for pm_record, debate_msg, session_obj in pm_rows:
+                recent_pm_decisions.append(_build_pm_history_item(
                     pm_record,
                     debate_msg,
                     session_obj,
-                    _build_previous_execution_summary(db, session_obj.session_id),
-                )
-                for pm_record, debate_msg, session_obj in pm_rows
-            ]
+                    await _build_previous_execution_summary(db, session_obj.session_id),
+                ))
             pm_by_session = {item["session_id"]: item for item in recent_pm_decisions}
 
             order_filters = [
@@ -773,7 +785,10 @@ def _get_same_stock_history(
             else:
                 order_filters.append(Order.session_id.in_([]))
 
-            orders = db.query(Order).filter(*order_filters).order_by(Order.created_at.desc()).limit(order_limit).all()
+            orders_result = await db.execute(
+                select(Order).where(*order_filters).order_by(Order.created_at.desc()).limit(order_limit)
+            )
+            orders = list(orders_result.scalars().all())
 
             trade_filters = [
                 TradeRecord.stock_code == stock_code,
@@ -789,10 +804,13 @@ def _get_same_stock_history(
             else:
                 trade_filters.append(TradeRecord.session_id.in_([]))
 
-            trades = db.query(TradeRecord).filter(*trade_filters).order_by(
-                TradeRecord.trade_time.desc(),
-                TradeRecord.created_at.desc(),
-            ).limit(trade_limit).all()
+            trades_result = await db.execute(
+                select(TradeRecord).where(*trade_filters).order_by(
+                    TradeRecord.trade_time.desc(),
+                    TradeRecord.created_at.desc(),
+                ).limit(trade_limit)
+            )
+            trades = list(trades_result.scalars().all())
 
             order_by_id = {str(order.order_id): order for order in orders}
             missing_trade_order_ids = [
@@ -801,7 +819,8 @@ def _get_same_stock_history(
                 if trade.order_id and str(trade.order_id) not in order_by_id
             ]
             if missing_trade_order_ids:
-                for order in db.query(Order).filter(Order.order_id.in_(missing_trade_order_ids)).all():
+                missing_orders_result = await db.execute(select(Order).where(Order.order_id.in_(missing_trade_order_ids)))
+                for order in missing_orders_result.scalars().all():
                     order_by_id[str(order.order_id)] = order
 
             recent_orders = [_build_order_history_item(order, pm_by_session) for order in orders]
@@ -840,7 +859,7 @@ def _get_same_stock_history(
             return {}
 
 
-def _get_pending_orders_for_pm(session_id: Optional[UUID], limit: int = 20) -> list[dict[str, Any]]:
+async def _get_pending_orders_for_pm(session_id: Optional[UUID], limit: int = 20) -> list[dict[str, Any]]:
     """获取当前用户账户下待成交订单，供 PM 撤单或改挂参考。
 
     Args:
@@ -853,32 +872,39 @@ def _get_pending_orders_for_pm(session_id: Optional[UUID], limit: int = 20) -> l
     if not session_id:
         return []
 
-    from app.core.database import SessionLocal
     from app.models.account import Account
     from app.models.order import Order
     from app.models.session import Session as SessionModel
 
-    with SessionLocal() as db:
+    async with database_module.AsyncSessionLocal() as db:
         try:
-            current_session = db.query(SessionModel).filter(SessionModel.session_id == session_id).first()
+            current_result = await db.execute(select(SessionModel).where(SessionModel.session_id == session_id))
+            current_session = current_result.scalar_one_or_none()
             if not current_session:
                 return []
 
-            account = db.query(Account).filter(Account.user_id == current_session.user_id).first()
+            account_result = await db.execute(select(Account).where(Account.user_id == current_session.user_id))
+            account = account_result.scalar_one_or_none()
             if not account:
                 return []
 
-            orders = db.query(Order).filter(
-                Order.account_id == account.account_id,
-                Order.status == "pending",
-            ).order_by(Order.created_at.desc(), Order.order_id.desc()).limit(limit).all()
+            orders_result = await db.execute(
+                select(Order)
+                .where(
+                    Order.account_id == account.account_id,
+                    Order.status == "pending",
+                )
+                .order_by(Order.created_at.desc(), Order.order_id.desc())
+                .limit(limit)
+            )
+            orders = orders_result.scalars().all()
             return [_build_pending_order_item(order) for order in orders]
         except Exception:
             logger.exception("Failed to fetch PM pending orders")
             return []
 
 
-def _get_previous_pm_decision(
+async def _get_previous_pm_decision(
     session_id: Optional[UUID],
     stock_code: str
 ) -> Dict[str, Any]:
@@ -886,36 +912,35 @@ def _get_previous_pm_decision(
     if not session_id:
         return {}
 
-    from app.core.database import SessionLocal
     from app.models.session import Session as SessionModel
     from app.models.debate_message import DebateMessage
     from app.models.pm_decision import PMDecisionRecord
 
-    with SessionLocal() as db:
+    async with database_module.AsyncSessionLocal() as db:
         try:
-            current_session = db.query(SessionModel).filter(
-                SessionModel.session_id == session_id
-            ).first()
+            current_result = await db.execute(select(SessionModel).where(SessionModel.session_id == session_id))
+            current_session = current_result.scalar_one_or_none()
             if not current_session:
                 return {}
 
-            previous_msg = db.query(PMDecisionRecord, DebateMessage, SessionModel).join(
-                DebateMessage, DebateMessage.session_id == PMDecisionRecord.session_id
-            ).join(
-                SessionModel, SessionModel.session_id == PMDecisionRecord.session_id
-            ).filter(
-                SessionModel.user_id == current_session.user_id,
-                SessionModel.stock_code == stock_code,
-                DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
-                PMDecisionRecord.session_id != session_id
-            ).order_by(
-                DebateMessage.created_at.desc()
-            ).first()
+            previous_result = await db.execute(
+                select(PMDecisionRecord, DebateMessage, SessionModel)
+                .join(DebateMessage, DebateMessage.session_id == PMDecisionRecord.session_id)
+                .join(SessionModel, SessionModel.session_id == PMDecisionRecord.session_id)
+                .where(
+                    SessionModel.user_id == current_session.user_id,
+                    SessionModel.stock_code == stock_code,
+                    DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
+                    PMDecisionRecord.session_id != session_id,
+                )
+                .order_by(DebateMessage.created_at.desc())
+            )
+            previous_msg = previous_result.first()
             if not previous_msg:
                 return {}
 
             pm_record, debate_msg, prev_session = previous_msg
-            execution_summary = _build_previous_execution_summary(db, prev_session.session_id)
+            execution_summary = await _build_previous_execution_summary(db, prev_session.session_id)
             return {
                 "session_id": str(prev_session.session_id),
                 "session_status": prev_session.status,
@@ -1258,9 +1283,9 @@ async def portfolio_management(state: AnalystState) -> Dict[str, Any]:
     """
     static_context = state.get("static_context", {})
     session_id = state.get("session_id")
-    previous_pm_decision = _get_previous_pm_decision(session_id, state["stock_code"])
-    same_stock_history = _get_same_stock_history(session_id, state["stock_code"])
-    pending_orders = _get_pending_orders_for_pm(session_id)
+    previous_pm_decision = await _get_previous_pm_decision(session_id, state["stock_code"])
+    same_stock_history = await _get_same_stock_history(session_id, state["stock_code"])
+    pending_orders = await _get_pending_orders_for_pm(session_id)
     vertical_reports = state.get("vertical_reports", {})
     runtime_context = _build_runtime_context(
         state,
@@ -1299,12 +1324,9 @@ async def portfolio_management(state: AnalystState) -> Dict[str, Any]:
             prompt_input=agent.last_prompt
         )
 
-        from app.core.database import SessionLocal
         from app.ai.llm_engine.pm_decision_service import get_pm_decision_for_session
 
-        with SessionLocal() as db:
-            pm_record = get_pm_decision_for_session(db, session_id)
-            decision_data = pm_record.to_dict() if pm_record else {}
+        decision_data = await get_pm_decision_for_session(session_id)
 
         return {"pm_decision": decision_data}
     except Exception as e:

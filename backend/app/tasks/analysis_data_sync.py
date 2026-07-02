@@ -1,10 +1,10 @@
 import asyncio
 
-from app.core.database import SessionLocal
+from sqlalchemy import select
+
+from app.core import database as database_module
 from app.core.logger import get_logger
-from app.core.request_context import get_or_create_request_id
 from app.models.async_task import AsyncTask
-from app.tasks.async_task_runner import async_task_runner
 from app.tasks.task_functions import sync_stock_data_func
 from app.tasks.task_manager import task_manager
 
@@ -23,41 +23,28 @@ async def sync_stock_data_before_analysis(stock_code: str) -> bool:
     from app.core.i18n import i18n_service
 
     sync_task_name = i18n_service.t("tasks.names.data_sync") + f" ({stock_code})"
-    with SessionLocal() as db:
-        sync_result = task_manager.submit_task(
-            db=db,
-            task_name=sync_task_name,
-            task_type="db_sync",
-            parameters={"stock_code": stock_code},
-            allow_concurrent=False,
-        )
+    sync_result = await task_manager.submit_task(
+        task_name=sync_task_name,
+        task_type="db_sync",
+        parameters={"stock_code": stock_code},
+        allow_concurrent=False,
+        task_func=sync_stock_data_func,
+        task_kwargs={
+            "stock_code": stock_code,
+            "allow_concurrent": False,
+        },
+    )
 
     sync_task_id = sync_result["task_id"]
 
-    if sync_result.get("new_task", True):
-        submitted = async_task_runner.submit_task(
-            task_id=sync_task_id,
-            task_func=sync_stock_data_func,
-            task_kwargs={
-                "stock_code": stock_code,
-                "task_id": sync_task_id,
-                "allow_concurrent": False,
-            },
-            task_name=sync_task_name,
-            request_id=get_or_create_request_id(),
-        )
-        if not submitted:
-            logger.warning("Failed to submit data-sync async task for %s", stock_code)
-            return False
-
     for _ in range(60):
         await asyncio.sleep(5)
-        with SessionLocal() as db:
+        async with database_module.AsyncSessionLocal() as db:
             task_row = (
-                db.query(AsyncTask.status, AsyncTask.error_message)
-                .filter(AsyncTask.task_id == sync_task_id)
-                .first()
-            )
+                await db.execute(
+                    select(AsyncTask.status, AsyncTask.error_message).where(AsyncTask.task_id == sync_task_id)
+                )
+            ).first()
         if task_row and task_row.status in ("completed", "failed"):
             if task_row.status == "completed":
                 logger.info("Data sync completed for %s before analysis", stock_code)

@@ -3,30 +3,30 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import func, select
 
-from app.crud.account import ensure_user_account
-from app.crud.user import create_user
 from app.models.position import Position
 from app.models.async_task import AsyncTask
 from app.models.session import Session
 from app.models.stock_warehouse import StockWarehouse
 from app.models.system_setting import SystemSetting
-from app.schemas.user import UserCreate
 from app.trading.discipline_service import scan_position_disciplines
 from app.trading import discipline_service
 from app.trading.discipline_settings import PositionDisciplineSettingsResponse
 
 
-def _create_user(db_session):
-    user = create_user(
-        db_session,
-        UserCreate(username="discipline_service", email="discipline_service@example.com", password="password123"),
+async def _create_user(db, async_create_user, async_ensure_account):
+    user = await async_create_user(
+        db,
+        username="discipline_service",
+        email="discipline_service@example.com",
+        password="password123",
     )
-    account = ensure_user_account(db_session, user)
+    account = await async_ensure_account(db, user)
     return user, account
 
 
-def _create_position(db_session, account, *, pm_session_id=None):
+async def _create_position(db, account, *, pm_session_id=None):
     position = Position(
         account_id=account.account_id,
         stock_code="000001.SZ",
@@ -42,13 +42,14 @@ def _create_position(db_session, account, *, pm_session_id=None):
         stop_loss=Decimal("9.50"),
         pm_session_id=pm_session_id or uuid4(),
     )
-    db_session.add(position)
-    db_session.commit()
+    db.add(position)
+    await db.commit()
+    await db.refresh(position)
     return position
 
 
-def _add_stock_warehouse(db_session, user_id):
-    db_session.add(
+async def _add_stock_warehouse(db, user_id):
+    db.add(
         StockWarehouse(
             user_id=user_id,
             stock_code="000001.SZ",
@@ -57,13 +58,18 @@ def _add_stock_warehouse(db_session, user_id):
             auto_analysis_trading_strategy="价值投资 (Value Investing)",
         )
     )
-    db_session.commit()
+    await db.commit()
 
 
 @pytest.mark.asyncio
-async def test_position_discipline_debate_respects_global_concurrency_limit(db_session, test_db, monkeypatch):
-    user, _account = _create_user(db_session)
-    db_session.add_all([
+async def test_position_discipline_debate_respects_global_concurrency_limit(
+    async_db_session,
+    monkeypatch,
+    async_create_user,
+    async_ensure_account,
+):
+    user, _account = await _create_user(async_db_session, async_create_user, async_ensure_account)
+    async_db_session.add_all([
         SystemSetting(key="ai_debate.max_concurrent", value=1, description="test"),
         AsyncTask(
             task_name="AI Analysis - 000001.SZ",
@@ -74,9 +80,11 @@ async def test_position_discipline_debate_respects_global_concurrency_limit(db_s
             user_id=user.id,
         ),
     ])
-    db_session.commit()
-    monkeypatch.setattr("app.trading.discipline_service.database_module.SessionLocal", test_db)
-    monkeypatch.setattr("app.trading.discipline_service._is_duplicate_discipline_trigger", lambda **kwargs: False)
+    await async_db_session.commit()
+    async def _not_duplicate(**_kwargs):
+        return False
+
+    monkeypatch.setattr("app.trading.discipline_service._is_duplicate_discipline_trigger", _not_duplicate)
 
     result = await discipline_service._handle_position_discipline_trigger(
         user_id=user.id,
@@ -99,17 +107,21 @@ async def test_position_discipline_debate_respects_global_concurrency_limit(db_s
 
     assert result["status"] == "skipped"
     assert result["reason"] == "concurrency_limit"
-    assert db_session.query(AsyncTask).count() == 1
+    count = await async_db_session.scalar(select(func.count()).select_from(AsyncTask))
+    assert count == 1
 
 
 @pytest.mark.asyncio
-async def test_discipline_scan_skips_duplicate_latest_stock_trigger(db_session, test_db, monkeypatch):
-    user, account = _create_user(db_session)
+async def test_discipline_scan_skips_duplicate_latest_stock_trigger(
+    async_db_session,
+    monkeypatch,
+    async_create_user,
+    async_ensure_account,
+):
+    user, account = await _create_user(async_db_session, async_create_user, async_ensure_account)
     pm_session_id = uuid4()
-    _create_position(db_session, account, pm_session_id=pm_session_id)
-    _add_stock_warehouse(db_session, user.id)
-    monkeypatch.setattr("app.core.database.SessionLocal", test_db)
-    monkeypatch.setattr("app.trading.discipline_service.database_module.SessionLocal", test_db)
+    await _create_position(async_db_session, account, pm_session_id=pm_session_id)
+    await _add_stock_warehouse(async_db_session, user.id)
     monkeypatch.setattr(
         "app.ai.agentic.tools._resolve_latest_stock_price",
         lambda stock_code: {"success": True, "latest_price": "9.40"},
@@ -150,14 +162,17 @@ async def test_discipline_scan_skips_duplicate_latest_stock_trigger(db_session, 
     }
     assert launcher_calls[0]["discipline_trigger"] == expected_trigger
 
-    task = db_session.query(AsyncTask).one()
+    task = (await async_db_session.execute(select(AsyncTask))).scalars().one()
     assert task.parameters["discipline_trigger"] == expected_trigger
 
     setting = (
-        db_session.query(SystemSetting)
-        .filter(SystemSetting.user_id == user.id, SystemSetting.key == "position_discipline.dedup_state")
-        .one()
-    )
+        await async_db_session.execute(
+            select(SystemSetting).where(
+                SystemSetting.user_id == user.id,
+                SystemSetting.key == "position_discipline.dedup_state",
+            )
+        )
+    ).scalars().one()
     state = setting.value["stocks"]["000001.SZ"]
     assert state["trigger"] == "stop_loss"
     assert state["threshold"] == "9.5000"
@@ -166,12 +181,15 @@ async def test_discipline_scan_skips_duplicate_latest_stock_trigger(db_session, 
 
 
 @pytest.mark.asyncio
-async def test_discipline_scan_marks_created_records_failed_when_scheduler_fails(db_session, test_db, monkeypatch):
-    user, account = _create_user(db_session)
-    _create_position(db_session, account)
-    _add_stock_warehouse(db_session, user.id)
-    monkeypatch.setattr("app.core.database.SessionLocal", test_db)
-    monkeypatch.setattr("app.trading.discipline_service.database_module.SessionLocal", test_db)
+async def test_discipline_scan_marks_created_records_failed_when_scheduler_fails(
+    async_db_session,
+    monkeypatch,
+    async_create_user,
+    async_ensure_account,
+):
+    user, account = await _create_user(async_db_session, async_create_user, async_ensure_account)
+    await _create_position(async_db_session, account)
+    await _add_stock_warehouse(async_db_session, user.id)
     monkeypatch.setattr(
         "app.ai.agentic.tools._resolve_latest_stock_price",
         lambda stock_code: {"success": True, "latest_price": "9.40"},
@@ -197,10 +215,13 @@ async def test_discipline_scan_marks_created_records_failed_when_scheduler_fails
     assert launch["reason"] == "launch_failed"
     assert launch["error"] == "scheduler unavailable"
 
-    task = db_session.query(AsyncTask).one()
-    session = db_session.query(Session).one()
+    task = (await async_db_session.execute(select(AsyncTask))).scalars().one()
+    session = (await async_db_session.execute(select(Session))).scalars().one()
     assert task.status == "failed"
     assert task.error_message == "scheduler unavailable"
     assert task.completed_at is not None
     assert session.status == "failed"
-    assert db_session.query(SystemSetting).filter(SystemSetting.key == "position_discipline.dedup_state").count() == 0
+    count = await async_db_session.scalar(
+        select(func.count()).select_from(SystemSetting).where(SystemSetting.key == "position_discipline.dedup_state")
+    )
+    assert count == 0

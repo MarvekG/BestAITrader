@@ -442,7 +442,7 @@ class TradingEngine:
         if order_type == "market":
             from app.data.storage import data_storage_service
             try:
-                realtime_data = data_storage_service.get_stock_realtime_market(stock_code)
+                realtime_data = await data_storage_service.get_stock_realtime_market(stock_code)
                 price = realtime_data.get("latest_price") if realtime_data else None
 
                 if price:

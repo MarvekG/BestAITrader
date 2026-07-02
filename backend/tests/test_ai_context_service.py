@@ -79,27 +79,27 @@ async def test_ai_context_service_assembles_time_layer_context():
 
 @pytest.mark.asyncio
 async def test_ai_context_service_includes_portfolio_static_context_for_current_user(
-    db_session,
+    async_db_session,
     monkeypatch,
     test_db,
 ):
     """AI 静态上下文应包含当前用户的组合概览和绩效表现。
 
     Args:
-        db_session: 测试数据库会话。
+        async_db_session: 异步测试数据库会话。
         monkeypatch: pytest monkeypatch 工具。
         test_db: 测试数据库会话工厂。
     """
-    from app.ai.llm_engine.context import runtime as runtime_module
     from app.ai.llm_engine.context.providers import PortfolioProvider
+    from app.core import database as database_module
 
     user = User(
         username="portfolio_context_user",
         email="portfolio_context_user@example.com",
         password_hash="hashed",
     )
-    db_session.add(user)
-    db_session.flush()
+    async_db_session.add(user)
+    await async_db_session.flush()
     account = Account(
         user_id=user.id,
         total_assets=Decimal("1000000.0000"),
@@ -110,9 +110,9 @@ async def test_ai_context_service_includes_portfolio_static_context_for_current_
         total_profit_loss=Decimal("0.0000"),
         total_trades=3,
     )
-    db_session.add(account)
-    db_session.flush()
-    db_session.add_all(
+    async_db_session.add(account)
+    await async_db_session.flush()
+    async_db_session.add_all(
         [
             StockBasic(stock_code="000001.SZ", name="平安银行", industry="银行"),
             StockRealtimeMarket(
@@ -151,8 +151,8 @@ async def test_ai_context_service_includes_portfolio_static_context_for_current_
             ),
         ]
     )
-    db_session.commit()
-    monkeypatch.setattr(runtime_module, "SessionLocal", test_db)
+    await async_db_session.commit()
+    monkeypatch.setattr(database_module, "AsyncSessionLocal", test_db)
 
     token = set_current_user_id(user.id)
     try:
@@ -214,10 +214,30 @@ class _FakeRealtimeDB:
         self.rows = rows
 
     def query(self, _model):
-        return _FakeRealtimeQuery(self.rows)
+        raise AssertionError("Async DB tests must use execute(), not query().")
+
+    async def execute(self, _statement):
+        return _FakeRealtimeResult(sorted(self.rows, key=lambda row: row.timestamp, reverse=True))
 
 
-def test_realtime_market_prefers_latest_timestamp_row():
+class _FakeRealtimeScalarResult:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def first(self):
+        return self.rows[0] if self.rows else None
+
+
+class _FakeRealtimeResult:
+    def __init__(self, rows):
+        self.rows = rows
+
+    def scalars(self):
+        return _FakeRealtimeScalarResult(self.rows)
+
+
+@pytest.mark.asyncio
+async def test_realtime_market_prefers_latest_timestamp_row():
     source = TechnicalSource()
     db = _FakeRealtimeDB(
         [
@@ -252,7 +272,7 @@ def test_realtime_market_prefers_latest_timestamp_row():
         ]
     )
 
-    market = source._get_realtime_market(db, "600519.SH")
+    market = await source._get_realtime_market(db, "600519.SH")
 
     assert market["price"] == "1401.3元"
     assert market["pct_chg"] == "-3.02%"

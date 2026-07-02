@@ -2,6 +2,7 @@ from datetime import date, datetime, timedelta
 import uuid
 
 import pytest
+from sqlalchemy import func, select
 
 from app.ai.experience import service as experience_service_module
 from app.ai.experience.service import experience_service
@@ -16,15 +17,15 @@ from app.models.trade_record import TradeRecord
 from app.models.user import User
 
 
-def _create_user_and_session(db_session):
+async def _create_user_and_session(async_db_session):
     user = User(
         username=f"experience_{uuid.uuid4().hex[:8]}",
         email=f"experience_{uuid.uuid4().hex[:8]}@example.com",
         password_hash="hashed",
     )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    async_db_session.add(user)
+    await async_db_session.commit()
+    await async_db_session.refresh(user)
 
     session = DebateSession(
         user_id=user.id,
@@ -33,13 +34,13 @@ def _create_user_and_session(db_session):
         trading_strategy="trend",
         status="completed",
     )
-    db_session.add(session)
-    db_session.commit()
-    db_session.refresh(session)
+    async_db_session.add(session)
+    await async_db_session.commit()
+    await async_db_session.refresh(session)
     return user, session
 
 
-def _create_pm_record(db_session, user, session, *, created_at=datetime(2026, 1, 1, 15, 0)):
+async def _create_pm_record(async_db_session, user, session, *, created_at=datetime(2026, 1, 1, 15, 0)):
     record = PMDecisionRecord(
         session_id=session.session_id,
         user_id=user.id,
@@ -51,13 +52,14 @@ def _create_pm_record(db_session, user, session, *, created_at=datetime(2026, 1,
         holding_horizon_days=20,
         created_at=created_at,
     )
-    db_session.add(record)
-    db_session.commit()
+    async_db_session.add(record)
+    await async_db_session.commit()
     return record
 
 
-def test_cleanup_interrupted_review_runs_marks_active_runs_failed(db_session):
-    user, active_session = _create_user_and_session(db_session)
+@pytest.mark.asyncio
+async def test_cleanup_interrupted_review_runs_marks_active_runs_failed(async_db_session):
+    user, active_session = await _create_user_and_session(async_db_session)
 
     completed_session = DebateSession(
         user_id=user.id,
@@ -66,14 +68,14 @@ def test_cleanup_interrupted_review_runs_marks_active_runs_failed(db_session):
         trading_strategy="value",
         status="completed",
     )
-    db_session.add_all([active_session, completed_session])
-    db_session.commit()
+    async_db_session.add(completed_session)
+    await async_db_session.commit()
 
     started_run_id = str(uuid.uuid4())
     running_run_id = str(uuid.uuid4())
     completed_run_id = str(uuid.uuid4())
 
-    db_session.add_all(
+    async_db_session.add_all(
         [
             ExperienceReviewEvent(
                 review_run_id=started_run_id,
@@ -101,28 +103,44 @@ def test_cleanup_interrupted_review_runs_marks_active_runs_failed(db_session):
             ),
         ]
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    cleaned = experience_service._cleanup_interrupted_review_runs_in_db(db_session)
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        cleaned = await experience_service._cleanup_interrupted_review_runs_in_db(db)
 
     assert cleaned == 2
 
-    started_events = (
-        db_session.query(ExperienceReviewEvent)
-        .filter(ExperienceReviewEvent.review_run_id == started_run_id)
-        .order_by(ExperienceReviewEvent.created_at.asc())
+    started_events = list(
+        (
+            await async_db_session.execute(
+                select(ExperienceReviewEvent)
+                .where(ExperienceReviewEvent.review_run_id == started_run_id)
+                .order_by(ExperienceReviewEvent.created_at.asc())
+            )
+        )
+        .scalars()
         .all()
     )
-    running_events = (
-        db_session.query(ExperienceReviewEvent)
-        .filter(ExperienceReviewEvent.review_run_id == running_run_id)
-        .order_by(ExperienceReviewEvent.created_at.asc())
+    running_events = list(
+        (
+            await async_db_session.execute(
+                select(ExperienceReviewEvent)
+                .where(ExperienceReviewEvent.review_run_id == running_run_id)
+                .order_by(ExperienceReviewEvent.created_at.asc())
+            )
+        )
+        .scalars()
         .all()
     )
-    completed_events = (
-        db_session.query(ExperienceReviewEvent)
-        .filter(ExperienceReviewEvent.review_run_id == completed_run_id)
-        .order_by(ExperienceReviewEvent.created_at.asc())
+    completed_events = list(
+        (
+            await async_db_session.execute(
+                select(ExperienceReviewEvent)
+                .where(ExperienceReviewEvent.review_run_id == completed_run_id)
+                .order_by(ExperienceReviewEvent.created_at.asc())
+            )
+        )
+        .scalars()
         .all()
     )
 
@@ -145,12 +163,12 @@ def test_cleanup_interrupted_review_runs_marks_active_runs_failed(db_session):
 
 
 @pytest.mark.asyncio
-async def test_analyze_allows_existing_completed_review_to_run_again(db_session, monkeypatch):
-    user, session = _create_user_and_session(db_session)
-    _create_stock_and_klines(db_session, count=21)
+async def test_analyze_allows_existing_completed_review_to_run_again(async_db_session, monkeypatch):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=21)
     existing_review_run_id = str(uuid.uuid4())
-    _create_pm_record(db_session, user, session)
-    db_session.add_all(
+    await _create_pm_record(async_db_session, user, session)
+    async_db_session.add_all(
         [
             DebateMessage(
                 session_id=session.session_id,
@@ -172,9 +190,9 @@ async def test_analyze_allows_existing_completed_review_to_run_again(db_session,
             ),
         ]
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    def fake_build_debate_review_context(*args, **kwargs):
+    async def fake_build_debate_review_context(*args, **kwargs):
         return {
             "pm_decision": {"decision": "buy", "target_position": 0.5},
             "market_outcome_summary": {"return_pct": 3.2},
@@ -197,14 +215,17 @@ async def test_analyze_allows_existing_completed_review_to_run_again(db_session,
     monkeypatch.setattr(experience_service_module, "create_experience_workflow", lambda: FakeWorkflow())
 
     result = await experience_service.analyze(
-        db_session,
         user_id=user.id,
         session_id=session.session_id,
     )
 
-    rows = (
-        db_session.query(ExperienceReviewEvent)
-        .filter(ExperienceReviewEvent.session_id == session.session_id)
+    rows = list(
+        (
+            await async_db_session.execute(
+                select(ExperienceReviewEvent).where(ExperienceReviewEvent.session_id == session.session_id)
+            )
+        )
+        .scalars()
         .all()
     )
     review_run_ids = {row.review_run_id for row in rows}
@@ -213,10 +234,11 @@ async def test_analyze_allows_existing_completed_review_to_run_again(db_session,
     assert result["review_run_id"] != existing_review_run_id
 
 
-def test_list_debate_sessions_marks_existing_reviews(db_session):
-    user, session = _create_user_and_session(db_session)
-    _create_pm_record(db_session, user, session)
-    db_session.add(
+@pytest.mark.asyncio
+async def test_list_debate_sessions_marks_existing_reviews(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_pm_record(async_db_session, user, session)
+    async_db_session.add(
         DebateMessage(
             session_id=session.session_id,
             stage="portfolio_manager",
@@ -227,7 +249,7 @@ def test_list_debate_sessions_marks_existing_reviews(db_session):
             reasoning="pm reasoning",
         )
     )
-    db_session.add(
+    async_db_session.add(
         ExperienceReviewEvent(
             review_run_id=str(uuid.uuid4()),
             session_id=session.session_id,
@@ -237,17 +259,18 @@ def test_list_debate_sessions_marks_existing_reviews(db_session):
             message_key="experience.live_messages.completed",
         )
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    sessions = experience_service.list_debate_sessions(db_session, user_id=user.id)
+    sessions = await experience_service.list_debate_sessions(user_id=user.id)
 
     assert len(sessions) == 1
     assert sessions[0]["has_experience_review"] is True
 
 
-def test_get_review_run_result_falls_back_from_completed_event_payload(db_session):
-    user, session = _create_user_and_session(db_session)
-    _create_pm_record(db_session, user, session)
+@pytest.mark.asyncio
+async def test_get_review_run_result_falls_back_from_completed_event_payload(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_pm_record(async_db_session, user, session)
     pm_message = DebateMessage(
         session_id=session.session_id,
         stage="portfolio_manager",
@@ -258,8 +281,8 @@ def test_get_review_run_result_falls_back_from_completed_event_payload(db_sessio
         reasoning="pm reasoning",
     )
     completed_run_id = str(uuid.uuid4())
-    db_session.add(pm_message)
-    db_session.add_all(
+    async_db_session.add(pm_message)
+    async_db_session.add_all(
         [
             ExperienceReviewEvent(
                 review_run_id=completed_run_id,
@@ -301,10 +324,9 @@ def test_get_review_run_result_falls_back_from_completed_event_payload(db_sessio
             ),
         ]
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    result = experience_service.get_review_run_result(
-        db_session,
+    result = await experience_service.get_review_run_result(
         user_id=user.id,
         review_run_id=completed_run_id,
     )
@@ -336,12 +358,13 @@ def test_get_review_run_result_falls_back_from_completed_event_payload(db_sessio
     ]
 
 
-def test_delete_review_run_and_clear_review_runs(db_session):
-    user, session = _create_user_and_session(db_session)
+@pytest.mark.asyncio
+async def test_delete_review_run_and_clear_review_runs(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
     deletable_run_id = str(uuid.uuid4())
     remaining_run_id = str(uuid.uuid4())
 
-    db_session.add_all(
+    async_db_session.add_all(
         [
             ExperienceReviewEvent(
                 review_run_id=deletable_run_id,
@@ -361,33 +384,32 @@ def test_delete_review_run_and_clear_review_runs(db_session):
             ),
         ]
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    deleted = experience_service.delete_review_run(
-        db_session,
+    deleted = await experience_service.delete_review_run(
         user_id=user.id,
         review_run_id=deletable_run_id,
     )
-    cleared = experience_service.delete_all_review_runs(
-        db_session,
+    cleared = await experience_service.delete_all_review_runs(
         user_id=user.id,
     )
 
     assert deleted is True
     assert cleared == 1
-    assert db_session.query(ExperienceReviewEvent).count() == 0
+    count = await async_db_session.scalar(select(func.count()).select_from(ExperienceReviewEvent))
+    assert count == 0
 
 
-def _create_stock_and_klines(db_session, *, stock_code="000001.SZ", industry="Bank", count=21):
+async def _create_stock_and_klines(async_db_session, *, stock_code="000001.SZ", industry="Bank", count=21):
     stock = StockBasic(
         stock_code=stock_code,
         name="Ping An Bank",
         industry=industry,
         market="SZSE",
     )
-    db_session.add(stock)
-    db_session.commit()
-    db_session.add_all(
+    async_db_session.add(stock)
+    await async_db_session.commit()
+    async_db_session.add_all(
         [
             KlineData(
                 stock_code=stock_code,
@@ -401,11 +423,11 @@ def _create_stock_and_klines(db_session, *, stock_code="000001.SZ", industry="Ba
             for index in range(count)
         ]
     )
-    db_session.commit()
+    await async_db_session.commit()
 
 
-def _create_pm_decision(db_session, user, session, *, created_at=datetime(2026, 1, 1, 15, 0)):
-    _create_pm_record(db_session, user, session, created_at=created_at)
+async def _create_pm_decision(async_db_session, user, session, *, created_at=datetime(2026, 1, 1, 15, 0)):
+    await _create_pm_record(async_db_session, user, session, created_at=created_at)
     message = DebateMessage(
         session_id=session.session_id,
         stage="portfolio_manager",
@@ -416,16 +438,17 @@ def _create_pm_decision(db_session, user, session, *, created_at=datetime(2026, 
         reasoning="pm reasoning",
         created_at=created_at,
     )
-    db_session.add(message)
-    db_session.commit()
+    async_db_session.add(message)
+    await async_db_session.commit()
     return message
 
 
-def test_build_debate_review_context_uses_buy_fill_price_as_entry(db_session):
-    user, session = _create_user_and_session(db_session)
-    _create_stock_and_klines(db_session, count=21)
-    pm_message = _create_pm_decision(db_session, user, session)
-    db_session.add_all(
+@pytest.mark.asyncio
+async def test_build_debate_review_context_uses_buy_fill_price_as_entry(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=21)
+    pm_message = await _create_pm_decision(async_db_session, user, session)
+    async_db_session.add_all(
         [
             TradeRecord(
                 session_id=session.session_id,
@@ -453,18 +476,19 @@ def test_build_debate_review_context_uses_buy_fill_price_as_entry(db_session):
             ),
         ]
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    context = experience_service._build_debate_review_context(
-        db_session,
-        session_obj=session,
-        stock_name="Ping An Bank",
-        industry="Bank",
-        debate_messages=[pm_message],
-        pm_message=pm_message,
-        review_horizon="20d",
-        market_day_count=21,
-    )
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        context = await experience_service._build_debate_review_context(
+            db,
+            session_obj=session,
+            stock_name="Ping An Bank",
+            industry="Bank",
+            debate_messages=[pm_message],
+            pm_message=pm_message,
+            review_horizon="20d",
+            market_day_count=21,
+        )
 
     market_outcome = context["market_outcome_summary"]
     assert context["pm_decision"]["take_profit"] == 12.0
@@ -474,11 +498,12 @@ def test_build_debate_review_context_uses_buy_fill_price_as_entry(db_session):
     assert market_outcome["close_20d_return"] == pytest.approx((30.5 / 11.0) - 1)
 
 
-def test_build_debate_review_context_falls_back_to_decision_day_close_without_buy_trade(db_session):
-    user, session = _create_user_and_session(db_session)
-    _create_stock_and_klines(db_session, count=21)
-    pm_message = _create_pm_decision(db_session, user, session)
-    db_session.add(
+@pytest.mark.asyncio
+async def test_build_debate_review_context_falls_back_to_decision_day_close_without_buy_trade(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=21)
+    pm_message = await _create_pm_decision(async_db_session, user, session)
+    async_db_session.add(
         TradeRecord(
             session_id=session.session_id,
             stock_code=session.stock_code,
@@ -488,27 +513,29 @@ def test_build_debate_review_context_falls_back_to_decision_day_close_without_bu
             trade_time=datetime(2026, 1, 2, 10, 0),
         )
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    context = experience_service._build_debate_review_context(
-        db_session,
-        session_obj=session,
-        stock_name="Ping An Bank",
-        industry="Bank",
-        debate_messages=[pm_message],
-        pm_message=pm_message,
-        review_horizon="20d",
-        market_day_count=21,
-    )
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        context = await experience_service._build_debate_review_context(
+            db,
+            session_obj=session,
+            stock_name="Ping An Bank",
+            industry="Bank",
+            debate_messages=[pm_message],
+            pm_message=pm_message,
+            review_horizon="20d",
+            market_day_count=21,
+        )
 
     market_outcome = context["market_outcome_summary"]
     assert market_outcome["entry_price"] == 10.5
     assert market_outcome["entry_price_source"] == "decision_day_close"
 
 
-def test_build_market_outcome_summary_returns_empty_when_kline_closes_missing(db_session):
+@pytest.mark.asyncio
+async def test_build_market_outcome_summary_returns_empty_when_kline_closes_missing(async_db_session):
     stock_code = "000003.SZ"
-    db_session.add(
+    async_db_session.add(
         StockBasic(
             stock_code=stock_code,
             name="Missing Close Stock",
@@ -516,8 +543,8 @@ def test_build_market_outcome_summary_returns_empty_when_kline_closes_missing(db
             market="SZSE",
         )
     )
-    db_session.flush()
-    db_session.add_all(
+    await async_db_session.flush()
+    async_db_session.add_all(
         [
             KlineData(
                 stock_code=stock_code,
@@ -531,26 +558,28 @@ def test_build_market_outcome_summary_returns_empty_when_kline_closes_missing(db
             for index in range(3)
         ]
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    market_outcome = experience_service._build_market_outcome_summary(
-        db_session,
-        stock_code=stock_code,
-        industry="Bank",
-        decision_time=datetime(2026, 1, 1, 15, 0),
-        review_horizon="5d",
-        market_day_count=3,
-    )
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        market_outcome = await experience_service._build_market_outcome_summary(
+            db,
+            stock_code=stock_code,
+            industry="Bank",
+            decision_time=datetime(2026, 1, 1, 15, 0),
+            review_horizon="5d",
+            market_day_count=3,
+        )
 
     assert market_outcome == {}
 
 
-def test_list_review_candidates_returns_ready_horizons(db_session):
-    user, session = _create_user_and_session(db_session)
-    _create_stock_and_klines(db_session, count=21)
-    _create_pm_decision(db_session, user, session)
+@pytest.mark.asyncio
+async def test_list_review_candidates_returns_ready_horizons(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=21)
+    await _create_pm_decision(async_db_session, user, session)
 
-    result = experience_service.list_review_candidates(db_session, user_id=user.id)
+    result = await experience_service.list_review_candidates(user_id=user.id)
 
     assert result["summary"]["ready_20d"] == 1
     assert len(result["items"]) == 1
@@ -566,11 +595,12 @@ def test_list_review_candidates_returns_ready_horizons(db_session):
     assert item["days_until_next_horizon"] == 40
 
 
-def test_list_review_candidates_hides_completed_horizon_but_keeps_later_ready_horizon(db_session):
-    user, session = _create_user_and_session(db_session)
-    _create_stock_and_klines(db_session, count=61)
-    _create_pm_decision(db_session, user, session)
-    db_session.add(
+@pytest.mark.asyncio
+async def test_list_review_candidates_hides_completed_horizon_but_keeps_later_ready_horizon(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=61)
+    await _create_pm_decision(async_db_session, user, session)
+    async_db_session.add(
         ExperienceReviewEvent(
             review_run_id=str(uuid.uuid4()),
             session_id=session.session_id,
@@ -581,9 +611,9 @@ def test_list_review_candidates_hides_completed_horizon_but_keeps_later_ready_ho
             payload={"review_horizon": "20d"},
         )
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    result = experience_service.list_review_candidates(db_session, user_id=user.id)
+    result = await experience_service.list_review_candidates(user_id=user.id)
 
     item = result["items"][0]
     assert item["eligible_horizons"] == ["5d", "20d", "60d"]
@@ -591,12 +621,13 @@ def test_list_review_candidates_hides_completed_horizon_but_keeps_later_ready_ho
     assert item["review_status"] == "ready_60d"
 
 
-def test_list_review_candidates_marks_not_ready_when_market_data_is_short(db_session):
-    user, session = _create_user_and_session(db_session)
-    _create_stock_and_klines(db_session, count=5)
-    _create_pm_decision(db_session, user, session)
+@pytest.mark.asyncio
+async def test_list_review_candidates_marks_not_ready_when_market_data_is_short(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=5)
+    await _create_pm_decision(async_db_session, user, session)
 
-    result = experience_service.list_review_candidates(db_session, user_id=user.id)
+    result = await experience_service.list_review_candidates(user_id=user.id)
 
     item = result["items"][0]
     assert item["eligible_horizons"] == []
@@ -606,14 +637,13 @@ def test_list_review_candidates_marks_not_ready_when_market_data_is_short(db_ses
 
 
 @pytest.mark.asyncio
-async def test_analyze_rejects_unavailable_review_horizon(db_session):
-    user, session = _create_user_and_session(db_session)
-    _create_stock_and_klines(db_session, count=6)
-    _create_pm_decision(db_session, user, session)
+async def test_analyze_rejects_unavailable_review_horizon(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=6)
+    await _create_pm_decision(async_db_session, user, session)
 
     with pytest.raises(ValueError, match="requires 21 market days"):
         await experience_service.analyze(
-            db_session,
             user_id=user.id,
             session_id=session.session_id,
             review_horizon="20d",
@@ -621,10 +651,10 @@ async def test_analyze_rejects_unavailable_review_horizon(db_session):
 
 
 @pytest.mark.asyncio
-async def test_analyze_defaults_to_highest_available_review_horizon(db_session, monkeypatch):
-    user, session = _create_user_and_session(db_session)
-    _create_stock_and_klines(db_session, count=21)
-    _create_pm_decision(db_session, user, session)
+async def test_analyze_defaults_to_highest_available_review_horizon(async_db_session, monkeypatch):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=21)
+    await _create_pm_decision(async_db_session, user, session)
 
     class FakeWorkflow:
         async def ainvoke(self, state):
@@ -675,7 +705,6 @@ async def test_analyze_defaults_to_highest_available_review_horizon(db_session, 
     monkeypatch.setattr(experience_service_module, "create_experience_workflow", lambda: FakeWorkflow())
 
     result = await experience_service.analyze(
-        db_session,
         user_id=user.id,
         session_id=session.session_id,
     )
@@ -683,22 +712,59 @@ async def test_analyze_defaults_to_highest_available_review_horizon(db_session, 
     assert result["review_horizon"] == "20d"
     assert result["market_day_count"] == 21
     completed = (
-        db_session.query(ExperienceReviewEvent)
-        .filter(
-            ExperienceReviewEvent.review_run_id == result["review_run_id"],
-            ExperienceReviewEvent.status == "completed",
+        await async_db_session.execute(
+            select(ExperienceReviewEvent).where(
+                ExperienceReviewEvent.review_run_id == result["review_run_id"],
+                ExperienceReviewEvent.status == "completed",
+            )
         )
-        .one()
-    )
+    ).scalar_one()
     assert completed.payload["review_horizon"] == "20d"
     assert completed.payload["market_day_count"] == 21
 
 
 @pytest.mark.asyncio
-async def test_analyze_defaults_to_20d_before_60d_when_both_are_available(db_session, monkeypatch):
-    user, session = _create_user_and_session(db_session)
-    _create_stock_and_klines(db_session, count=61)
-    _create_pm_decision(db_session, user, session)
+async def test_analyze_persists_completed_event_before_push(async_db_session, monkeypatch):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=21)
+    await _create_pm_decision(async_db_session, user, session)
+    calls = []
+    original_persist = experience_service._persist_review_event
+
+    class FakeWorkflow:
+        async def ainvoke(self, state):
+            return {
+                "errors": [],
+                "full_context": {},
+                "analysis_payload": {
+                    "recommended_action": "hold",
+                    "confidence_score": 80,
+                    "debate_correctness": "correct",
+                },
+                "tool_trace": [],
+            }
+
+    async def track_persist(db, **kwargs):
+        await original_persist(db, **kwargs)
+        calls.append(("persist", kwargs["status"]))
+
+    async def track_push(**kwargs):
+        calls.append(("push", kwargs["status"]))
+
+    monkeypatch.setattr(experience_service_module, "create_experience_workflow", lambda: FakeWorkflow())
+    monkeypatch.setattr(experience_service, "_persist_review_event", track_persist)
+    monkeypatch.setattr(experience_service, "_push_review_update", track_push)
+
+    await experience_service.analyze(user_id=user.id, session_id=session.session_id)
+
+    assert calls.index(("persist", "completed")) < calls.index(("push", "completed"))
+
+
+@pytest.mark.asyncio
+async def test_analyze_defaults_to_20d_before_60d_when_both_are_available(async_db_session, monkeypatch):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=61)
+    await _create_pm_decision(async_db_session, user, session)
 
     class FakeWorkflow:
         async def ainvoke(self, state):
@@ -741,7 +807,6 @@ async def test_analyze_defaults_to_20d_before_60d_when_both_are_available(db_ses
     monkeypatch.setattr(experience_service_module, "create_experience_workflow", lambda: FakeWorkflow())
 
     result = await experience_service.analyze(
-        db_session,
         user_id=user.id,
         session_id=session.session_id,
     )

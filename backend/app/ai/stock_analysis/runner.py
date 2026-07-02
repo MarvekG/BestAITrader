@@ -112,7 +112,7 @@ async def run_single_stock_analysis(stock_code: str | None, stock_name: str | No
 
     for iteration_index in range(1, MAX_STOCK_ANALYSIS_ITERATIONS + 1):
         response = await llm_with_tools.ainvoke(messages)
-        record_llm_usage(
+        await record_llm_usage(
             response,
             settings.LLM_MODEL,
             "stock_analysis",
@@ -146,7 +146,7 @@ async def run_single_stock_analysis(stock_code: str | None, stock_name: str | No
         )
     )
     final_response = await llm.ainvoke(messages)
-    record_llm_usage(
+    await record_llm_usage(
         final_response,
         settings.LLM_MODEL,
         "stock_analysis",

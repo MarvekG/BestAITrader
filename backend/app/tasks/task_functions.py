@@ -8,11 +8,12 @@ from datetime import datetime, timedelta
 import logging
 import uuid
 
-from sqlalchemy import func
+from sqlalchemy import delete, func, select
 
-from app.core.database import SessionLocal
+from app.core import database as database_module
 from app.data.analytics.core_index import get_core_index_constituent_codes
 from app.tasks.settlement import execute_daily_settlement
+from app.tasks.task_manager import task_manager
 
 
 def get_sync_date_range(task_type: str = "normal") -> tuple[str, str]:
@@ -62,6 +63,7 @@ def _sync_step_result(result: Any) -> bool:
     return True
 
 
+
 async def sync_stock_data_func(
     stock_code: Optional[str] = None,
     task_id: Optional[str] = None,
@@ -85,8 +87,6 @@ async def sync_stock_data_func(
         包含任务状态、消息、各步骤结果和标准化股票代码的字典。
     """
     from app.data.ingestors.manager import ingestor_manager
-    from app.tasks.task_manager import task_manager
-    from app.core.database import SessionLocal
     from app.core.utils.formatters import StockCodeStandardizer
 
     if not stock_code:
@@ -141,36 +141,34 @@ async def sync_stock_data_func(
     total_steps = len(steps)
     results = {}
 
-    with SessionLocal() as db:
-        for i, step in enumerate(steps):
-            step_name = step["name"]
-            progress = i + 1
+    for i, step in enumerate(steps):
+        step_name = step["name"]
+        progress = i + 1
 
-            # Update status
-            if task_id:
-                try:
-                    task_manager.update_task_status(
-                        db=db,
-                        task_id=task_id,
-                        status="running",
-                        result={
-                            "progress": progress,
-                            "total": total_steps,
-                            "current_step": f"正在同步：{step_name}"
-                        }
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to update task status for step {step_name}: {e}")
-
-            # Execute step
+        # Update status
+        if task_id:
             try:
-                logger.info(f"[{task_id}] Executing step {progress}/{total_steps}: {step_name}")
-                func = step["func"]
-                success = await func()
-                results[step_name] = _sync_step_result(success)
+                await task_manager.update_task_status(
+                    task_id=task_id,
+                    status="running",
+                    result={
+                        "progress": progress,
+                        "total": total_steps,
+                        "current_step": f"正在同步：{step_name}"
+                    }
+                )
             except Exception as e:
-                logger.error(f"[{task_id}] Step '{step_name}' failed: {e}", exc_info=True)
-                results[step_name] = False
+                logger.error(f"Failed to update task status for step {step_name}: {e}")
+
+        # Execute step
+        try:
+            logger.info(f"[{task_id}] Executing step {progress}/{total_steps}: {step_name}")
+            func = step["func"]
+            success = await func()
+            results[step_name] = _sync_step_result(success)
+        except Exception as e:
+            logger.error(f"[{task_id}] Step '{step_name}' failed: {e}", exc_info=True)
+            results[step_name] = False
 
     msg = f"Sync for {stock_code} completed. Total steps: {total_steps}."
     return {
@@ -180,14 +178,14 @@ async def sync_stock_data_func(
         "stock_code": stock_code
     }
 
-def execute_daily_settlement_func(**kwargs):
+async def execute_daily_settlement_func(**kwargs):
     """
     执行每日 T+1 结算任务
     Execute daily T+1 settlement task
     """
     try:
         logger.info("Executing daily settlement (T+1)...")
-        execute_daily_settlement()
+        await execute_daily_settlement()
         logger.info("Daily settlement completed")
     except Exception as e:
         logger.error(f"Failed to execute daily settlement: {e}")
@@ -221,8 +219,6 @@ async def sync_bulk_tables_func(
         Task execution result
     """
     from app.data.ingestors.manager import ingestor_manager
-    from app.tasks.task_manager import task_manager
-    from app.core.database import SessionLocal
     from datetime import datetime, timedelta
 
     logger.info(f"Starting bulk sync task. Tables: {tables}, task_id: {task_id}, stock_codes: {stock_codes}, start_date: {start_date}, end_date: {end_date}")
@@ -245,12 +241,12 @@ async def sync_bulk_tables_func(
         if stock_scope == "all":
             # 全量：从 stock_basic 获取所有股票代码
             # All: fetch all stock codes from stock_basic
-            final_stock_codes = ingestor_manager._get_all_stock_codes_from_stock_basic()
+            final_stock_codes = await ingestor_manager._get_all_stock_codes_from_stock_basic()
             logger.info(f"stock_scope=all, using all {len(final_stock_codes)} codes from stock_basic")
         else:
             # 默认：从仓库获取活跃股票代码（warehouse）
             # Default: use all active codes from warehouse
-            final_stock_codes = ingestor_manager._get_all_stock_codes()
+            final_stock_codes = await ingestor_manager._get_all_stock_codes()
             logger.info(f"No stock codes provided, using all {len(final_stock_codes)} active codes from warehouse")
 
     # 统一配置表：将方法引用与调用模式声明合并为单一字典
@@ -316,93 +312,93 @@ async def sync_bulk_tables_func(
     total_steps = len(tables)
     results = {}
 
-    with SessionLocal() as db:
-        for i, table_key in enumerate(tables):
-            progress = i + 1
-            config = TABLE_CONFIG.get(table_key)
+    for i, table_key in enumerate(tables):
+        progress = i + 1
+        config = TABLE_CONFIG.get(table_key)
 
-            if not config:
-                logger.warning(f"[{task_id}] No mapping found for table key: {table_key}")
-                results[table_key] = False
-                continue
+        if not config:
+            logger.warning(f"[{task_id}] No mapping found for table key: {table_key}")
+            results[table_key] = False
+            continue
 
-            method = config['method']
-            mode = config['mode']
+        method = config['method']
+        mode = config['mode']
 
-            # 更新任务状态
-            # Update task progress status
-            if task_id:
-                try:
-                    task_manager.update_task_status(
-                        db=db,
-                        task_id=task_id,
-                        status="running",
-                        result={
-                            "progress": progress,
-                            "total": total_steps,
-                            "current_step": f"Syncing: {table_key}"
-                        }
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to update task status for step {table_key}: {e}")
-
+        # 更新任务状态
+        # Update task progress status
+        if task_id:
             try:
-                if mode == 'per_stock':
-                    # 逐股迭代模式：遍历 final_stock_codes，逐只调用
-                    # Per-stock mode: iterate over final_stock_codes
-                    logger.info(
-                        f"[{task_id}] Executing step {progress}/{total_steps}: "
-                        f"{table_key} (per_stock: {len(final_stock_codes)} stocks)"
-                    )
-                    success_count = 0
-                    for code_idx, code in enumerate(final_stock_codes):
-                        kwargs = get_method_kwargs(table_key, code)
-                        kwargs['stock_code'] = code
-                        success = await method(**kwargs)
-                        step_result = _sync_step_result(success)
-                        if step_result:
-                            success_count += 1
-
-                        if task_id and (code_idx + 1) % 5 == 0:
-                            task_manager.update_task_status(
-                                db=db, task_id=task_id, status="running",
-                                result={
-                                    "progress": progress, "total": total_steps,
-                                    "current_step": f"Syncing {table_key} ({code_idx + 1}/{len(final_stock_codes)})"
-                                }
-                            )
-
-                    results[table_key] = f"Success ({success_count}/{len(final_stock_codes)})"
-
-                elif mode == 'index':
-                    # 固定指数遍历模式：遍历主要指数代码 (从配置中读取)
-                    # Index mode: iterate over major index codes from config
-                    from app.core.config import settings
-                    indices = settings.CORE_INDICES
-                    logger.info(
-                        f"[{task_id}] Executing step {progress}/{total_steps}: "
-                        f"{table_key} (index: {len(indices)} indices)"
-                    )
-                    for idx_code in indices:
-                        kwargs = get_method_kwargs(table_key)
-                        kwargs['index_code'] = idx_code
-                        await method(**kwargs)
-                    results[table_key] = True
-
-                else:
-                    # bulk 模式：只调用一次，不依赖股票/品种列表
-                    # Bulk mode: single call, no iteration
-                    logger.info(
-                        f"[{task_id}] Executing step {progress}/{total_steps}: "
-                        f"{table_key} (bulk)"
-                    )
-                    kwargs = get_method_kwargs(table_key)
-                    success = await method(**kwargs)
-                    results[table_key] = _sync_step_result(success)
-
+                await task_manager.update_task_status(
+                    task_id=task_id,
+                    status="running",
+                    result={
+                        "progress": progress,
+                        "total": total_steps,
+                        "current_step": f"Syncing: {table_key}"
+                    }
+                )
             except Exception as e:
-                logger.error(f"[{task_id}] Step '{table_key}' failed: {e}", exc_info=True)
-                results[table_key] = False
+                logger.error(f"Failed to update task status for step {table_key}: {e}")
+
+        try:
+            if mode == 'per_stock':
+                # 逐股迭代模式：遍历 final_stock_codes，逐只调用
+                # Per-stock mode: iterate over final_stock_codes
+                logger.info(
+                    f"[{task_id}] Executing step {progress}/{total_steps}: "
+                    f"{table_key} (per_stock: {len(final_stock_codes)} stocks)"
+                )
+                success_count = 0
+                for code_idx, code in enumerate(final_stock_codes):
+                    kwargs = get_method_kwargs(table_key, code)
+                    kwargs['stock_code'] = code
+                    success = await method(**kwargs)
+                    step_result = _sync_step_result(success)
+                    if step_result:
+                        success_count += 1
+
+                    if task_id and (code_idx + 1) % 5 == 0:
+                        await task_manager.update_task_status(
+                            task_id=task_id,
+                            status="running",
+                            result={
+                                "progress": progress,
+                                "total": total_steps,
+                                "current_step": f"Syncing {table_key} ({code_idx + 1}/{len(final_stock_codes)})"
+                            }
+                        )
+
+                results[table_key] = f"Success ({success_count}/{len(final_stock_codes)})"
+
+            elif mode == 'index':
+                # 固定指数遍历模式：遍历主要指数代码 (从配置中读取)
+                # Index mode: iterate over major index codes from config
+                from app.core.config import settings
+                indices = settings.CORE_INDICES
+                logger.info(
+                    f"[{task_id}] Executing step {progress}/{total_steps}: "
+                    f"{table_key} (index: {len(indices)} indices)"
+                )
+                for idx_code in indices:
+                    kwargs = get_method_kwargs(table_key)
+                    kwargs['index_code'] = idx_code
+                    await method(**kwargs)
+                results[table_key] = True
+
+            else:
+                # bulk 模式：只调用一次，不依赖股票/品种列表
+                # Bulk mode: single call, no iteration
+                logger.info(
+                    f"[{task_id}] Executing step {progress}/{total_steps}: "
+                    f"{table_key} (bulk)"
+                )
+                kwargs = get_method_kwargs(table_key)
+                success = await method(**kwargs)
+                results[table_key] = _sync_step_result(success)
+
+        except Exception as e:
+            logger.error(f"[{task_id}] Step '{table_key}' failed: {e}", exc_info=True)
+            results[table_key] = False
 
     msg = f"Bulk Sync completed for {len(tables)} tables."
     return {
@@ -414,6 +410,7 @@ async def sync_bulk_tables_func(
 
 async def sync_all_stock_basic_func(
     stock_code: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Stock Basic Info Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -449,6 +446,7 @@ async def sync_valuation_data_func(
     stock_code: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Valuation Data Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -456,7 +454,6 @@ async def sync_valuation_data_func(
     同步估值数据任务函数
     """
     from app.data.ingestors.manager import ingestor_manager
-    from app.core.database import SessionLocal
     from app.models.stock_warehouse import StockWarehouse
 
     logger.info(f"Starting {task_name} (Stock Code: {stock_code})")
@@ -470,14 +467,15 @@ async def sync_valuation_data_func(
             msg = f"Sync result for {stock_code}: {success}"
         else:
             # Sync all warehouse stocks
-            with SessionLocal() as db:
-                stocks = db.query(StockWarehouse).all()
-                count = 0
-                for stock in stocks:
-                    if await ingestor_manager.fetch_and_ingest_stock_valuation(stock.stock_code, start_date, end_date):
-                        count += 1
-                success = True
-                msg = f"Synced valuation for {count} stocks"
+            async with database_module.AsyncSessionLocal() as db:
+                stocks_result = await db.execute(select(StockWarehouse.stock_code))
+                stock_codes = list(stocks_result.scalars().all())
+            count = 0
+            for code in stock_codes:
+                if await ingestor_manager.fetch_and_ingest_stock_valuation(code, start_date, end_date):
+                    count += 1
+            success = True
+            msg = f"Synced valuation for {count} stocks"
 
         status = "success" if success else "failed"
         return {
@@ -494,6 +492,7 @@ async def sync_valuation_data_func(
 async def sync_dragon_tiger_data_func(
     date: str,
     end_date: str = None,
+    task_id: Optional[str] = None,
     task_name: str = "Dragon Tiger Sync Task",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -505,8 +504,8 @@ async def sync_dragon_tiger_data_func(
     :param allow_concurrent: 是否允许并发
     """
 
-    task_id = str(uuid.uuid4())
-    logger.info(f"Task {task_id}: Starting {task_name} for date(s) {date} to {end_date or date}")
+    current_task_id = task_id or str(uuid.uuid4())
+    logger.info(f"Task {current_task_id}: Starting {task_name} for date(s) {date} to {end_date or date}")
 
     try:
         from app.data.ingestors.manager import ingestor_manager
@@ -515,24 +514,24 @@ async def sync_dragon_tiger_data_func(
         success = await ingestor_manager.fetch_and_ingest_dragon_tiger(date, end_date)
 
         if success:
-            logger.info(f"Task {task_id}: Completed successfully.")
+            logger.info(f"Task {current_task_id}: Completed successfully.")
             return {
-                "task_id": task_id,
+                "task_id": current_task_id,
                 "status": "completed",
                 "message": f"Successfully synced dragon tiger data for {date}-{end_date or date}.",
             }
         else:
-            logger.warning(f"Task {task_id}: Failed or no data found.")
+            logger.warning(f"Task {current_task_id}: Failed or no data found.")
             return {
-                "task_id": task_id,
+                "task_id": current_task_id,
                 "status": "warning",
                 "message": f"No data found or sync failed for {date}",
             }
 
     except Exception as e:
-        logger.error(f"Task {task_id}: Failed. Error: {e}", exc_info=True)
+        logger.error(f"Task {current_task_id}: Failed. Error: {e}", exc_info=True)
         return {
-            "task_id": task_id,
+            "task_id": current_task_id,
             "status": "failed",
             "error_message": str(e)
         }
@@ -540,6 +539,7 @@ async def sync_dragon_tiger_data_func(
 
 async def sync_limit_up_pool_func(
     date: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Limit Up Pool Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -565,6 +565,7 @@ async def sync_limit_up_pool_func(
 
 async def sync_limit_down_pool_func(
     date: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Limit Down Pool Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -590,6 +591,7 @@ async def sync_limit_down_pool_func(
 
 async def sync_zhaban_pool_func(
     date: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Zhaban Pool Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -616,6 +618,7 @@ async def sync_zhaban_pool_func(
 async def sync_pledge_summary_func(
     task_name: str = "Pledge Summary Sync",
     stock_code: Optional[str] = None,
+    task_id: Optional[str] = None,
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
     """
@@ -651,6 +654,7 @@ async def sync_granular_data_func(
     data_type: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Granular Data Sync",
     allow_concurrent: bool = True
 ) -> Dict[str, Any]:
@@ -714,6 +718,7 @@ async def sync_stock_daily_func(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     adjust: str = "qfq",
+    task_id: Optional[str] = None,
     task_name: str = "Daily Data Sync",
     allow_concurrent: bool = True
 ) -> Dict[str, Any]:
@@ -749,6 +754,7 @@ async def sync_stock_daily_func(
 
 async def sync_realtime_market_func(
     stock_code: str,
+    task_id: Optional[str] = None,
     task_name: str = "Realtime Market Data Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -776,6 +782,7 @@ async def sync_realtime_market_func(
 
 
 async def sync_industry_data_func(
+    task_id: Optional[str] = None,
     task_name: str = "Industry Data Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -803,6 +810,7 @@ async def sync_industry_data_func(
 
 async def sync_sector_money_flow_func(
     stock_code: str,
+    task_id: Optional[str] = None,
     task_name: str = "Sector Money Flow Sync",
     allow_concurrent: bool = True
 ) -> Dict[str, Any]:
@@ -842,6 +850,7 @@ async def sync_index_daily_func(
     index_code: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Index Daily Sync",
     allow_concurrent: bool = True
 ) -> Dict[str, Any]:
@@ -876,6 +885,7 @@ async def sync_index_daily_func(
 
 async def sync_northbound_data_func(
     stock_code: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Northbound Data Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -883,7 +893,6 @@ async def sync_northbound_data_func(
     同步北向资金持股数据任务函数
     """
     from app.data.ingestors.manager import ingestor_manager
-    from app.core.database import SessionLocal
     from app.models.stock_warehouse import StockWarehouse
 
     logger.info(f"Starting {task_name} (Stock Code: {stock_code})")
@@ -895,14 +904,15 @@ async def sync_northbound_data_func(
             msg = f"Sync result for {stock_code}: {success}"
         else:
             # Sync all warehouse stocks
-            with SessionLocal() as db:
-                stocks = db.query(StockWarehouse).all()
-                count = 0
-                for stock in stocks:
-                    if await ingestor_manager.fetch_and_ingest_northbound(stock.stock_code):
-                        count += 1
-                success = True
-                msg = f"Synced northbound data for {count} stocks"
+            async with database_module.AsyncSessionLocal() as db:
+                stocks_result = await db.execute(select(StockWarehouse.stock_code))
+                stock_codes = list(stocks_result.scalars().all())
+            count = 0
+            for code in stock_codes:
+                if await ingestor_manager.fetch_and_ingest_northbound(code):
+                    count += 1
+            success = True
+            msg = f"Synced northbound data for {count} stocks"
 
         status = "success" if success else "failed"
         return {
@@ -918,6 +928,7 @@ async def sync_northbound_data_func(
 
 async def calculate_indicators_func(
     stock_code: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Calculate Indicators",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -925,30 +936,30 @@ async def calculate_indicators_func(
     计算技术指标任务函数
     """
     from app.data.analytics.indicators import indicator_service
-    from app.core.database import SessionLocal
     from app.models.stock_warehouse import StockWarehouse
 
     logger.info(f"Starting {task_name} (Stock Code: {stock_code})")
 
     try:
-        with SessionLocal() as db:
-            if stock_code:
-                indicator_service.process_stock(db, stock_code)
-                msg = f"Calculated indicators for {stock_code}"
-            else:
-                # Calculate for all stocks in warehouse
-                stocks = db.query(StockWarehouse).all()
-                count = 0
-                for stock in stocks:
-                    try:
-                        indicator_service.process_stock(db, stock.stock_code)
-                        count += 1
-                        if count % 10 == 0:
-                            logger.info(f"Calculated indicators for {count} stocks...")
-                    except Exception as e:
-                        logger.error(f"Failed to calculate for {stock.stock_code}: {e}")
+        if stock_code:
+            await indicator_service.process_stock(stock_code)
+            msg = f"Calculated indicators for {stock_code}"
+        else:
+            # Calculate for all stocks in warehouse
+            async with database_module.AsyncSessionLocal() as db:
+                stocks_result = await db.execute(select(StockWarehouse.stock_code))
+                stock_codes = list(stocks_result.scalars().all())
+            count = 0
+            for current_stock_code in stock_codes:
+                try:
+                    await indicator_service.process_stock(current_stock_code)
+                    count += 1
+                    if count % 10 == 0:
+                        logger.info(f"Calculated indicators for {count} stocks...")
+                except Exception as e:
+                    logger.error(f"Failed to calculate for {current_stock_code}: {e}")
 
-                msg = f"Calculated indicators for {count} stocks"
+            msg = f"Calculated indicators for {count} stocks"
 
         return {
             "status": "success",
@@ -963,6 +974,7 @@ async def calculate_indicators_func(
 
 async def sync_top_holders_func(
     stock_code: str,
+    task_id: Optional[str] = None,
     task_name: str = "Top Holders Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -1014,9 +1026,11 @@ async def update_warehouse_stocks_realtime_quotes(
         from app.data.ingestors.manager import ingestor_manager
 
         # 2. 获取股票仓库中的所有活跃股票
-        with SessionLocal() as db:
-            stocks = db.query(StockWarehouse).filter(StockWarehouse.is_active.is_(True)).all()
-            stock_codes = [s.stock_code for s in stocks]
+        async with database_module.AsyncSessionLocal() as db:
+            stocks_result = await db.execute(
+                select(StockWarehouse.stock_code).where(StockWarehouse.is_active.is_(True))
+            )
+            stock_codes = list(stocks_result.scalars().all())
 
         if not stock_codes:
             logger.info("No active stocks in warehouse, skipping update.")
@@ -1076,8 +1090,10 @@ async def cleanup_stock_realtime_market_history(task_name: str | None = None) ->
     retention_hours = 24
 
     try:
-        with SessionLocal() as db:
-            latest_timestamp = db.query(func.max(StockRealtimeMarket.timestamp)).scalar()
+        async with database_module.AsyncSessionLocal() as db:
+            latest_timestamp = (
+                await db.execute(select(func.max(StockRealtimeMarket.timestamp)))
+            ).scalar_one_or_none()
             if latest_timestamp is None:
                 return {
                     "status": "success",
@@ -1088,12 +1104,11 @@ async def cleanup_stock_realtime_market_history(task_name: str | None = None) ->
                 }
 
             cutoff_time = latest_timestamp - timedelta(hours=retention_hours)
-            deleted_count = (
-                db.query(StockRealtimeMarket)
-                .filter(StockRealtimeMarket.timestamp < cutoff_time)
-                .delete(synchronize_session=False)
+            delete_result = await db.execute(
+                delete(StockRealtimeMarket).where(StockRealtimeMarket.timestamp < cutoff_time)
             )
-            db.commit()
+            deleted_count = delete_result.rowcount or 0
+            await db.commit()
         logger.info("Deleted %s stale StockRealtimeMarket records before %s", deleted_count, cutoff_time.isoformat())
         return {
             "status": "success",
@@ -1180,117 +1195,118 @@ async def sync_base_info_func(
     同步内容：股票基础信息、日线行情、财务指标、估值数据、十大股东、实时行情、技术指标
     """
     from app.data.ingestors.manager import ingestor_manager
-    from app.tasks.task_manager import task_manager
-    from app.core.database import SessionLocal
 
     logger.info(f"Starting base info sync for {stock_code if stock_code else 'ALL (Filtered)'} (scope: {scope}), task_id: {task_id}")
     # 如果没有指定股票代码，则执行全量过滤同步 (Batch sync if no stock_code)
     if not stock_code:
-        with SessionLocal() as db:
-            from app.models.data_storage import StockBasic
-            from app.models.async_task import AsyncTask
-            from app.models.stock_warehouse import StockWarehouse
-            from app.data.stock_filters import get_basic_stock_filter_conds
+        from app.models.data_storage import StockBasic
+        from app.models.async_task import AsyncTask
+        from app.models.stock_warehouse import StockWarehouse
+        from app.data.stock_filters import get_basic_stock_filter_conds
 
-            stock_list = []
-            start_index = 0
+        stock_list = []
+        start_index = 0
 
-            # 尝试从上次任务续传 (Try resume from last task)
-            if resume:
-                # ... [Keep resume logic the same, it depends on task_type] ...
-                last_task = db.query(AsyncTask).filter(
-                    AsyncTask.task_type == "base_info_sync",
-                    AsyncTask.status.in_(["failed", "warning", "running"]),
-                    AsyncTask.task_id != task_id
-                ).order_by(AsyncTask.created_at.desc()).first()
+        # 尝试从上次任务续传 (Try resume from last task)
+        if resume:
+            async with database_module.AsyncSessionLocal() as db:
+                last_task_result = await db.execute(
+                    select(AsyncTask)
+                    .where(
+                        AsyncTask.task_type == "base_info_sync",
+                        AsyncTask.status.in_(["failed", "warning", "running"]),
+                        AsyncTask.task_id != task_id,
+                    )
+                    .order_by(AsyncTask.created_at.desc())
+                    .limit(1)
+                )
+                last_task = last_task_result.scalars().first()
 
                 if last_task and last_task.result and "stock_list" in last_task.result:
                     stock_list = last_task.result["stock_list"]
                     start_index = last_task.result.get("last_processed_index", -1) + 1
                     logger.info(f"Resuming task {last_task.task_id} from index {start_index}")
 
-            if not stock_list:
-                # 1. 先同步一次 A 股基础列表 (Update master list first)
-                logger.info("Updating master stock list from ingestor...")
-                await ingestor_manager.fetch_and_ingest_all_stock_basic()
+        if not stock_list:
+            # 1. 先同步一次 A 股基础列表 (Update master list first)
+            logger.info("Updating master stock list from ingestor...")
+            await ingestor_manager.fetch_and_ingest_all_stock_basic()
 
-                # 2. 获取过滤后的股票列表 (Get filtered list)
-                if scope == "warehouse":
-                    logger.info("Sync scope: warehouse. Fetching active warehouse stocks...")
-                    warehouse_stocks = db.query(StockWarehouse.stock_code).filter(StockWarehouse.is_active == True).all()
-                    stock_list = [s[0] for s in warehouse_stocks]
-                elif scope == "core":
-                    logger.info("Sync scope: core. Fetching core index constituents via Tushare...")
-                    stock_list = get_core_index_constituent_codes()
-                else:
-                    logger.info("Sync scope: all. Fetching filtered basic stocks...")
-                    filtered_conds = get_basic_stock_filter_conds()
-                    stocks_to_sync = db.query(StockBasic.stock_code).filter(filtered_conds).all()
-                    stock_list = [s[0] for s in stocks_to_sync]
-                
-                start_index = 0
-
-            total_stocks = len(stock_list)
-            logger.info(f"Filtered {total_stocks} stocks for batch base info sync (Start at: {start_index})")
-
-            # 初始化当前任务状态 (Initialize current task result with stock_list)
-            task_manager.update_task_status(
-                db=db,
-                task_id=task_id,
-                status="running",
-                result={
-                    "progress": start_index,
-                    "total": total_stocks,
-                    "stock_list": stock_list,
-                    "last_processed_index": start_index - 1
-                }
-            )
-
-            if total_stocks == 0 or start_index >= total_stocks:
-                return {"status": "success", "message": "No stocks match the filter criteria or already completed."}
-
-            # 3. 循环调用自身同步每只股票 (Recurse for each stock)
-            success_count = 0
-            for idx in range(start_index, total_stocks):
-                code = stock_list[idx]
-                try:
-                    # 每同步 3 只或最后一只更新总进度 (Update overall progress every 3 stocks or at the end)
-                    if task_id and (idx % 3 == 0 or idx == total_stocks - 1):
-                        # 获取当前任务结果以获取最新的 stock_list (虽然 stock_list 不变)
-                        current_task = db.query(AsyncTask).filter(AsyncTask.task_id == task_id).first()
-                        task_result = (current_task.result or {}).copy() if current_task else {}
-
-                        task_result.update({
-                            "progress": idx + 1,
-                            "total": total_stocks,
-                            "current_step": f"Updating {code}",
-                            "last_processed_index": idx,
-                            "stock_list": stock_list
-                        })
-
-                        task_manager.update_task_status(
-                            db=db,
-                            task_id=task_id,
-                            status="running",
-                            result=task_result
+            # 2. 获取过滤后的股票列表 (Get filtered list)
+            if scope == "core":
+                logger.info("Sync scope: core. Fetching core index constituents via Tushare...")
+                stock_list = await get_core_index_constituent_codes()
+            else:
+                async with database_module.AsyncSessionLocal() as db:
+                    if scope == "warehouse":
+                        logger.info("Sync scope: warehouse. Fetching active warehouse stocks...")
+                        warehouse_stocks = await db.execute(
+                            select(StockWarehouse.stock_code).where(StockWarehouse.is_active.is_(True))
                         )
+                        stock_list = list(warehouse_stocks.scalars().all())
+                    else:
+                        logger.info("Sync scope: all. Fetching filtered basic stocks...")
+                        filtered_conds = get_basic_stock_filter_conds()
+                        stocks_to_sync = await db.execute(select(StockBasic.stock_code).where(filtered_conds))
+                        stock_list = list(stocks_to_sync.scalars().all())
 
-                    # 执行单股同步步骤
-                    res = await _process_single_stock(code, task_id)
-                    if res.get("status") == "success":
-                        success_count += 1
-                except Exception as e:
-                    logger.error(f"Failed to sync stock {code} in batch: {e}")
+            start_index = 0
 
-            return {
-                "status": "success" if success_count > 0 else "failed",
-                "message": (
-                    f"Batch sync completed. {success_count}/{total_stocks - start_index} "
-                    f"stocks succeeded in this session."
-                ),
+        total_stocks = len(stock_list)
+        logger.info(f"Filtered {total_stocks} stocks for batch base info sync (Start at: {start_index})")
+
+        # 初始化当前任务状态 (Initialize current task result with stock_list)
+        await task_manager.update_task_status(
+            task_id=task_id,
+            status="running",
+            result={
+                "progress": start_index,
                 "total": total_stocks,
-                "success_count": success_count,
-                "resumed_from": start_index
+                "stock_list": stock_list,
+                "last_processed_index": start_index - 1
             }
+        )
+
+        if total_stocks == 0 or start_index >= total_stocks:
+            return {"status": "success", "message": "No stocks match the filter criteria or already completed."}
+
+        # 3. 循环调用自身同步每只股票 (Recurse for each stock)
+        success_count = 0
+        for idx in range(start_index, total_stocks):
+            code = stock_list[idx]
+            try:
+                # 每同步 3 只或最后一只更新总进度 (Update overall progress every 3 stocks or at the end)
+                if task_id and (idx % 3 == 0 or idx == total_stocks - 1):
+                    task_result = {
+                        "progress": idx + 1,
+                        "total": total_stocks,
+                        "current_step": f"Updating {code}",
+                        "last_processed_index": idx,
+                        "stock_list": stock_list
+                    }
+
+                    await task_manager.update_task_status(
+                        task_id=task_id,
+                        status="running",
+                        result=task_result
+                    )
+
+                # 执行单股同步步骤
+                res = await _process_single_stock(code, task_id)
+                if res.get("status") == "success":
+                    success_count += 1
+            except Exception as e:
+                logger.error(f"Failed to sync stock {code} in batch: {e}")
+
+        return {
+            "status": "success" if success_count > 0 else "failed",
+            "message": (
+                f"Batch sync completed. {success_count}/{total_stocks - start_index} "
+                f"stocks succeeded in this session."
+            ),
+            "total": total_stocks,
+            "success_count": success_count,
+            "resumed_from": start_index
+        }
 
     return await _process_single_stock(stock_code, task_id)

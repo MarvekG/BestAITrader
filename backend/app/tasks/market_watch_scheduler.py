@@ -5,14 +5,14 @@ from datetime import datetime
 from typing import Any
 
 import pytz
-from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from app.ai.market_watch.audit import cleanup_old_events
 from app.ai.market_watch.schemas import MIN_MARKET_WATCH_SCAN_INTERVAL_SECONDS
 from app.ai.market_watch.service import scan_market_watch
 from app.ai.market_watch.settings import get_market_watch_settings
+from app.core import database as database_module
 from app.core.config import settings
-from app.core.database import SessionLocal
 from app.core.logger import get_logger
 from app.tasks.scheduled_task_registry import ScheduledTask
 from app.tasks.scheduled_task_registry import ScheduledTaskSnapshot
@@ -66,7 +66,7 @@ async def run_audit_cleanup() -> dict[str, int]:
         删除数量和实际使用的保留天数。
     """
     retention_days = settings.MARKET_WATCH_EVENT_RETENTION_DAYS
-    deleted_count = cleanup_old_events(retention_days=retention_days)
+    deleted_count = await cleanup_old_events(retention_days=retention_days)
     if deleted_count:
         logger.info(
             "deleted old market watch audit events",
@@ -81,11 +81,10 @@ async def run_due_scans() -> dict[str, Any]:
     launched: list[dict[str, Any]] = []
     skipped = 0
 
-    with SessionLocal() as db:
-        user_ids = _load_active_user_ids(db)
+    user_ids = await _load_active_user_ids()
 
     for user_id in user_ids:
-        settings = get_market_watch_settings(user_id)
+        settings = await get_market_watch_settings(user_id)
         if not settings.auto_scan_enabled:
             skipped += 1
             continue
@@ -122,12 +121,13 @@ async def run_due_scans() -> dict[str, Any]:
     return {"scanned": len(launched), "skipped": skipped, "items": launched}
 
 
-def _load_active_user_ids(db: Session) -> list[int]:
+async def _load_active_user_ids() -> list[int]:
     """Load active user IDs that may have market watch enabled."""
     from app.models.user import User
 
-    rows = db.query(User.id).filter(User.is_active.is_(True)).order_by(User.id.asc()).all()
-    return [int(user_id) for user_id, in rows]
+    async with database_module.AsyncSessionLocal() as db:
+        result = await db.execute(select(User.id).where(User.is_active.is_(True)).order_by(User.id.asc()))
+        return [int(user_id) for user_id in result.scalars().all()]
 
 
 def _is_due(user_id: int, interval_seconds: int, now: datetime) -> bool:

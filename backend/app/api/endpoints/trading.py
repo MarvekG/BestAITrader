@@ -1,4 +1,3 @@
-from app.models.data_storage import StockBasic
 from app.core.utils.formatters import StockCodeStandardizer
 from app.data.storage import data_storage_service  # Added for stock name lookup
 from app.websocket.manager import ws_manager
@@ -8,23 +7,22 @@ from app.api.ownership import (
     get_owned_order,
     get_owned_session,
     get_owned_trade_record,
+    get_stock_name,
+    list_owned_orders,
+    list_owned_session_orders,
+    list_owned_session_trades,
+    list_owned_trades,
 )
-from app.crud.order import crud_order
-from app.models.order import Order
 from app.schemas.order import OrderUpdate, PlaceOrderRequest
 from app.core.security import get_current_user
 from app.models.user import User
-from app.models.trade_record import TradeRecord
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from sqlalchemy.orm import Session
 from typing import List, Dict, Any, Optional
 from uuid import UUID
 
 from datetime import datetime
 
-from app.core.database import get_db
 from app.core.logger import get_logger
-from app.crud.account import ensure_user_account
 from app.tasks.async_scheduler import async_task_scheduler
 from app.trading.discipline_service import scan_position_disciplines
 from app.trading.discipline_settings import (
@@ -44,21 +42,21 @@ trading_engine = TradingEngine()
 
 
 @router.get("/discipline-settings", response_model=PositionDisciplineSettingsResponse)
-def read_position_discipline_settings(
+async def read_position_discipline_settings(
     current_user: User = Depends(get_current_user),
 ) -> PositionDisciplineSettingsResponse:
     """读取当前用户止损止盈扫描设置。"""
-    return get_position_discipline_settings(current_user.id)
+    return await get_position_discipline_settings(current_user.id)
 
 
 @router.put("/discipline-settings", response_model=PositionDisciplineSettingsResponse)
-def update_position_discipline_settings(
+async def update_position_discipline_settings(
     payload: PositionDisciplineSettingsUpdate,
     current_user: User = Depends(get_current_user),
 ) -> PositionDisciplineSettingsResponse:
     """更新当前用户止损止盈扫描设置。"""
     try:
-        updated = upsert_position_discipline_settings(current_user.id, payload)
+        updated = await upsert_position_discipline_settings(current_user.id, payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     async_task_scheduler.refresh_schedule()
@@ -78,7 +76,6 @@ async def scan_position_disciplines_once(
 async def place_order(
     order: PlaceOrderRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
 ):
     """Place order"""
     try:
@@ -96,18 +93,17 @@ async def place_order(
         # [FEATURE] If stock_name is missing, try to fetch it from database
         if not stock_name and stock_code:
             try:
-                stock_basic = data_storage_service.get_stock_basic(stock_code)
+                stock_basic = await data_storage_service.get_stock_basic(stock_code)
                 if stock_basic:
                     stock_name = stock_basic.get("name")
                     logger.info(f"Retrieved stock name '{stock_name}' for code '{stock_code}' from DB")
             except Exception as e:
                 logger.error(f"Failed to fetch stock name for {stock_code}: {e}")
 
-        # Check account using current user
-        account = ensure_user_account(db, current_user)
-
         if session_id:
-            get_owned_session(db, session_id, current_user)
+            await get_owned_session(session_id, current_user)
+
+        account = await get_current_user_account(current_user)
 
         if action != "buy":
             stop_loss = None
@@ -117,9 +113,8 @@ async def place_order(
         # 使用 TradingService 统一处理订单执行和数据库更新
         # Use TradingService to uniformly handle order execution and DB updates
         order_result = await trading_service.execute_order_and_update_db(
-            db=db,
             session_id=session_id,
-            account=account,
+            account_id=account.account_id,
             stock_code=stock_code,
             action=action,
             shares=order.shares,
@@ -218,20 +213,18 @@ async def place_order(
 async def cancel_order(
     order_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """Cancel order"""
     try:
-        order_record = get_owned_order(db, order_id, current_user)
         from app.trading.service import trading_service
 
-        result = await trading_service.cancel_order(db, order_record)
+        result = await trading_service.cancel_order(order_id, user_id=current_user.id)
+        order_record = result["order"]
 
         # Push order status change
         if result["success"]:
             # 动态获取股票名称
-            s_name = db.query(StockBasic.name).filter(StockBasic.stock_code ==
-                                                      order_record.stock_code).scalar() or "Unknown"
+            s_name = await get_stock_name(order_record.stock_code)
 
             order_status_message = {
                 "order_id": str(order_record.order_id),
@@ -268,23 +261,12 @@ async def get_order_history(
     limit: int = 100,
     status: Optional[str] = None,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """Get order history"""
     try:
-        get_owned_session(db, session_id, current_user)
-        account_id = get_current_user_account(db, current_user).account_id
-        query = db.query(Order, StockBasic.name).outerjoin(
-            StockBasic, Order.stock_code == StockBasic.stock_code
-        ).filter(
-            Order.session_id == session_id,
-            Order.account_id == account_id,
-        )
-
-        if status:
-            query = query.filter(Order.status == status)
-
-        results = query.order_by(Order.created_at.desc()).offset(skip).limit(limit).all()
+        await get_owned_session(session_id, current_user)
+        account_id = (await get_current_user_account(current_user)).account_id
+        results = await list_owned_session_orders(session_id, account_id, skip=skip, limit=limit, status=status)
 
         # Convert to response format
         order_history = []
@@ -319,11 +301,11 @@ async def get_order_history(
 async def get_order(
     order_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """Get single order details"""
     try:
-        order = get_owned_order(db, order_id, current_user)
+        order = await get_owned_order(order_id, current_user)
+        stock_name = await get_stock_name(order.stock_code)
 
         # Convert to response format
         order_dict = {
@@ -331,9 +313,7 @@ async def get_order(
             "session_id": str(order.session_id) if order.session_id else None,
             "source": order.source,
             "stock_code": order.stock_code,
-            "stock_name": db.query(StockBasic.name).filter(
-                StockBasic.stock_code == order.stock_code
-            ).scalar() or "Unknown",
+            "stock_name": stock_name,
             "action": order.action,
             "order_type": order.order_type,
             "price": float(order.price),
@@ -357,12 +337,10 @@ async def update_order(
     order_id: UUID,
     order_update: OrderUpdate,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """Update order"""
     try:
-        # Get order
-        order = get_owned_order(db, order_id, current_user)
+        order = await get_owned_order(order_id, current_user)
 
         # Check order status, only pending orders can be updated
         if order.status not in ["pending"]:
@@ -379,13 +357,11 @@ async def update_order(
                 "order_id": str(order_id),
             }
 
-        # Update order
         update_data = order_update.model_dump(exclude_unset=True)
-        updated_order = crud_order.update(db, db_obj=order, obj_in=update_data)
+        from app.trading.service import trading_service
 
-        # Convert to response format
-        s_name = db.query(StockBasic.name).filter(StockBasic.stock_code ==
-                                                  updated_order.stock_code).scalar() or "Unknown"
+        updated_order = await trading_service.update_order(order_id, update_data)
+        s_name = await get_stock_name(updated_order.stock_code)
         updated_order_dict = {
             "id": str(updated_order.order_id),
             "stock_code": updated_order.stock_code,
@@ -418,20 +394,12 @@ async def get_trade_records(
     skip: int = 0,
     limit: int = 100,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """Get trade records"""
     try:
-        get_owned_session(db, session_id, current_user)
-        account_id = get_current_user_account(db, current_user).account_id
-        query = db.query(TradeRecord, StockBasic.name).outerjoin(
-            StockBasic, TradeRecord.stock_code == StockBasic.stock_code
-        ).filter(
-            TradeRecord.session_id == session_id,
-            TradeRecord.account_id == account_id,
-        )
-
-        results = query.order_by(TradeRecord.trade_time.desc()).offset(skip).limit(limit).all()
+        await get_owned_session(session_id, current_user)
+        account_id = (await get_current_user_account(current_user)).account_id
+        results = await list_owned_session_trades(session_id, account_id, skip=skip, limit=limit)
 
         trade_records = []
         for record, s_name in results:
@@ -464,13 +432,12 @@ async def get_trade_records(
 async def get_trade_record(
     trade_id: UUID,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
 ):
     """Get single trade record"""
     try:
-        record = get_owned_trade_record(db, trade_id, current_user)
+        record = await get_owned_trade_record(trade_id, current_user)
 
-        s_name = db.query(StockBasic.name).filter(StockBasic.stock_code == record.stock_code).scalar() or "Unknown"
+        s_name = await get_stock_name(record.stock_code)
         trade_record = {
             "id": str(record.trade_id),
             "order_id": str(record.order_id),
@@ -503,21 +470,11 @@ async def get_my_orders(
     status: Optional[str] = None,
     stock_code: Optional[str] = None,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
 ):
     """Get current user global order history (all sessions and no session)"""
     try:
-        account_id = ensure_user_account(db, current_user).account_id
-
-        query = db.query(Order, StockBasic.name).outerjoin(
-            StockBasic, Order.stock_code == StockBasic.stock_code
-        ).filter(Order.account_id == account_id)
-        if status:
-            query = query.filter(Order.status == status)
-        if stock_code:
-            query = query.filter(Order.stock_code == stock_code)
-
-        orders = query.order_by(Order.created_at.desc()).offset(skip).limit(limit).all()
+        account_id = (await get_current_user_account(current_user)).account_id
+        orders = await list_owned_orders(account_id, skip=skip, limit=limit, status=status, stock_code=stock_code)
 
         # Convert to response format
         order_history = []
@@ -556,20 +513,11 @@ async def get_my_trades(
     limit: int = 100,
     stock_code: Optional[str] = None,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
 ):
     """Get current user global trade history (all sessions and no session)"""
     try:
-        account_id = ensure_user_account(db, current_user).account_id
-
-        query = db.query(TradeRecord, StockBasic.name).outerjoin(
-            StockBasic, TradeRecord.stock_code == StockBasic.stock_code
-        ).filter(TradeRecord.account_id == account_id)
-
-        if stock_code:
-            query = query.filter(TradeRecord.stock_code == stock_code)
-
-        results = query.order_by(TradeRecord.trade_time.desc()).offset(skip).limit(limit).all()
+        account_id = (await get_current_user_account(current_user)).account_id
+        results = await list_owned_trades(account_id, skip=skip, limit=limit, stock_code=stock_code)
 
         trade_records = []
         for record, s_name in results:

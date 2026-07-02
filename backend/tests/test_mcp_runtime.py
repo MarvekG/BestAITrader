@@ -13,8 +13,9 @@ SCRAPLING_ALLOWED_TOOLS = [
 ]
 
 
-def test_default_mcp_server_is_available_when_system_config_missing(db_session):
-    list_result = mcp_registry.list_mcp_servers()
+@pytest.mark.asyncio
+async def test_default_mcp_server_is_available_when_system_config_missing(test_db):
+    list_result = await mcp_registry.list_mcp_servers()
 
     assert list_result["count"] == 1
     assert list_result["items"][0] == {
@@ -25,8 +26,9 @@ def test_default_mcp_server_is_available_when_system_config_missing(db_session):
     }
 
 
-def test_create_update_delete_mcp_server_config(db_session):
-    create_result = mcp_registry.create_mcp_server(
+@pytest.mark.asyncio
+async def test_create_update_delete_mcp_server_config(test_db):
+    create_result = await mcp_registry.create_mcp_server(
         MCPServerCreateRequest(
             name="公告检索",
             url="http://127.0.0.1:8000/mcp",
@@ -39,22 +41,22 @@ def test_create_update_delete_mcp_server_config(db_session):
     assert set(create_result["server"]) == {"name", "enabled", "url", "allowed_tools"}
     assert "token" not in create_result["server"]
 
-    stored_config = mcp_registry.get_mcp_server_config("公告检索")
+    stored_config = await mcp_registry.get_mcp_server_config("公告检索")
     assert stored_config.token == "secret-token"
 
-    list_result = mcp_registry.list_mcp_servers()
+    list_result = await mcp_registry.list_mcp_servers()
     assert list_result["count"] == 2
     assert any(item["name"] == "公告检索" for item in list_result["items"])
 
-    update_result = mcp_registry.update_mcp_server(
+    update_result = await mcp_registry.update_mcp_server(
         "公告检索",
         MCPServerUpdateRequest(enabled=True),
     )
     assert update_result["server"]["enabled"] is True
 
-    delete_result = mcp_registry.delete_mcp_server("公告检索")
+    delete_result = await mcp_registry.delete_mcp_server("公告检索")
     assert delete_result == {"status": "success", "name": "公告检索"}
-    assert [item["name"] for item in mcp_registry.list_mcp_servers()["items"]] == ["网页抓取"]
+    assert [item["name"] for item in (await mcp_registry.list_mcp_servers())["items"]] == ["网页抓取"]
 
 
 @pytest.mark.parametrize("url", ["", "ftp://example.com/mcp", "http:///missing-host"])
@@ -63,19 +65,21 @@ def test_mcp_url_rejects_unsafe_values(url):
         mcp_registry.validate_mcp_url(url)
 
 
-def test_build_mcp_catalog_prompt_shows_configured_disabled_servers(db_session):
-    prompt = build_mcp_catalog_prompt()
+@pytest.mark.asyncio
+async def test_build_mcp_catalog_prompt_shows_configured_disabled_servers(test_db):
+    prompt = await build_mcp_catalog_prompt()
 
     assert prompt == "No MCP tools are enabled for LLM use."
 
 
-def test_build_mcp_catalog_prompt_lists_enabled_server_tools(db_session):
-    mcp_registry.update_mcp_server(
+@pytest.mark.asyncio
+async def test_build_mcp_catalog_prompt_lists_enabled_server_tools(test_db):
+    await mcp_registry.update_mcp_server(
         "网页抓取",
         MCPServerUpdateRequest(enabled=True),
     )
 
-    prompt = build_mcp_catalog_prompt()
+    prompt = await build_mcp_catalog_prompt()
 
     assert "网页抓取" in prompt
     assert "stealthy_fetch" in prompt
@@ -84,7 +88,7 @@ def test_build_mcp_catalog_prompt_lists_enabled_server_tools(db_session):
 
 
 @pytest.mark.asyncio
-async def test_build_mcp_tools_documentation_shows_tool_description_and_schema(monkeypatch, db_session):
+async def test_build_mcp_tools_documentation_shows_tool_description_and_schema(monkeypatch, test_db):
     class FakeArgsSchema:
         @classmethod
         def model_json_schema(cls):
@@ -98,7 +102,7 @@ async def test_build_mcp_tools_documentation_shows_tool_description_and_schema(m
     async def fake_get_tools(name):
         return [FakeTool()]
 
-    mcp_registry.update_mcp_server(
+    await mcp_registry.update_mcp_server(
         "网页抓取",
         MCPServerUpdateRequest(enabled=True, allowed_tools=["get"]),
     )
@@ -112,7 +116,7 @@ async def test_build_mcp_tools_documentation_shows_tool_description_and_schema(m
 
 
 @pytest.mark.asyncio
-async def test_mcp_runtime_lists_invokes_and_filters_adapter_tools(monkeypatch, db_session):
+async def test_mcp_runtime_lists_invokes_and_filters_adapter_tools(monkeypatch, test_db):
     class FakeArgsSchema:
         @classmethod
         def model_json_schema(cls):
@@ -129,7 +133,7 @@ async def test_mcp_runtime_lists_invokes_and_filters_adapter_tools(monkeypatch, 
     async def fake_get_tools(name):
         return [FakeTool()]
 
-    mcp_registry.create_mcp_server(
+    await mcp_registry.create_mcp_server(
         MCPServerCreateRequest(
             name="fake",
             enabled=True,

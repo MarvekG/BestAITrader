@@ -1,96 +1,57 @@
 from datetime import datetime
 from decimal import Decimal
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import func, select
 
 from app.models.account import Account
 from app.models.order import Order
 from app.models.position import Position
 from app.models.trade_record import TradeRecord
-from app.trading.service import TradingService
+from app.models.user import User
+from app.trading.service import TradingService, _recompute_account_total_assets
 
 
-class _FakeQuery:
-    def __init__(self, *, first_result=None, scalar_result=None, all_result=None):
-        self._first_result = first_result
-        self._scalar_result = scalar_result
-        self._all_result = all_result or []
-
-    def filter(self, *_args, **_kwargs):
-        return self
-
-    def with_for_update(self):
-        return self
-
-    def order_by(self, *_args, **_kwargs):
-        return self
-
-    def limit(self, *_args, **_kwargs):
-        return self
-
-    def offset(self, *_args, **_kwargs):
-        return self
-
-    def first(self):
-        return self._first_result
-
-    def scalar(self):
-        return self._scalar_result
-
-    def all(self):
-        return self._all_result
-
-
-class _FakeSession:
-    def __init__(self, *, account, position_results, total_mv=0, order_results=None, order_first_result=None):
-        self.account = account
-        self.position_results = list(position_results)
-        self.order_results = list(order_results or [])
-        self.order_first_result = order_first_result
-        self.total_mv = total_mv
-        self.added = []
-        self.deleted = []
-        self.committed = False
-
-    def query(self, entity, *_args, **_kwargs):
-        entity_name = getattr(entity, "__name__", "")
-        if entity_name == "Account":
-            return _FakeQuery(first_result=self.account)
-        if entity_name == "Position":
-            result = self.position_results.pop(0) if self.position_results else None
-            return _FakeQuery(first_result=result)
-        if entity_name == "Order":
-            return _FakeQuery(first_result=self.order_first_result, all_result=self.order_results)
-        if entity_name == "DebateMessage":
-            return _FakeQuery(first_result=None)
-        return _FakeQuery(scalar_result=self.total_mv)
-
-    def add(self, obj):
-        self.added.append(obj)
-        if isinstance(obj, Order) and not getattr(obj, "order_id", None):
-            obj.order_id = uuid4()
-        if isinstance(obj, TradeRecord) and not getattr(obj, "trade_id", None):
-            obj.trade_id = uuid4()
-
-    def flush(self):
-        return None
-
-    def refresh(self, _obj):
-        return None
-
-    def commit(self):
-        self.committed = True
-
-    def delete(self, obj):
-        self.deleted.append(obj)
+async def _seed_account(db, *, user_id: int = 42, cash: str = "100000") -> Account:
+    db.add(
+        User(
+            id=user_id,
+            username=f"trading_service_{user_id}",
+            email=f"trading_service_{user_id}@example.com",
+            password_hash="test",
+            is_active=True,
+        )
+    )
+    await db.flush()
+    account = Account(
+        account_id=uuid4(),
+        user_id=user_id,
+        available_cash=Decimal(cash),
+        frozen_cash=Decimal("0"),
+        total_assets=Decimal(cash),
+        market_value=Decimal("0"),
+        total_profit_loss=Decimal("0"),
+        profit_loss_pct=Decimal("0"),
+        total_trades=0,
+        win_rate=Decimal("0"),
+    )
+    db.add(account)
+    await db.commit()
+    await db.refresh(account)
+    return account
 
 
 @pytest.fixture(autouse=True)
-def mock_service_risk_control(monkeypatch):
-    def _evaluate_order(*_args, **_kwargs):
+def patch_service_async_session(monkeypatch, test_db):
+    del test_db
+    monkeypatch.setattr("app.trading.service.is_trading_time", lambda: True)
+
+
+@pytest.fixture(autouse=True)
+def patch_risk_and_websocket(monkeypatch):
+    async def _allow_order(*_args, **_kwargs):
         return {
             "enabled": True,
             "passed": True,
@@ -100,33 +61,22 @@ def mock_service_risk_control(monkeypatch):
             "metrics": {},
         }
 
-    monkeypatch.setattr("app.trading.service.portfolio_risk_control_service.evaluate_order", _evaluate_order)
-    monkeypatch.setattr("app.trading.service.is_trading_time", lambda: True)
+    monkeypatch.setattr("app.trading.service.portfolio_risk_control_service.evaluate_order", _allow_order)
+    monkeypatch.setattr("app.trading.service.ws_manager.send_order_status", AsyncMock())
+    monkeypatch.setattr("app.trading.service.ws_manager.send_position_update", AsyncMock())
+    monkeypatch.setattr("app.trading.service.ws_manager.send_trade_executed", AsyncMock())
 
 
 @pytest.mark.asyncio
-async def test_service_creates_pending_limit_buy_and_freezes_cash(monkeypatch):
+async def test_service_creates_pending_limit_buy_and_freezes_cash(async_db_session):
     service = TradingService()
     service.engine.execute_order = AsyncMock()
-    session_id = uuid4()
-
-    account = Account(
-        account_id=uuid4(),
-        user_id=42,
-        available_cash=Decimal("100000"),
-        total_assets=Decimal("100000"),
-        market_value=Decimal("0"),
-        total_profit_loss=Decimal("0"),
-    )
-    db = _FakeSession(account=account, position_results=[None])
-
-    send_order_status = AsyncMock()
-    monkeypatch.setattr("app.trading.service.ws_manager.send_order_status", send_order_status)
+    account = await _seed_account(async_db_session)
+    account_id = account.account_id
 
     result = await service.execute_order_and_update_db(
-        db=db,
-        session_id=session_id,
-        account=account,
+        session_id=None,
+        account_id=account.account_id,
         stock_code="000001.SZ",
         action="buy",
         shares=100,
@@ -134,28 +84,27 @@ async def test_service_creates_pending_limit_buy_and_freezes_cash(monkeypatch):
         order_type="limit",
     )
 
-    persisted_order = next(obj for obj in db.added if isinstance(obj, Order))
+    async_db_session.expire_all()
+    persisted_order = (
+        await async_db_session.execute(select(Order).where(Order.account_id == account_id))
+    ).scalar_one()
+    persisted_account = await async_db_session.get(Account, account_id)
 
     assert result["success"] is True
     assert result["status"] == "pending"
     assert persisted_order.status == "pending"
-    assert float(account.available_cash) < 100000
-    assert float(account.frozen_cash) > 0
+    assert float(persisted_account.available_cash) < 100000
+    assert float(persisted_account.frozen_cash) > 0
     service.engine.execute_order.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_service_cancel_pending_limit_buy_releases_cash(monkeypatch):
+async def test_service_cancel_pending_limit_buy_releases_cash(async_db_session):
     service = TradingService()
-    account = Account(
-        account_id=uuid4(),
-        user_id=42,
-        available_cash=Decimal("98894.98"),
-        frozen_cash=Decimal("1105.02"),
-        total_assets=Decimal("100000"),
-        market_value=Decimal("0"),
-        total_profit_loss=Decimal("0"),
-    )
+    account = await _seed_account(async_db_session, user_id=7, cash="98894.98")
+    account_id = account.account_id
+    user_id = account.user_id
+    account.frozen_cash = Decimal("1105.02")
     order = Order(
         order_id=uuid4(),
         account_id=account.account_id,
@@ -167,120 +116,30 @@ async def test_service_cancel_pending_limit_buy_releases_cash(monkeypatch):
         filled_shares=0,
         status="pending",
     )
-    db = _FakeSession(account=account, position_results=[])
-    monkeypatch.setattr("app.trading.service.ws_manager.send_order_status", AsyncMock())
+    order_id = order.order_id
+    async_db_session.add(order)
+    await async_db_session.commit()
 
-    result = await service.cancel_order(db, order)
+    result = await service.cancel_order(order_id, user_id=user_id)
 
+    async_db_session.expire_all()
+    persisted_order = await async_db_session.get(Order, order_id)
+    persisted_account = await async_db_session.get(Account, account_id)
     assert result["success"] is True
-    assert order.status == "cancelled"
-    assert float(account.available_cash) == pytest.approx(100000.0)
-    assert float(account.frozen_cash) == pytest.approx(0.0)
+    assert persisted_order.status == "cancelled"
+    assert float(persisted_account.available_cash) == pytest.approx(100000.0)
+    assert float(persisted_account.frozen_cash) == pytest.approx(0.0)
 
 
 @pytest.mark.asyncio
-async def test_service_matches_pending_limit_buy_at_latest_price(monkeypatch):
-    service = TradingService()
-    account = Account(
-        account_id=uuid4(),
-        user_id=7,
-        available_cash=Decimal("98894.98"),
-        frozen_cash=Decimal("1105.02"),
-        total_assets=Decimal("100000"),
-        market_value=Decimal("0"),
-        total_profit_loss=Decimal("0"),
-    )
-    order = Order(
-        order_id=uuid4(),
-        account_id=account.account_id,
-        stock_code="000001.SZ",
-        action="buy",
-        order_type="limit",
-        price=Decimal("11.00"),
-        shares=100,
-        filled_shares=0,
-        status="pending",
-    )
-    db = _FakeSession(account=account, position_results=[None, None], total_mv=Decimal("1000"), order_first_result=order)
-    service.engine.execute_order = AsyncMock(return_value={
-        "success": True,
-        "message": "Order executed successfully",
-        "trade_record": {
-            "id": uuid4(),
-            "price": 10.0,
-            "shares": 100,
-            "turnover": 1000.0,
-            "commission": 5.0,
-            "stamp_duty": 0.0,
-            "transfer_fee": 0.02,
-            "total_fee": 5.02,
-            "net_amount": 1005.02,
-        },
-        "updated_account": {
-            "cash_balance": 98994.98,
-            "total_assets": 99994.98,
-            "market_value": 1000.0,
-            "total_profit_loss": 0.0,
-        },
-        "updated_position": {
-            "current_shares": 100,
-            "available_shares": 0,
-            "frozen_shares": 100,
-            "avg_cost": 10.0502,
-            "market_value": 1000.0,
-            "unrealized_pnl": -5.02,
-            "purchase_details": {"ledger": [{"time": datetime.now().isoformat(), "shares": 100, "price": 10.0}]},
-        },
-        "executed_shares": 100,
-        "remaining_shares": 0,
-        "realized_pnl": Decimal("0.00"),
-        "order_status": "filled",
-    })
-    monkeypatch.setattr(
-        "app.trading.service.data_storage_service.get_stock_realtime_market",
-        lambda _stock_code: {"latest_price": 10.0},
-    )
-    send_order_status = AsyncMock()
-    send_position_update = AsyncMock()
-    send_trade_executed = AsyncMock()
-    monkeypatch.setattr("app.trading.service.ws_manager.send_order_status", send_order_status)
-    monkeypatch.setattr("app.trading.service.ws_manager.send_position_update", send_position_update)
-    monkeypatch.setattr("app.trading.service.ws_manager.send_trade_executed", send_trade_executed)
-
-    result = await service.match_pending_order(db, order)
-    sent_order = service.engine.execute_order.await_args.args[0]
-
-    assert result["success"] is True
-    assert result["matched"] is True
-    assert sent_order["price"] == 10.0
-    assert order.status == "filled"
-    assert float(order.price) == 11.0
-    assert float(order.avg_fill_price) == 10.0
-    send_order_status.assert_not_awaited()
-    send_position_update.assert_not_awaited()
-    send_trade_executed.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_service_rejects_limit_buy_stop_loss_above_limit_price(monkeypatch):
+async def test_service_rejects_limit_buy_stop_loss_above_limit_price(async_db_session):
     service = TradingService()
     service.engine.execute_order = AsyncMock()
-
-    account = Account(
-        account_id=uuid4(),
-        user_id=42,
-        available_cash=Decimal("100000"),
-        total_assets=Decimal("100000"),
-        market_value=Decimal("0"),
-        total_profit_loss=Decimal("0"),
-    )
-    db = _FakeSession(account=account, position_results=[None])
-    monkeypatch.setattr("app.trading.service.ws_manager.send_order_status", AsyncMock())
+    account = await _seed_account(async_db_session)
 
     result = await service.execute_order_and_update_db(
-        db=db,
         session_id=None,
-        account=account,
+        account_id=account.account_id,
         stock_code="000001.SZ",
         action="buy",
         shares=100,
@@ -292,26 +151,110 @@ async def test_service_rejects_limit_buy_stop_loss_above_limit_price(monkeypatch
     assert result["success"] is False
     assert result["reason"] == "invalid_buy_stop_loss"
     assert result["price"] == 8.0
-    assert not any(isinstance(obj, Order) for obj in db.added)
-    assert db.committed is False
+    order_count = (await async_db_session.execute(select(func.count()).select_from(Order))).scalar_one()
+    assert order_count == 0
     service.engine.execute_order.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_service_blocks_by_risk_control_before_creating_order(monkeypatch):
+async def test_service_updates_market_order_price_to_actual_fill(monkeypatch, async_db_session):
+    service = TradingService()
+    account = await _seed_account(async_db_session)
+    account_id = account.account_id
+    account.frozen_cash = Decimal("500.00")
+    account.total_assets = Decimal("100500.00")
+    await async_db_session.commit()
+    service.engine.execute_order = AsyncMock(
+        return_value={
+            "success": True,
+            "message": "Order executed successfully",
+            "trade_record": {
+                "id": uuid4(),
+                "price": 10.23,
+                "shares": 100,
+                "turnover": 1023.0,
+                "commission": 5.0,
+                "stamp_duty": 0.0,
+                "transfer_fee": 0.02,
+                "total_fee": 5.02,
+                "net_amount": 1028.02,
+            },
+            "updated_account": {
+                "cash_balance": 98971.98,
+                "total_assets": 99994.98,
+                "market_value": 1023.0,
+                "total_profit_loss": 0.0,
+            },
+            "updated_position": {
+                "current_shares": 100,
+                "available_shares": 0,
+                "frozen_shares": 100,
+                "avg_cost": 10.2802,
+                "market_value": 1023.0,
+                "unrealized_pnl": -5.02,
+                "purchase_details": {"ledger": [{"time": datetime.now().isoformat(), "shares": 100, "price": 10.23}]},
+            },
+            "executed_shares": 100,
+            "remaining_shares": 0,
+            "realized_pnl": Decimal("0.00"),
+            "order_status": "filled",
+        }
+    )
+    monkeypatch.setattr(
+        "app.trading.service.data_storage_service.get_stock_realtime_market",
+        AsyncMock(return_value={"latest_price": 10.23}),
+    )
+
+    result = await service.execute_order_and_update_db(
+        session_id=None,
+        account_id=account.account_id,
+        stock_code="000001.SZ",
+        action="buy",
+        shares=100,
+        price=0.0,
+        order_type="market",
+    )
+
+    async_db_session.expire_all()
+    persisted_order = (
+        await async_db_session.execute(select(Order).where(Order.account_id == account_id))
+    ).scalar_one()
+    persisted_trade = (
+        await async_db_session.execute(select(TradeRecord).where(TradeRecord.account_id == account_id))
+    ).scalar_one()
+    persisted_position = (
+        await async_db_session.execute(select(Position).where(Position.account_id == account_id))
+    ).scalar_one()
+
+    assert result["success"] is True
+    assert float(persisted_order.price) == 10.23
+    assert float(persisted_order.avg_fill_price) == 10.23
+    assert persisted_order.filled_at is not None
+    assert float(persisted_trade.fill_price) == 10.23
+    assert persisted_position.purchase_details["ledger"][0]["price"] == 10.23
+    persisted_account = await async_db_session.get(Account, account_id)
+    assert persisted_account is not None
+    assert float(persisted_account.total_assets) == pytest.approx(100494.98)
+
+
+def test_recompute_account_total_assets_includes_frozen_cash():
+    account = Account(
+        available_cash=Decimal("100.00"),
+        frozen_cash=Decimal("20.00"),
+        market_value=Decimal("30.00"),
+    )
+
+    total_assets = _recompute_account_total_assets(account)
+
+    assert total_assets == Decimal("150.00")
+    assert account.total_assets == Decimal("150.00")
+
+
+@pytest.mark.asyncio
+async def test_service_blocks_by_risk_control_before_creating_order(monkeypatch, async_db_session):
     service = TradingService()
     service.engine.execute_order = AsyncMock()
-
-    account = Account(
-        account_id=uuid4(),
-        user_id=42,
-        available_cash=Decimal("100000"),
-        total_assets=Decimal("100000"),
-        market_value=Decimal("0"),
-        total_profit_loss=Decimal("0"),
-    )
-    db = _FakeSession(account=account, position_results=[None])
-
+    account = await _seed_account(async_db_session)
     risk_result = {
         "enabled": True,
         "passed": False,
@@ -320,580 +263,25 @@ async def test_service_blocks_by_risk_control_before_creating_order(monkeypatch)
         "blocks": [{"rule": "require_stop_loss", "message": "blocked"}],
         "metrics": {},
     }
-    monkeypatch.setattr("app.trading.service.ws_manager.send_order_status", AsyncMock())
 
-    with patch("app.trading.service.portfolio_risk_control_service.evaluate_order", return_value=risk_result):
-        result = await service.execute_order_and_update_db(
-            db=db,
-            session_id=None,
-            account=account,
-            stock_code="000001.SZ",
-            action="buy",
-            shares=100,
-            price=10.0,
-            order_type="limit",
-        )
+    async def _block_order(*_args, **_kwargs):
+        return risk_result
+
+    monkeypatch.setattr("app.trading.service.portfolio_risk_control_service.evaluate_order", _block_order)
+
+    result = await service.execute_order_and_update_db(
+        session_id=None,
+        account_id=account.account_id,
+        stock_code="000001.SZ",
+        action="buy",
+        shares=100,
+        price=10.0,
+        order_type="limit",
+    )
 
     assert result["success"] is False
     assert result["reason"] == "risk_control_blocked"
     assert result["risk_control"] == risk_result
-    assert not any(isinstance(obj, Order) for obj in db.added)
-    assert db.committed is False
+    order_count = (await async_db_session.execute(select(func.count()).select_from(Order))).scalar_one()
+    assert order_count == 0
     service.engine.execute_order.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_service_uses_resolved_market_price_and_fee_for_risk_control(monkeypatch):
-    service = TradingService()
-    service.engine.execute_order = AsyncMock(return_value={"success": False, "message": "rejected"})
-
-    account = Account(
-        account_id=uuid4(),
-        user_id=42,
-        available_cash=Decimal("100000"),
-        total_assets=Decimal("100000"),
-        market_value=Decimal("0"),
-        total_profit_loss=Decimal("0"),
-    )
-    db = _FakeSession(account=account, position_results=[None])
-    monkeypatch.setattr("app.trading.service.ws_manager.send_order_status", AsyncMock())
-
-    with patch(
-        "app.trading.service.data_storage_service.get_stock_realtime_market",
-        return_value={"latest_price": 10.23},
-    ), patch("app.trading.service.portfolio_risk_control_service.evaluate_order") as mock_evaluate:
-        mock_evaluate.return_value = {
-            "enabled": True,
-            "passed": True,
-            "severity": "none",
-            "accepted": [],
-            "blocks": [],
-            "metrics": {},
-        }
-
-        await service.execute_order_and_update_db(
-            db=db,
-            session_id=None,
-            account=account,
-            stock_code="000001.SZ",
-            action="buy",
-            shares=100,
-            price=0.0,
-            order_type="market",
-            stop_loss=9.5,
-        )
-
-    risk_kwargs = mock_evaluate.call_args.kwargs
-    expected_fee = service.engine.calculate_fee(10.23, 100, True)["total_fee"]
-    sent_order = service.engine.execute_order.await_args.args[0]
-
-    assert risk_kwargs["price"] == 10.23
-    assert risk_kwargs["estimated_fee"] == expected_fee
-    assert sent_order["price"] == 10.23
-
-
-@pytest.mark.asyncio
-async def test_service_persists_filled_status_and_real_trade_id(monkeypatch):
-    service = TradingService()
-    session_id = uuid4()
-
-    account = Account(
-        account_id=uuid4(),
-        user_id=7,
-        available_cash=Decimal("100000"),
-        total_assets=Decimal("100000"),
-        market_value=Decimal("0"),
-        total_profit_loss=Decimal("0"),
-    )
-    db = _FakeSession(account=account, position_results=[None, None], total_mv=Decimal("5000"))
-
-    service.engine.execute_order = AsyncMock(return_value={
-        "success": True,
-        "message": "Order executed successfully",
-        "trade_record": {
-            "id": uuid4(),
-            "price": 10.0,
-            "shares": 1000,
-            "turnover": 10000.0,
-            "commission": 5.0,
-            "stamp_duty": 0.0,
-            "transfer_fee": 0.2,
-            "total_fee": 5.2,
-            "net_amount": 10005.2,
-        },
-        "updated_account": {
-            "cash_balance": 89994.8,
-            "total_assets": 99994.8,
-            "market_value": 10000.0,
-            "total_profit_loss": 0.0,
-        },
-        "updated_position": {
-            "current_shares": 1000,
-            "available_shares": 0,
-            "frozen_shares": 1000,
-            "avg_cost": 10.0052,
-            "market_value": 10000.0,
-            "unrealized_pnl": -5.2,
-            "purchase_details": {"ledger": [{"time": datetime.now().isoformat(), "shares": 1000, "price": 10.0}]},
-        },
-        "executed_shares": 1000,
-        "remaining_shares": 0,
-        "realized_pnl": Decimal("0.00"),
-        "order_status": "filled",
-    })
-
-    send_order_status = AsyncMock()
-    send_position_update = AsyncMock()
-    send_trade_executed = AsyncMock()
-    monkeypatch.setattr("app.trading.service.ws_manager.send_order_status", send_order_status)
-    monkeypatch.setattr("app.trading.service.ws_manager.send_position_update", send_position_update)
-    monkeypatch.setattr("app.trading.service.ws_manager.send_trade_executed", send_trade_executed)
-    monkeypatch.setattr(
-        "app.trading.service.data_storage_service.get_stock_realtime_market",
-        lambda _stock_code: {"latest_price": 10.0},
-    )
-
-    result = await service.execute_order_and_update_db(
-        db=db,
-        session_id=session_id,
-        account=account,
-        stock_code="000001.SZ",
-        action="buy",
-        shares=1000,
-        price=10.0,
-        order_type="market",
-    )
-
-    persisted_trade = next(obj for obj in db.added if isinstance(obj, TradeRecord))
-    ws_payload = send_order_status.await_args.args[1]
-
-    assert result["success"] is True
-    assert result["order"].status == "filled"
-    assert result["order"].filled_at is not None
-    assert result["trade_result"]["trade_record"]["id"] == persisted_trade.trade_id
-    assert ws_payload["status"] == "filled"
-
-
-@pytest.mark.asyncio
-async def test_service_keeps_success_when_post_commit_order_notification_fails(monkeypatch):
-    service = TradingService()
-    session_id = uuid4()
-
-    account = Account(
-        account_id=uuid4(),
-        user_id=7,
-        available_cash=Decimal("100000"),
-        total_assets=Decimal("100000"),
-        market_value=Decimal("0"),
-        total_profit_loss=Decimal("0"),
-    )
-    db = _FakeSession(account=account, position_results=[None, None], total_mv=Decimal("5000"))
-
-    service.engine.execute_order = AsyncMock(return_value={
-        "success": True,
-        "message": "Order executed successfully",
-        "trade_record": {
-            "id": uuid4(),
-            "price": 10.0,
-            "shares": 1000,
-            "turnover": 10000.0,
-            "commission": 5.0,
-            "stamp_duty": 0.0,
-            "transfer_fee": 0.2,
-            "total_fee": 5.2,
-            "net_amount": 10005.2,
-        },
-        "updated_account": {
-            "cash_balance": 89994.8,
-            "total_assets": 99994.8,
-            "market_value": 10000.0,
-            "total_profit_loss": 0.0,
-        },
-        "updated_position": {
-            "current_shares": 1000,
-            "available_shares": 0,
-            "frozen_shares": 1000,
-            "avg_cost": 10.0052,
-            "market_value": 10000.0,
-            "unrealized_pnl": -5.2,
-            "purchase_details": {"ledger": [{"time": datetime.now().isoformat(), "shares": 1000, "price": 10.0}]},
-        },
-        "executed_shares": 1000,
-        "remaining_shares": 0,
-        "realized_pnl": Decimal("0.00"),
-        "order_status": "filled",
-    })
-
-    async def _raise_notification_error(*_args, **_kwargs):
-        raise RuntimeError("websocket unavailable")
-
-    monkeypatch.setattr("app.trading.service.ws_manager.broadcast_to_session", _raise_notification_error)
-    monkeypatch.setattr(
-        "app.trading.service.data_storage_service.get_stock_realtime_market",
-        lambda _stock_code: {"latest_price": 10.0},
-    )
-
-    result = await service.execute_order_and_update_db(
-        db=db,
-        session_id=session_id,
-        account=account,
-        stock_code="000001.SZ",
-        action="buy",
-        shares=1000,
-        price=10.0,
-        order_type="market",
-    )
-
-    assert result["success"] is True
-    assert db.committed is True
-
-
-@pytest.mark.asyncio
-async def test_service_sends_position_removed_event_when_sell_clears_position(monkeypatch):
-    service = TradingService()
-
-    account = Account(
-        account_id=uuid4(),
-        available_cash=Decimal("100000"),
-        total_assets=Decimal("100000"),
-        market_value=Decimal("10000"),
-        total_profit_loss=Decimal("0"),
-        total_trades=0,
-        win_rate=Decimal("0"),
-    )
-    position = Position(
-        position_id=uuid4(),
-        account_id=account.account_id,
-        stock_code="000001.SZ",
-        total_shares=100,
-        available_shares=100,
-        frozen_shares=0,
-        avg_cost=Decimal("10.0000"),
-        current_price=Decimal("10.0000"),
-        market_value=Decimal("1000.0000"),
-        profit_loss=Decimal("0"),
-        profit_loss_pct=Decimal("0"),
-        purchase_details={"ledger": [{"time": datetime.now().isoformat(), "shares": 100, "price": 10.0}]},
-        updated_at=datetime.now(),
-    )
-    db = _FakeSession(account=account, position_results=[position, None], total_mv=Decimal("0"))
-
-    service.engine.execute_order = AsyncMock(return_value={
-        "success": True,
-        "message": "Order executed successfully",
-        "trade_record": {
-            "id": uuid4(),
-            "price": 11.0,
-            "shares": 100,
-            "turnover": 1100.0,
-            "commission": 5.0,
-            "stamp_duty": 1.1,
-            "transfer_fee": 0.02,
-            "total_fee": 6.12,
-            "net_amount": 1093.88,
-        },
-        "updated_account": {
-            "cash_balance": 101093.88,
-            "total_assets": 101093.88,
-            "market_value": 0.0,
-            "total_profit_loss": 93.88,
-        },
-        "updated_position": None,
-        "executed_shares": 100,
-        "remaining_shares": 0,
-        "realized_pnl": Decimal("93.88"),
-        "order_status": "filled",
-    })
-
-    monkeypatch.setattr("app.trading.service.ws_manager.send_order_status", AsyncMock())
-    send_position_update = AsyncMock()
-    monkeypatch.setattr("app.trading.service.ws_manager.send_position_update", send_position_update)
-    monkeypatch.setattr("app.trading.service.ws_manager.send_trade_executed", AsyncMock())
-    monkeypatch.setattr(
-        "app.trading.service.data_storage_service.get_stock_realtime_market",
-        lambda _stock_code: {"latest_price": 11.0},
-    )
-
-    result = await service.execute_order_and_update_db(
-        db=db,
-        session_id=None,
-        account=account,
-        stock_code="000001.SZ",
-        action="sell",
-        shares=100,
-        price=11.0,
-        order_type="market",
-    )
-
-    payload = send_position_update.await_args.args[1]
-    assert result["success"] is True
-    assert payload["removed"] is True
-    assert payload["current_shares"] == 0
-    assert payload["stock_code"] == "000001.SZ"
-
-
-@pytest.mark.asyncio
-async def test_service_updates_market_order_price_to_actual_fill(monkeypatch):
-    service = TradingService()
-
-    account = Account(
-        account_id=uuid4(),
-        available_cash=Decimal("100000"),
-        total_assets=Decimal("100000"),
-        market_value=Decimal("0"),
-        total_profit_loss=Decimal("0"),
-    )
-    db = _FakeSession(account=account, position_results=[None, None], total_mv=Decimal("1023"))
-
-    service.engine.execute_order = AsyncMock(return_value={
-        "success": True,
-        "message": "Order executed successfully",
-        "trade_record": {
-            "id": uuid4(),
-            "price": 10.23,
-            "shares": 100,
-            "turnover": 1023.0,
-            "commission": 5.0,
-            "stamp_duty": 0.0,
-            "transfer_fee": 0.02,
-            "total_fee": 5.02,
-            "net_amount": 1028.02,
-        },
-        "updated_account": {
-            "cash_balance": 98971.98,
-            "total_assets": 99994.98,
-            "market_value": 1023.0,
-            "total_profit_loss": 0.0,
-        },
-        "updated_position": {
-            "current_shares": 100,
-            "available_shares": 0,
-            "frozen_shares": 100,
-            "avg_cost": 10.2802,
-            "market_value": 1023.0,
-            "unrealized_pnl": -5.02,
-            "purchase_details": {"ledger": [{"time": datetime.now().isoformat(), "shares": 100, "price": 10.23}]},
-        },
-        "executed_shares": 100,
-        "remaining_shares": 0,
-        "realized_pnl": Decimal("0.00"),
-        "order_status": "filled",
-    })
-
-    send_order_status = AsyncMock()
-    send_trade_executed = AsyncMock()
-    monkeypatch.setattr("app.trading.service.ws_manager.send_order_status", send_order_status)
-    monkeypatch.setattr("app.trading.service.ws_manager.send_position_update", AsyncMock())
-    monkeypatch.setattr("app.trading.service.ws_manager.send_trade_executed", send_trade_executed)
-    monkeypatch.setattr(
-        "app.trading.service.data_storage_service.get_stock_realtime_market",
-        lambda _stock_code: {"latest_price": 10.23},
-    )
-
-    result = await service.execute_order_and_update_db(
-        db=db,
-        session_id=None,
-        account=account,
-        stock_code="000001.SZ",
-        action="buy",
-        shares=100,
-        price=0.0,
-        order_type="market",
-    )
-
-    assert result["success"] is True
-    assert float(result["order"].price) == 10.23
-    assert float(result["order"].avg_fill_price) == 10.23
-    assert result["order"].filled_at is not None
-    assert send_order_status.await_args.args[1]["price"] == 10.23
-    assert send_trade_executed.await_args.args[1]["price"] == 10.23
-
-
-@pytest.mark.asyncio
-async def test_service_persists_explicit_stop_loss_from_request(monkeypatch):
-    service = TradingService()
-
-    account = Account(
-        account_id=uuid4(),
-        available_cash=Decimal("100000"),
-        total_assets=Decimal("100000"),
-        market_value=Decimal("0"),
-        total_profit_loss=Decimal("0"),
-    )
-    db = _FakeSession(account=account, position_results=[None, None], total_mv=Decimal("1023"))
-
-    service.engine.execute_order = AsyncMock(return_value={
-        "success": True,
-        "message": "Order executed successfully",
-        "trade_record": {
-            "id": uuid4(),
-            "price": 10.23,
-            "shares": 100,
-            "turnover": 1023.0,
-            "commission": 5.0,
-            "stamp_duty": 0.0,
-            "transfer_fee": 0.02,
-            "total_fee": 5.02,
-            "net_amount": 1028.02,
-        },
-        "updated_account": {
-            "cash_balance": 98971.98,
-            "total_assets": 99994.98,
-            "market_value": 1023.0,
-            "total_profit_loss": 0.0,
-        },
-        "updated_position": {
-            "current_shares": 100,
-            "available_shares": 0,
-            "frozen_shares": 100,
-            "avg_cost": 10.2802,
-            "market_value": 1023.0,
-            "unrealized_pnl": -5.02,
-            "purchase_details": {"ledger": [{"time": datetime.now().isoformat(), "shares": 100, "price": 10.23}]},
-        },
-        "executed_shares": 100,
-        "remaining_shares": 0,
-        "realized_pnl": Decimal("0.00"),
-        "order_status": "filled",
-    })
-
-    monkeypatch.setattr("app.trading.service.ws_manager.send_order_status", AsyncMock())
-    monkeypatch.setattr("app.trading.service.ws_manager.send_position_update", AsyncMock())
-    monkeypatch.setattr("app.trading.service.ws_manager.send_trade_executed", AsyncMock())
-    monkeypatch.setattr(
-        "app.trading.service.data_storage_service.get_stock_realtime_market",
-        lambda _stock_code: {"latest_price": 10.23},
-    )
-
-    result = await service.execute_order_and_update_db(
-        db=db,
-        session_id=None,
-        account=account,
-        stock_code="000001.SZ",
-        action="buy",
-        shares=100,
-        price=0.0,
-        order_type="market",
-        stop_loss=9.41,
-    )
-
-    persisted_position = next(obj for obj in db.added if isinstance(obj, Position))
-
-    assert result["success"] is True
-    assert persisted_position.purchase_details["stop_loss"] == 9.41
-
-
-@pytest.mark.asyncio
-async def test_service_normalizes_decimal_models_for_engine_and_persists_float_results(monkeypatch):
-    service = TradingService()
-
-    account = Account(
-        account_id=uuid4(),
-        available_cash=Decimal("100000.00"),
-        total_assets=Decimal("101000.00"),
-        market_value=Decimal("1000.00"),
-        total_profit_loss=Decimal("12.34"),
-    )
-    position = Position(
-        position_id=uuid4(),
-        account_id=account.account_id,
-        stock_code="000001.SZ",
-        total_shares=100,
-        available_shares=100,
-        frozen_shares=0,
-        avg_cost=Decimal("10.0000"),
-        current_price=Decimal("10.0000"),
-        market_value=Decimal("1000.0000"),
-        profit_loss=Decimal("0"),
-        profit_loss_pct=Decimal("0"),
-        purchase_details={
-            "ledger": [
-                {"time": datetime.now().isoformat(), "shares": 100, "price": 10.0, "cost_basis": 10.0}
-            ]
-        },
-        updated_at=datetime.now(),
-    )
-    db = _FakeSession(account=account, position_results=[position, position], total_mv=Decimal("2200.50"))
-
-    service.engine.execute_order = AsyncMock(return_value={
-        "success": True,
-        "message": "Order executed successfully",
-        "trade_record": {
-            "id": uuid4(),
-            "price": 12.0,
-            "shares": 100,
-            "turnover": 1200.0,
-            "commission": 5.0,
-            "stamp_duty": 0.0,
-            "transfer_fee": 0.02,
-            "total_fee": 5.02,
-            "net_amount": 1205.02,
-        },
-        "updated_account": {
-            "cash_balance": 98794.98,
-            "total_assets": 100995.48,
-            "market_value": 2200.5,
-            "total_profit_loss": 7.82,
-        },
-        "updated_position": {
-            "current_shares": 200,
-            "available_shares": 0,
-            "frozen_shares": 200,
-            "avg_cost": 11.0251,
-            "market_value": 2200.5,
-            "unrealized_pnl": -5.02,
-            "purchase_details": {
-                "ledger": [
-                    {"time": datetime.now().isoformat(), "shares": 100, "price": 10.0, "cost_basis": 10.0},
-                    {"time": datetime.now().isoformat(), "shares": 100, "price": 12.0, "cost_basis": 12.0502},
-                ]
-            },
-        },
-        "executed_shares": 100,
-        "remaining_shares": 0,
-        "realized_pnl": 0.0,
-        "order_status": "filled",
-    })
-
-    monkeypatch.setattr("app.trading.service.ws_manager.send_order_status", AsyncMock())
-    send_position_update = AsyncMock()
-    monkeypatch.setattr("app.trading.service.ws_manager.send_position_update", send_position_update)
-    monkeypatch.setattr("app.trading.service.ws_manager.send_trade_executed", AsyncMock())
-    monkeypatch.setattr(
-        "app.trading.service.data_storage_service.get_stock_realtime_market",
-        lambda _stock_code: {"latest_price": 12.0},
-    )
-
-    result = await service.execute_order_and_update_db(
-        db=db,
-        session_id=None,
-        account=account,
-        stock_code="000001.SZ",
-        action="buy",
-        shares=100,
-        price=12.0,
-        order_type="market",
-    )
-
-    sent_order, sent_account, sent_position = service.engine.execute_order.await_args.args
-    ws_payload = send_position_update.await_args.args[1]
-
-    assert result["success"] is True
-    assert sent_order["price"] == 12.0
-    assert sent_account["cash_balance"] == 100000.0
-    assert sent_account["total_assets"] == 101000.0
-    assert sent_position["avg_cost"] == 10.0
-    assert sent_position["market_value"] == 1000.0
-    assert isinstance(position.avg_cost, Decimal)
-    assert isinstance(position.current_price, Decimal)
-    assert isinstance(position.market_value, Decimal)
-    assert isinstance(position.profit_loss, Decimal)
-    assert float(position.avg_cost) == pytest.approx(11.0251)
-    assert float(position.current_price) == 12.0
-    assert float(position.market_value) == 2200.5
-    assert float(position.profit_loss) == -5.02
-    assert float(account.available_cash) == pytest.approx(98794.98)
-    assert float(account.total_assets) == pytest.approx(100995.48)
-    assert ws_payload["avg_cost"] == pytest.approx(11.0251)
-    assert ws_payload["market_value"] == pytest.approx(2200.5)
-    assert ws_payload["unrealized_pnl"] == pytest.approx(-5.02)

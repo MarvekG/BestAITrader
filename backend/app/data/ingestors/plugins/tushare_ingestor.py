@@ -31,6 +31,7 @@ class TushareIngestor(BaseIngestor):
     def __init__(self):
         self.ingestion_service = DataIngestionService()
         self.source = self.get_source_name()
+        self.pro = None
         self._stock_info_cache = {}  # Cache for shares and financial data
 
         # 初始化限流器（单例模式）
@@ -49,10 +50,9 @@ class TushareIngestor(BaseIngestor):
             }
         )
 
-    @property
-    def pro(self):
+    async def ensure_pro(self):
         """
-        基于数据库中的最新 Tushare 配置创建 Pro 客户端。
+        确保当前实例已初始化 Tushare Pro 客户端。
 
         Returns:
             Tushare Pro 客户端。
@@ -60,7 +60,9 @@ class TushareIngestor(BaseIngestor):
         Raises:
             ValueError: 未配置 Tushare Token。
         """
-        return self.get_pro_client()
+        if self.pro is None:
+            self.pro = await self.get_pro_client()
+        return self.pro
 
     async def _run_in_executor(self, func, *args, use_cache: bool = True, cache_ttl: int = 60, **kwargs):
         """
@@ -92,7 +94,7 @@ class TushareIngestor(BaseIngestor):
         return await super()._run_in_executor(func, *args, use_cache=use_cache, cache_ttl=cache_ttl, **kwargs)
 
     @staticmethod
-    def get_pro_client(token: Optional[str] = None, api_url: Optional[str] = None):
+    async def get_pro_client(token: Optional[str] = None, api_url: Optional[str] = None):
         """
         创建 Tushare Pro 客户端，支持用临时配置覆盖已保存配置。
 
@@ -106,8 +108,8 @@ class TushareIngestor(BaseIngestor):
         Raises:
             ValueError: 未配置 Tushare Token。
         """
-        api_url = TushareIngestor.get_tushare_api_url() if api_url is None else api_url
-        token = TushareIngestor.get_tushare_token() if token is None else token
+        api_url = await TushareIngestor.get_tushare_api_url() if api_url is None else api_url
+        token = await TushareIngestor.get_tushare_token() if token is None else token
         if api_url:
             from tushare.pro.client import DataApi
 
@@ -117,24 +119,24 @@ class TushareIngestor(BaseIngestor):
         return ts.pro_api(token)
 
     @staticmethod
-    def get_tushare_token() -> str:
+    async def get_tushare_token() -> str:
         """
         读取当前 Tushare Token。
 
         Returns:
             system_settings 中配置的 Token；未配置时返回空字符串。
         """
-        return get_data_source_config_value(TUSHARE_TOKEN_SETTING_KEY)
+        return await get_data_source_config_value(TUSHARE_TOKEN_SETTING_KEY)
 
     @staticmethod
-    def get_tushare_api_url() -> str:
+    async def get_tushare_api_url() -> str:
         """
         读取当前 Tushare API URL。
 
         Returns:
             system_settings 中配置的 API URL；未配置时返回空字符串。
         """
-        return get_data_source_config_value(TUSHARE_API_SETTING_KEY)
+        return await get_data_source_config_value(TUSHARE_API_SETTING_KEY)
 
     async def fetch_and_ingest_stock_kline(
             self,
@@ -162,8 +164,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             # Map period to Tushare API and frequency
             period_map = {
@@ -211,8 +212,7 @@ class TushareIngestor(BaseIngestor):
                 if col in df.columns:
                     df[col] = df[col].apply(lambda x: round(float(x), 3) if x is not None else x)
 
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 api_name, df, source=self.source, target_table='kline_data'
             )
             # 返回字典格式
@@ -244,8 +244,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
             api_name = 'stock_basic'
             df = await self._run_in_executor(self.pro.stock_basic, ts_code=stock_code)
             if df is None or df.empty:
@@ -259,8 +258,7 @@ class TushareIngestor(BaseIngestor):
             if 'list_date' in df.columns:
                 df['list_date'] = pd.to_datetime(df['list_date'].astype(str), format='mixed', errors='coerce').dt.date
 
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 api_name, df, source=self.source, target_table='stock_basic'
             )
             # 返回字典格式
@@ -298,8 +296,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
             api_name = 'daily_basic'
             ts_code = StockCodeStandardizer.standardize(stock_code)
 
@@ -347,8 +344,7 @@ class TushareIngestor(BaseIngestor):
             if 'data_date' in df.columns:
                 df['data_date'] = pd.to_datetime(df['data_date'].astype(str), format='mixed', errors='coerce').dt.date
 
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 api_name, df, source=self.source, target_table='stock_valuation_history'
             )
             # 返回字典格式
@@ -386,9 +382,7 @@ class TushareIngestor(BaseIngestor):
             获取成功返回标准化记录；无数据、配置缺失或异常返回空结果。
         """
         try:
-            if not self.pro:
-                logger.error("Tushare API client (pro) not initialized")
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             def _parse_tushare_date(value):
                 if value is None or pd.isna(value):
@@ -522,8 +516,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
             api_name = 'hk_hold'
             # Fetch base northbound data
             df = await self._run_in_executor(self.pro.hk_hold, ts_code=stock_code)
@@ -609,8 +602,7 @@ class TushareIngestor(BaseIngestor):
             # Final Cleanup: Sort back to descending
             df = df.sort_values('date', ascending=False)
 
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 api_name, df, source=self.source, target_table='northbound_data'
             )
             # 返回字典格式
@@ -642,8 +634,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
             api_name = 'stock_company'
             df = await self._run_in_executor(self.pro.stock_company, ts_code=stock_code)
             if df is None or df.empty:
@@ -652,8 +643,7 @@ class TushareIngestor(BaseIngestor):
             df.rename(columns={'ts_code': 'stock_code'}, inplace=True)
             df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
 
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 api_name, df, source=self.source
             )
             # 返回字典格式
@@ -681,9 +671,7 @@ class TushareIngestor(BaseIngestor):
         Returns:
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
-        import time
-        if not self.pro:
-            return {"success": False, "data": [], "count": 0}
+        await self.ensure_pro()
         api_name = 'stock_basic'
 
         # Fetch all listing stocks
@@ -692,7 +680,7 @@ class TushareIngestor(BaseIngestor):
         for exchange in ['SSE', 'SZSE', 'BSE']:
             # Add small delay between requests to avoid rate limit
             if len(dfs) > 0:
-                time.sleep(0.5)
+                await asyncio.sleep(0.5)
 
             sub_df = await self._run_in_executor(
                 self.pro.stock_basic,
@@ -727,8 +715,7 @@ class TushareIngestor(BaseIngestor):
             except Exception as e:
                 logger.warning(f"Failed to convert list_date in Tushare: {e}")
 
-        await self._run_in_executor(
-            self.ingestion_service.write_dataframe,
+        await self.ingestion_service.write_dataframe(
             api_name, df, source=self.source, target_table='stock_basic'
         )
         logger.info(f"Successfully synced {len(df)} stocks basic info from Tushare")
@@ -764,8 +751,7 @@ class TushareIngestor(BaseIngestor):
         Returns:
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
-        if not self.pro:
-            return {"success": False, "data": [], "count": 0}
+        await self.ensure_pro()
         try:
             # Map frontend "none" strings
             if start_date and str(start_date).lower() == "none":
@@ -794,8 +780,7 @@ class TushareIngestor(BaseIngestor):
                 # 4. Standardize Columns (ts_code -> index_code)
                 df = ColumnMapper.map_columns(df, target_table='data.index_daily', source=self.source)
 
-                await self._run_in_executor(
-                    self.ingestion_service.write_dataframe,
+                await self.ingestion_service.write_dataframe(
                     'index_daily', df, source=self.source, target_table='data.index_daily'
                 )
                 # 返回字典格式
@@ -875,12 +860,25 @@ class TushareIngestor(BaseIngestor):
                 if df.empty:
                     return {"success": False, "data": [], "count": 0}
 
+            numeric_columns = [
+                'change_percent',
+                'change_amount',
+                'volume',
+                'turnover',
+                'high',
+                'low',
+                'open',
+                'prev_close',
+            ]
+            for col in numeric_columns:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+
             df['data_source'] = self.source
             df['timestamp'] = pd.Timestamp.now()
 
             # 5. 持久化入库
-            success = await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            success = await self.ingestion_service.write_dataframe(
                 'tushare_realtime', df, source=self.source,
                 target_table='data.stock_realtime_market'
             )
@@ -919,9 +917,7 @@ class TushareIngestor(BaseIngestor):
             任一交易日采集并写入成功返回 True；全部无数据、配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                logger.error("Tushare API client (pro) not initialized")
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             api_name = 'top_list'
 
@@ -977,8 +973,7 @@ class TushareIngestor(BaseIngestor):
                         df['data_source'] = self.source
 
                         # Write to database
-                        await self._run_in_executor(
-                            self.ingestion_service.write_dataframe,
+                        await self.ingestion_service.write_dataframe(
                             api_name, df, source=self.source, target_table='dragon_tiger_data'
                         )
                         success_count += 1
@@ -1010,8 +1005,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             # 1. 获取最新交易日数据
             trade_date = datetime.now().strftime('%Y%m%d')
@@ -1069,8 +1063,7 @@ class TushareIngestor(BaseIngestor):
                 df['stock_code'] = df['board_code']
 
             # 5. 写入数据库
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'industry_sync', df, source=self.source, force_sync=True,
                 target_table='industry_data'
             )
@@ -1103,8 +1096,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             # 获取最近 30 天数据
             df = await self._run_in_executor(
@@ -1153,8 +1145,7 @@ class TushareIngestor(BaseIngestor):
                 df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
 
                 # 写入数据库
-                await self._run_in_executor(
-                    self.ingestion_service.write_dataframe,
+                await self.ingestion_service.write_dataframe(
                     'moneyflow', df, source=self.source, target_table='stock_money_flow'
                 )
                 # 返回字典格式
@@ -1188,8 +1179,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             df = await self._run_in_executor(
                 self.pro.stk_holdernumber, ts_code=stock_code
@@ -1306,8 +1296,7 @@ class TushareIngestor(BaseIngestor):
                 # 将 NaN 转为 None 以便 SQLAlchemy 处理 (显式转为 object 避免类型不兼容)
                 df = df.astype(object).where(pd.notnull(df), None)
 
-                await self._run_in_executor(
-                    self.ingestion_service.write_dataframe,
+                await self.ingestion_service.write_dataframe(
                     'shareholder_count', df, source=self.source, target_table='stock_shareholder_count'
                 )
                 # 返回字典格式
@@ -1340,8 +1329,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据视为成功；配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             ts_code = StockCodeStandardizer.standardize(stock_code)
 
@@ -1397,8 +1385,7 @@ class TushareIngestor(BaseIngestor):
             if existing_subset:
                 df.drop_duplicates(subset=existing_subset, inplace=True)
 
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'pledge_detail', df, source=self.source, target_table='stock_pledge_risk'
             )
             # 返回字典格式
@@ -1430,9 +1417,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                logger.error("Tushare API client (pro) not initialized")
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             api_name = 'pledge_stat'
 
@@ -1488,8 +1473,7 @@ class TushareIngestor(BaseIngestor):
             df['data_source'] = self.source
 
             # 写入数据库
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 api_name, df, source=self.source, target_table='stock_pledge_summary'
             )
 
@@ -1525,8 +1509,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据视为成功；配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             # Determine date range: [Today, Today + 30 days]
             import pandas as pd
@@ -1554,8 +1537,7 @@ class TushareIngestor(BaseIngestor):
                     # Tushare share_float.float_share uses 万股; model stores raw shares.
                     df['release_shares'] = pd.to_numeric(df['release_shares'], errors='coerce') * 10000
 
-                await self._run_in_executor(
-                    self.ingestion_service.write_dataframe,
+                await self.ingestion_service.write_dataframe(
                     'share_float', df, source=self.source, target_table='stock_lockup_release'
                 )
                 # 返回字典格式
@@ -1590,8 +1572,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             df = await self._run_in_executor(
                 self.pro.margin_detail, ts_code=stock_code
@@ -1606,8 +1587,7 @@ class TushareIngestor(BaseIngestor):
                 if 'trade_date' in df.columns:
                     df['trade_date'] = pd.to_datetime(df['trade_date'].astype(str), errors='coerce').dt.date
 
-                await self._run_in_executor(
-                    self.ingestion_service.write_dataframe,
+                await self.ingestion_service.write_dataframe(
                     'margin_detail', df, source=self.source, target_table='stock_margin_data'
                 )
                 # 返回字典格式
@@ -1640,8 +1620,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             # 如果没有指定日期，尝试今天。
             target_dates = []
@@ -1700,8 +1679,7 @@ class TushareIngestor(BaseIngestor):
                     if col in df.columns:
                         df[col] = pd.to_numeric(df[col], errors='coerce') * 10000
 
-                await self._run_in_executor(
-                    self.ingestion_service.write_dataframe,
+                await self.ingestion_service.write_dataframe(
                     'limit_list_d', df, source=self.source, target_table='stock_limit_up_pool'
                 )
                 # 返回字典格式
@@ -1735,8 +1713,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             # Wenn kein Datum angegeben ist, versuche heute, gestern, vorgestern
             target_dates = []
@@ -1794,8 +1771,7 @@ class TushareIngestor(BaseIngestor):
                     if col in df.columns:
                         df[col] = pd.to_numeric(df[col], errors='coerce') * 10000
 
-                await self._run_in_executor(
-                    self.ingestion_service.write_dataframe,
+                await self.ingestion_service.write_dataframe(
                     'limit_list_d', df, source=self.source, target_table='stock_limit_down_pool'
                 )
                 # 返回字典格式
@@ -1829,8 +1805,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             # Normalize date
             target_dates = []
@@ -1888,8 +1863,7 @@ class TushareIngestor(BaseIngestor):
                     if col in df.columns:
                         df[col] = pd.to_numeric(df[col], errors='coerce') * 10000
 
-                await self._run_in_executor(
-                    self.ingestion_service.write_dataframe,
+                await self.ingestion_service.write_dataframe(
                     'limit_list_d', df, source=self.source, target_table='stock_zhaban_pool'
                 )
                 # 返回字典格式
@@ -1923,8 +1897,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             api_name = 'stock_insider_trading'
             # Ensure stock code standard
@@ -1959,8 +1932,7 @@ class TushareIngestor(BaseIngestor):
             if all(col in df.columns for col in subset):
                 df = df.drop_duplicates(subset=subset, keep='last')
 
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 api_name, df,
                 source=self.source,
                 target_table='stock_insider_trading'
@@ -1998,8 +1970,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据视为成功；配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             api_name = 'block_trade'
             # Fix: handle empty stock_code properly for global sync
@@ -2054,8 +2025,7 @@ class TushareIngestor(BaseIngestor):
             # Write key is tricky for block trade as one day can have multiple trades.
             # But underlying table has unique constraint on multiple fields.
 
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 api_name, df, source=self.source, target_table='stock_block_trade'
             )
             # 返回字典格式
@@ -2089,8 +2059,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；行业无匹配数据视为成功；配置缺失或异常返回 False。
         """
         try:
-            if not self.pro:
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             # 1. 获取个股所属行业 (同花顺行业/申万行业)
             # Tushare moneyflow_ind_ths 对应的是同花顺行业
@@ -2170,8 +2139,7 @@ class TushareIngestor(BaseIngestor):
                 df['trade_date'] = pd.to_datetime(df['trade_date']).dt.date
 
             # Ingest
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 api_name, df, source=self.source, target_table='sector_money_flow'
             )
             # 返回字典格式
@@ -2204,6 +2172,7 @@ class TushareIngestor(BaseIngestor):
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
         """
         try:
+            await self.ensure_pro()
             ts_code = StockCodeStandardizer.to_standard(stock_code)
             logger.info(f"Fetching top 10 shareholders for {stock_code} ({ts_code}) via Tushare top10_holders")
 
@@ -2237,8 +2206,7 @@ class TushareIngestor(BaseIngestor):
             df['holder_rank'] = df.groupby('report_date').cumcount() + 1
 
             # 4. 入库
-            await self._run_in_executor(
-                self.ingestion_service.write_dataframe,
+            await self.ingestion_service.write_dataframe(
                 'top10_holders', df, source=self.source, target_table='stock_top_holders'
             )
 
@@ -2279,9 +2247,7 @@ class TushareIngestor(BaseIngestor):
             获取成功返回标准化记录；无数据、参数缺失、配置缺失或异常返回空结果。
         """
         try:
-            if not self.pro:
-                logger.error("Tushare API client (pro) not initialized")
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             if not stock_code:
                 logger.error("Stock code is required for income statement sync (Tushare).")
@@ -2416,9 +2382,7 @@ class TushareIngestor(BaseIngestor):
             获取成功返回标准化记录；无数据、参数缺失、配置缺失或异常返回空结果。
         """
         try:
-            if not self.pro:
-                logger.error("Tushare API client (pro) not initialized")
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             if not stock_code:
                 logger.error("Stock code is required for balance sheet sync (Tushare).")
@@ -2556,9 +2520,7 @@ class TushareIngestor(BaseIngestor):
             获取成功返回标准化记录；无数据、参数缺失、配置缺失或异常返回空结果。
         """
         try:
-            if not self.pro:
-                logger.error("Tushare API client (pro) not initialized")
-                return {"success": False, "data": [], "count": 0}
+            await self.ensure_pro()
 
             if not stock_code:
                 logger.error("Stock code is required for cashflow statement sync (Tushare).")

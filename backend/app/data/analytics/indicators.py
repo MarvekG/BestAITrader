@@ -1,11 +1,12 @@
 from typing import List, Optional
 import pandas as pd
 import numpy as np
-from sqlalchemy.orm import Session
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 import ta
-from datetime import datetime, date
+from datetime import datetime
 
+from app.core import database as database_module
 from app.core.logger import get_logger
 from app.models.stock_indicators import StockIndicators
 from app.models.data_storage import KlineData
@@ -137,10 +138,13 @@ class IndicatorService:
         return df
 
     @staticmethod
-    def save_indicators(db: Session, stock_code: str, df: pd.DataFrame):
+    async def save_indicators(stock_code: str, df: pd.DataFrame):
         """
-        Batch save calculated indicators to database.
-        Updates existing records if conflict.
+        批量保存计算后的技术指标，冲突时更新已有记录。
+
+        Args:
+            stock_code: 股票代码。
+            df: 已计算技术指标的数据帧。
         """
         if df.empty:
             return
@@ -195,36 +199,39 @@ class IndicatorService:
             }
         )
         try:
-            db.execute(stmt)
-            db.commit()
+            async with database_module.AsyncSessionLocal() as db:
+                await db.execute(stmt)
+                await db.commit()
             logger.info(f"Saved {len(records)} indicator records for {stock_code}")
         except Exception as e:
-            db.rollback()
             logger.error(f"Failed to save indicators for {stock_code}: {e}")
             raise e
 
     @classmethod
-    def process_stock(cls, db: Session, stock_code: str, force_update: bool = False):
+    async def process_stock(cls, stock_code: str, force_update: bool = False):
         """
         基于日线行情重新计算并保存单只股票的技术指标。
 
         Args:
-            db: 数据库会话。
             stock_code: 股票代码。
             force_update: 是否强制更新，当前保留参数未使用。
         """
+        _ = force_update
         # 1. Fetch Kline Data
         formatted_code = StockCodeStandardizer.standardize(stock_code)
         # Note: We need a large enough window to calculate indicators correctly (e.g. MA250 requires 250 days)
         # For simplicity, we fetch all, or we could fetch last year + buffer.
         # Fetching strictly from DB.
         
-        query = db.query(KlineData).filter(
-            KlineData.stock_code == formatted_code,
-            KlineData.freq == "D"
-        ).order_by(KlineData.date.asc())
-        
-        kline_records = query.all()
+        async with database_module.AsyncSessionLocal() as db:
+            kline_records = (await db.execute(
+                select(KlineData)
+                .where(
+                    KlineData.stock_code == formatted_code,
+                    KlineData.freq == "D"
+                )
+                .order_by(KlineData.date.asc())
+            )).scalars().all()
         if not kline_records:
             logger.warning(f"No kline data found for {stock_code}")
             return
@@ -246,6 +253,6 @@ class IndicatorService:
         # 3. Save
         # Optimization: Only save rows that don't exist or need update?
         # For now, simplistic bulk upsert for all (or last N days if we optimized fetch)
-        cls.save_indicators(db, formatted_code, df_ind)
+        await cls.save_indicators(formatted_code, df_ind)
 
 indicator_service = IndicatorService()

@@ -9,14 +9,15 @@ from app.models.position import Position
 from app.models.user import User
 
 
-def test_position_rejects_duplicate_account_stock_code(db_session):
+@pytest.mark.asyncio
+async def test_position_rejects_duplicate_account_stock_code(async_db_session):
     user = User(
         username="position_unique_user",
         email="position_unique_user@example.com",
         password_hash="hashed",
     )
-    db_session.add(user)
-    db_session.flush()
+    async_db_session.add(user)
+    await async_db_session.flush()
 
     account = Account(
         account_id=uuid4(),
@@ -26,8 +27,8 @@ def test_position_rejects_duplicate_account_stock_code(db_session):
         market_value=Decimal("0"),
         total_profit_loss=Decimal("0"),
     )
-    db_session.add(account)
-    db_session.flush()
+    async_db_session.add(account)
+    await async_db_session.flush()
 
     first_position = Position(
         account_id=account.account_id,
@@ -56,7 +57,7 @@ def test_position_rejects_duplicate_account_stock_code(db_session):
         purchase_details={"ledger": []},
     )
 
-    db_session.add_all([first_position, duplicate_position])
+    async_db_session.add_all([first_position, duplicate_position])
 
     with pytest.raises(IntegrityError):
-        db_session.commit()
+        await async_db_session.commit()

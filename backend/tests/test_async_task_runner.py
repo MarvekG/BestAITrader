@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from datetime import datetime, timedelta
 from functools import partial
 
 import pytest
+from sqlalchemy import select
 
 from app.core.request_context import get_request_id
+from app.models.async_task import AsyncTask
 from app.tasks.async_task_runner import AsyncTaskRunner
+from app.tasks.task_manager import TaskManager
 
 
 @pytest.mark.asyncio
@@ -15,27 +19,15 @@ async def test_async_task_runner_binds_request_id_and_updates_status(monkeypatch
     observed_request_ids: list[str | None] = []
     status_updates: list[tuple[str, object, str | None]] = []
 
-    class _FakeSession:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:
-            del exc_type, exc, tb
-
-        def commit(self) -> None:
-            return None
-
-    class _FakeTaskManager:
-        def update_task_status(self, db, task_id, status, result=None, error_message=None) -> None:
-            del db, task_id
-            status_updates.append((status, result, error_message))
-
     async def _task() -> dict[str, str]:
         observed_request_ids.append(get_request_id())
         return {"status": "ok"}
 
-    monkeypatch.setattr("app.tasks.async_task_runner.SessionLocal", lambda: _FakeSession())
-    monkeypatch.setattr("app.tasks.async_task_runner.task_manager", _FakeTaskManager())
+    async def _record_status(*, task_id, status, result=None, error_message=None, notification_result=None):
+        del task_id, notification_result
+        status_updates.append((status, result, error_message))
+
+    monkeypatch.setattr("app.tasks.task_manager.task_manager.update_task_status", _record_status)
 
     runner = AsyncTaskRunner(max_concurrent_tasks=1)
 
@@ -58,15 +50,9 @@ async def test_async_task_runner_binds_request_id_and_updates_status(monkeypatch
 async def test_async_task_runner_can_skip_status_persistence(monkeypatch) -> None:
     observed_request_ids: list[str | None] = []
 
-    class _FakeTaskManager:
-        def update_task_status(self, *_args, **_kwargs) -> None:
-            raise AssertionError("status persistence should be skipped")
-
     async def _task() -> dict[str, str]:
         observed_request_ids.append(get_request_id())
         return {"status": "ok"}
-
-    monkeypatch.setattr("app.tasks.async_task_runner.task_manager", _FakeTaskManager())
 
     runner = AsyncTaskRunner(max_concurrent_tasks=1)
 
@@ -86,26 +72,14 @@ async def test_async_task_runner_can_skip_status_persistence(monkeypatch) -> Non
 async def test_async_task_runner_marks_soft_failure(monkeypatch) -> None:
     status_updates: list[tuple[str, object, str | None]] = []
 
-    class _FakeSession:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:
-            del exc_type, exc, tb
-
-        def commit(self) -> None:
-            return None
-
-    class _FakeTaskManager:
-        def update_task_status(self, db, task_id, status, result=None, error_message=None) -> None:
-            del db, task_id
-            status_updates.append((status, result, error_message))
-
     async def _task() -> dict[str, str]:
         return {"status": "failed", "error": "upstream failed"}
 
-    monkeypatch.setattr("app.tasks.async_task_runner.SessionLocal", lambda: _FakeSession())
-    monkeypatch.setattr("app.tasks.async_task_runner.task_manager", _FakeTaskManager())
+    async def _record_status(*, task_id, status, result=None, error_message=None, notification_result=None):
+        del task_id, notification_result
+        status_updates.append((status, result, error_message))
+
+    monkeypatch.setattr("app.tasks.task_manager.task_manager.update_task_status", _record_status)
 
     runner = AsyncTaskRunner(max_concurrent_tasks=1)
 
@@ -127,26 +101,14 @@ async def test_async_task_runner_marks_soft_failure(monkeypatch) -> None:
 async def test_async_task_runner_awaits_partial_async_task(monkeypatch) -> None:
     status_updates: list[tuple[str, object, str | None]] = []
 
-    class _FakeSession:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:
-            del exc_type, exc, tb
-
-        def commit(self) -> None:
-            return None
-
-    class _FakeTaskManager:
-        def update_task_status(self, db, task_id, status, result=None, error_message=None) -> None:
-            del db, task_id
-            status_updates.append((status, result, error_message))
-
     async def _task(value: str) -> dict[str, str]:
         return {"value": value}
 
-    monkeypatch.setattr("app.tasks.async_task_runner.SessionLocal", lambda: _FakeSession())
-    monkeypatch.setattr("app.tasks.async_task_runner.task_manager", _FakeTaskManager())
+    async def _record_status(*, task_id, status, result=None, error_message=None, notification_result=None):
+        del task_id, notification_result
+        status_updates.append((status, result, error_message))
+
+    monkeypatch.setattr("app.tasks.task_manager.task_manager.update_task_status", _record_status)
 
     runner = AsyncTaskRunner(max_concurrent_tasks=1)
 
@@ -169,20 +131,6 @@ async def test_async_task_runner_stop_all_waits_for_cancelled_tasks(monkeypatch)
     entered = asyncio.Event()
     cancelled = asyncio.Event()
 
-    class _FakeSession:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:
-            del exc_type, exc, tb
-
-        def commit(self) -> None:
-            return None
-
-    class _FakeTaskManager:
-        def update_task_status(self, db, task_id, status, result=None, error_message=None) -> None:
-            del db, task_id, status, result, error_message
-
     async def _task() -> dict[str, str]:
         try:
             entered.set()
@@ -191,8 +139,10 @@ async def test_async_task_runner_stop_all_waits_for_cancelled_tasks(monkeypatch)
             cancelled.set()
             raise
 
-    monkeypatch.setattr("app.tasks.async_task_runner.SessionLocal", lambda: _FakeSession())
-    monkeypatch.setattr("app.tasks.async_task_runner.task_manager", _FakeTaskManager())
+    async def _ignore_status(**kwargs):
+        del kwargs
+
+    monkeypatch.setattr("app.tasks.task_manager.task_manager.update_task_status", _ignore_status)
 
     runner = AsyncTaskRunner(max_concurrent_tasks=1)
     runner.submit_task(
@@ -214,28 +164,16 @@ async def test_async_task_runner_stop_all_waits_for_sync_task_thread(monkeypatch
     release = threading.Event()
     completed: list[bool] = []
 
-    class _FakeSession:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:
-            del exc_type, exc, tb
-
-        def commit(self) -> None:
-            return None
-
-    class _FakeTaskManager:
-        def update_task_status(self, db, task_id, status, result=None, error_message=None) -> None:
-            del db, task_id, status, result, error_message
-
     def _task() -> dict[str, str]:
         entered.set()
         release.wait(timeout=1)
         completed.append(True)
         return {"status": "ok"}
 
-    monkeypatch.setattr("app.tasks.async_task_runner.SessionLocal", lambda: _FakeSession())
-    monkeypatch.setattr("app.tasks.async_task_runner.task_manager", _FakeTaskManager())
+    async def _ignore_status(**kwargs):
+        del kwargs
+
+    monkeypatch.setattr("app.tasks.task_manager.task_manager.update_task_status", _ignore_status)
 
     runner = AsyncTaskRunner(max_concurrent_tasks=1)
     runner.submit_task(
@@ -254,3 +192,46 @@ async def test_async_task_runner_stop_all_waits_for_sync_task_thread(monkeypatch
 
     assert completed == [True]
     assert runner.get_active_task_count() == 0
+
+
+@pytest.mark.asyncio
+async def test_cleanup_zombie_tasks_marks_pending_and_running_failed(async_db_session) -> None:
+    manager = TaskManager()
+    now = datetime.now()
+    async_db_session.add_all(
+        [
+            AsyncTask(
+                task_id="pending-task",
+                task_name="Pending Task",
+                task_type="stock_analysis",
+                status="pending",
+                allow_concurrent=False,
+                parameters={"symbol": "000001.SZ"},
+                created_at=now,
+            ),
+            AsyncTask(
+                task_id="running-task",
+                task_name="Running Task",
+                task_type="stock_analysis",
+                status="running",
+                allow_concurrent=False,
+                parameters={"symbol": "000002.SZ"},
+                started_at=now,
+                created_at=now,
+            ),
+        ]
+    )
+    await async_db_session.commit()
+
+    cleaned_count = await manager.cleanup_zombie_tasks()
+
+    tasks = (
+        await async_db_session.execute(select(AsyncTask).order_by(AsyncTask.task_id.asc()))
+    ).scalars().all()
+    assert cleaned_count == 2
+    assert {task.task_id: task.status for task in tasks} == {
+        "pending-task": "failed",
+        "running-task": "failed",
+    }
+    assert all(task.error_message == "Task interrupted by server restart" for task in tasks)
+    assert all(task.completed_at is not None for task in tasks)

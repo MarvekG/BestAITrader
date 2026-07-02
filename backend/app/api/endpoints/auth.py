@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import timedelta
 
-from app.core.database import get_db
+from app.core.database import get_async_db
 from app.crud.user import authenticate_user, update_user
 from app.schemas.user import User, Token, PasswordResetRequest
 from app.core.security import create_access_token, get_current_user
@@ -24,10 +24,10 @@ async def register_user():
 @router.post("/login", response_model=Token)
 async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """用户登录获取访问令牌"""
-    user = authenticate_user(db, form_data.username, form_data.password)
+    user = await authenticate_user(db, form_data.username, form_data.password)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -52,12 +52,12 @@ async def login_for_access_token(
 async def reset_password(
     request: PasswordResetRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """无需旧密码，直接重置/修改当前用户的密码"""
     from app.schemas.user import UserUpdate
 
-    updated_user = update_user(
+    updated_user = await update_user(
         db,
         current_user.id,
         UserUpdate(

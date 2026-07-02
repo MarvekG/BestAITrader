@@ -1,7 +1,8 @@
 from dataclasses import dataclass
 
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
 
+from app.core import database as database_module
 from app.core.i18n import i18n_service
 from app.core.runtime_settings import get_runtime_settings
 from app.models.async_task import AsyncTask
@@ -59,61 +60,62 @@ class DebateStockTaskAlreadyRunning(Exception):
         )
 
 
-def count_running_debate_tasks(db: Session) -> int:
-    """统计当前待执行或运行中的 AI 投研辩论任务数量。
+async def count_running_debate_tasks() -> int:
+    """异步统计当前待执行或运行中的 AI 投研辩论任务数量。"""
+    async with database_module.AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(func.count()).select_from(AsyncTask).where(
+                AsyncTask.task_type == "ai_analysis",
+                AsyncTask.status.in_(["pending", "running"]),
+            )
+        )
+        return int(result.scalar_one() or 0)
+
+
+async def find_running_debate_task_for_session(session_id: str) -> AsyncTask | None:
+    """异步查找指定会话正在排队或运行的 AI 投研辩论任务。
 
     Args:
-        db: 数据库会话。
-
-    Returns:
-        当前全局 pending/running 的 ai_analysis 任务数。
-    """
-    return db.query(AsyncTask).filter(
-        AsyncTask.task_type == "ai_analysis",
-        AsyncTask.status.in_(["pending", "running"]),
-    ).count()
-
-
-def find_running_debate_task_for_session(db: Session, session_id: str) -> AsyncTask | None:
-    """查找指定会话正在排队或运行的 AI 投研辩论任务。
-
-    Args:
-        db: 数据库会话。
         session_id: 辩论会话 ID。
 
     Returns:
         匹配的异步任务；没有则返回 None。
     """
-    running_tasks = db.query(AsyncTask).filter(
-        AsyncTask.task_type == "ai_analysis",
-        AsyncTask.status.in_(["pending", "running"]),
-    ).all()
-    for task in running_tasks:
-        parameters = task.parameters if isinstance(task.parameters, dict) else {}
-        if parameters.get("session_id") == session_id:
-            return task
+    async with database_module.AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(AsyncTask).where(
+                AsyncTask.task_type == "ai_analysis",
+                AsyncTask.status.in_(["pending", "running"]),
+            )
+        )
+        for task in result.scalars().all():
+            parameters = task.parameters if isinstance(task.parameters, dict) else {}
+            if parameters.get("session_id") == session_id:
+                return task
     return None
 
 
-def find_running_debate_task_for_stock(db: Session, stock_code: str) -> AsyncTask | None:
-    """查找指定股票正在排队或运行的 AI 投研辩论任务。
+async def find_running_debate_task_for_stock(stock_code: str) -> AsyncTask | None:
+    """异步查找指定股票正在排队或运行的 AI 投研辩论任务。
 
     Args:
-        db: 数据库会话。
         stock_code: 标准股票代码。
 
     Returns:
         匹配的异步任务；没有则返回 None。
     """
     task_name = format_ai_analysis_task_name(stock_code)
-    running_tasks = db.query(AsyncTask).filter(
-        AsyncTask.task_type == "ai_analysis",
-        AsyncTask.status.in_(["pending", "running"]),
-    ).all()
-    for task in running_tasks:
-        parameters = task.parameters if isinstance(task.parameters, dict) else {}
-        if task.task_name == task_name or parameters.get("stock_code") == stock_code:
-            return task
+    async with database_module.AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(AsyncTask).where(
+                AsyncTask.task_type == "ai_analysis",
+                AsyncTask.status.in_(["pending", "running"]),
+            )
+        )
+        for task in result.scalars().all():
+            parameters = task.parameters if isinstance(task.parameters, dict) else {}
+            if task.task_name == task_name or parameters.get("stock_code") == stock_code:
+                return task
     return None
 
 
@@ -134,17 +136,15 @@ def format_debate_concurrency_limit_message(*, running_count: int, max_concurren
     )
 
 
-def ensure_debate_concurrency_available(db: Session) -> None:
+async def ensure_debate_concurrency_available() -> None:
     """校验 AI 投研辩论全局并发是否仍有余量。
 
     Args:
-        db: 数据库会话。
-
     Raises:
         DebateConcurrencyLimitReached: 当前并发任务数已达到系统设置上限时抛出。
     """
-    max_concurrent = get_runtime_settings(db).ai_debate_max_concurrent
-    running_count = count_running_debate_tasks(db)
+    max_concurrent = (await get_runtime_settings()).ai_debate_max_concurrent
+    running_count = await count_running_debate_tasks()
     if running_count >= max_concurrent:
         raise DebateConcurrencyLimitReached(
             running_count=running_count,
@@ -152,21 +152,20 @@ def ensure_debate_concurrency_available(db: Session) -> None:
         )
 
 
-def ensure_debate_launch_available(db: Session, stock_code: str) -> None:
+async def ensure_debate_launch_available(stock_code: str) -> None:
     """校验指定股票可启动新的 AI 投研辩论任务。
 
     规则：同一股票全系统只允许一个 pending/running 的 AI 分析任务；
     全系统 AI 分析任务总并发数按运行时配置限制。
 
     Args:
-        db: 数据库会话。
         stock_code: 标准股票代码。
 
     Raises:
         DebateStockTaskAlreadyRunning: 指定股票已有运行中任务。
         DebateConcurrencyLimitReached: 全局并发数已达到系统设置上限。
     """
-    existing_task = find_running_debate_task_for_stock(db, stock_code)
+    existing_task = await find_running_debate_task_for_stock(stock_code)
     if existing_task:
         parameters = existing_task.parameters if isinstance(existing_task.parameters, dict) else {}
         raise DebateStockTaskAlreadyRunning(
@@ -174,4 +173,4 @@ def ensure_debate_launch_available(db: Session, stock_code: str) -> None:
             task_id=existing_task.task_id,
             session_id=parameters.get("session_id"),
         )
-    ensure_debate_concurrency_available(db)
+    await ensure_debate_concurrency_available()

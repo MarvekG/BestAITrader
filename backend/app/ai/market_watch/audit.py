@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 import json
 from typing import Any
 
+from sqlalchemy import delete, func, select
+
 from app.core.config import settings
 from app.core import database as database_module
 from app.core.redis_client import redis_client
@@ -19,7 +21,7 @@ DEFAULT_DECISION_PAGE_SIZE = 5
 MAX_DECISION_PAGE_SIZE = 50
 
 
-def is_in_cooldown(user_id: int, stock_code: str, cooldown_minutes: int) -> bool:
+async def is_in_cooldown(user_id: int, stock_code: str, cooldown_minutes: int) -> bool:
     """
     Return whether a stock is inside the persisted automatic launch cooldown window.
 
@@ -35,26 +37,22 @@ def is_in_cooldown(user_id: int, stock_code: str, cooldown_minutes: int) -> bool
         return False
 
     cutoff = datetime.now() - timedelta(minutes=cooldown_minutes)
-    with database_module.SessionLocal() as db:
-        session_ids = [
-            str(session_id)
-            for session_id, in (
-                db.query(AnalysisSession.session_id)
-                .filter(
-                    AnalysisSession.user_id == user_id,
-                    AnalysisSession.stock_code == stock_code,
-                    AnalysisSession.status != "failed",
-                    AnalysisSession.created_at >= cutoff,
-                )
-                .all()
+    async with database_module.AsyncSessionLocal() as db:
+        session_result = await db.execute(
+            select(AnalysisSession.session_id).where(
+                AnalysisSession.user_id == user_id,
+                AnalysisSession.stock_code == stock_code,
+                AnalysisSession.status != "failed",
+                AnalysisSession.created_at >= cutoff,
             )
-        ]
+        )
+        session_ids = [str(session_id) for session_id in session_result.scalars().all()]
         if not session_ids:
             return False
 
-        event = (
-            db.query(MarketWatchEvent)
-            .filter(
+        event_result = await db.execute(
+            select(MarketWatchEvent)
+            .where(
                 MarketWatchEvent.user_id == user_id,
                 MarketWatchEvent.event_type == "debate_launched",
                 MarketWatchEvent.status == "success",
@@ -62,12 +60,12 @@ def is_in_cooldown(user_id: int, stock_code: str, cooldown_minutes: int) -> bool
                 MarketWatchEvent.created_at >= cutoff,
             )
             .order_by(MarketWatchEvent.created_at.desc())
-            .first()
         )
+        event = event_result.scalars().first()
     return event is not None
 
 
-def cleanup_old_events(retention_days: int) -> int:
+async def cleanup_old_events(retention_days: int) -> int:
     """
     删除超过保留窗口的盯盘审计事件。
 
@@ -84,13 +82,13 @@ def cleanup_old_events(retention_days: int) -> int:
         raise ValueError("retention_days must be greater than 0")
 
     cutoff = datetime.now() - timedelta(days=retention_days)
-    with database_module.SessionLocal() as db:
-        deleted = db.query(MarketWatchEvent).filter(MarketWatchEvent.created_at < cutoff).delete()
-        db.commit()
-    return int(deleted)
+    async with database_module.AsyncSessionLocal() as db:
+        result = await db.execute(delete(MarketWatchEvent).where(MarketWatchEvent.created_at < cutoff))
+        await db.commit()
+    return int(result.rowcount or 0)
 
 
-def query_market_watch_events(
+async def query_market_watch_events(
     *,
     user_id: int,
     limit: int = DEFAULT_EVENT_LIMIT,
@@ -116,18 +114,19 @@ def query_market_watch_events(
         raise ValueError("limit must be between 1 and 200")
 
     lower_bound = since or (datetime.now() - timedelta(days=settings.MARKET_WATCH_EVENT_RETENTION_DAYS))
-    with database_module.SessionLocal() as db:
-        query = db.query(MarketWatchEvent).filter(
+    async with database_module.AsyncSessionLocal() as db:
+        query = select(MarketWatchEvent).where(
             MarketWatchEvent.user_id == user_id,
             MarketWatchEvent.created_at >= lower_bound,
         )
         if event_type:
-            query = query.filter(MarketWatchEvent.event_type == event_type)
+            query = query.where(MarketWatchEvent.event_type == event_type)
 
-        return query.order_by(MarketWatchEvent.created_at.desc()).limit(limit).all()
+        result = await db.execute(query.order_by(MarketWatchEvent.created_at.desc()).limit(limit))
+        return list(result.scalars().all())
 
 
-def query_market_watch_decisions(
+async def query_market_watch_decisions(
     *,
     user_id: int,
     page: int = 1,
@@ -153,19 +152,22 @@ def query_market_watch_decisions(
         raise ValueError("page_size must be between 1 and 50")
 
     lower_bound = datetime.now() - timedelta(days=settings.MARKET_WATCH_EVENT_RETENTION_DAYS)
-    with database_module.SessionLocal() as db:
-        query = db.query(MarketWatchEvent).filter(
+    filters = (
             MarketWatchEvent.user_id == user_id,
             MarketWatchEvent.event_type == "ai_decision",
             MarketWatchEvent.created_at >= lower_bound,
         )
-        total = query.count()
-        items = (
-            query.order_by(MarketWatchEvent.created_at.desc(), MarketWatchEvent.event_id.desc())
+    async with database_module.AsyncSessionLocal() as db:
+        total_result = await db.execute(select(func.count()).select_from(MarketWatchEvent).where(*filters))
+        total = int(total_result.scalar_one() or 0)
+        items_result = await db.execute(
+            select(MarketWatchEvent)
+            .where(*filters)
+            .order_by(MarketWatchEvent.created_at.desc(), MarketWatchEvent.event_id.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
-            .all()
         )
+        items = list(items_result.scalars().all())
     return items, total
 
 

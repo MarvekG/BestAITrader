@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
+from sqlalchemy import delete
+
 from app.core.config import settings
-from app.core.database import SessionLocal
+from app.core import database as database_module
 from app.core.logger import get_logger
 from app.models.experience_index import ExperienceIndex
 from app.models.experience_review_event import ExperienceReviewEvent
@@ -138,7 +140,7 @@ def get_scheduled_tasks() -> ScheduledTaskSnapshot:
     )
 
 
-def cleanup_old_experience_records(
+async def cleanup_old_experience_records(
     *,
     index_retention_days: int | None = None,
     review_event_retention_days: int | None = None,
@@ -152,8 +154,8 @@ def cleanup_old_experience_records(
     Returns:
         各类记录删除数量和实际使用的保留天数。
     """
-    index_result = cleanup_old_experience_indexes(retention_days=index_retention_days)
-    review_event_result = cleanup_old_experience_review_events(retention_days=review_event_retention_days)
+    index_result = await cleanup_old_experience_indexes(retention_days=index_retention_days)
+    review_event_result = await cleanup_old_experience_review_events(retention_days=review_event_retention_days)
     return {
         "experience_indexes_deleted": index_result["deleted"],
         "experience_index_retention_days": index_result["retention_days"],
@@ -162,7 +164,7 @@ def cleanup_old_experience_records(
     }
 
 
-def cleanup_old_experience_indexes(*, retention_days: int | None = None) -> dict[str, int]:
+async def cleanup_old_experience_indexes(*, retention_days: int | None = None) -> dict[str, int]:
     """删除超过保留窗口的经验索引记录。
 
     只删除 `experience_indexes` 目录记录，不删除 Memory 经验正文或复盘事件。
@@ -173,14 +175,15 @@ def cleanup_old_experience_indexes(*, retention_days: int | None = None) -> dict
     Returns:
         删除数量和实际使用的保留天数。
     """
-    with SessionLocal() as db:
-        if retention_days is None:
-            config = get_experience_cleanup_config()
-            retention_days = config["index_retention_days"]
-        retention_days = _coerce_int(retention_days, default=EXPERIENCE_INDEX_RETENTION_DAYS, min_value=1, max_value=3650)
-        cutoff = _now() - timedelta(days=retention_days)
-        deleted = db.query(ExperienceIndex).filter(ExperienceIndex.created_at < cutoff).delete(synchronize_session=False)
-        db.commit()
+    if retention_days is None:
+        config = get_experience_cleanup_config()
+        retention_days = config["index_retention_days"]
+    retention_days = _coerce_int(retention_days, default=EXPERIENCE_INDEX_RETENTION_DAYS, min_value=1, max_value=3650)
+    cutoff = _now() - timedelta(days=retention_days)
+    async with database_module.AsyncSessionLocal() as db:
+        result = await db.execute(delete(ExperienceIndex).where(ExperienceIndex.created_at < cutoff))
+        await db.commit()
+        deleted = result.rowcount or 0
 
     if deleted:
         logger.info(
@@ -190,7 +193,7 @@ def cleanup_old_experience_indexes(*, retention_days: int | None = None) -> dict
     return {"deleted": int(deleted or 0), "retention_days": retention_days}
 
 
-def cleanup_old_experience_review_events(*, retention_days: int | None = None) -> dict[str, int]:
+async def cleanup_old_experience_review_events(*, retention_days: int | None = None) -> dict[str, int]:
     """删除超过一个月保留窗口的经验复盘事件记录。
 
     Args:
@@ -209,13 +212,10 @@ def cleanup_old_experience_review_events(*, retention_days: int | None = None) -
         max_value=3650,
     )
     cutoff = _now() - timedelta(days=retention_days)
-    with SessionLocal() as db:
-        deleted = (
-            db.query(ExperienceReviewEvent)
-            .filter(ExperienceReviewEvent.created_at < cutoff)
-            .delete(synchronize_session=False)
-        )
-        db.commit()
+    async with database_module.AsyncSessionLocal() as db:
+        result = await db.execute(delete(ExperienceReviewEvent).where(ExperienceReviewEvent.created_at < cutoff))
+        await db.commit()
+        deleted = result.rowcount or 0
 
     if deleted:
         logger.info(

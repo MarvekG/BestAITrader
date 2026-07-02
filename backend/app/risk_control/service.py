@@ -1,8 +1,10 @@
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import database as database_module
 from app.models.account import Account
 from app.models.data_storage import StockBasic, StockRealtimeMarket
 from app.models.system_setting import SystemSetting
@@ -125,40 +127,109 @@ def serialize_config(config: SystemSetting) -> dict[str, Any]:
 class PortfolioRiskControlService:
     """组合风控配置和评估服务。"""
 
-    def get_or_create_config(self, db: Session, account: Account) -> SystemSetting:
-        """
-        获取账户风控配置，不存在时创建默认配置。
+    def _apply_config_payload(self, config: SystemSetting, payload: dict[str, Any]) -> None:
+        """把风控配置更新字段应用到系统设置对象。"""
+        value = serialize_config(config)
+        for field_name in (
+            "enabled",
+            "max_single_position_pct",
+            "max_industry_position_pct",
+            "min_cash_pct",
+            "require_stop_loss",
+            "stop_loss_warning_pct",
+        ):
+            if field_name not in payload:
+                continue
+            field_value = payload[field_name]
+            if field_name in {"enabled", "require_stop_loss"}:
+                value[field_name] = bool(field_value)
+            else:
+                value[field_name] = float(_to_decimal(field_value))
+
+        value["rule_policies"] = normalize_rule_policies(value.get("rule_policies"))
+        if "rule_policies" in payload:
+            for rule, policy in payload["rule_policies"].items():
+                normalized_policy = _policy_to_str(policy)
+                if rule in DEFAULT_RULE_POLICIES and normalized_policy in SUPPORTED_RULE_POLICIES:
+                    value["rule_policies"][rule] = normalized_policy
+
+        config.value = {
+            "enabled": value["enabled"],
+            "max_single_position_pct": value["max_single_position_pct"],
+            "max_industry_position_pct": value["max_industry_position_pct"],
+            "min_cash_pct": value["min_cash_pct"],
+            "require_stop_loss": value["require_stop_loss"],
+            "stop_loss_warning_pct": value["stop_loss_warning_pct"],
+            "rule_policies": value["rule_policies"],
+        }
+
+    async def get_or_create_config_for_user(self, user_id: int) -> SystemSetting:
+        """异步获取用户风控配置，不存在时创建默认配置。
 
         Args:
-            db: 数据库会话。
-            account: 当前用户账户。
+            user_id: 当前用户 ID。
 
         Returns:
-            账户对应的组合风控系统设置。
+            用户对应的组合风控系统设置。
         """
-        config = db.query(SystemSetting).filter(
-            SystemSetting.user_id == account.user_id,
-            SystemSetting.key == RISK_CONTROL_SETTING_KEY,
-        ).first()
-        if config:
+        async with database_module.AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(SystemSetting).where(
+                    SystemSetting.user_id == user_id,
+                    SystemSetting.key == RISK_CONTROL_SETTING_KEY,
+                )
+            )
+            config = result.scalars().first()
+            if config:
+                return config
+
+            config = SystemSetting(
+                user_id=user_id,
+                key=RISK_CONTROL_SETTING_KEY,
+                value=_default_config_value(),
+                description="Portfolio risk control configuration",
+            )
+            db.add(config)
+            await db.commit()
+            await db.refresh(config)
             return config
 
-        config = SystemSetting(
-            user_id=account.user_id,
-            key=RISK_CONTROL_SETTING_KEY,
-            value=_default_config_value(),
-            description="Portfolio risk control configuration",
-        )
-        db.add(config)
-        db.commit()
-        db.refresh(config)
-        return config
+    async def update_config_for_user(self, user_id: int, payload: dict[str, Any]) -> SystemSetting:
+        """异步更新用户风控配置。
 
-    def evaluate_order(
+        Args:
+            user_id: 当前用户 ID。
+            payload: 风控配置更新字段。
+
+        Returns:
+            更新后的组合风控系统设置。
+        """
+        async with database_module.AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(SystemSetting).where(
+                    SystemSetting.user_id == user_id,
+                    SystemSetting.key == RISK_CONTROL_SETTING_KEY,
+                )
+            )
+            config = result.scalars().first()
+            if config is None:
+                config = SystemSetting(
+                    user_id=user_id,
+                    key=RISK_CONTROL_SETTING_KEY,
+                    value=_default_config_value(),
+                    description="Portfolio risk control configuration",
+                )
+                db.add(config)
+                await db.flush()
+            self._apply_config_payload(config, payload)
+            await db.commit()
+            await db.refresh(config)
+            return config
+
+    async def evaluate_order(
         self,
-        db: Session,
         *,
-        account: Account,
+        user_id: int,
         stock_code: str,
         action: str,
         shares: int,
@@ -171,8 +242,7 @@ class PortfolioRiskControlService:
         评估订单执行后的组合风控结果。
 
         Args:
-            db: 数据库会话。
-            account: 当前用户账户。
+            user_id: 当前用户 ID。
             stock_code: 股票代码。
             action: 交易方向。
             shares: 交易股数。
@@ -184,7 +254,7 @@ class PortfolioRiskControlService:
         Returns:
             风控评估结果，包含是否通过、拦截命中和关键指标。
         """
-        config = serialize_config(self.get_or_create_config(db, account))
+        config = serialize_config(await self.get_or_create_config_for_user(user_id))
         if not config["enabled"]:
             return {
                 "enabled": False,
@@ -195,18 +265,31 @@ class PortfolioRiskControlService:
                 "metrics": {},
             }
 
+        async with database_module.AsyncSessionLocal() as db:
+            account_result = await db.execute(select(Account).where(Account.user_id == user_id))
+            account = account_result.scalars().first()
+            if account is None:
+                return {
+                    "enabled": config["enabled"],
+                    "passed": False,
+                    "severity": "block",
+                    "accepted": [],
+                    "blocks": [{"rule": "account_missing", "message": "Account not found"}],
+                    "metrics": {},
+                }
+
         action = str(action or "").lower()
         price_decimal = _to_decimal(price or 0)
         if price_decimal <= 0:
-            price_decimal = self._get_latest_price(db, stock_code)
+            price_decimal = await self._get_latest_price(stock_code)
         shares_decimal = _to_decimal(shares or 0)
         trade_value = price_decimal * shares_decimal
         estimated_fee_decimal = _to_decimal(estimated_fee or 0)
-        valuation = build_portfolio_valuation(db, account)
+        valuation = await build_portfolio_valuation(account)
         total_assets = valuation["summary"]["total_assets_decimal"]
         available_cash = valuation["summary"]["available_cash_decimal"]
         current_position_value = self._get_position_value(valuation, stock_code)
-        industry = self._get_stock_industry(db, stock_code)
+        industry = await self._get_stock_industry(stock_code)
         current_industry_value = self._get_industry_value(valuation, industry)
 
         if action == "buy":
@@ -337,36 +420,42 @@ class PortfolioRiskControlService:
                 return position["market_value_decimal"]
         return Decimal("0")
 
-    def _get_stock_industry(self, db: Session, stock_code: str) -> str:
+    async def _get_stock_industry(self, stock_code: str) -> str:
         """
         获取股票所属行业，缺失时返回未知行业。
 
         Args:
-            db: 数据库会话。
             stock_code: 股票代码。
 
         Returns:
             股票行业名称。
         """
-        industry = db.query(StockBasic.industry).filter(StockBasic.stock_code == stock_code).scalar()
+        async with database_module.AsyncSessionLocal() as db:
+            result = await db.execute(select(StockBasic.industry).where(StockBasic.stock_code == stock_code))
+            industry = result.scalar_one_or_none()
         return str(industry or "未知行业")
 
-    def _get_latest_price(self, db: Session, stock_code: str) -> Decimal:
+    async def _get_latest_price(self, stock_code: str) -> Decimal:
         """
         获取股票最近有效行情价格。
 
         Args:
-            db: 数据库会话。
             stock_code: 股票代码。
 
         Returns:
             最近有效价格；缺失时返回 0。
         """
-        price = db.query(StockRealtimeMarket.current_price).filter(
-            StockRealtimeMarket.stock_code == stock_code,
-            StockRealtimeMarket.current_price.isnot(None),
-            StockRealtimeMarket.current_price > 0,
-        ).order_by(StockRealtimeMarket.timestamp.desc()).scalar()
+        async with database_module.AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(StockRealtimeMarket.current_price)
+                .where(
+                    StockRealtimeMarket.stock_code == stock_code,
+                    StockRealtimeMarket.current_price.isnot(None),
+                    StockRealtimeMarket.current_price > 0,
+                )
+                .order_by(StockRealtimeMarket.timestamp.desc())
+            )
+            price = result.scalar_one_or_none()
         return _to_decimal(price or 0)
 
     def _get_industry_value(self, valuation: dict[str, Any], industry: str) -> Decimal:
@@ -490,56 +579,5 @@ class PortfolioRiskControlService:
         if value is None or isinstance(value, bool):
             return value
         return round(float(value), 6)
-
-    def update_config(self, db: Session, account: Account, payload: dict[str, Any]) -> SystemSetting:
-        """
-        更新账户风控配置。
-
-        Args:
-            db: 数据库会话。
-            account: 当前用户账户。
-            payload: 风控配置更新字段。
-
-        Returns:
-            更新后的组合风控系统设置。
-        """
-        config = self.get_or_create_config(db, account)
-        value = serialize_config(config)
-        for field_name in (
-            "enabled",
-            "max_single_position_pct",
-            "max_industry_position_pct",
-            "min_cash_pct",
-            "require_stop_loss",
-            "stop_loss_warning_pct",
-        ):
-            if field_name not in payload:
-                continue
-            field_value = payload[field_name]
-            if field_name in {"enabled", "require_stop_loss"}:
-                value[field_name] = bool(field_value)
-            else:
-                value[field_name] = float(_to_decimal(field_value))
-
-        value["rule_policies"] = normalize_rule_policies(value.get("rule_policies"))
-        if "rule_policies" in payload:
-            for rule, policy in payload["rule_policies"].items():
-                normalized_policy = _policy_to_str(policy)
-                if rule in DEFAULT_RULE_POLICIES and normalized_policy in SUPPORTED_RULE_POLICIES:
-                    value["rule_policies"][rule] = normalized_policy
-
-        config.value = {
-            "enabled": value["enabled"],
-            "max_single_position_pct": value["max_single_position_pct"],
-            "max_industry_position_pct": value["max_industry_position_pct"],
-            "min_cash_pct": value["min_cash_pct"],
-            "require_stop_loss": value["require_stop_loss"],
-            "stop_loss_warning_pct": value["stop_loss_warning_pct"],
-            "rule_policies": value["rule_policies"],
-        }
-        db.commit()
-        db.refresh(config)
-        return config
-
 
 portfolio_risk_control_service = PortfolioRiskControlService()

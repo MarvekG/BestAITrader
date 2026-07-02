@@ -357,7 +357,7 @@ async def _retry_final_experience_json(
         retry_messages.append(HumanMessage(content=_build_final_json_retry_message()))
         response = await raw_llm.ainvoke(retry_messages)
         cache_lane, api_key_alias = get_research_usage_lane()
-        record_llm_usage(
+        await record_llm_usage(
             response,
             settings.LLM_MODEL,
             "experience_debate_review",
@@ -675,7 +675,7 @@ async def review_debate_conclusion(state: ExperienceWorkflowState) -> Dict[str, 
             )
             response = await llm.ainvoke(messages)
             cache_lane, api_key_alias = get_research_usage_lane()
-            record_llm_usage(
+            await record_llm_usage(
                 response,
                 settings.LLM_MODEL,
                 "experience_debate_review",

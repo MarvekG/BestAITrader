@@ -1,12 +1,16 @@
 from datetime import datetime
 from decimal import Decimal
 
+import pytest
+from sqlalchemy import select
+
+from app.models.account import Account
 from app.models.data_storage import StockBasic, StockRealtimeMarket
 from app.models.position import Position
 from app.risk_control.service import portfolio_risk_control_service
 
 
-def _seed_stock_basic(db_session, stock_code="000001.SZ", industry="Banking", name=None):
+async def _seed_stock_basic(db, stock_code="000001.SZ", industry="Banking", name=None):
     """创建测试股票基础信息。"""
     record = StockBasic(
         stock_code=stock_code,
@@ -15,24 +19,22 @@ def _seed_stock_basic(db_session, stock_code="000001.SZ", industry="Banking", na
         market="SZSE",
         data_source="test",
     )
-    db_session.add(record)
-    db_session.commit()
+    db.add(record)
+    await db.commit()
     return record
 
 
-def _get_auth_account(client, auth_headers, db_session):
+async def _get_auth_account(client, auth_headers, db):
     """初始化并读取当前测试用户账户。"""
     response = client.get("/api/v1/accounts/my-assets", headers=auth_headers)
     assert response.status_code == 200
 
-    from app.models.account import Account
-
-    return db_session.query(Account).first()
+    return (await db.execute(select(Account))).scalars().first()
 
 
-def _add_position(db_session, account, stock_code, shares, price, industry="Banking"):
+async def _add_position(db, account, stock_code, shares, price, industry="Banking"):
     """创建测试持仓记录。"""
-    _seed_stock_basic(db_session, stock_code=stock_code, industry=industry)
+    await _seed_stock_basic(db, stock_code=stock_code, industry=industry)
     position = Position(
         account_id=account.account_id,
         stock_code=stock_code,
@@ -46,8 +48,8 @@ def _add_position(db_session, account, stock_code, shares, price, industry="Bank
         profit_loss_pct=Decimal("0"),
         purchase_details={},
     )
-    db_session.add(position)
-    db_session.commit()
+    db.add(position)
+    await db.commit()
     return position
 
 
@@ -138,14 +140,14 @@ def test_evaluate_order_rejects_invalid_action(client, auth_headers):
     assert response.status_code == 422
 
 
-def test_evaluate_order_skips_rules_when_disabled(client, auth_headers, db_session):
-    _seed_stock_basic(db_session, stock_code="000001.SZ", industry="Banking")
-    account = _get_auth_account(client, auth_headers, db_session)
-    portfolio_risk_control_service.update_config(db_session, account, {"enabled": False})
+@pytest.mark.asyncio
+async def test_evaluate_order_skips_rules_when_disabled(client, auth_headers, async_db_session):
+    await _seed_stock_basic(async_db_session, stock_code="000001.SZ", industry="Banking")
+    account = await _get_auth_account(client, auth_headers, async_db_session)
+    await portfolio_risk_control_service.update_config_for_user(account.user_id, {"enabled": False})
 
-    result = portfolio_risk_control_service.evaluate_order(
-        db_session,
-        account=account,
+    result = await portfolio_risk_control_service.evaluate_order(
+        user_id=account.user_id,
         stock_code="000001.SZ",
         action="buy",
         shares=5000,
@@ -161,14 +163,14 @@ def test_evaluate_order_skips_rules_when_disabled(client, auth_headers, db_sessi
     assert result["blocks"] == []
 
 
-def test_evaluate_order_blocks_single_position_exceed_by_default(client, auth_headers, db_session):
-    _seed_stock_basic(db_session, stock_code="000001.SZ", industry="Banking")
-    account = _get_auth_account(client, auth_headers, db_session)
-    portfolio_risk_control_service.update_config(db_session, account, {"max_single_position_pct": 0.2})
+@pytest.mark.asyncio
+async def test_evaluate_order_blocks_single_position_exceed_by_default(client, auth_headers, async_db_session):
+    await _seed_stock_basic(async_db_session, stock_code="000001.SZ", industry="Banking")
+    account = await _get_auth_account(client, auth_headers, async_db_session)
+    await portfolio_risk_control_service.update_config_for_user(account.user_id, {"max_single_position_pct": 0.2})
 
-    result = portfolio_risk_control_service.evaluate_order(
-        db_session,
-        account=account,
+    result = await portfolio_risk_control_service.evaluate_order(
+        user_id=account.user_id,
         stock_code="000001.SZ",
         action="buy",
         shares=3000,
@@ -192,12 +194,12 @@ def test_evaluate_order_blocks_single_position_exceed_by_default(client, auth_he
     assert result["metrics"]["post_single_position_pct"] == 0.3
 
 
-def test_evaluate_order_blocks_when_cash_falls_below_floor(client, auth_headers, db_session):
-    _seed_stock_basic(db_session, stock_code="000001.SZ", industry="Banking")
-    account = _get_auth_account(client, auth_headers, db_session)
-    portfolio_risk_control_service.update_config(
-        db_session,
-        account,
+@pytest.mark.asyncio
+async def test_evaluate_order_blocks_when_cash_falls_below_floor(client, auth_headers, async_db_session):
+    await _seed_stock_basic(async_db_session, stock_code="000001.SZ", industry="Banking")
+    account = await _get_auth_account(client, auth_headers, async_db_session)
+    await portfolio_risk_control_service.update_config_for_user(
+        account.user_id,
         {
             "min_cash_pct": 0.1,
             "rule_policies": {
@@ -207,9 +209,8 @@ def test_evaluate_order_blocks_when_cash_falls_below_floor(client, auth_headers,
         },
     )
 
-    result = portfolio_risk_control_service.evaluate_order(
-        db_session,
-        account=account,
+    result = await portfolio_risk_control_service.evaluate_order(
+        user_id=account.user_id,
         stock_code="000001.SZ",
         action="buy",
         shares=9500,
@@ -224,14 +225,14 @@ def test_evaluate_order_blocks_when_cash_falls_below_floor(client, auth_headers,
     assert result["metrics"]["post_cash_pct"] == 0.05
 
 
-def test_evaluate_order_blocks_missing_required_stop_loss(client, auth_headers, db_session):
-    _seed_stock_basic(db_session, stock_code="000001.SZ", industry="Banking")
-    account = _get_auth_account(client, auth_headers, db_session)
-    portfolio_risk_control_service.update_config(db_session, account, {"require_stop_loss": True})
+@pytest.mark.asyncio
+async def test_evaluate_order_blocks_missing_required_stop_loss(client, auth_headers, async_db_session):
+    await _seed_stock_basic(async_db_session, stock_code="000001.SZ", industry="Banking")
+    account = await _get_auth_account(client, auth_headers, async_db_session)
+    await portfolio_risk_control_service.update_config_for_user(account.user_id, {"require_stop_loss": True})
 
-    result = portfolio_risk_control_service.evaluate_order(
-        db_session,
-        account=account,
+    result = await portfolio_risk_control_service.evaluate_order(
+        user_id=account.user_id,
         stock_code="000001.SZ",
         action="buy",
         shares=100,
@@ -253,22 +254,21 @@ def test_evaluate_order_blocks_missing_required_stop_loss(client, auth_headers, 
     }
 
 
-def test_evaluate_order_blocks_when_industry_exceeds_limit(client, auth_headers, db_session):
-    account = _get_auth_account(client, auth_headers, db_session)
-    _add_position(db_session, account, "000002.SZ", 2000, 100, industry="Banking")
-    _seed_stock_basic(db_session, stock_code="000001.SZ", industry="Banking")
-    portfolio_risk_control_service.update_config(
-        db_session,
-        account,
+@pytest.mark.asyncio
+async def test_evaluate_order_blocks_when_industry_exceeds_limit(client, auth_headers, async_db_session):
+    account = await _get_auth_account(client, auth_headers, async_db_session)
+    await _add_position(async_db_session, account, "000002.SZ", 2000, 100, industry="Banking")
+    await _seed_stock_basic(async_db_session, stock_code="000001.SZ", industry="Banking")
+    await portfolio_risk_control_service.update_config_for_user(
+        account.user_id,
         {
             "max_industry_position_pct": 0.35,
             "rule_policies": {"max_single_position_pct": "off"},
         },
     )
 
-    result = portfolio_risk_control_service.evaluate_order(
-        db_session,
-        account=account,
+    result = await portfolio_risk_control_service.evaluate_order(
+        user_id=account.user_id,
         stock_code="000001.SZ",
         action="buy",
         shares=3000,
@@ -283,21 +283,20 @@ def test_evaluate_order_blocks_when_industry_exceeds_limit(client, auth_headers,
     assert result["metrics"]["post_industry_position_pct"] == 0.416667
 
 
-def test_evaluate_order_blocks_single_position_when_policy_is_block(client, auth_headers, db_session):
-    _seed_stock_basic(db_session, stock_code="000001.SZ", industry="Banking")
-    account = _get_auth_account(client, auth_headers, db_session)
-    portfolio_risk_control_service.update_config(
-        db_session,
-        account,
+@pytest.mark.asyncio
+async def test_evaluate_order_blocks_single_position_when_policy_is_block(client, auth_headers, async_db_session):
+    await _seed_stock_basic(async_db_session, stock_code="000001.SZ", industry="Banking")
+    account = await _get_auth_account(client, auth_headers, async_db_session)
+    await portfolio_risk_control_service.update_config_for_user(
+        account.user_id,
         {
             "max_single_position_pct": 0.2,
             "rule_policies": {"max_single_position_pct": "block"},
         },
     )
 
-    result = portfolio_risk_control_service.evaluate_order(
-        db_session,
-        account=account,
+    result = await portfolio_risk_control_service.evaluate_order(
+        user_id=account.user_id,
         stock_code="000001.SZ",
         action="buy",
         shares=3000,
@@ -312,21 +311,20 @@ def test_evaluate_order_blocks_single_position_when_policy_is_block(client, auth
     assert result["blocks"][0]["rule"] == "max_single_position_pct"
 
 
-def test_evaluate_order_skips_rule_when_policy_is_off(client, auth_headers, db_session):
-    _seed_stock_basic(db_session, stock_code="000001.SZ", industry="Banking")
-    account = _get_auth_account(client, auth_headers, db_session)
-    portfolio_risk_control_service.update_config(
-        db_session,
-        account,
+@pytest.mark.asyncio
+async def test_evaluate_order_skips_rule_when_policy_is_off(client, auth_headers, async_db_session):
+    await _seed_stock_basic(async_db_session, stock_code="000001.SZ", industry="Banking")
+    account = await _get_auth_account(client, auth_headers, async_db_session)
+    await portfolio_risk_control_service.update_config_for_user(
+        account.user_id,
         {
             "max_single_position_pct": 0.2,
             "rule_policies": {"max_single_position_pct": "off"},
         },
     )
 
-    result = portfolio_risk_control_service.evaluate_order(
-        db_session,
-        account=account,
+    result = await portfolio_risk_control_service.evaluate_order(
+        user_id=account.user_id,
         stock_code="000001.SZ",
         action="buy",
         shares=3000,
@@ -341,12 +339,13 @@ def test_evaluate_order_skips_rule_when_policy_is_off(client, auth_headers, db_s
     assert result["blocks"] == []
 
 
-def test_evaluate_order_uses_dynamic_portfolio_valuation(client, auth_headers, db_session):
-    account = _get_auth_account(client, auth_headers, db_session)
+@pytest.mark.asyncio
+async def test_evaluate_order_uses_dynamic_portfolio_valuation(client, auth_headers, async_db_session):
+    account = await _get_auth_account(client, auth_headers, async_db_session)
     account.total_assets = Decimal("1000000.0000")
     account.available_cash = Decimal("300000.0000")
-    _seed_stock_basic(db_session, stock_code="000001.SZ", industry="Banking")
-    db_session.add_all(
+    await _seed_stock_basic(async_db_session, stock_code="000001.SZ", industry="Banking")
+    async_db_session.add_all(
         [
             StockRealtimeMarket(
                 stock_code="000001.SZ",
@@ -368,16 +367,14 @@ def test_evaluate_order_uses_dynamic_portfolio_valuation(client, auth_headers, d
             ),
         ]
     )
-    db_session.commit()
-    portfolio_risk_control_service.update_config(
-        db_session,
-        account,
+    await async_db_session.commit()
+    await portfolio_risk_control_service.update_config_for_user(
+        account.user_id,
         {"require_stop_loss": False, "max_single_position_pct": 0.2},
     )
 
-    result = portfolio_risk_control_service.evaluate_order(
-        db_session,
-        account=account,
+    result = await portfolio_risk_control_service.evaluate_order(
+        user_id=account.user_id,
         stock_code="000001.SZ",
         action="buy",
         shares=100,

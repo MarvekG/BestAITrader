@@ -43,13 +43,13 @@ def test_market_watch_scheduler_due_check_uses_user_interval() -> None:
 
 
 @pytest.mark.asyncio
-async def test_market_watch_scheduler_runs_due_enabled_users(monkeypatch, sqlite_session_factory, db_session) -> None:
+async def test_market_watch_scheduler_runs_due_enabled_users(monkeypatch, async_db_session) -> None:
     user = User(id=7, username="watcher", email="watcher@example.com", password_hash="hash", is_active=True)
-    db_session.add(user)
-    db_session.commit()
+    async_db_session.add(user)
+    await async_db_session.commit()
     calls: list[dict[str, object]] = []
 
-    def fake_settings(user_id: int) -> MarketWatchSettingsResponse:
+    async def fake_settings(user_id: int) -> MarketWatchSettingsResponse:
         return MarketWatchSettingsResponse(user_id=user_id, scan_interval_seconds=45)
 
     async def fake_scan_market_watch(user_id: int, **kwargs):
@@ -60,7 +60,6 @@ async def test_market_watch_scheduler_runs_due_enabled_users(monkeypatch, sqlite
             "debate_launch": {"status": "not_started"},
         }
 
-    monkeypatch.setattr(scheduler_module, "SessionLocal", sqlite_session_factory)
     monkeypatch.setattr(scheduler_module, "get_market_watch_settings", fake_settings)
     monkeypatch.setattr(scheduler_module, "scan_market_watch", fake_scan_market_watch)
     monkeypatch.setattr(scheduler_module, "_shanghai_now", lambda: datetime(2026, 5, 15, 10, 0))
@@ -80,18 +79,17 @@ async def test_market_watch_scheduler_runs_due_enabled_users(monkeypatch, sqlite
 
 
 @pytest.mark.asyncio
-async def test_market_watch_scheduler_skips_disabled_users(monkeypatch, sqlite_session_factory, db_session) -> None:
+async def test_market_watch_scheduler_skips_disabled_users(monkeypatch, async_db_session) -> None:
     user = User(id=8, username="disabled", email="disabled@example.com", password_hash="hash", is_active=True)
-    db_session.add(user)
-    db_session.commit()
+    async_db_session.add(user)
+    await async_db_session.commit()
 
-    def fake_settings(user_id: int) -> MarketWatchSettingsResponse:
+    async def fake_settings(user_id: int) -> MarketWatchSettingsResponse:
         return MarketWatchSettingsResponse(user_id=user_id, auto_scan_enabled=False)
 
     async def fake_scan_market_watch(*args, **kwargs):
         raise AssertionError("scan should not run for disabled market watch settings")
 
-    monkeypatch.setattr(scheduler_module, "SessionLocal", sqlite_session_factory)
     monkeypatch.setattr(scheduler_module, "get_market_watch_settings", fake_settings)
     monkeypatch.setattr(scheduler_module, "scan_market_watch", fake_scan_market_watch)
     scheduler_module.last_scan_at_by_user.clear()

@@ -3,9 +3,12 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from app.core.database import SessionLocal
+from sqlalchemy import select
+
+from app.core import database as database_module
 from app.core.logger import get_logger
 from app.models.account import Account
+from app.performance.service import DEFAULT_BENCHMARK_CODE
 from app.performance.service import create_account_equity_snapshot
 from app.tasks.scheduled_task_registry import ScheduledTask, ScheduledTaskSnapshot
 
@@ -53,13 +56,15 @@ async def generate_daily_account_equity_snapshots() -> dict[str, Any]:
     snapshot_date = _today()
     created = 0
     failed = 0
-    with SessionLocal() as db:
-        accounts = db.query(Account).all()
+    async with database_module.AsyncSessionLocal() as db:
+        accounts_result = await db.execute(select(Account))
+        accounts = accounts_result.scalars().all()
         for account in accounts:
             try:
-                create_account_equity_snapshot(db, account=account, snapshot_date=snapshot_date)
+                await create_account_equity_snapshot(db, account=account, snapshot_date=snapshot_date)
                 created += 1
             except Exception:
+                await db.rollback()
                 failed += 1
                 logger.exception(
                     "failed to create account equity snapshot",

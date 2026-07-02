@@ -1,15 +1,13 @@
-from collections.abc import Callable
 from typing import Any, Dict, List, Optional
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import inspect, text
-from sqlalchemy.orm import Session
+from sqlalchemy import delete, func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import get_async_db
 from app.core.i18n import i18n_service
 from app.core.logger import logger
-from app.core.request_context import get_or_create_request_id
 from app.ai.llm_engine.context.service import AIContextService
 from app.data.metadata.field_labels import get_table_field_label
 from app.data.storage import data_storage_service
@@ -18,39 +16,15 @@ from app.core.utils.converters import safe_float
 from app.core.utils.json_utils import sanitize_for_json
 
 
-def _submit_async_task(
-    executor: Any,
-    *,
-    task_id: str,
-    task_func: Callable[..., Any],
-    task_args: tuple = (),
-    task_kwargs: dict[str, Any] | None = None,
-    task_name: str | None = None,
-) -> bool:
-    """
-    提交后台异步任务并保留当前请求上下文。
-
-    Args:
-        executor: 异步任务运行器实例。
-        task_id: 任务 ID。
-        task_func: 任务函数。
-        task_args: 任务位置参数。
-        task_kwargs: 任务关键字参数。
-        task_name: 可选任务展示名称。
-
-    Returns:
-        是否提交成功。
-    """
-    return executor.submit_task(
-        task_id=task_id,
-        task_func=task_func,
-        task_args=task_args,
-        task_kwargs=task_kwargs,
-        task_name=task_name,
-        request_id=get_or_create_request_id(),
-    )
-
 router = APIRouter()
+
+
+def _is_sqlite_session(db: Any) -> bool:
+    """判断异步数据库会话是否绑定 SQLite。"""
+    bind = getattr(db, "bind", None)
+    if bind is None and hasattr(db, "_db"):
+        bind = getattr(db._db, "bind", None)
+    return bind is not None and "sqlite" in str(bind.url)
 
 
 @router.get("/stocks/{stock_code}")
@@ -60,7 +34,7 @@ async def get_stock_data(
     """Get stock data"""
     try:
         # Use DataStorageService to get data from DB
-        stock_data = data_storage_service.get_stock_data_from_db(stock_code)
+        stock_data = await data_storage_service.get_stock_data_from_db(stock_code)
         if not stock_data:
             raise HTTPException(status_code=404, detail=f"Stock code {stock_code} not found")
         return stock_data
@@ -74,7 +48,7 @@ async def get_stock_name(stock_code: str):
     """Get stock name by code"""
     try:
         # Use DataStorageService to get basic info
-        basic_info = data_storage_service.get_stock_basic(stock_code)
+        basic_info = await data_storage_service.get_stock_basic(stock_code)
         if not basic_info:
              raise HTTPException(status_code=404, detail=f"Stock code {stock_code} not found")
 
@@ -103,11 +77,11 @@ async def get_ai_context(stock_code: str):
 from app.models.data_storage import KlineData
 
 @router.get("/kline/{stock_code}", response_model=List[Dict[str, Any]])
-def get_kline_data(
+async def get_kline_data(
     stock_code: str,
     freq: str = "D",
     limit: int = 100,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Get Kline data"""
     try:
@@ -115,12 +89,16 @@ def get_kline_data(
         formatted_code = StockCodeStandardizer.standardize(stock_code)
 
         # Query database
-        klines = db.query(KlineData).filter(
-            KlineData.stock_code == formatted_code,
-            KlineData.freq == freq
-        ).order_by(
-            KlineData.date.desc()
-        ).limit(limit).all()
+        result = await db.execute(
+            select(KlineData)
+            .where(
+                KlineData.stock_code == formatted_code,
+                KlineData.freq == freq,
+            )
+            .order_by(KlineData.date.desc())
+            .limit(limit)
+        )
+        klines = result.scalars().all()
 
         # Convert data format (return to frontend in chronological order)
         result = []
@@ -146,25 +124,27 @@ async def get_db_stocks(
     query: Optional[str] = None,
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Get basic stock information from database"""
     from app.models.data_storage import StockBasic
     from sqlalchemy import or_
 
-    db_query = db.query(StockBasic)
+    filters = []
     if stock_code:
-        db_query = db_query.filter(StockBasic.stock_code == StockCodeStandardizer.standardize(stock_code))
+        filters.append(StockBasic.stock_code == StockCodeStandardizer.standardize(stock_code))
     if query:
-        db_query = db_query.filter(
+        filters.append(
             or_(
                 StockBasic.stock_code.ilike(f"%{query}%"),
                 StockBasic.name.ilike(f"%{query}%")
             )
         )
 
-    total = db_query.count()
-    items = db_query.offset(skip).limit(limit).all()
+    total_result = await db.execute(select(func.count()).select_from(StockBasic).where(*filters))
+    items_result = await db.execute(select(StockBasic).where(*filters).offset(skip).limit(limit))
+    total = total_result.scalar_one()
+    items = items_result.scalars().all()
 
     # Transform keys to TableName.FieldName format
     transformed_items = []
@@ -181,8 +161,8 @@ async def get_db_stocks(
     }
 
 
-def _get_json_report_data(
-    db: Session,
+async def _get_json_report_data(
+    db: AsyncSession,
     model: Any,
     target_table: str,
     stock_code: Optional[str],
@@ -194,18 +174,26 @@ def _get_json_report_data(
     import math
 
     try:
-        query = db.query(model)
+        filters = []
 
         if stock_code:
             formatted_code = StockCodeStandardizer.standardize(stock_code)
             if formatted_code:
-                query = query.filter(model.stock_code == formatted_code)
+                filters.append(model.stock_code == formatted_code)
 
         # Calculate total count
-        total = query.count()
+        total_result = await db.execute(select(func.count()).select_from(model).where(*filters))
+        total = total_result.scalar_one()
 
         # Fetch paginated items, sorted by report_date dec
-        items_db = query.order_by(model.report_date.desc(), model.stock_code).offset(skip).limit(limit).all()
+        items_result = await db.execute(
+            select(model)
+            .where(*filters)
+            .order_by(model.report_date.desc(), model.stock_code)
+            .offset(skip)
+            .limit(limit)
+        )
+        items_db = items_result.scalars().all()
 
         if not items_db:
             return {
@@ -280,7 +268,7 @@ async def get_db_data(
     order: Optional[str] = 'desc',
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Generic database table query interface"""
     from app.models.data_storage import (
@@ -340,14 +328,15 @@ async def get_db_data(
     # Use table name from model definition as prefix
     prefix = model.__tablename__
 
-    query = db.query(model)
+    filters = []
     if stock_code:
         standardized_code = StockCodeStandardizer.standardize(stock_code)
         if hasattr(model, 'stock_code'):
-            query = query.filter(model.stock_code == standardized_code)
+            filters.append(model.stock_code == standardized_code)
         elif data_type.lower() == "sector_money_flow":
             from app.models.data_storage import StockBasic
-            stock = db.query(StockBasic).filter(StockBasic.stock_code == standardized_code).first()
+            stock_result = await db.execute(select(StockBasic).where(StockBasic.stock_code == standardized_code))
+            stock = stock_result.scalars().first()
             if stock and stock.industry:
                 industry = stock.industry
                 mapping = {
@@ -358,15 +347,15 @@ async def get_db_data(
                     '光伏': '光伏设备',
                 }
                 sector_name = mapping.get(industry, industry)
-                query = query.filter(model.sector_name == sector_name)
+                filters.append(model.sector_name == sector_name)
             else:
-                query = query.filter(model.sector_name == "___NOT_FOUND___")
+                filters.append(model.sector_name == "___NOT_FOUND___")
         elif hasattr(model, 'etf_code'):
-            query = query.filter(model.etf_code == standardized_code)
+            filters.append(model.etf_code == standardized_code)
 
     # Data source filtering (for futures data differentiation)
     if data_source and hasattr(model, 'data_source'):
-        query = query.filter(model.data_source == data_source)
+        filters.append(model.data_source == data_source)
 
 
     # Date filtering
@@ -374,46 +363,52 @@ async def get_db_data(
     if date_val:
         # Try to find the date column
         if hasattr(model, 'update_date'):
-             query = query.filter(model.update_date == date_val)
+             filters.append(model.update_date == date_val)
         elif hasattr(model, 'trade_date'):
-             query = query.filter(model.trade_date == date_val)
+             filters.append(model.trade_date == date_val)
         elif hasattr(model, 'date'):
-             query = query.filter(model.date == date_val)
+             filters.append(model.date == date_val)
         elif hasattr(model, 'publish_date'):
-             query = query.filter(model.publish_date == date_val)
+             filters.append(model.publish_date == date_val)
         elif hasattr(model, 'report_date'):
-             query = query.filter(model.report_date == date_val)
+             filters.append(model.report_date == date_val)
         elif hasattr(model, 'data_date'):
-             query = query.filter(model.data_date == date_val)
+             filters.append(model.data_date == date_val)
 
     # Sort processing
+    order_by = None
     if sort_by and hasattr(model, sort_by):
          # Explicit sorting
          if order and order.lower() == 'asc':
-             query = query.order_by(getattr(model, sort_by).asc())
+             order_by = getattr(model, sort_by).asc()
          else:
-             query = query.order_by(getattr(model, sort_by).desc())
+             order_by = getattr(model, sort_by).desc()
     else:
         # Default implicit sorting
         if hasattr(model, 'update_date'):
-            query = query.order_by(model.update_date.desc())
+            order_by = model.update_date.desc()
         elif hasattr(model, 'trade_date'):
-            query = query.order_by(model.trade_date.desc())
+            order_by = model.trade_date.desc()
         elif hasattr(model, 'date'):
-            query = query.order_by(model.date.desc())
+            order_by = model.date.desc()
         elif hasattr(model, 'publish_date'):
-            query = query.order_by(model.publish_date.desc())
+            order_by = model.publish_date.desc()
         elif hasattr(model, 'report_date'):
-            query = query.order_by(model.report_date.desc())
+            order_by = model.report_date.desc()
         elif hasattr(model, 'data_date'):
-            query = query.order_by(model.data_date.desc())
+            order_by = model.data_date.desc()
         elif hasattr(model, 'end_date'): # For Shareholder count
-            query = query.order_by(model.end_date.desc())
+            order_by = model.end_date.desc()
         elif hasattr(model, 'timestamp'):
-            query = query.order_by(model.timestamp.desc())
+            order_by = model.timestamp.desc()
 
-    total = query.count()
-    items = query.offset(skip).limit(limit).all()
+    total_result = await db.execute(select(func.count()).select_from(model).where(*filters))
+    items_stmt = select(model).where(*filters)
+    if order_by is not None:
+        items_stmt = items_stmt.order_by(order_by)
+    items_result = await db.execute(items_stmt.offset(skip).limit(limit))
+    total = total_result.scalar_one()
+    items = items_result.scalars().all()
 
     # Sanitize float values and transform keys
     sanitized_items = []
@@ -446,14 +441,12 @@ class BulkSyncRequest(BaseModel):
 
 @router.post("/db/sync/bulk")
 async def sync_bulk_data(
-    request: BulkSyncRequest,
-    db: Session = Depends(get_db)
+    request: BulkSyncRequest
 ):
     """
     一键批量同步选中数据表 (Bulk Sync Selected Tables)
     The client provides a list of table identifiers to sync.
     """
-    from app.tasks.async_task_runner import async_task_runner
     from app.tasks.task_functions import sync_bulk_tables_func
     from app.tasks.task_manager import task_manager
     from app.core.i18n import i18n_service
@@ -469,30 +462,21 @@ async def sync_bulk_data(
         parameters = {"tables": request.tables}
 
         # 提交任务到任务管理器 (生成 task_id 并检查并发)
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
-            allow_concurrent=False
+            allow_concurrent=False,
+            task_func=sync_bulk_tables_func,
+            task_kwargs={
+                "tables": request.tables,
+                "start_date": request.start_date,
+                "end_date": request.end_date,
+                "stock_codes": request.stock_codes,
+                "stock_scope": request.stock_scope or "warehouse",
+                "allow_concurrent": False
+            }
         )
-
-        if task_result.get("new_task"):
-            # 提交到独立进程执行 (Submit to independent process execution)
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_bulk_tables_func,
-                task_kwargs={
-                    "tables": request.tables,
-                    "task_id": task_result["task_id"],
-                    "start_date": request.start_date,
-                    "end_date": request.end_date,
-                    "stock_codes": request.stock_codes,
-                    "stock_scope": request.stock_scope or "warehouse",
-                    "allow_concurrent": False
-                },
-                task_name=task_name,
-            )
 
         return task_result
     except HTTPException:
@@ -505,8 +489,7 @@ async def sync_bulk_data(
 async def sync_db_data(
     stock_code: str = Query(..., description="Stock Code (Required)"),
     start_date: Optional[str] = Query(None, description="Start Date (YYYY-MM-DD/YYYYMMDD)"),
-    end_date: Optional[str] = Query(None, description="End Date (YYYY-MM-DD/YYYYMMDD)"),
-    db: Session = Depends(get_db)
+    end_date: Optional[str] = Query(None, description="End Date (YYYY-MM-DD/YYYYMMDD)")
 ):
     """Manually sync database data for a single stock (Async Task)
 
@@ -516,7 +499,6 @@ async def sync_db_data(
     Returns:
         Task submission result, including task ID and status message
     """
-    from app.tasks.async_task_runner import async_task_runner
     from app.tasks.task_functions import sync_stock_data_func
     from app.tasks.task_manager import task_manager
     from app.core.i18n import i18n_service
@@ -536,29 +518,20 @@ async def sync_db_data(
         }
 
         # Submit task using task_manager (generate task_id and check concurrency)
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
             allow_concurrent=False,
-            celery_task_id=None  # Do not use Celery
+            celery_task_id=None,  # Do not use Celery
+            task_func=sync_stock_data_func,
+            task_kwargs={
+                "stock_code": stock_code,
+                "allow_concurrent": False,
+                "start_date": start_date,
+                "end_date": end_date
+            }
         )
-
-        if task_result.get("new_task"):
-            # Submit to independent process execution
-            success = _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_stock_data_func,
-                task_kwargs={
-                    "stock_code": stock_code,
-                    "task_id": task_result["task_id"],
-                    "allow_concurrent": False,
-                    "start_date": start_date,
-                    "end_date": end_date
-                },
-                task_name=task_name,
-            )
 
         return task_result
     except HTTPException:
@@ -572,14 +545,12 @@ async def sync_db_data(
 async def sync_base_info(
     stock_code: Optional[str] = Query(None, description="Stock code (Optional, blank for batch sync)"),
     scope: str = Query("all", description="Sync scope: 'all', 'warehouse', or 'core'"),
-    resume: bool = Query(False, description="Whether to resume from last incomplete task"),
-    db: Session = Depends(get_db)
+    resume: bool = Query(False, description="Whether to resume from last incomplete task")
 ):
     """
     一键同步基础信息接口 (One-click Base Information Sync API)
     同步：基础信息、日线行情、财务指标、估值数据、十大股东、实时行情、技术指标
     """
-    from app.tasks.async_task_runner import async_task_runner
     from app.tasks.task_functions import sync_base_info_func
     from app.tasks.task_manager import task_manager
     from app.core.i18n import i18n_service
@@ -592,28 +563,19 @@ async def sync_base_info(
         parameters = {"stock_code": stock_code, "resume": resume, "scope": scope}
 
         # 提交任务到任务管理器 (生成 task_id 并检查并发)
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
-            allow_concurrent=False
+            allow_concurrent=False,
+            task_func=sync_base_info_func,
+            task_kwargs={
+                "stock_code": stock_code,
+                "allow_concurrent": False,
+                "resume": resume,
+                "scope": scope
+            }
         )
-
-        if task_result.get("new_task"):
-            # 提交到独立进程执行 (Submit to independent process execution)
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_base_info_func,
-                task_kwargs={
-                    "stock_code": stock_code,
-                    "task_id": task_result["task_id"],
-                    "allow_concurrent": False,
-                    "resume": resume,
-                    "scope": scope
-                },
-                task_name=task_name,
-            )
 
         return task_result
     except HTTPException:
@@ -626,8 +588,7 @@ async def sync_base_info(
 @router.post("/db/sync/stock-basic")
 async def sync_stock_basic(
     stock_code: Optional[str] = Query(None, description="Stock Code (Optional)"),
-    resume: bool = Query(False, description="Whether to resume from last incomplete task"),
-    db: Session = Depends(get_db)
+    resume: bool = Query(False, description="Whether to resume from last incomplete task")
 ):
     """
     手动同步股票基础信息 (Async Task)
@@ -635,7 +596,6 @@ async def sync_stock_basic(
     """
     from app.tasks.task_manager import task_manager
     from app.tasks.task_functions import sync_all_stock_basic_func
-    from app.tasks.async_task_runner import async_task_runner
     from app.core.i18n import i18n_service
 
     try:
@@ -644,23 +604,16 @@ async def sync_stock_basic(
         parameters = {"stock_code": stock_code, "resume": resume}
 
         # Submit task
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
-            allow_concurrent=False
+            allow_concurrent=False,
+            task_func=sync_all_stock_basic_func,
+            task_kwargs={
+                "stock_code": stock_code,
+            }
         )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_all_stock_basic_func,
-                task_kwargs={
-                    "stock_code": stock_code,
-                },
-                task_name=task_name,
-            )
 
         return task_result
     except Exception as e:
@@ -672,15 +625,13 @@ async def sync_stock_basic(
 async def sync_valuation_history(
     stock_code: Optional[str] = Query(None, description="Stock Code (Optional)"),
     start_date: Optional[str] = Query(None, description="Start Date YYYYMMDD (Optional)"),
-    end_date: Optional[str] = Query(None, description="End Date YYYYMMDD (Optional)"),
-    db: Session = Depends(get_db)
+    end_date: Optional[str] = Query(None, description="End Date YYYYMMDD (Optional)")
 ):
     """
     手动同步估值数据 (Async Task)
     """
     from app.tasks.task_manager import task_manager
     from app.tasks.task_functions import sync_valuation_data_func
-    from app.tasks.async_task_runner import async_task_runner
     from app.core.i18n import i18n_service
 
     try:
@@ -692,21 +643,14 @@ async def sync_valuation_history(
             "end_date": end_date
         }
 
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
-            allow_concurrent=False
+            allow_concurrent=False,
+            task_func=sync_valuation_data_func,
+            task_kwargs=parameters
         )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_valuation_data_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
 
         return task_result
     except Exception as e:
@@ -719,15 +663,13 @@ async def sync_dragon_tiger_data(
     date: str = Query(None, description="Date (YYYY-MM-DD) for single day sync"),
     start_date: str = Query(None, description="Start Date (YYYY-MM-DD)"),
     end_date: str = Query(None, description="End Date (YYYY-MM-DD)"),
-    allow_concurrent: bool = False,
-    db: Session = Depends(get_db)
+    allow_concurrent: bool = False
 ):
     """
     同步龙虎榜数据
     """
     from app.tasks.task_manager import task_manager
     from app.tasks.task_functions import sync_dragon_tiger_data_func
-    from app.tasks.async_task_runner import async_task_runner
     from app.core.i18n import i18n_service
 
     # Resolve date logic: start_date takes precedence, fallback to date
@@ -748,32 +690,14 @@ async def sync_dragon_tiger_data(
 
     try:
         # Submit task using task_manager (handles concurrency check and DB record)
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
-            allow_concurrent=allow_concurrent
+            allow_concurrent=allow_concurrent,
+            task_func=sync_dragon_tiger_data_func,
+            task_kwargs=parameters
         )
-
-        # If it is a new task (message indicates success), submit to executor
-        if task_result.get("new_task"):
-            success = _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_dragon_tiger_data_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
-
-            if not success:
-                # Rollback/Update status if submission failed
-                task_manager.update_task_status(
-                    db=db,
-                    task_id=task_result["task_id"],
-                    status="failed",
-                    error_message="Failed to submit task to process executor"
-                )
-                raise HTTPException(status_code=500, detail="Failed to submit task to executor")
 
         return task_result
 
@@ -784,15 +708,13 @@ async def sync_dragon_tiger_data(
 
 @router.post("/db/sync/northbound")
 async def sync_northbound_data(
-    stock_code: Optional[str] = Query(None, description="Stock Code (Optional)"),
-    db: Session = Depends(get_db)
+    stock_code: Optional[str] = Query(None, description="Stock Code (Optional)")
 ):
     """
     手动同步北向资金持股数据 (Async Task)
     """
     from app.tasks.task_manager import task_manager
     from app.tasks.task_functions import sync_northbound_data_func
-    from app.tasks.async_task_runner import async_task_runner
     from app.core.i18n import i18n_service
 
     try:
@@ -801,21 +723,14 @@ async def sync_northbound_data(
         parameters = {"stock_code": stock_code}
 
         # Submit task
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
-            allow_concurrent=False
+            allow_concurrent=False,
+            task_func=sync_northbound_data_func,
+            task_kwargs=parameters
         )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_northbound_data_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
 
         return task_result
     except Exception as e:
@@ -825,15 +740,13 @@ async def sync_northbound_data(
 
 @router.post("/db/sync/limit-up-pool")
 async def sync_limit_up_pool(
-    date: str = Query(None, description="Date (YYYY-MM-DD or YYYYMMDD)"),
-    db: Session = Depends(get_db)
+    date: str = Query(None, description="Date (YYYY-MM-DD or YYYYMMDD)")
 ):
     """
     Manually sync daily Limit Up Pool
     """
     from app.tasks.task_manager import task_manager
     from app.tasks.task_functions import sync_limit_up_pool_func
-    from app.tasks.async_task_runner import async_task_runner
     from app.core.i18n import i18n_service
 
     task_name = i18n_service.t("tasks.names.limit_up_pool_sync").format(date=date or 'Today')
@@ -841,21 +754,14 @@ async def sync_limit_up_pool(
     parameters = {"date": date}
 
     try:
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
-            allow_concurrent=False
+            allow_concurrent=False,
+            task_func=sync_limit_up_pool_func,
+            task_kwargs=parameters
         )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_limit_up_pool_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
 
         return task_result
     except Exception as e:
@@ -865,15 +771,13 @@ async def sync_limit_up_pool(
 
 @router.post("/db/sync/limit-down-pool")
 async def sync_limit_down_pool(
-    date: str = Query(None, description="Date (YYYY-MM-DD or YYYYMMDD)"),
-    db: Session = Depends(get_db)
+    date: str = Query(None, description="Date (YYYY-MM-DD or YYYYMMDD)")
 ):
     """
     Manually sync daily Limit Down Pool
     """
     from app.tasks.task_manager import task_manager
     from app.tasks.task_functions import sync_limit_down_pool_func
-    from app.tasks.async_task_runner import async_task_runner
     from app.core.i18n import i18n_service
 
     task_name = i18n_service.t("tasks.names.limit_down_pool_sync").format(date=date or 'Today')
@@ -881,21 +785,14 @@ async def sync_limit_down_pool(
     parameters = {"date": date}
 
     try:
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
-            allow_concurrent=False
+            allow_concurrent=False,
+            task_func=sync_limit_down_pool_func,
+            task_kwargs=parameters
         )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_limit_down_pool_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
 
         return task_result
     except Exception as e:
@@ -905,15 +802,13 @@ async def sync_limit_down_pool(
 
 @router.post("/db/sync/zhaban-pool")
 async def sync_zhaban_pool(
-    date: str = Query(None, description="Date (YYYY-MM-DD or YYYYMMDD)"),
-    db: Session = Depends(get_db)
+    date: str = Query(None, description="Date (YYYY-MM-DD or YYYYMMDD)")
 ):
     """
     Manually sync daily Zhaban Pool (Fried Board)
     """
     from app.tasks.task_manager import task_manager
     from app.tasks.task_functions import sync_zhaban_pool_func
-    from app.tasks.async_task_runner import async_task_runner
     from app.core.i18n import i18n_service
 
     task_name = i18n_service.t("tasks.names.zhaban_pool_sync").format(date=date or 'Today')
@@ -921,21 +816,14 @@ async def sync_zhaban_pool(
     parameters = {"date": date}
 
     try:
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
-            allow_concurrent=False
+            allow_concurrent=False,
+            task_func=sync_zhaban_pool_func,
+            task_kwargs=parameters
         )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_zhaban_pool_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
 
         return task_result
     except Exception as e:
@@ -945,8 +833,7 @@ async def sync_zhaban_pool(
 
 @router.post("/db/sync/pledge-summary")
 async def sync_pledge_summary(
-    stock_code: Optional[str] = Query(None, description="Stock code"),
-    db: Session = Depends(get_db)
+    stock_code: Optional[str] = Query(None, description="Stock code")
 ):
     """
     同步股权质押汇总数据 (TuShare pledge_stat 接口)
@@ -954,7 +841,6 @@ async def sync_pledge_summary(
     """
     from app.tasks.task_manager import task_manager
     from app.tasks.task_functions import sync_pledge_summary_func
-    from app.tasks.async_task_runner import async_task_runner
     from app.core.i18n import i18n_service
 
     task_name = i18n_service.t("tasks.names.pledge_summary_sync") or "Sync Pledge Summary"
@@ -964,21 +850,14 @@ async def sync_pledge_summary(
     parameters = {"stock_code": stock_code}
 
     try:
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
-            allow_concurrent=False
+            allow_concurrent=False,
+            task_func=sync_pledge_summary_func,
+            task_kwargs=parameters
         )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_pledge_summary_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
 
         return task_result
     except Exception as e:
@@ -991,8 +870,7 @@ async def sync_granular_data(
     data_type: str,
     stock_code: str = Query(..., description="Stock Code"),
     start_date: Optional[str] = Query(None, description="Start Date (Optional, YYYY-MM-DD)"),
-    end_date: Optional[str] = Query(None, description="End Date (Optional, YYYY-MM-DD)"),
-    db: Session = Depends(get_db)
+    end_date: Optional[str] = Query(None, description="End Date (Optional, YYYY-MM-DD)")
 ):
     """
     Manually sync specific granular data type for a stock
@@ -1000,7 +878,6 @@ async def sync_granular_data(
     """
     from app.tasks.task_manager import task_manager
     from app.tasks.task_functions import sync_granular_data_func
-    from app.tasks.async_task_runner import async_task_runner
     from app.core.i18n import i18n_service
 
     valid_types = [
@@ -1020,21 +897,14 @@ async def sync_granular_data(
     }
 
     try:
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
-            allow_concurrent=True
+            allow_concurrent=True,
+            task_func=sync_granular_data_func,
+            task_kwargs=parameters
         )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_granular_data_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
 
         return task_result
     except Exception as e:
@@ -1047,8 +917,7 @@ async def sync_daily_data(
     stock_code: str = Query(..., description="Stock Code"),
     start_date: str = Query(..., description="Start Date (YYYYMMDD)"),
     end_date: str = Query(..., description="End Date (YYYYMMDD)"),
-    adjust: str = "qfq",
-    db: Session = Depends(get_db)
+    adjust: str = "qfq"
 ):
     """
     手动同步个股日线数据
@@ -1056,7 +925,6 @@ async def sync_daily_data(
     """
     from app.tasks.task_manager import task_manager
     from app.tasks.task_functions import sync_stock_daily_func
-    from app.tasks.async_task_runner import async_task_runner
     from app.core.i18n import i18n_service
 
     task_name = i18n_service.t("tasks.names.daily_sync").format(stock=stock_code, range=f"{start_date}-{end_date}")
@@ -1070,21 +938,14 @@ async def sync_daily_data(
 
     try:
         # Submit task
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
-            allow_concurrent=True
+            allow_concurrent=True,
+            task_func=sync_stock_daily_func,
+            task_kwargs=parameters
         )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_stock_daily_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
 
         return task_result
     except Exception as e:
@@ -1096,8 +957,7 @@ async def sync_daily_data(
 async def sync_index_daily(
     index_code: str = Query(..., description="Index Code"),
     start_date: str = Query(..., description="Start Date (YYYYMMDD)"),
-    end_date: str = Query(..., description="End Date (YYYYMMDD)"),
-    db: Session = Depends(get_db)
+    end_date: str = Query(..., description="End Date (YYYYMMDD)")
 ):
     """
     手动同步指数日线数据
@@ -1105,7 +965,6 @@ async def sync_index_daily(
     """
     from app.tasks.task_manager import task_manager
     from app.tasks.task_functions import sync_index_daily_func
-    from app.tasks.async_task_runner import async_task_runner
     from app.core.i18n import i18n_service
 
     task_name = i18n_service.t("tasks.names.index_daily_sync").format(index_code=index_code, range=f"{start_date}-{end_date}")
@@ -1118,21 +977,14 @@ async def sync_index_daily(
 
     try:
         # Submit task
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
-            allow_concurrent=True
+            allow_concurrent=True,
+            task_func=sync_index_daily_func,
+            task_kwargs=parameters
         )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_index_daily_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
 
         return task_result
     except Exception as e:
@@ -1144,7 +996,6 @@ async def sync_index_daily(
 @router.get("/db/stock_detail/{stock_code}")
 async def get_db_stock_detail(
     stock_code: str,
-    db: Session = Depends(get_db)
 ):
     """直接从数据库获取股票详情"""
     from app.data.storage import data_storage_service
@@ -1154,7 +1005,7 @@ async def get_db_stock_detail(
         formatted_code = StockCodeStandardizer.standardize(stock_code)
 
         # 从存储服务获取数据
-        stock_data = data_storage_service.get_stock_data_from_db(formatted_code)
+        stock_data = await data_storage_service.get_stock_data_from_db(formatted_code)
 
         if not stock_data:
             detail_msg = f"Stock code {stock_code} not found or no data available"
@@ -1233,7 +1084,7 @@ async def get_realtime_market(
     stock_code: Optional[str] = None,
     sort_by: Optional[str] = None,
     order: str = "desc",
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """从数据库分页读取有效实时行情数据。
 
@@ -1255,32 +1106,38 @@ async def get_realtime_market(
     import math
 
     try:
-        query = db.query(StockRealtimeMarket)
+        filters = []
 
         # Filter by stock code if provided
         if stock_code:
             formatted_code = StockCodeStandardizer.standardize(stock_code)
-            query = query.filter(StockRealtimeMarket.stock_code == formatted_code)
+            filters.append(StockRealtimeMarket.stock_code == formatted_code)
 
-        query = query.filter(
+        filters.extend([
             StockRealtimeMarket.current_price.isnot(None),
             StockRealtimeMarket.current_price > 0,
-        )
+        ])
 
         # Apply sorting
+        order_by = None
         if sort_by:
             sort_column = getattr(StockRealtimeMarket, sort_by, None)
             if sort_column is not None:
                 if order.lower() == 'asc':
-                    query = query.order_by(sort_column.asc())
+                    order_by = sort_column.asc()
                 else:
-                    query = query.order_by(sort_column.desc())
+                    order_by = sort_column.desc()
         else:
             # Default sort by timestamp desc
-            query = query.order_by(StockRealtimeMarket.timestamp.desc())
+            order_by = StockRealtimeMarket.timestamp.desc()
 
-        total = query.count()
-        items = query.offset(skip).limit(limit).all()
+        total_result = await db.execute(select(func.count()).select_from(StockRealtimeMarket).where(*filters))
+        items_stmt = select(StockRealtimeMarket).where(*filters)
+        if order_by is not None:
+            items_stmt = items_stmt.order_by(order_by)
+        items_result = await db.execute(items_stmt.offset(skip).limit(limit))
+        total = total_result.scalar_one()
+        items = items_result.scalars().all()
 
         # Sanitize float values and add prefix
         prefix = StockRealtimeMarket.__tablename__
@@ -1310,7 +1167,7 @@ async def get_stock_valuation(
     stock_code: str,
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Get stock valuation history from database
 
@@ -1327,10 +1184,18 @@ async def get_stock_valuation(
 
     try:
         formatted_code = StockCodeStandardizer.standardize(stock_code)
-        query = db.query(StockValuationHistory).filter(StockValuationHistory.stock_code == formatted_code)
+        filters = [StockValuationHistory.stock_code == formatted_code]
 
-        total = query.count()
-        items = query.order_by(StockValuationHistory.data_date.desc()).offset(skip).limit(limit).all()
+        total_result = await db.execute(select(func.count()).select_from(StockValuationHistory).where(*filters))
+        items_result = await db.execute(
+            select(StockValuationHistory)
+            .where(*filters)
+            .order_by(StockValuationHistory.data_date.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        total = total_result.scalar_one()
+        items = items_result.scalars().all()
 
         # Sanitize float values and add prefix
         prefix = StockValuationHistory.__tablename__
@@ -1355,8 +1220,7 @@ async def get_stock_valuation(
 
 @router.post("/market/sync/realtime/{stock_code}")
 async def sync_realtime_market(
-    stock_code: str,
-    db: Session = Depends(get_db)
+    stock_code: str
 ):
     """Sync real-time market data for a specific stock to database
 
@@ -1367,7 +1231,6 @@ async def sync_realtime_market(
         Sync result with task ID
     """
     from app.tasks.task_manager import task_manager
-    from app.tasks.async_task_runner import async_task_runner
     from app.tasks.task_functions import sync_realtime_market_func
     from app.core.utils.formatters import StockCodeStandardizer
 
@@ -1376,21 +1239,16 @@ async def sync_realtime_market(
         task_id = str(uuid.uuid4())
         task_name = f"Realtime Market Sync: {formatted_code}"
 
-        task_manager.submit_task(
-            db=db,
+        await task_manager.submit_task(
             celery_task_id=task_id,
             task_name=task_name,
             task_type="realtime_market_sync",
-            parameters={"stock_code": formatted_code}
-        )
-
-        _submit_async_task(async_task_runner,
-            task_id=task_id,
+            parameters={"stock_code": formatted_code},
             task_func=sync_realtime_market_func,
             task_kwargs={
                 "stock_code": formatted_code,
                 "task_name": task_name
-            },
+            }
         )
 
         return {
@@ -1405,7 +1263,6 @@ async def sync_realtime_market(
 @router.post("/market/sync/valuation/{stock_code}")
 async def sync_stock_valuation(
     stock_code: str,
-    db: Session = Depends(get_db)
 ):
     """Sync stock valuation history from the active data source to database
 
@@ -1443,28 +1300,32 @@ async def get_industry_market(
     limit: int = 100,
     sort_by: Optional[str] = None,
     order: str = "desc",
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """Get industry market data"""
     from app.models.data_storage import IndustryData
     import math
 
     try:
-        query = db.query(IndustryData)
-
         # Apply sorting
+        order_by = None
         if sort_by:
             sort_column = getattr(IndustryData, sort_by, None)
             if sort_column is not None:
                 if order.lower() == 'asc':
-                    query = query.order_by(sort_column.asc())
+                    order_by = sort_column.asc()
                 else:
-                    query = query.order_by(sort_column.desc())
+                    order_by = sort_column.desc()
         else:
-            query = query.order_by(IndustryData.change_percent.desc())
+            order_by = IndustryData.change_percent.desc()
 
-        total = query.count()
-        items = query.offset(skip).limit(limit).all()
+        total_result = await db.execute(select(func.count()).select_from(IndustryData))
+        items_stmt = select(IndustryData)
+        if order_by is not None:
+            items_stmt = items_stmt.order_by(order_by)
+        items_result = await db.execute(items_stmt.offset(skip).limit(limit))
+        total = total_result.scalar_one()
+        items = items_result.scalars().all()
 
         # Sanitize item and add prefix
         prefix = IndustryData.__tablename__
@@ -1489,11 +1350,9 @@ async def get_industry_market(
 
 @router.post("/market/sync/industry")
 async def sync_industry_market(
-    db: Session = Depends(get_db)
 ):
     """Sync industry market data (Async Task)"""
     from app.tasks.task_manager import task_manager
-    from app.tasks.async_task_runner import async_task_runner
     from app.tasks.task_functions import sync_industry_data_func
     from app.core.i18n import i18n_service
 
@@ -1501,18 +1360,13 @@ async def sync_industry_market(
         task_id = str(uuid.uuid4())
         task_name = i18n_service.t("tasks.names.industry_sync") or "Industry Data Sync"
 
-        task_manager.submit_task(
-            db=db,
+        await task_manager.submit_task(
             celery_task_id=task_id,
             task_name=task_name,
             task_type="industry_sync",
-            parameters={}
-        )
-
-        _submit_async_task(async_task_runner,
-            task_id=task_id,
+            parameters={},
             task_func=sync_industry_data_func,
-            task_kwargs={"task_name": task_name},
+            task_kwargs={"task_name": task_name}
         )
 
         return {
@@ -1527,12 +1381,10 @@ async def sync_industry_market(
 
 @router.post("/market/sync/sector-money-flow")
 async def sync_sector_money_flow(
-    stock_code: str,
-    db: Session = Depends(get_db)
+    stock_code: str
 ):
     """同步板块资金流数据 (Async Task)"""
     from app.tasks.task_manager import task_manager
-    from app.tasks.async_task_runner import async_task_runner
     from app.tasks.task_functions import sync_sector_money_flow_func
     from app.core.i18n import i18n_service
 
@@ -1540,18 +1392,13 @@ async def sync_sector_money_flow(
         task_id = str(uuid.uuid4())
         task_name = i18n_service.t("tasks.names.sector_money_flow_sync") or "Sector Money Flow Sync"
 
-        task_manager.submit_task(
-            db=db,
+        await task_manager.submit_task(
             celery_task_id=task_id,
             task_name=task_name,
             task_type="sector_money_flow_sync",
-            parameters={"stock_code": stock_code}
-        )
-
-        _submit_async_task(async_task_runner,
-            task_id=task_id,
+            parameters={"stock_code": stock_code},
             task_func=sync_sector_money_flow_func,
-            task_kwargs={"stock_code": stock_code, "task_name": task_name},
+            task_kwargs={"stock_code": stock_code, "task_name": task_name}
         )
 
         return {
@@ -1567,7 +1414,7 @@ async def sync_sector_money_flow(
 @router.delete("/db/stock/{stock_code}")
 async def delete_stock_data(
     stock_code: str,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     Cascade delete ALL data related to a specific stock code.
@@ -1618,11 +1465,12 @@ async def delete_stock_data(
                 #     stock_code = Column(String(10), index=True)
                 # So yes, we delete sessions specific to this stock.
 
-                count = db.query(model).filter(model.stock_code == formatted_code).delete()
+                result = await db.execute(delete(model).where(model.stock_code == formatted_code))
+                count = result.rowcount or 0
                 if count > 0:
                     deleted_counts[model.__tablename__] = count
 
-        db.commit()
+        await db.commit()
 
         return {
             "message": f"Successfully deleted ALL data for {stock_code}",
@@ -1630,7 +1478,7 @@ async def delete_stock_data(
         }
 
     except Exception as e:
-        db.rollback()
+        await db.rollback()
         raise HTTPException(
             status_code=500,
             detail=f"Failed to delete stock data: {str(e)}"
@@ -1639,14 +1487,24 @@ async def delete_stock_data(
 
 @router.get("/db/tables")
 async def get_db_tables(
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     Get list of all database tables
     """
-    from app.core.database import engine
-    inspector = inspect(engine)
-    return inspector.get_table_names()
+    if _is_sqlite_session(db):
+        result = await db.execute(
+            text("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+        )
+    else:
+        result = await db.execute(
+            text(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'public' AND table_type = 'BASE TABLE' "
+                "ORDER BY table_name"
+            )
+        )
+    return result.scalars().all()
 
 
 from pydantic import BaseModel
@@ -1659,22 +1517,38 @@ class ClearTableRequest(BaseModel):
 @router.post("/db/clear")
 async def clear_db_table(
     request: ClearTableRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     Clear data from a specific table or all tables.
     Requires confirmation text: 'confirm' or '确认'.
     """
-    from app.core.database import engine
-
     # 1. Validation
     if request.confirmation_text.strip().lower() not in ["confirm", "确认"]:
         raise HTTPException(status_code=400, detail="Invalid confirmation text. Please type 'confirm' or '确认'.")
 
     # 2. Get available tables from both public and data schemas
-    inspector = inspect(engine)
-    public_tables = inspector.get_table_names(schema='public')
-    data_tables = inspector.get_table_names(schema='data')
+    is_sqlite = _is_sqlite_session(db)
+    if is_sqlite:
+        tables_result = await db.execute(
+            text("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+        )
+        public_tables = tables_result.scalars().all()
+        data_tables = []
+    else:
+        tables_result = await db.execute(
+            text(
+                "SELECT table_schema, table_name FROM information_schema.tables "
+                "WHERE table_schema IN ('public', 'data') AND table_type = 'BASE TABLE'"
+            )
+        )
+        public_tables = []
+        data_tables = []
+        for schema, table_name in tables_result.all():
+            if schema == "public":
+                public_tables.append(table_name)
+            elif schema == "data":
+                data_tables.append(table_name)
     
     # Store table names with schema prefix
     schema_table_map = {} # { "table_name": "schema.table_name" }
@@ -1702,19 +1576,15 @@ async def clear_db_table(
     # 3. Execute Clear
     # We use raw connection execution similar to scripts/clear_tables.py
     try:
-        # We need to execute strictly, so we use engine connect
-        with engine.connect() as conn:
-            # Check dialect
-            is_sqlite = 'sqlite' in engine.dialect.name
+        for table in target_tables:
+              if is_sqlite:
+                  sqlite_table = table.removeprefix("public.")
+                  await db.execute(text(f"DELETE FROM {sqlite_table}"))
+              else:
+                  # PostgreSQL: TRUNCATE with CASCADE is faster and handles FKs better if needed
+                  await db.execute(text(f"TRUNCATE TABLE {table} CASCADE"))
 
-            for table in target_tables:
-                 if is_sqlite:
-                     conn.execute(text(f"DELETE FROM {table}"))
-                 else:
-                     # PostgreSQL: TRUNCATE with CASCADE is faster and handles FKs better if needed
-                     conn.execute(text(f"TRUNCATE TABLE {table} CASCADE"))
-
-            conn.commit()
+        await db.commit()
 
         return {
             "status": "success",
@@ -1727,15 +1597,13 @@ async def clear_db_table(
 
 @router.post("/db/calculate/indicators")
 async def calculate_indicators(
-    stock_code: Optional[str] = Query(None, description="Stock Code (Optional)"),
-    db: Session = Depends(get_db)
+    stock_code: Optional[str] = Query(None, description="Stock Code (Optional)")
 ):
     """
     手动触发指标计算 (Async Task)
     """
     from app.tasks.task_manager import task_manager
     from app.tasks.task_functions import calculate_indicators_func
-    from app.tasks.async_task_runner import async_task_runner
     from app.core.i18n import i18n_service
 
     try:
@@ -1743,21 +1611,14 @@ async def calculate_indicators(
         task_type = "calculate_indicators"
         parameters = {"stock_code": stock_code}
 
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
-            allow_concurrent=False
+            allow_concurrent=False,
+            task_func=calculate_indicators_func,
+            task_kwargs=parameters
         )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=calculate_indicators_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
 
         return task_result
     except Exception as e:
@@ -1769,15 +1630,13 @@ async def calculate_indicators(
 async def sync_valuation_data(
     stock_code: Optional[str] = Query(None, description="Stock Code (Optional)"),
     start_date: Optional[str] = Query(None, description="Start Date (Optional)"),
-    end_date: Optional[str] = Query(None, description="End Date (Optional)"),
-    db: Session = Depends(get_db)
+    end_date: Optional[str] = Query(None, description="End Date (Optional)")
 ):
     """
     Manually sync valuation data (Async Task)
     """
     from app.tasks.task_manager import task_manager
     from app.tasks.task_functions import sync_valuation_data_func
-    from app.tasks.async_task_runner import async_task_runner
     from app.core.i18n import i18n_service
 
     try:
@@ -1789,21 +1648,14 @@ async def sync_valuation_data(
             "end_date": end_date
         }
 
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
-            allow_concurrent=False
+            allow_concurrent=False,
+            task_func=sync_valuation_data_func,
+            task_kwargs=parameters
         )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_valuation_data_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
 
         return task_result
     except Exception as e:
@@ -1813,8 +1665,7 @@ async def sync_valuation_data(
 
 @router.post("/db/sync/top_holders")
 async def sync_top_holders(
-    stock_code: str = Query(..., description="Stock Code (Required)"),
-    db: Session = Depends(get_db)
+    stock_code: str = Query(..., description="Stock Code (Required)")
 ):
     """
     手动同步十大股东数据 (Async Task)
@@ -1822,7 +1673,6 @@ async def sync_top_holders(
     """
     from app.tasks.task_manager import task_manager
     from app.tasks.task_functions import sync_top_holders_func
-    from app.tasks.async_task_runner import async_task_runner
     from app.core.i18n import i18n_service
 
     try:
@@ -1830,21 +1680,14 @@ async def sync_top_holders(
         task_type = "top_holders_sync"
         parameters = {"stock_code": stock_code}
 
-        task_result = task_manager.submit_task(
-            db=db,
+        task_result = await task_manager.submit_task(
             task_name=task_name,
             task_type=task_type,
             parameters=parameters,
-            allow_concurrent=False
+            allow_concurrent=False,
+            task_func=sync_top_holders_func,
+            task_kwargs=parameters
         )
-
-        if task_result.get("new_task"):
-            _submit_async_task(async_task_runner,
-                task_id=task_result["task_id"],
-                task_func=sync_top_holders_func,
-                task_kwargs=parameters,
-                task_name=task_name,
-            )
 
         return task_result
     except Exception as e:

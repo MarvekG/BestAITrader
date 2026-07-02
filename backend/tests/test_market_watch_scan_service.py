@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from sqlalchemy import func, select
 
 from app.ai.market_watch import service as market_watch_service
 from app.ai.market_watch.schemas import (
@@ -155,12 +156,12 @@ def test_market_watch_llm_usage_observability_uses_dedicated_lane() -> None:
 
 
 @pytest.mark.asyncio
-async def test_market_watch_debate_launch_respects_global_concurrency_limit(db_session, test_db, monkeypatch) -> None:
+async def test_market_watch_debate_launch_respects_global_concurrency_limit(async_db_session, test_db, monkeypatch) -> None:
     user = User(username="market_watch_limit", email="market_watch_limit@example.com", password_hash="x")
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
-    db_session.add_all([
+    async_db_session.add(user)
+    await async_db_session.commit()
+    await async_db_session.refresh(user)
+    async_db_session.add_all([
         SystemSetting(key="ai_debate.max_concurrent", value=1, description="test"),
         AsyncTask(
             task_name="AI Analysis - 000001.SZ",
@@ -171,8 +172,8 @@ async def test_market_watch_debate_launch_respects_global_concurrency_limit(db_s
             user_id=user.id,
         ),
     ])
-    db_session.commit()
-    monkeypatch.setattr("app.ai.market_watch.service.database_module.SessionLocal", test_db)
+    await async_db_session.commit()
+    monkeypatch.setattr("app.ai.market_watch.service.database_module.AsyncSessionLocal", test_db)
 
     response = await market_watch_service._maybe_launch_debate(
         user_id=user.id,
@@ -196,7 +197,7 @@ async def test_market_watch_debate_launch_respects_global_concurrency_limit(db_s
 
     assert response["status"] == "skipped"
     assert response["reason"] == "concurrency_limit"
-    assert db_session.query(AsyncTask).count() == 1
+    assert await async_db_session.scalar(select(func.count()).select_from(AsyncTask)) == 1
 
 
 def test_build_watch_ai_payload_sorts_stock_lists_for_cache_stability() -> None:
@@ -237,17 +238,17 @@ def _default_market_watch_scan_time(monkeypatch) -> None:
     monkeypatch.setattr(market_watch_service, "fetch_market_watch_documents", FakeSourceDocumentFetcher())
 
 
-def _create_user(db_session, user_id: int = 100, *, configure_sources: bool = True) -> User:
+async def _create_user(async_db_session, user_id: int = 100, *, configure_sources: bool = True) -> User:
     user = User(
         id=user_id,
         username=f"watch_user_{user_id}",
         email=f"watch_user_{user_id}@example.com",
         password_hash="hashed",
     )
-    db_session.add(user)
-    db_session.commit()
+    async_db_session.add(user)
+    await async_db_session.commit()
     if configure_sources:
-        upsert_market_watch_settings(
+        await upsert_market_watch_settings(
             user.id,
             MarketWatchSettingsUpdate(
                 data_sources=["https://example.com/data"],
@@ -257,15 +258,15 @@ def _create_user(db_session, user_id: int = 100, *, configure_sources: bool = Tr
     return user
 
 
-def _add_stock(
-    db_session,
+async def _add_stock(
+    async_db_session,
     user_id: int,
     stock_code: str,
     stock_name: str = "Alpha Tech",
     auto_analysis_trading_frequency: str = "中长线持有 (Position Trading)",
     auto_analysis_trading_strategy: str = "价值投资 (Value Investing)",
 ) -> None:
-    db_session.add(
+    async_db_session.add(
         StockBasic(
             stock_code=stock_code,
             name=stock_name,
@@ -273,7 +274,7 @@ def _add_stock(
             market="SZ",
         )
     )
-    db_session.add(
+    async_db_session.add(
         StockWarehouse(
             user_id=user_id,
             stock_code=stock_code,
@@ -282,11 +283,11 @@ def _add_stock(
             auto_analysis_trading_strategy=auto_analysis_trading_strategy,
         )
     )
-    db_session.commit()
+    await async_db_session.commit()
 
 
 def _add_quote(
-    db_session,
+    async_db_session,
     stock_code: str,
     *,
     change_percent: float = 4.2,
@@ -297,7 +298,7 @@ def _add_quote(
     timestamp: datetime | None = None,
 ) -> None:
     _ = (
-        db_session,
+        async_db_session,
         stock_code,
         change_percent,
         change_5min,
@@ -308,9 +309,9 @@ def _add_quote(
     )
 
 
-def _add_quiet_quote(db_session, stock_code: str) -> None:
+def _add_quiet_quote(async_db_session, stock_code: str) -> None:
     _add_quote(
-        db_session,
+        async_db_session,
         stock_code,
         change_percent=0.2,
         change_5min=0.1,
@@ -320,15 +321,15 @@ def _add_quiet_quote(db_session, stock_code: str) -> None:
     )
 
 
-def _add_position(db_session, user_id: int, stock_code: str) -> None:
+async def _add_position(async_db_session, user_id: int, stock_code: str) -> None:
     account = Account(
         user_id=user_id,
         total_assets=Decimal("100000.0000"),
         market_value=Decimal("25000.0000"),
     )
-    db_session.add(account)
-    db_session.flush()
-    db_session.add(
+    async_db_session.add(account)
+    await async_db_session.flush()
+    async_db_session.add(
         Position(
             account_id=account.account_id,
             stock_code=stock_code,
@@ -339,7 +340,7 @@ def _add_position(db_session, user_id: int, stock_code: str) -> None:
             profit_loss_pct=Decimal("0.0500"),
         )
     )
-    db_session.commit()
+    await async_db_session.commit()
 
 
 def _source_document(
@@ -392,8 +393,8 @@ def _start_debate_decision(stock_code: str = "000001", stock_name: str = "Alpha 
     )
 
 
-def _add_recent_launch_event(
-    db_session,
+async def _add_recent_launch_event(
+    async_db_session,
     user_id: int,
     stock_code: str = "000001",
     *,
@@ -408,7 +409,7 @@ def _add_recent_launch_event(
     写入一条盯盘辩论事件，供近期启动判重测试使用。
 
     Args:
-        db_session: 测试数据库会话。
+        async_db_session: 测试数据库会话。
         user_id: 当前测试用户 ID。
         stock_code: 事件关联股票代码。
         trigger_reason: 盯盘 AI 触发原因。
@@ -428,8 +429,8 @@ def _add_recent_launch_event(
         created_at=event_created_at,
         updated_at=event_created_at,
     )
-    db_session.add(session)
-    db_session.commit()
+    async_db_session.add(session)
+    await async_db_session.commit()
     watch_ai_decision = None
     if trigger_reason is not None or evidence_summary is not None:
         watch_ai_decision = {
@@ -437,7 +438,7 @@ def _add_recent_launch_event(
             "trigger_reason": trigger_reason,
             "evidence_summary": evidence_summary,
         }
-    db_session.add(
+    async_db_session.add(
         MarketWatchEvent(
             user_id=user_id,
             event_type=event_type,
@@ -447,14 +448,14 @@ def _add_recent_launch_event(
             created_at=event_created_at,
         )
     )
-    db_session.commit()
+    await async_db_session.commit()
 
 
 @pytest.mark.asyncio
-async def test_scan_skips_on_non_trading_day_without_loading_news_or_ai(db_session, caplog) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
+async def test_scan_skips_on_non_trading_day_without_loading_news_or_ai(async_db_session, caplog) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
     gate = FakeWatchAiGate(_ignore_decision())
     caplog.set_level(logging.INFO, logger="app.ai.market_watch.service")
 
@@ -475,10 +476,10 @@ async def test_scan_skips_on_non_trading_day_without_loading_news_or_ai(db_sessi
 
 
 @pytest.mark.asyncio
-async def test_scan_skips_when_required_source_urls_are_missing(db_session) -> None:
-    user = _create_user(db_session, configure_sources=False)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
+async def test_scan_skips_when_required_source_urls_are_missing(async_db_session) -> None:
+    user = await _create_user(async_db_session, configure_sources=False)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
     gate = FakeWatchAiGate(_ignore_decision())
 
     result = await scan_market_watch(
@@ -495,10 +496,10 @@ async def test_scan_skips_when_required_source_urls_are_missing(db_session) -> N
 
 
 @pytest.mark.asyncio
-async def test_scan_market_watch_does_not_check_removed_research_task_lock(db_session, monkeypatch):
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001.SZ")
-    _add_quote(db_session, "000001.SZ")
+async def test_scan_market_watch_does_not_check_removed_research_task_lock(async_db_session, monkeypatch):
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001.SZ")
+    _add_quote(async_db_session, "000001.SZ")
     gate = FakeWatchAiGate(_ignore_decision())
 
     assert not hasattr(market_watch_service, "get_market_watch_skip_reason")
@@ -515,11 +516,11 @@ async def test_scan_market_watch_does_not_check_removed_research_task_lock(db_se
 
 
 @pytest.mark.asyncio
-async def test_scan_can_run_on_non_trading_day_when_enabled(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
-    upsert_market_watch_settings(
+async def test_scan_can_run_on_non_trading_day_when_enabled(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
+    await upsert_market_watch_settings(
         user.id,
         MarketWatchSettingsUpdate(scan_non_trading_days=True),
     )
@@ -549,9 +550,9 @@ async def test_scan_can_run_on_non_trading_day_when_enabled(db_session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scan_logs_configured_source_fetch_failure_with_exception(db_session, monkeypatch) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
+async def test_scan_logs_configured_source_fetch_failure_with_exception(async_db_session, monkeypatch) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
     logged_messages: list[str] = []
 
     def capture_exception(message: str, *args, **kwargs) -> None:
@@ -572,11 +573,11 @@ async def test_scan_logs_configured_source_fetch_failure_with_exception(db_sessi
 
 
 @pytest.mark.asyncio
-async def test_scan_skips_outside_configured_time_window_without_loading_news_or_ai(db_session, caplog) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
-    upsert_market_watch_settings(
+async def test_scan_skips_outside_configured_time_window_without_loading_news_or_ai(async_db_session, caplog) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
+    await upsert_market_watch_settings(
         user.id,
         MarketWatchSettingsUpdate(scan_start_time="10:00", scan_end_time="14:30"),
     )
@@ -600,11 +601,11 @@ async def test_scan_skips_outside_configured_time_window_without_loading_news_or
 
 
 @pytest.mark.asyncio
-async def test_scan_returns_warehouse_source_documents_and_position_context(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
-    _add_position(db_session, user.id, "000001")
+async def test_scan_returns_warehouse_source_documents_and_position_context(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
+    await _add_position(async_db_session, user.id, "000001")
     gate = FakeWatchAiGate(_ignore_decision())
 
     result = await scan_market_watch(
@@ -628,10 +629,10 @@ async def test_scan_returns_warehouse_source_documents_and_position_context(db_s
 
 
 @pytest.mark.asyncio
-async def test_scan_sends_source_documents_and_stock_context_to_watch_ai(db_session, caplog) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
+async def test_scan_sends_source_documents_and_stock_context_to_watch_ai(async_db_session, caplog) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
     gate = FakeWatchAiGate(_ignore_decision())
     caplog.set_level(logging.DEBUG, logger="app.ai.market_watch.service")
 
@@ -661,20 +662,20 @@ async def test_scan_sends_source_documents_and_stock_context_to_watch_ai(db_sess
 
 
 @pytest.mark.asyncio
-async def test_scan_sends_recent_successful_debate_launches_to_watch_ai(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
-    _add_recent_launch_event(
-        db_session,
+async def test_scan_sends_recent_successful_debate_launches_to_watch_ai(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
+    await _add_recent_launch_event(
+        async_db_session,
         user.id,
         stock_code="000001",
         trigger_reason="同一公告触发",
         evidence_summary="公告和盘口异动一致",
         created_at=datetime(2026, 5, 14, 9, 30),
     )
-    _add_recent_launch_event(
-        db_session,
+    await _add_recent_launch_event(
+        async_db_session,
         user.id,
         stock_code="000001",
         trigger_reason="旧事件",
@@ -697,18 +698,19 @@ async def test_scan_sends_recent_successful_debate_launches_to_watch_ai(db_sessi
     assert recent_launches[0]["debate_session_id"]
 
 
-def test_recent_debate_launches_exclude_skipped_and_non_success_events(db_session) -> None:
-    user = _create_user(db_session)
-    _add_recent_launch_event(
-        db_session,
+@pytest.mark.asyncio
+async def test_recent_debate_launches_exclude_skipped_and_non_success_events(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_recent_launch_event(
+        async_db_session,
         user.id,
         stock_code="000001",
         trigger_reason="成功启动事件",
         evidence_summary="已真实启动辩论",
         created_at=datetime(2026, 5, 14, 9, 30),
     )
-    _add_recent_launch_event(
-        db_session,
+    await _add_recent_launch_event(
+        async_db_session,
         user.id,
         stock_code="000001",
         trigger_reason="跳过事件",
@@ -717,8 +719,8 @@ def test_recent_debate_launches_exclude_skipped_and_non_success_events(db_sessio
         event_type="debate_skipped",
         status="skipped",
     )
-    _add_recent_launch_event(
-        db_session,
+    await _add_recent_launch_event(
+        async_db_session,
         user.id,
         stock_code="000001",
         trigger_reason="失败事件",
@@ -727,7 +729,7 @@ def test_recent_debate_launches_exclude_skipped_and_non_success_events(db_sessio
         status="failed",
     )
 
-    launches = market_watch_service._load_recent_debate_launches(
+    launches = await market_watch_service._load_recent_debate_launches(
         user_id=user.id,
         now=datetime(2026, 5, 14, 10, 0),
         lookback_hours=24,
@@ -737,18 +739,19 @@ def test_recent_debate_launches_exclude_skipped_and_non_success_events(db_sessio
     assert launches[0]["trigger_reason"] == "成功启动事件"
 
 
-def test_recent_debate_launches_exclude_failed_debate_session(db_session) -> None:
-    user = _create_user(db_session)
-    _add_recent_launch_event(
-        db_session,
+@pytest.mark.asyncio
+async def test_recent_debate_launches_exclude_failed_debate_session(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_recent_launch_event(
+        async_db_session,
         user.id,
         stock_code="000001",
         trigger_reason="成功流程事件",
         evidence_summary="辩论流程仍有效",
         created_at=datetime(2026, 5, 14, 9, 20),
     )
-    _add_recent_launch_event(
-        db_session,
+    await _add_recent_launch_event(
+        async_db_session,
         user.id,
         stock_code="000001",
         trigger_reason="会话失败事件",
@@ -756,7 +759,7 @@ def test_recent_debate_launches_exclude_failed_debate_session(db_session) -> Non
         created_at=datetime(2026, 5, 14, 9, 30),
         session_status="failed",
     )
-    launches = market_watch_service._load_recent_debate_launches(
+    launches = await market_watch_service._load_recent_debate_launches(
         user_id=user.id,
         now=datetime(2026, 5, 14, 10, 0),
         lookback_hours=24,
@@ -767,17 +770,17 @@ def test_recent_debate_launches_exclude_failed_debate_session(db_session) -> Non
 
 
 @pytest.mark.asyncio
-async def test_recent_debate_launch_window_uses_runtime_setting(db_session) -> None:
-    user = _create_user(db_session)
-    _add_recent_launch_event(
-        db_session,
+async def test_recent_debate_launch_window_uses_runtime_setting(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_recent_launch_event(
+        async_db_session,
         user.id,
         stock_code="000001",
         trigger_reason="配置窗口内事件",
         evidence_summary="25 小时前事件",
         created_at=datetime(2026, 5, 13, 9, 0),
     )
-    launches = market_watch_service._load_recent_debate_launches(
+    launches = await market_watch_service._load_recent_debate_launches(
         user_id=user.id,
         now=datetime(2026, 5, 14, 10, 0),
         lookback_hours=26,
@@ -788,10 +791,10 @@ async def test_recent_debate_launch_window_uses_runtime_setting(db_session) -> N
 
 
 @pytest.mark.asyncio
-async def test_scan_pushes_same_source_markdown_to_frontend_and_watch_ai(db_session, monkeypatch) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
+async def test_scan_pushes_same_source_markdown_to_frontend_and_watch_ai(async_db_session, monkeypatch) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
     gate = FakeWatchAiGate(_ignore_decision())
     published_payloads: list[dict[str, Any]] = []
 
@@ -842,10 +845,10 @@ async def test_scan_pushes_same_source_markdown_to_frontend_and_watch_ai(db_sess
 
 
 @pytest.mark.asyncio
-async def test_scan_evaluates_watch_ai_when_configured_news_source_exists(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quiet_quote(db_session, "000001")
+async def test_scan_evaluates_watch_ai_when_configured_news_source_exists(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quiet_quote(async_db_session, "000001")
 
     first_gate = FakeWatchAiGate(_ignore_decision())
     first_result = await scan_market_watch(
@@ -865,11 +868,11 @@ async def test_scan_evaluates_watch_ai_when_configured_news_source_exists(db_ses
 
 
 @pytest.mark.asyncio
-async def test_scan_evaluates_watch_ai_for_configured_data_and_news_sources(db_session) -> None:
-    user = _create_user(db_session, configure_sources=False)
-    _add_stock(db_session, user.id, "000001")
-    _add_quiet_quote(db_session, "000001")
-    upsert_market_watch_settings(
+async def test_scan_evaluates_watch_ai_for_configured_data_and_news_sources(async_db_session) -> None:
+    user = await _create_user(async_db_session, configure_sources=False)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quiet_quote(async_db_session, "000001")
+    await upsert_market_watch_settings(
         user.id,
         MarketWatchSettingsUpdate(
             data_sources=["https://example.com/data"],
@@ -890,10 +893,10 @@ async def test_scan_evaluates_watch_ai_for_configured_data_and_news_sources(db_s
 
 
 @pytest.mark.asyncio
-async def test_scan_loads_data_and_news_source_documents_concurrently(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quiet_quote(db_session, "000001")
+async def test_scan_loads_data_and_news_source_documents_concurrently(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quiet_quote(async_db_session, "000001")
     fetcher = BlockingSourceDocumentFetcher(expected_calls=2)
     scan_task = asyncio.create_task(
         scan_market_watch(
@@ -915,11 +918,11 @@ async def test_scan_loads_data_and_news_source_documents_concurrently(db_session
 
 
 @pytest.mark.asyncio
-async def test_scan_sends_full_markdown_documents_without_news_cache_truncation(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
-    upsert_market_watch_settings(
+async def test_scan_sends_full_markdown_documents_without_news_cache_truncation(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
+    await upsert_market_watch_settings(
         user.id,
         MarketWatchSettingsUpdate(
             news_sources=["https://example.com/news-a", "https://example.com/news-b"],
@@ -955,11 +958,11 @@ async def test_scan_sends_full_markdown_documents_without_news_cache_truncation(
 
 
 @pytest.mark.asyncio
-async def test_scan_enforces_cooldown(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
-    _add_recent_launch_event(db_session, user.id)
+async def test_scan_enforces_cooldown(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
+    await _add_recent_launch_event(async_db_session, user.id)
     launcher_calls: list[dict[str, Any]] = []
 
     cooldown_result = await scan_market_watch(
@@ -974,11 +977,11 @@ async def test_scan_enforces_cooldown(db_session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_scan_skips_launch_when_auto_launch_disabled_by_settings(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
-    upsert_market_watch_settings(user.id, MarketWatchSettingsUpdate(auto_launch_debate=False))
+async def test_scan_skips_launch_when_auto_launch_disabled_by_settings(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
+    await upsert_market_watch_settings(user.id, MarketWatchSettingsUpdate(auto_launch_debate=False))
     launcher_calls: list[dict[str, Any]] = []
 
     settings_result = await scan_market_watch(
@@ -990,16 +993,19 @@ async def test_scan_skips_launch_when_auto_launch_disabled_by_settings(db_sessio
     assert settings_result["debate_launch"]["status"] == "skipped"
     assert settings_result["debate_launch"]["reason"] == "auto_launch_disabled"
     assert launcher_calls == []
-    skipped_event = db_session.query(MarketWatchEvent).filter(MarketWatchEvent.event_type == "debate_skipped").one()
+    skipped_event = await async_db_session.scalar(
+        select(MarketWatchEvent).where(MarketWatchEvent.event_type == "debate_skipped")
+    )
+    assert skipped_event is not None
     assert skipped_event.reason == "auto_launch_disabled"
 
 
 @pytest.mark.asyncio
-async def test_scan_breaks_cooldown_for_high_confidence_decision_with_news_evidence(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
-    _add_recent_launch_event(db_session, user.id)
+async def test_scan_breaks_cooldown_for_high_confidence_decision_with_news_evidence(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
+    await _add_recent_launch_event(async_db_session, user.id)
     launcher_calls: list[dict[str, Any]] = []
 
     result = await scan_market_watch(
@@ -1011,16 +1017,19 @@ async def test_scan_breaks_cooldown_for_high_confidence_decision_with_news_evide
     assert result["debate_launch"]["status"] == "launched"
     assert result["debate_launch"]["cooldown_broken"] is True
     assert len(launcher_calls) == 1
-    task = db_session.query(AsyncTask).filter(AsyncTask.task_id == result["debate_launch"]["task_id"]).one()
+    task = await async_db_session.scalar(
+        select(AsyncTask).where(AsyncTask.task_id == result["debate_launch"]["task_id"])
+    )
+    assert task is not None
     assert task.user_id == user.id
 
 
 @pytest.mark.asyncio
-async def test_scan_does_not_break_cooldown_below_confidence_threshold(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
-    _add_recent_launch_event(db_session, user.id)
+async def test_scan_does_not_break_cooldown_below_confidence_threshold(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
+    await _add_recent_launch_event(async_db_session, user.id)
     decision = _start_debate_decision().model_copy(update={"confidence": 0.84})
     launcher_calls: list[dict[str, Any]] = []
 
@@ -1036,11 +1045,11 @@ async def test_scan_does_not_break_cooldown_below_confidence_threshold(db_sessio
 
 
 @pytest.mark.asyncio
-async def test_scan_breaks_cooldown_by_confidence_without_news_identity(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
-    _add_recent_launch_event(db_session, user.id)
+async def test_scan_breaks_cooldown_by_confidence_without_news_identity(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
+    await _add_recent_launch_event(async_db_session, user.id)
     launcher_calls: list[dict[str, Any]] = []
 
     result = await scan_market_watch(
@@ -1055,11 +1064,11 @@ async def test_scan_breaks_cooldown_by_confidence_without_news_identity(db_sessi
 
 
 @pytest.mark.asyncio
-async def test_scan_existing_pending_or_running_task_always_skips(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
-    db_session.add(
+async def test_scan_existing_pending_or_running_task_always_skips(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
+    async_db_session.add(
         AsyncTask(
             task_name="AI Analysis - 000001",
             task_type="ai_analysis",
@@ -1068,7 +1077,7 @@ async def test_scan_existing_pending_or_running_task_always_skips(db_session) ->
             parameters={"stock_code": "000001", "session_id": "existing"},
         )
     )
-    db_session.commit()
+    await async_db_session.commit()
 
     result = await scan_market_watch(
         user.id,
@@ -1078,14 +1087,14 @@ async def test_scan_existing_pending_or_running_task_always_skips(db_session) ->
 
     assert result["debate_launch"]["status"] == "skipped"
     assert result["debate_launch"]["reason"] == "existing_task"
-    assert db_session.query(Session).count() == 0
+    assert await async_db_session.scalar(select(func.count()).select_from(Session)) == 0
 
 
 @pytest.mark.asyncio
-async def test_scan_filters_watch_ai_decision_when_target_stock_is_unwatched(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
+async def test_scan_filters_watch_ai_decision_when_target_stock_is_unwatched(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
     decision = _start_debate_decision(stock_code="999999", stock_name="Outside Stock")
     launcher_calls: list[dict[str, Any]] = []
 
@@ -1099,16 +1108,17 @@ async def test_scan_filters_watch_ai_decision_when_target_stock_is_unwatched(db_
     assert result["debate_launch"]["status"] == "not_started"
     assert result["debate_launch"]["reason"] == "watch_ai_decision"
     assert launcher_calls == []
-    assert db_session.query(Session).count() == 0
-    event = db_session.query(MarketWatchEvent).filter(MarketWatchEvent.event_type == "ai_decision").one()
+    assert await async_db_session.scalar(select(func.count()).select_from(Session)) == 0
+    event = await async_db_session.scalar(select(MarketWatchEvent).where(MarketWatchEvent.event_type == "ai_decision"))
+    assert event is not None
     assert event.watch_ai_decision == []
 
 
 @pytest.mark.asyncio
-async def test_scan_returns_multiple_watch_ai_stock_results_and_launch_outcomes(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001", "Alpha Tech")
-    _add_stock(db_session, user.id, "000002", "Beta Tech")
+async def test_scan_returns_multiple_watch_ai_stock_results_and_launch_outcomes(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001", "Alpha Tech")
+    await _add_stock(async_db_session, user.id, "000002", "Beta Tech")
     launcher_calls: list[dict[str, Any]] = []
 
     result = await scan_market_watch(
@@ -1131,9 +1141,9 @@ async def test_scan_returns_multiple_watch_ai_stock_results_and_launch_outcomes(
 
 
 @pytest.mark.asyncio
-async def test_scan_pushes_latest_watch_ai_decision_to_frontend(db_session, monkeypatch) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001", "Alpha Tech")
+async def test_scan_pushes_latest_watch_ai_decision_to_frontend(async_db_session, monkeypatch) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001", "Alpha Tech")
     published_payloads: list[dict[str, Any]] = []
 
     async def capture_event_payload(payload: dict[str, Any]) -> int:
@@ -1156,10 +1166,10 @@ async def test_scan_pushes_latest_watch_ai_decision_to_frontend(db_session, monk
 
 
 @pytest.mark.asyncio
-async def test_scan_keeps_scan_response_and_audits_error_when_watch_ai_fails(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
+async def test_scan_keeps_scan_response_and_audits_error_when_watch_ai_fails(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
 
     result = await scan_market_watch(
         user.id,
@@ -1172,16 +1182,17 @@ async def test_scan_keeps_scan_response_and_audits_error_when_watch_ai_fails(db_
     assert result["watch_ai_decision"] is None
     assert result["debate_launch"]["status"] == "failed"
     assert result["debate_launch"]["reason"] == "watch_ai_failed"
-    event = db_session.query(MarketWatchEvent).filter(MarketWatchEvent.event_type == "error").one()
+    event = await async_db_session.scalar(select(MarketWatchEvent).where(MarketWatchEvent.event_type == "error"))
+    assert event is not None
     assert event.status == "failed"
     assert event.error_message == "watch ai unavailable"
 
 
 @pytest.mark.asyncio
-async def test_scan_marks_created_task_and_session_failed_when_launcher_fails(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
+async def test_scan_marks_created_task_and_session_failed_when_launcher_fails(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
 
     def failing_launcher(**kwargs) -> None:
         _ = kwargs
@@ -1195,47 +1206,47 @@ async def test_scan_marks_created_task_and_session_failed_when_launcher_fails(db
 
     assert result["debate_launch"]["status"] == "failed"
     assert result["debate_launch"]["reason"] == "launch_failed"
-    task = db_session.query(AsyncTask).one()
-    session = db_session.query(Session).one()
+    task = (await async_db_session.execute(select(AsyncTask))).scalar_one()
+    session = (await async_db_session.execute(select(Session))).scalar_one()
     assert task.status == "failed"
     assert task.error_message == "scheduler unavailable"
     assert session.status == "failed"
-    event = db_session.query(MarketWatchEvent).filter(MarketWatchEvent.event_type == "error").one()
+    event = await async_db_session.scalar(select(MarketWatchEvent).where(MarketWatchEvent.event_type == "error"))
+    assert event is not None
     assert event.task_id == task.task_id
     assert event.debate_session_id == str(session.session_id)
 
 
 @pytest.mark.asyncio
-async def test_scan_marks_created_task_and_session_failed_when_scheduler_is_missing(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(db_session, user.id, "000001")
-    _add_quote(db_session, "000001")
+async def test_scan_submits_background_task_when_launcher_is_not_injected(async_db_session, monkeypatch) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(async_db_session, user.id, "000001")
+    _add_quote(async_db_session, "000001")
+    monkeypatch.setattr("app.tasks.async_task_runner.async_task_runner.submit_task", lambda **_kwargs: True)
 
     result = await scan_market_watch(
         user.id,
         watch_ai_gate=FakeWatchAiGate(_start_debate_decision()),
     )
 
-    assert result["debate_launch"]["status"] == "failed"
-    assert result["debate_launch"]["reason"] == "launch_failed"
-    task = db_session.query(AsyncTask).one()
-    session = db_session.query(Session).one()
-    assert task.status == "failed"
-    assert task.error_message == "market watch debate scheduler is unavailable"
-    assert session.status == "failed"
+    assert result["debate_launch"]["status"] == "launched"
+    task = (await async_db_session.execute(select(AsyncTask))).scalar_one()
+    session = (await async_db_session.execute(select(Session))).scalar_one()
+    assert task.task_id == result["debate_launch"]["task_id"]
+    assert str(session.session_id) == result["debate_launch"]["session_id"]
 
 
 @pytest.mark.asyncio
-async def test_scan_successful_launch_writes_audit_and_returns_session_and_task_ids(db_session) -> None:
-    user = _create_user(db_session)
-    _add_stock(
-        db_session,
+async def test_scan_successful_launch_writes_audit_and_returns_session_and_task_ids(async_db_session) -> None:
+    user = await _create_user(async_db_session)
+    await _add_stock(
+        async_db_session,
         user.id,
         "000001",
         auto_analysis_trading_frequency="日内交易 (Day Trading)",
         auto_analysis_trading_strategy="趋势追踪 (Trend Following)",
     )
-    _add_quote(db_session, "000001")
+    _add_quote(async_db_session, "000001")
     launcher_calls: list[dict[str, Any]] = []
 
     result = await scan_market_watch(
@@ -1248,19 +1259,19 @@ async def test_scan_successful_launch_writes_audit_and_returns_session_and_task_
     assert launch["status"] == "launched"
     assert launch["session_id"]
     assert launch["task_id"]
-    session = db_session.query(Session).filter(Session.session_id == UUID(launch["session_id"])).one()
+    session = await async_db_session.scalar(select(Session).where(Session.session_id == UUID(launch["session_id"])))
+    assert session is not None
     assert session.trading_frequency == "日内交易 (Day Trading)"
     assert session.trading_strategy == "趋势追踪 (Trend Following)"
-    task = db_session.query(AsyncTask).filter(AsyncTask.task_id == launch["task_id"]).first()
+    task = await async_db_session.scalar(select(AsyncTask).where(AsyncTask.task_id == launch["task_id"]))
     assert task is not None
     assert set(task.parameters) == {"session_id", "stock_code", "trading_frequency", "trading_strategy"}
     assert task.parameters["trading_frequency"] == "日内交易 (Day Trading)"
     assert task.parameters["trading_strategy"] == "趋势追踪 (Trend Following)"
-    launch_event = (
-        db_session.query(MarketWatchEvent)
-        .filter(MarketWatchEvent.event_type == "debate_launched")
-        .one()
+    launch_event = await async_db_session.scalar(
+        select(MarketWatchEvent).where(MarketWatchEvent.event_type == "debate_launched")
     )
+    assert launch_event is not None
     assert launch_event.status == "success"
     assert launch_event.debate_session_id == launch["session_id"]
     assert launch_event.task_id == launch["task_id"]

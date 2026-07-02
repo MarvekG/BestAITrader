@@ -1,7 +1,11 @@
+import pytest
+from sqlalchemy import select
+
 from app.models.system_setting import SystemSetting
 
 
-def test_mcp_server_crud_api(client, auth_headers, db_session):
+@pytest.mark.asyncio
+async def test_mcp_server_crud_api(client, auth_headers, async_db_session):
     create_response = client.post(
         "/api/v1/mcp/servers",
         headers=auth_headers,
@@ -18,7 +22,9 @@ def test_mcp_server_crud_api(client, auth_headers, db_session):
     assert create_response.json()["status"] == "success"
     assert set(create_response.json()["server"]) == {"name", "enabled", "url", "allowed_tools"}
     assert "token" not in create_response.json()["server"]
-    setting = db_session.query(SystemSetting).filter(SystemSetting.key == "mcp.servers").one()
+    setting = (
+        await async_db_session.execute(select(SystemSetting).where(SystemSetting.key == "mcp.servers"))
+    ).scalar_one()
     assert setting.user_id is None
     assert any(item["name"] == "公告检索" and item["token"] == "secret-token" for item in setting.value["servers"])
 

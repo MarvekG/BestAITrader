@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 import pytest
+from sqlalchemy import select
 from pydantic import ValidationError
 
 from app.ai.market_watch.settings import (
@@ -149,14 +150,14 @@ def test_market_watch_settings_can_disable_recent_debate_deduplication() -> None
     assert merged.recent_debate_dedup_enabled is False
 
 
-def test_market_watch_settings_save_allows_sources_to_be_configured_later(test_db) -> None:
+@pytest.mark.asyncio
+async def test_market_watch_settings_save_allows_sources_to_be_configured_later(test_db) -> None:
     session_factory = test_db
-    db = session_factory()
-    db.add(User(id=7, username="market-watch-owner", email="market-watch-owner@example.com", password_hash="hash"))
-    db.commit()
-    db.close()
+    async with session_factory() as db:
+        db.add(User(id=7, username="market-watch-owner", email="market-watch-owner@example.com", password_hash="hash"))
+        await db.commit()
 
-    settings = upsert_market_watch_settings(
+    settings = await upsert_market_watch_settings(
         7,
         MarketWatchSettingsUpdate(scan_interval_seconds=45),
     )
@@ -178,14 +179,14 @@ def test_market_watch_settings_default_scan_window_matches_a_share_session() -> 
     assert settings.news_sources == []
 
 
-def test_market_watch_settings_persist_in_system_settings_table(test_db) -> None:
+@pytest.mark.asyncio
+async def test_market_watch_settings_persist_in_system_settings_table(test_db) -> None:
     session_factory = test_db
-    db = session_factory()
-    db.add(User(id=7, username="market-watch-owner", email="market-watch-owner@example.com", password_hash="hash"))
-    db.commit()
-    db.close()
+    async with session_factory() as db:
+        db.add(User(id=7, username="market-watch-owner", email="market-watch-owner@example.com", password_hash="hash"))
+        await db.commit()
 
-    updated = upsert_market_watch_settings(
+    updated = await upsert_market_watch_settings(
         7,
         MarketWatchSettingsUpdate(
             scan_interval_seconds=45,
@@ -196,12 +197,14 @@ def test_market_watch_settings_persist_in_system_settings_table(test_db) -> None
         ),
     )
 
-    db = session_factory()
-    row = db.query(SystemSetting).filter(
-        SystemSetting.key == market_watch_settings_key(7),
-        SystemSetting.user_id == 7,
-    ).one()
-    loaded = get_market_watch_settings(7)
+    async with session_factory() as db:
+        row = (await db.execute(
+            select(SystemSetting).where(
+                SystemSetting.key == market_watch_settings_key(7),
+                SystemSetting.user_id == 7,
+            )
+        )).scalar_one()
+    loaded = await get_market_watch_settings(7)
 
     assert updated.scan_interval_seconds == 45
     assert updated.scan_non_trading_days is True

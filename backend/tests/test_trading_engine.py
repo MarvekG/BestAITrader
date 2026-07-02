@@ -4,6 +4,7 @@ from decimal import Decimal
 from uuid import UUID
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from app.trading.trading_engine import TradingEngine
 
 # Mock data
@@ -335,7 +336,7 @@ class TestTradingEngine:
 
     @pytest.mark.asyncio
     async def test_market_order_fails_when_market_price_unavailable(self, trading_engine, monkeypatch):
-        monkeypatch.setattr("app.data.storage.data_storage_service.get_stock_realtime_market", lambda _code: None)
+        monkeypatch.setattr("app.data.storage.data_storage_service.get_stock_realtime_market", AsyncMock(return_value=None))
 
         order = {
             "stock_code": "000001.SZ",
@@ -352,7 +353,7 @@ class TestTradingEngine:
 
     @pytest.mark.asyncio
     async def test_market_order_ignores_client_price_when_market_price_unavailable(self, trading_engine, monkeypatch):
-        monkeypatch.setattr("app.data.storage.data_storage_service.get_stock_realtime_market", lambda _code: None)
+        monkeypatch.setattr("app.data.storage.data_storage_service.get_stock_realtime_market", AsyncMock(return_value=None))
 
         order = {
             "stock_code": "000001.SZ",

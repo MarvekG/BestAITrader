@@ -3,10 +3,12 @@ from unittest.mock import AsyncMock, Mock, patch
 from datetime import datetime, timedelta
 
 import pytest
+from sqlalchemy import select
 
 from app.models.data_storage import StockBasic, StockRealtimeMarket
 from app.tasks.task_functions import (
     cleanup_stock_realtime_market_history,
+    sync_base_info_func,
     sync_bulk_tables_func,
     sync_stock_data_func,
     _process_single_stock,
@@ -109,13 +111,6 @@ async def test_sync_stock_data_func_does_not_sync_concept_boards():
         fetch_and_ingest_stock_fund_holding=AsyncMock(side_effect=_mark_side_effect("stock_fund_holding")),
     )
 
-    class DummySessionLocal:
-        def __enter__(self):
-            return object()
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
     def _date_range(task_type: str = "normal"):
         if task_type == "kline_base_info":
             return "2025-07-01", "2026-07-01"
@@ -125,8 +120,6 @@ async def test_sync_stock_data_func_does_not_sync_concept_boards():
 
     with patch("app.tasks.task_functions.get_sync_date_range", side_effect=_date_range), patch(
         "app.data.ingestors.manager.ingestor_manager", mock_ingestor
-    ), patch(
-        "app.core.database.SessionLocal", return_value=DummySessionLocal()
     ), patch(
         "app.tasks.task_functions.calculate_indicators_func",
         new=AsyncMock(side_effect=_mark_side_effect("technical_indicators")),
@@ -189,8 +182,8 @@ async def test_sync_stock_data_func_stores_only_step_statuses():
 @pytest.mark.asyncio
 async def test_sync_bulk_tables_kline_uses_qfq_adjustment():
     mock_ingestor = SimpleNamespace(
-        _get_all_stock_codes=Mock(return_value=["600519.SH"]),
-        _get_all_stock_codes_from_stock_basic=Mock(return_value=["600519.SH"]),
+        _get_all_stock_codes=AsyncMock(return_value=["600519.SH"]),
+        _get_all_stock_codes_from_stock_basic=AsyncMock(return_value=["600519.SH"]),
         fetch_and_ingest_stock_kline=AsyncMock(return_value=True),
         fetch_and_ingest_all_stock_basic=AsyncMock(),
         fetch_and_ingest_index_daily=AsyncMock(),
@@ -228,8 +221,7 @@ async def test_sync_bulk_tables_kline_uses_qfq_adjustment():
 @pytest.mark.asyncio
 async def test_cleanup_stock_realtime_market_history_keeps_recent_24h_records(test_db) -> None:
     latest_market_time = datetime.now() - timedelta(days=3)
-    db = test_db()
-    try:
+    async with test_db() as db:
         db.add(StockBasic(stock_code="600519.SH", name="贵州茅台"))
         db.add_all(
             [
@@ -250,29 +242,24 @@ async def test_cleanup_stock_realtime_market_history_keeps_recent_24h_records(te
                 ),
             ]
         )
-        db.commit()
-    finally:
-        db.close()
+        await db.commit()
 
-    with patch("app.tasks.task_functions.SessionLocal", test_db):
-        result = await cleanup_stock_realtime_market_history()
+    result = await cleanup_stock_realtime_market_history()
 
-    db = test_db()
-    try:
-        rows = db.query(StockRealtimeMarket).order_by(StockRealtimeMarket.current_price.asc()).all()
+    async with test_db() as db:
+        rows = (await db.execute(
+            select(StockRealtimeMarket).order_by(StockRealtimeMarket.current_price.asc())
+        )).scalars().all()
         assert result["status"] == "success"
         assert result["deleted_count"] == 1
         assert [row.current_price for row in rows] == [1, 2]
         assert result["retention_hours"] == 24
-    finally:
-        db.close()
 
 
 @pytest.mark.asyncio
 async def test_cleanup_stock_realtime_market_history_deletes_records_older_than_24h(test_db) -> None:
     latest_market_time = datetime.now() - timedelta(days=1)
-    db = test_db()
-    try:
+    async with test_db() as db:
         db.add(StockBasic(stock_code="600519.SH", name="贵州茅台"))
         db.add_all(
             [
@@ -288,14 +275,68 @@ async def test_cleanup_stock_realtime_market_history_deletes_records_older_than_
                 ),
             ]
         )
-        db.commit()
-    finally:
-        db.close()
+        await db.commit()
 
-    with patch("app.tasks.task_functions.SessionLocal", test_db):
-        result = await cleanup_stock_realtime_market_history(
-            task_name="[Auto] Stock Market Intraday Cache Cleanup 1h"
-        )
+    result = await cleanup_stock_realtime_market_history(
+        task_name="[Auto] Stock Market Intraday Cache Cleanup 1h"
+    )
 
     assert result["status"] == "success"
     assert result["deleted_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_sync_base_info_batch_does_not_hold_session_during_work(monkeypatch) -> None:
+    """批量基础信息同步只应在加载股票列表时持有数据库会话。"""
+    active_sessions = 0
+    max_sessions = 0
+
+    class _Scalars:
+        def all(self):
+            return ["600519.SH"]
+
+    class _Result:
+        def scalars(self):
+            return _Scalars()
+
+    class _FakeSession:
+        async def __aenter__(self):
+            nonlocal active_sessions, max_sessions
+            active_sessions += 1
+            max_sessions = max(max_sessions, active_sessions)
+            return self
+
+        async def __aexit__(self, *_args):
+            nonlocal active_sessions
+            active_sessions -= 1
+
+        async def execute(self, _statement):
+            return _Result()
+
+    class _FakeSessionFactory:
+        def __call__(self):
+            return _FakeSession()
+
+    async def _fetch_and_ingest_all_stock_basic():
+        assert active_sessions == 0
+        return True
+
+    async def _update_task_status(**_kwargs):
+        assert active_sessions == 0
+
+    async def _process_stock(_stock_code, _task_id):
+        assert active_sessions == 0
+        return {"status": "success"}
+
+    mock_ingestor = SimpleNamespace(fetch_and_ingest_all_stock_basic=AsyncMock(side_effect=_fetch_and_ingest_all_stock_basic))
+
+    monkeypatch.setattr("app.tasks.task_functions.database_module.AsyncSessionLocal", _FakeSessionFactory())
+    monkeypatch.setattr("app.tasks.task_functions.task_manager.update_task_status", _update_task_status)
+    monkeypatch.setattr("app.tasks.task_functions._process_single_stock", _process_stock)
+
+    with patch("app.data.ingestors.manager.ingestor_manager", mock_ingestor):
+        result = await sync_base_info_func(task_id="base-info-task", scope="warehouse")
+
+    assert result["status"] == "success"
+    assert active_sessions == 0
+    assert max_sessions == 1

@@ -13,6 +13,7 @@ email-validator>=2.0.0
 python-multipart>=0.0.12
 SQLAlchemy>=2.0.45
 psycopg2-binary>=2.9.10
+asyncpg>=0.30.0
 tushare>=1.4.24
 akshare>=1.17.87
 uvicorn[standard]>=0.40.0

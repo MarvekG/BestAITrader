@@ -7,13 +7,14 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.experience.horizons import ReviewHorizon
 from app.ai.experience.horizons import eligible_horizons
 from app.ai.experience.horizons import normalize_review_horizon
 from app.ai.experience.service import experience_service
-from app.core.database import SessionLocal
+from app.core import database as database_module
 from app.core.logger import get_logger
 from app.crud.system_setting import system_setting
 from app.models.data_storage import KlineData
@@ -124,37 +125,31 @@ def normalize_experience_review_config(value: Any) -> dict[str, Any]:
     }
 
 
-def get_experience_review_scheduler_config(db: Session) -> dict[str, Any]:
+async def get_experience_review_scheduler_config() -> dict[str, Any]:
     """获取带默认值的经验复盘调度配置。
-
-    Args:
-        db: 用于读取系统设置的数据库会话。
 
     Returns:
         规范化后的调度配置。
     """
     return normalize_experience_review_config(
-        system_setting.get_value(
-            db,
+        await system_setting.get_value(
             EXPERIENCE_REVIEW_CONFIG_KEY,
             DEFAULT_EXPERIENCE_REVIEW_CONFIG,
         )
     )
 
 
-def update_experience_review_scheduler_config(db: Session, value: dict[str, Any]) -> dict[str, Any]:
+async def update_experience_review_scheduler_config(value: dict[str, Any]) -> dict[str, Any]:
     """持久化并返回规范化后的经验复盘调度配置。
 
     Args:
-        db: 用于更新系统设置的数据库会话。
         value: 调用方提交的原始调度配置。
 
     Returns:
         已持久化的规范化调度配置。
     """
     normalized = normalize_experience_review_config(value)
-    system_setting.set_value(
-        db,
+    await system_setting.set_value(
         EXPERIENCE_REVIEW_CONFIG_KEY,
         normalized,
         description="Experience review scheduler configuration",
@@ -198,8 +193,8 @@ def _extract_review_horizon_from_event(row: ExperienceReviewEvent) -> ReviewHori
     return None
 
 
-def _load_existing_review_horizons(
-    db: Session,
+async def _load_existing_review_horizons(
+    db: AsyncSession,
     *,
     session_ids: list[UUID],
 ) -> dict[UUID, set[ReviewHorizon]]:
@@ -216,16 +211,15 @@ def _load_existing_review_horizons(
     if not session_ids:
         return existing
 
-    rows = (
-        db.query(ExperienceReviewEvent)
-        .filter(
+    result = await db.execute(
+        select(ExperienceReviewEvent)
+        .where(
             ExperienceReviewEvent.session_id.in_(session_ids),
             ExperienceReviewEvent.stage == "experience_review",
             ExperienceReviewEvent.status.in_(EXPERIENCE_REVIEW_BLOCKING_STATUSES),
         )
-        .all()
     )
-    for row in rows:
+    for row in result.scalars().all():
         horizon = _extract_review_horizon_from_event(row)
         if horizon is None:
             continue
@@ -239,13 +233,6 @@ def get_scheduled_tasks() -> ScheduledTaskSnapshot:
     Returns:
         包含启用任务或禁用任务 ID 的调度快照。
     """
-    with SessionLocal() as db:
-        config = get_experience_review_scheduler_config(db)
-
-    if not config["enabled"]:
-        logger.info("Experience review scheduler is disabled")
-        return ScheduledTaskSnapshot(tasks=[], disabled_job_ids=[EXPERIENCE_REVIEW_JOB_ID])
-
     snapshot = ScheduledTaskSnapshot(
         tasks=[
             ScheduledTask(
@@ -254,20 +241,15 @@ def get_scheduled_tasks() -> ScheduledTaskSnapshot:
                 trigger_type="cron",
                 job_id=EXPERIENCE_REVIEW_JOB_ID,
                 trigger_args={
-                    "hour": config["schedule_hour"],
-                    "minute": config["schedule_minute"],
+                    "hour": EXPERIENCE_REVIEW_SCHEDULE_HOUR,
+                    "minute": EXPERIENCE_REVIEW_SCHEDULE_MINUTE,
                 },
                 misfire_grace_time=3600,
             )
         ],
         disabled_job_ids=[],
     )
-    logger.info(
-        "Experience review auto scan scheduled: enabled=%s time=%02d:%02d",
-        config["enabled"],
-        config["schedule_hour"],
-        config["schedule_minute"],
-    )
+    logger.info("Experience review auto scan scheduled; runtime config is checked inside the job")
     return snapshot
 
 
@@ -277,11 +259,11 @@ async def run_due_reviews() -> dict[str, Any]:
     Returns:
         包含启动数量、跳过原因和启动项元数据的运行摘要。
     """
-    with SessionLocal() as db:
-        config = get_experience_review_scheduler_config(db)
-        if not config["enabled"]:
-            return {"launched": 0, "skipped": "disabled", "items": []}
-        candidates = _load_due_sessions(
+    config = await get_experience_review_scheduler_config()
+    if not config["enabled"]:
+        return {"launched": 0, "skipped": "disabled", "items": []}
+    async with database_module.AsyncSessionLocal() as db:
+        candidates = await _load_due_sessions(
             db,
             limit=config["max_runs_per_tick"],
             candidate_lookback=config["candidate_lookback"],
@@ -301,8 +283,8 @@ async def run_due_reviews() -> dict[str, Any]:
     return {"launched": len(launched), "items": launched}
 
 
-def _load_due_sessions(
-    db: Session,
+async def _load_due_sessions(
+    db: AsyncSession,
     *,
     limit: int,
     candidate_lookback: int = EXPERIENCE_REVIEW_CANDIDATE_LOOKBACK,
@@ -318,16 +300,16 @@ def _load_due_sessions(
         从最早到期会话到最新会话排序的复盘候选项；同一会话按 5D、20D、60D 输出缺失周期。
     """
     latest_pm_created_at = (
-        db.query(func.max(PMDecisionRecord.created_at))
-        .filter(
+        select(func.max(PMDecisionRecord.created_at))
+        .where(
             PMDecisionRecord.session_id == DebateSession.session_id,
         )
         .correlate(DebateSession)
         .scalar_subquery()
     )
     market_day_count = (
-        db.query(func.count(KlineData.date))
-        .filter(
+        select(func.count(KlineData.date))
+        .where(
             KlineData.stock_code == DebateSession.stock_code,
             KlineData.freq == "D",
             KlineData.date >= func.date(latest_pm_created_at),
@@ -335,13 +317,13 @@ def _load_due_sessions(
         .correlate(DebateSession)
         .scalar_subquery()
     )
-    rows = (
-        db.query(
+    rows_result = await db.execute(
+        select(
             DebateSession,
             latest_pm_created_at.label("pm_created_at"),
             market_day_count.label("market_day_count"),
         )
-        .filter(
+        .where(
             DebateSession.status == "completed",
             DebateSession.user_id.isnot(None),
             DebateSession.stock_code.isnot(None),
@@ -350,9 +332,9 @@ def _load_due_sessions(
         )
         .order_by(DebateSession.updated_at.asc(), DebateSession.created_at.asc())
         .limit(candidate_lookback + limit)
-        .all()
     )
-    existing_horizons = _load_existing_review_horizons(
+    rows = rows_result.all()
+    existing_horizons = await _load_existing_review_horizons(
         db,
         session_ids=[session_obj.session_id for session_obj, _, _ in rows],
     )
@@ -388,13 +370,11 @@ async def _launch_review(candidate: ExperienceReviewCandidate) -> dict[str, Any]
         复盘成功时返回启动元数据，否则返回 ``None``。
     """
     try:
-        with SessionLocal() as db:
-            result = await experience_service.analyze(
-                db,
-                user_id=candidate.user_id,
-                session_id=candidate.session_id,
-                review_horizon=candidate.review_horizon,
-            )
+        result = await experience_service.analyze(
+            user_id=candidate.user_id,
+            session_id=candidate.session_id,
+            review_horizon=candidate.review_horizon,
+        )
         return {
             "review_run_id": result.get("review_run_id"),
             "session_id": str(candidate.session_id),

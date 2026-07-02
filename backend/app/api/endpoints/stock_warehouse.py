@@ -1,36 +1,39 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any
 
-from app.core.database import get_db
+from app.core.database import get_async_db
+from app.crud.stock_warehouse import (
+    create_stock_warehouse,
+    delete_stock_warehouse,
+    get_stock_warehouse_by_code,
+    get_stock_warehouses,
+    initialize_shanghai_50,
+    update_stock_warehouse,
+)
 from app.schemas.stock_warehouse import (
     StockWarehouse as StockWarehouseSchema,
     StockWarehouseCreate,
     StockWarehouseUpdate
 )
-from app.crud.stock_warehouse import (
-    get_stock_warehouse_by_code,
-    get_stock_warehouses,
-    create_stock_warehouse,
-    update_stock_warehouse,
-    delete_stock_warehouse,
-    initialize_shanghai_50
-)
 from app.core.security import get_current_user
 from app.models.user import User
 from app.core.i18n import i18n_service
+from app.core.utils.formatters import StockCodeStandardizer
+from app.models.data_storage import StockBasic
 
 router = APIRouter()
 
 
 @router.post("/init-shanghai50", status_code=status.HTTP_201_CREATED)
 async def init_shanghai_50_stocks(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user)
 ):
     """初始化上证50成分股到股票仓库"""
     try:
-        count = initialize_shanghai_50(db, current_user.id)
+        count = await initialize_shanghai_50(db, current_user.id)
         return {
             "message": f"Successfully initialized {count} "
                        "SSE 50 index stocks to the warehouse",
@@ -47,22 +50,21 @@ async def init_shanghai_50_stocks(
 async def get_stock_warehouses_list(
     skip: int = 0,
     limit: int = 100,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user)
 ):
     """获取股票仓库列表，包含从 StockBasic 表获取的 industry 和 market"""
-    from app.models.data_storage import StockBasic
-    from app.core.utils.formatters import StockCodeStandardizer
-
-    stocks = get_stock_warehouses(
-        db, user_id=current_user.id, skip=skip, limit=limit
-    )
+    stocks = await get_stock_warehouses(db, current_user.id, skip=skip, limit=limit)
 
     # 获取所有股票代码对应的基本信息
     stock_codes = [StockCodeStandardizer.standardize(s.stock_code) for s in stocks]
-    stock_basics = db.query(StockBasic).filter(
-        StockBasic.stock_code.in_(stock_codes)
-    ).all()
+    if stock_codes:
+        stock_basics_result = await db.execute(
+            select(StockBasic).where(StockBasic.stock_code.in_(stock_codes))
+        )
+        stock_basics = stock_basics_result.scalars().all()
+    else:
+        stock_basics = []
 
     # 创建股票代码到基本信息的映射
     basics_map = {sb.stock_code: sb for sb in stock_basics}
@@ -102,11 +104,11 @@ async def get_stock_warehouses_list(
 @router.get("/{stock_code}", response_model=StockWarehouseSchema)
 async def get_stock_warehouse(
     stock_code: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user)
 ):
     """根据股票代码获取仓库中的股票"""
-    stock = get_stock_warehouse_by_code(
+    stock = await get_stock_warehouse_by_code(
         db, stock_code=stock_code, user_id=current_user.id
     )
     if not stock:
@@ -116,8 +118,8 @@ async def get_stock_warehouse(
         )
 
     # 动态注入股票名称
-    from app.models.data_storage import StockBasic
-    stock_name = db.query(StockBasic.name).filter(StockBasic.stock_code == stock.stock_code).scalar()
+    stock_name_result = await db.execute(select(StockBasic.name).where(StockBasic.stock_code == stock.stock_code))
+    stock_name = stock_name_result.scalar_one_or_none()
     stock.stock_name = stock_name or "Unknown"
 
     return stock
@@ -129,12 +131,10 @@ async def get_stock_warehouse(
 )
 async def add_stock_to_warehouse(
     stock: StockWarehouseCreate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user)
 ):
     """添加股票到仓库"""
-    from app.models.data_storage import StockBasic
-    from app.core.utils.formatters import StockCodeStandardizer
     from app.data.ingestors.manager import ingestor_manager
     from app.core.logger import get_logger
 
@@ -142,7 +142,7 @@ async def add_stock_to_warehouse(
 
     # 检查股票是否已存在于仓库（使用标准化后的代码）
     standard_code = StockCodeStandardizer.standardize(stock.stock_code)
-    existing_stock = get_stock_warehouse_by_code(
+    existing_stock = await get_stock_warehouse_by_code(
         db, stock_code=standard_code, user_id=current_user.id
     )
     if existing_stock:
@@ -156,18 +156,16 @@ async def add_stock_to_warehouse(
     stock.stock_code = standard_code
 
     # 验证股票代码是否存在并获取最新基本信息（仅作为校验，不存储名称）
-    stock_basic = db.query(StockBasic).filter(
-        StockBasic.stock_code == standard_code
-    ).first()
+    stock_basic_result = await db.execute(select(StockBasic).where(StockBasic.stock_code == standard_code))
+    stock_basic = stock_basic_result.scalar_one_or_none()
 
     if not stock_basic:
         # 尝试采集股票基本信息
         try:
             success = await ingestor_manager.fetch_and_ingest_stock_info(standard_code)
             if success:
-                stock_basic = db.query(StockBasic).filter(
-                    StockBasic.stock_code == standard_code
-                ).first()
+                stock_basic_result = await db.execute(select(StockBasic).where(StockBasic.stock_code == standard_code))
+                stock_basic = stock_basic_result.scalar_one_or_none()
         except Exception as e:
             logger.error(f"Failed to get stock info during warehouse add: {e}")
 
@@ -177,18 +175,18 @@ async def add_stock_to_warehouse(
             detail=f"Stock {stock.stock_code} not found, please check the code"
         )
 
-    return create_stock_warehouse(db, stock=stock, user_id=current_user.id)
+    return await create_stock_warehouse(db, stock=stock, user_id=current_user.id)
 
 
 @router.put("/{stock_code}", response_model=StockWarehouseSchema)
 async def update_stock_warehouse_item(
     stock_code: str,
     stock: StockWarehouseUpdate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user)
 ):
     """更新仓库中的股票信息"""
-    existing_stock = get_stock_warehouse_by_code(
+    existing_stock = await get_stock_warehouse_by_code(
         db, stock_code=stock_code, user_id=current_user.id
     )
     if not existing_stock:
@@ -197,17 +195,17 @@ async def update_stock_warehouse_item(
             detail=f"Stock {stock_code} is not in the warehouse"
         )
 
-    return update_stock_warehouse(db, db_stock=existing_stock, stock_update=stock)
+    return await update_stock_warehouse(db, existing_stock, stock)
 
 
 @router.delete("/{stock_code}", status_code=status.HTTP_200_OK)
 async def remove_stock_from_warehouse(
     stock_code: str,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user)
 ):
     """从仓库中删除股票"""
-    existing_stock = get_stock_warehouse_by_code(
+    existing_stock = await get_stock_warehouse_by_code(
         db, stock_code=stock_code, user_id=current_user.id
     )
     if not existing_stock:
@@ -220,11 +218,16 @@ async def remove_stock_from_warehouse(
     from app.models.position import Position
     from app.models.account import Account
 
-    active_position = db.query(Position).join(Account).filter(
-        Account.user_id == current_user.id,
-        Position.stock_code == stock_code,
-        Position.total_shares > 0
-    ).first()
+    active_position_result = await db.execute(
+        select(Position)
+        .join(Account)
+        .where(
+            Account.user_id == current_user.id,
+            Position.stock_code == stock_code,
+            Position.total_shares > 0,
+        )
+    )
+    active_position = active_position_result.scalar_one_or_none()
 
     if active_position:
         raise HTTPException(
@@ -235,7 +238,7 @@ async def remove_stock_from_warehouse(
             )
         )
 
-    delete_stock_warehouse(db, db_stock=existing_stock)
+    await delete_stock_warehouse(db, existing_stock)
     return {
         "message": i18n_service.t('warehouse.stock_removed_success').format(stock_code=stock_code)
     }

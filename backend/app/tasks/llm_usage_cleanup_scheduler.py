@@ -3,7 +3,9 @@ from __future__ import annotations
 from datetime import datetime
 from datetime import timedelta
 
-from app.core.database import SessionLocal
+from sqlalchemy import delete
+
+from app.core import database as database_module
 from app.core.logger import get_logger
 from app.models.llm_usage_log import LLMUsageLog
 from app.tasks.scheduled_task_registry import ScheduledTask
@@ -44,13 +46,14 @@ def get_scheduled_tasks() -> ScheduledTaskSnapshot:
     )
 
 
-def cleanup_old_llm_usage(*, retention_days: int = LLM_USAGE_RETENTION_DAYS) -> dict[str, int]:
+async def cleanup_old_llm_usage(*, retention_days: int = LLM_USAGE_RETENTION_DAYS) -> dict[str, int]:
     """Delete backend LLM usage records older than the retention window."""
 
     cutoff = _now() - timedelta(days=retention_days)
-    with SessionLocal() as db:
-        deleted = db.query(LLMUsageLog).filter(LLMUsageLog.created_at < cutoff).delete(synchronize_session=False)
-        db.commit()
+    async with database_module.AsyncSessionLocal() as db:
+        result = await db.execute(delete(LLMUsageLog).where(LLMUsageLog.created_at < cutoff))
+        await db.commit()
+        deleted = result.rowcount or 0
     if deleted:
         logger.info("Deleted %s old LLM usage log(s)", deleted)
     return {"deleted": int(deleted or 0), "retention_days": retention_days}

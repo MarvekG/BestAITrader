@@ -1,12 +1,12 @@
 from typing import List, Dict, Any
 from app.data.ingestors.manager import ingestor_manager
-from app.core.database import SessionLocal
+import app.core.database as database_module
 from app.models.data_storage import (
     StockBasic, StockValuationHistory,
     StockTopHolders, KlineData
 )
 from app.core.logger import get_logger
-from sqlalchemy import desc
+from sqlalchemy import desc, select
 
 logger = get_logger(__name__)
 
@@ -53,7 +53,7 @@ class StockTools:
     """
 
     @staticmethod
-    def get_stock_basic_info(stock_code: str) -> Dict[str, Any]:
+    async def get_stock_basic_info(stock_code: str) -> Dict[str, Any]:
         """获取股票基础信息。
 
         Args:
@@ -62,13 +62,15 @@ class StockTools:
         Returns:
             股票基础信息；股本字段来自最新估值表记录，使用“股”口径。
         """
-        with SessionLocal() as db:
-            stock = db.query(StockBasic).filter(StockBasic.stock_code == stock_code).first()
+        async with database_module.AsyncSessionLocal() as db:
+            stock = (await db.execute(select(StockBasic).where(StockBasic.stock_code == stock_code))).scalar_one_or_none()
             if stock:
-                latest_valuation = db.query(StockValuationHistory)\
-                    .filter(StockValuationHistory.stock_code == stock_code)\
-                    .order_by(desc(StockValuationHistory.data_date))\
-                    .first()
+                latest_valuation = (await db.execute(
+                    select(StockValuationHistory)
+                    .where(StockValuationHistory.stock_code == stock_code)
+                    .order_by(desc(StockValuationHistory.data_date))
+                    .limit(1)
+                )).scalar_one_or_none()
                 total_share = latest_valuation.total_share if latest_valuation else None
                 float_share = latest_valuation.float_share if latest_valuation else None
                 return {
@@ -85,23 +87,27 @@ class StockTools:
         return {}
 
     @staticmethod
-    def get_valuation_history(stock_code: str, limit: int = 10) -> List[Dict[str, Any]]:
+    async def get_valuation_history(stock_code: str, limit: int = 10) -> List[Dict[str, Any]]:
         """获取最近的估值历史 (Get recent valuation history)"""
-        with SessionLocal() as db:
-            valuations = db.query(StockValuationHistory)\
-                .filter(StockValuationHistory.stock_code == stock_code)\
-                .order_by(desc(StockValuationHistory.data_date))\
-                .limit(limit).all()
+        async with database_module.AsyncSessionLocal() as db:
+            valuations = (await db.execute(
+                select(StockValuationHistory)
+                .where(StockValuationHistory.stock_code == stock_code)
+                .order_by(desc(StockValuationHistory.data_date))
+                .limit(limit)
+            )).scalars().all()
             return [{k: v for k, v in v.__dict__.items() if not k.startswith('_')} for v in valuations]
 
     @staticmethod
-    def get_recent_kline(stock_code: str, limit: int = 60) -> List[Dict[str, Any]]:
+    async def get_recent_kline(stock_code: str, limit: int = 60) -> List[Dict[str, Any]]:
         """获取最近的日线数据 (Get recent daily Kline data)"""
-        with SessionLocal() as db:
-            klines = db.query(KlineData)\
-                .filter(KlineData.stock_code == stock_code)\
-                .order_by(desc(KlineData.date))\
-                .limit(limit).all()
+        async with database_module.AsyncSessionLocal() as db:
+            klines = (await db.execute(
+                select(KlineData)
+                .where(KlineData.stock_code == stock_code)
+                .order_by(desc(KlineData.date))
+                .limit(limit)
+            )).scalars().all()
             if not klines:
                 return []
 
@@ -120,53 +126,63 @@ class StockTools:
         return results
 
     @staticmethod
-    def get_top_holders(stock_code: str) -> List[Dict[str, Any]]:
+    async def get_top_holders(stock_code: str) -> List[Dict[str, Any]]:
         """获取十大股东信息 (Get top 10 shareholders)"""
-        with SessionLocal() as db:
-            latest_report = db.query(StockTopHolders.report_date)\
-                .filter(StockTopHolders.stock_code == stock_code)\
-                .order_by(desc(StockTopHolders.report_date))\
-                .first()
+        async with database_module.AsyncSessionLocal() as db:
+            latest_report = (await db.execute(
+                select(StockTopHolders.report_date)
+                .where(StockTopHolders.stock_code == stock_code)
+                .order_by(desc(StockTopHolders.report_date))
+                .limit(1)
+            )).first()
             if not latest_report:
                 return []
 
             report_date = latest_report[0]
-            holders = db.query(StockTopHolders)\
-                .filter(
+            holders = (await db.execute(
+                select(StockTopHolders)
+                .where(
                     StockTopHolders.stock_code == stock_code,
                     StockTopHolders.report_date == report_date
-                )\
-                .order_by(StockTopHolders.holder_rank.asc().nullslast(), desc(StockTopHolders.hold_amount))\
-                .limit(10).all()
+                )
+                .order_by(StockTopHolders.holder_rank.asc().nullslast(), desc(StockTopHolders.hold_amount))
+                .limit(10)
+            )).scalars().all()
             return [{k: v for k, v in h.__dict__.items() if not k.startswith('_')} for h in holders]
 
     @staticmethod
-    def check_data_status(stock_code: str) -> Dict[str, Any]:
+    async def check_data_status(stock_code: str) -> Dict[str, Any]:
         """
         检查股票数据的完整性 (Check data completeness in DB)
         返回各维度的最新数据日期或是否存在。
         """
         status = {}
-        with SessionLocal() as db:
+        async with database_module.AsyncSessionLocal() as db:
             # 基础信息
-            basic = db.query(StockBasic).filter(StockBasic.stock_code == stock_code).first()
+            basic = (await db.execute(select(StockBasic).where(StockBasic.stock_code == stock_code))).scalar_one_or_none()
             status["basic_info"] = "exists" if basic else "missing"
 
             # K线数据
-            latest_k = db.query(KlineData.date)\
-                .filter(KlineData.stock_code == stock_code)\
-                .order_by(desc(KlineData.date)).first()
+            latest_k = (await db.execute(
+                select(KlineData.date)
+                .where(KlineData.stock_code == stock_code)
+                .order_by(desc(KlineData.date))
+                .limit(1)
+            )).first()
             status["kline_data"] = str(latest_k[0]) if latest_k else "missing"
 
             # 估值数据
-            latest_val = db.query(StockValuationHistory.data_date)\
-                .filter(StockValuationHistory.stock_code == stock_code)\
-                .order_by(desc(StockValuationHistory.data_date)).first()
+            latest_val = (await db.execute(
+                select(StockValuationHistory.data_date)
+                .where(StockValuationHistory.stock_code == stock_code)
+                .order_by(desc(StockValuationHistory.data_date))
+                .limit(1)
+            )).first()
             status["valuation_history"] = str(latest_val[0]) if latest_val else "missing"
 
         return status
 
-    def get_generic_db_data(
+    async def get_generic_db_data(
         model_name: str,
         identifier: str = "",
         limit: int = 50,
@@ -198,19 +214,19 @@ class StockTools:
 
         selected_columns = StockTools._normalize_selected_columns(model, columns)
 
-        with SessionLocal() as db:
-            query = StockTools._build_model_query(db, model, selected_columns)
+        async with database_module.AsyncSessionLocal() as db:
+            query = StockTools._build_model_query(model, selected_columns)
 
             # 灵活处理过滤标识符 (Flexible identifier filtering)
             if identifier:
                 if hasattr(model, 'stock_code'):
-                    query = query.filter(model.stock_code == identifier)
+                    query = query.where(model.stock_code == identifier)
                 elif hasattr(model, 'symbol'):
-                    query = query.filter(model.symbol == identifier)
+                    query = query.where(model.symbol == identifier)
                 elif hasattr(model, 'indicator_code'):
-                    query = query.filter(model.indicator_code == identifier)
+                    query = query.where(model.indicator_code == identifier)
                 elif hasattr(model, 'sector_name'):
-                    query = query.filter(model.sector_name == identifier)
+                    query = query.where(model.sector_name == identifier)
 
             # 时间范围过滤 (Time range filtering)
             date_col_candidates = [
@@ -229,14 +245,14 @@ class StockTools:
                 base_query = query
                 
                 if start_time:
-                    query = query.filter(col_attr >= start_time)
+                    query = query.where(col_attr >= start_time)
                 if end_time:
-                    query = query.filter(col_attr <= end_time)
+                    query = query.where(col_attr <= end_time)
 
                 # 根据该日期字段倒序排列
                 query = query.order_by(desc(col_attr))
                 
-                results = query.limit(limit).all()
+                results = StockTools._query_result_records(await db.execute(query.limit(limit)), selected_columns)
                 
                 # 如果带时间过滤的结果为空，且确实传了时间参数，则触发回溯 (Fallback if no results)
                 if not results and (start_time or end_time):
@@ -248,14 +264,17 @@ class StockTools:
                             "end_time": end_time,
                         },
                     )
-                    results = base_query.order_by(desc(col_attr)).limit(limit).all()
+                    results = StockTools._query_result_records(
+                        await db.execute(base_query.order_by(desc(col_attr)).limit(limit)),
+                        selected_columns,
+                    )
                     serialized_results = StockTools._serialize_query_results(results, selected_columns)
                     return [{**item, "_fallback": True} for item in serialized_results]
                 
                 return StockTools._serialize_query_results(results, selected_columns)
 
             # 无日期字段的兜底逻辑
-            results = query.limit(limit).all()
+            results = StockTools._query_result_records(await db.execute(query.limit(limit)), selected_columns)
             return StockTools._serialize_query_results(results, selected_columns)
 
     @staticmethod
@@ -324,12 +343,11 @@ class StockTools:
         return [column.name for column in model.__table__.columns]
 
     @staticmethod
-    def _build_model_query(db: Any, model: Any, selected_columns: List[str]) -> Any:
+    def _build_model_query(model: Any, selected_columns: List[str]) -> Any:
         """
         根据列选择构建 SQLAlchemy 查询对象。
 
         Args:
-            db: SQLAlchemy Session。
             model: SQLAlchemy 模型类。
             selected_columns: 已校验的列名列表。
 
@@ -337,8 +355,22 @@ class StockTools:
             SQLAlchemy 查询对象。
         """
         if not selected_columns:
-            return db.query(model)
-        return db.query(*(getattr(model, column) for column in selected_columns))
+            return select(model)
+        return select(*(getattr(model, column) for column in selected_columns))
+
+    @staticmethod
+    def _query_result_records(result: Any, selected_columns: List[str]) -> List[Any]:
+        """
+        从异步执行结果中提取 ORM 实例或列投影行。
+
+        Args:
+            result: AsyncSession.execute 返回的结果对象。
+            selected_columns: 已校验的列名列表。
+
+        Returns:
+            可序列化前的查询记录列表。
+        """
+        return result.all() if selected_columns else result.scalars().all()
 
     @staticmethod
     def _serialize_query_results(records: List[Any], selected_columns: List[str]) -> List[Dict[str, Any]]:

@@ -1,8 +1,11 @@
 import pandas as pd
-from datetime import datetime
+import uuid
+from datetime import date, datetime
 from typing import Optional, List, Dict
+from sqlalchemy import select
+from sqlalchemy.sql.sqltypes import Date, DateTime, Float, Integer, String
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from app.core.database import engine
+from app.core import database as database_module
 from app.core.utils.formatters import StockCodeStandardizer
 from app.models.data_storage import (
     Base, CommonData, KlineData, StockBasic, NorthboundData, DragonTigerData, StockValuationHistory,
@@ -21,7 +24,6 @@ logger = get_logger(__name__)
 
 class DataIngestionService:
     def __init__(self):
-        self.engine = engine
         self.metadata = Base.metadata
         # 建立表名到模型类的映射，用于快速查找
         self.table_map = {
@@ -68,10 +70,8 @@ class DataIngestionService:
             'data.stock_pledge_summary': StockPledgeSummary,
             'data.stock_top_holders': StockTopHolders
         }
-        # 确保表存在
-        Base.metadata.create_all(self.engine)
 
-    def write_dataframe(
+    async def write_dataframe(
         self,
         api_name: str,
         df: pd.DataFrame,
@@ -79,13 +79,17 @@ class DataIngestionService:
         force_sync: bool = False,
         target_table: Optional[str] = None,
     ):
-        """
-        通用数据写入方法
-        :param api_name: API名称 (用于 CommonData 的 api_name 字段)
-        :param df: Pandas DataFrame 数据
-        :param source: 数据来源
-        :param force_sync: 保留参数，当前写入逻辑不使用。
-        :param target_table: 目标表名 (如 'kline_data' 或 'common_data')。如果为 None，默认写入 CommonData
+        """异步写入 DataFrame 数据。
+
+        Args:
+            api_name: API 名称，用于 CommonData 的 api_name 字段。
+            df: 待写入的 Pandas DataFrame 数据。
+            source: 数据来源。
+            force_sync: 保留参数，当前写入逻辑不使用。
+            target_table: 目标表名，如 ``kline_data`` 或 ``common_data``；为空时写入 CommonData。
+
+        Returns:
+            写入成功返回 True；无有效数据或写入失败返回 False。
         """
         if df.empty:
             logger.warning(f"Skipping empty dataframe for {api_name}")
@@ -113,14 +117,13 @@ class DataIngestionService:
         if 'stock_code' in df.columns and target_model not in [StockBasic, SectorMoneyFlow, IndustryData]:
             try:
                 logger.info(f"Filtering stock_code for {api_name} against stock_basic...")
-                with self.engine.begin() as conn:
-                    valid_df = pd.read_sql("SELECT stock_code FROM data.stock_basic", conn)
-                
-                if valid_df.empty:
+                async with database_module.AsyncSessionLocal() as session:
+                    result = await session.execute(select(StockBasic.stock_code))
+                    valid_stock_codes = {str(code) for code in result.scalars().all()}
+
+                if not valid_stock_codes:
                     logger.error(f"TABLE stock_basic IS EMPTY! All records for {api_name} with stock_code will be filtered. Please sync stock_basic first.")
-                
-                valid_stock_codes = set(valid_df['stock_code'].astype(str).tolist())
-                
+
                 original_count = len(df)
                 # 记录被过滤的代码，以便调试
                 mask = df['stock_code'].astype(str).isin(valid_stock_codes)
@@ -184,7 +187,7 @@ class DataIngestionService:
                 logger.warning(f"No valid records prepared for {api_name}")
                 return False
 
-            self._bulk_upsert(target_model, records)
+            await self._bulk_upsert(target_model, records)
             return True
 
         except Exception as e:
@@ -203,15 +206,94 @@ class DataIngestionService:
         if isinstance(obj, dict):
              return {k: DataIngestionService._json_serializable(v) for k, v in obj.items()}
         if isinstance(obj, list):
-             return [DataIngestionService._json_serializable(v) for v in obj]
+            return [DataIngestionService._json_serializable(v) for v in obj]
+        return obj
+
+    @staticmethod
+    def _is_missing_value(obj) -> bool:
+        """判断 DataFrame 单元格是否为空值。"""
+        try:
+            missing = pd.isna(obj)
+        except (TypeError, ValueError):
+            return False
+        return bool(missing) if isinstance(missing, bool) else False
+
+    @staticmethod
+    def _parse_date_value(obj):
+        """将数据源日期值转换为 Python date，供 asyncpg DATE bind 使用。"""
+        if isinstance(obj, datetime):
+            return obj.date()
+        if isinstance(obj, date):
+            return obj
+        if isinstance(obj, str):
+            raw = obj.strip()
+            if not raw:
+                return None
+            parsed = pd.to_datetime(raw, format="%Y%m%d" if raw.isdigit() and len(raw) == 8 else None, errors="coerce")
+            return None if pd.isna(parsed) else parsed.date()
+        return obj
+
+    @staticmethod
+    def _parse_datetime_value(obj):
+        """将数据源时间值转换为 Python datetime，供 asyncpg TIMESTAMP bind 使用。"""
+        if isinstance(obj, pd.Timestamp):
+            return obj.to_pydatetime()
+        if isinstance(obj, datetime):
+            return obj
+        if isinstance(obj, date):
+            return datetime.combine(obj, datetime.min.time())
+        if isinstance(obj, str):
+            raw = obj.strip()
+            if not raw:
+                return None
+            parsed = pd.to_datetime(raw, format="%Y%m%d" if raw.isdigit() and len(raw) == 8 else None, errors="coerce")
+            return None if pd.isna(parsed) else parsed.to_pydatetime()
+        return obj
+
+    @staticmethod
+    def _db_bind_value(obj, column=None):
+        """按目标列类型转换为 asyncpg 可绑定的 Python 原生值。"""
+        if isinstance(obj, pd.Timestamp):
+            return obj.to_pydatetime()
+        if hasattr(obj, 'item') and callable(getattr(obj, 'item')):
+            try:
+                return obj.item()
+            except (ValueError, TypeError):
+                pass
+
+        if column is None:
+            return obj
+
+        column_type = column.type
+        if isinstance(column_type, DateTime):
+            return DataIngestionService._parse_datetime_value(obj)
+        if isinstance(column_type, Date):
+            return DataIngestionService._parse_date_value(obj)
+        if isinstance(column_type, String):
+            return str(obj) if obj is not None and not isinstance(obj, str) else obj
+        if isinstance(column_type, Integer) and obj is not None and not isinstance(obj, bool):
+            return int(obj)
+        if isinstance(column_type, Float) and obj is not None:
+            return float(obj)
         return obj
 
     def _prepare_records(self, df: pd.DataFrame, target_model, api_name: str, source: str) -> List[Dict]:
-        """准备写入数据库的记录"""
+        """准备写入数据库的记录。
+
+        Args:
+            df: 待转换的 DataFrame。
+            target_model: 目标 SQLAlchemy 模型。
+            api_name: API 名称。
+            source: 数据来源。
+
+        Returns:
+            可用于 SQLAlchemy Core 写入的记录列表。
+        """
         records = []
         
         # 获取目标模型的列名，用于过滤无效字段 (如果是专用表)
-        model_columns = set(c.name for c in target_model.__table__.columns) if target_model != CommonData else set()
+        model_column_map = {c.name: c for c in target_model.__table__.columns} if target_model != CommonData else {}
+        model_columns = set(model_column_map)
 
         for _, row in df.iterrows():
             row_dict = row.to_dict()
@@ -219,11 +301,13 @@ class DataIngestionService:
             # 清理 NaN 值 并处理 JSON 序列化
             clean_row = {}
             for k, v in row_dict.items():
-                if pd.isna(v):
+                if self._is_missing_value(v):
                     clean_row[k] = None
-                else:
-                    # 使用递归序列化处理所有值，确保 JSON 字段内的日期也能正确转义
+                elif target_model == CommonData:
+                    # CommonData 的 data_payload 是 JSON，需要把日期递归转成可序列化值。
                     clean_row[k] = self._json_serializable(v)
+                else:
+                    clean_row[k] = self._db_bind_value(v)
 
             if target_model == CommonData:
                 # CommonData 逻辑
@@ -236,19 +320,31 @@ class DataIngestionService:
                     clean_row['data_source'] = source
                 
                 # 2. 过滤掉不在模型中的字段 (避免 SQL 错误)
-                final_record = {k: v for k, v in clean_row.items() if k in model_columns}
+                final_record = {
+                    k: self._db_bind_value(v, model_column_map[k])
+                    for k, v in clean_row.items()
+                    if k in model_columns
+                }
                 
                 # 3. 确保 ID 存在 (对于 bulk_insert，如果数据库不自动生成或者显式传 None 会报错)
                 if 'id' in model_columns and not final_record.get('id'):
-                    import uuid
-                    final_record['id'] = str(uuid.uuid4())
+                    final_record['id'] = uuid.uuid4()
                 
                 records.append(final_record)
         
         return records
 
     def _prepare_common_data_record(self, row_dict: Dict, api_name: str, source: str) -> Dict:
-        """构建 CommonData 记录"""
+        """构建 CommonData 记录。
+
+        Args:
+            row_dict: 清洗后的单行数据。
+            api_name: API 名称。
+            source: 数据来源。
+
+        Returns:
+            CommonData 表记录。
+        """
         # 1. 提取 Stock Code
         stock_code = (
             row_dict.get('stock_code') or 
@@ -305,8 +401,26 @@ class DataIngestionService:
             "data_source": source
         }
 
-    def _bulk_upsert(self, model, records: List[Dict]):
-        """执行批量 Upsert"""
+    async def _bulk_upsert(self, model, records: List[Dict]):
+        """异步执行批量 Upsert。
+
+        Args:
+            model: 目标 SQLAlchemy 模型。
+            records: 待写入记录。
+        """
+        if not records:
+            return
+
+        max_parameters = 30000
+        keys_per_record = max(len(records[0]), 1)
+        chunk_size = max(max_parameters // keys_per_record, 1)
+        for start in range(0, len(records), chunk_size):
+            await self._bulk_upsert_chunk(model, records[start:start + chunk_size])
+
+        logger.info(f"Upserted {len(records)} records to {model.__tablename__}")
+
+    async def _bulk_upsert_chunk(self, model, records: List[Dict]):
+        """异步执行单个分片的批量 Upsert。"""
         if not records:
             return
 
@@ -371,10 +485,9 @@ class DataIngestionService:
             else:
                 stmt = stmt.on_conflict_do_nothing(index_elements=conflict_target)
 
-        with self.engine.begin() as conn:
-            conn.execute(stmt)
-        
-        logger.info(f"Upserted {len(records)} records to {model.__tablename__}")
+        async with database_module.AsyncSessionLocal() as session:
+            async with session.begin():
+                await session.execute(stmt)
 
 
 # Helper Import (Lazy to avoid circular if placed at top, though top is fine usually)

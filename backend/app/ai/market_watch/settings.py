@@ -4,7 +4,6 @@ from app.ai.market_watch.schemas import (
     MarketWatchSettingsResponse,
     MarketWatchSettingsUpdate,
 )
-from app.core import database as database_module
 from app.crud.system_setting import system_setting
 from app.models.system_setting import SystemSetting
 
@@ -66,7 +65,7 @@ def _materialize_market_watch_settings(
     return MarketWatchSettingsResponse(**data)
 
 
-def get_market_watch_settings(user_id: int) -> MarketWatchSettingsResponse:
+async def get_market_watch_settings(user_id: int) -> MarketWatchSettingsResponse:
     """
     Return persisted market watch settings for a user, or defaults when absent.
 
@@ -76,12 +75,11 @@ def get_market_watch_settings(user_id: int) -> MarketWatchSettingsResponse:
     Returns:
         Fully materialized settings response.
     """
-    with database_module.SessionLocal() as db:
-        row = system_setting.get_by_key(db, market_watch_settings_key(user_id), user_id=user_id)
-        return _materialize_market_watch_settings(user_id, row)
+    row = await system_setting.get_by_key(market_watch_settings_key(user_id), user_id=user_id)
+    return _materialize_market_watch_settings(user_id, row)
 
 
-def upsert_market_watch_settings(
+async def upsert_market_watch_settings(
     user_id: int,
     update: MarketWatchSettingsUpdate,
 ) -> MarketWatchSettingsResponse:
@@ -95,17 +93,15 @@ def upsert_market_watch_settings(
     Returns:
         Persisted settings after merge.
     """
-    with database_module.SessionLocal() as db:
-        existing_row = system_setting.get_by_key(db, market_watch_settings_key(user_id), user_id=user_id)
-        existing = _materialize_market_watch_settings(user_id, existing_row)
-        merged = merge_market_watch_settings(existing, update)
-        value = merged.model_dump(mode="json", exclude={"created_at", "updated_at"})
-        row = system_setting.set_value(
-            db,
-            key=market_watch_settings_key(user_id),
-            value=value,
-            description=MARKET_WATCH_SETTINGS_DESCRIPTION,
-            user_id=user_id,
-        )
-        data = value | {"created_at": row.created_at, "updated_at": row.updated_at}
-        return MarketWatchSettingsResponse(**data)
+    existing_row = await system_setting.get_by_key(market_watch_settings_key(user_id), user_id=user_id)
+    existing = _materialize_market_watch_settings(user_id, existing_row)
+    merged = merge_market_watch_settings(existing, update)
+    value = merged.model_dump(mode="json", exclude={"created_at", "updated_at"})
+    row = await system_setting.set_value(
+        key=market_watch_settings_key(user_id),
+        value=value,
+        description=MARKET_WATCH_SETTINGS_DESCRIPTION,
+        user_id=user_id,
+    )
+    data = value | {"created_at": row.created_at, "updated_at": row.updated_at}
+    return MarketWatchSettingsResponse(**data)

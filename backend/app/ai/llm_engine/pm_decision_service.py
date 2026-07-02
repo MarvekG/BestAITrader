@@ -3,9 +3,9 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
 
-from app.core.database import SessionLocal
+from app.core import database as database_module
 from app.core.logger import get_logger
 from app.models.pm_decision import PMDecisionRecord
 from app.models.session import Session as DebateSession
@@ -58,7 +58,7 @@ def normalize_pm_decision_payload(
     }
 
 
-def save_pm_decision_record(
+async def save_pm_decision_record(
     *,
     session_id: UUID | str,
     target_position: float,
@@ -85,8 +85,9 @@ def save_pm_decision_record(
     Raises:
         ValueError: 会话不存在、字段非法或用户缺失时抛出。
     """
-    with SessionLocal() as db:
-        session_obj = db.query(DebateSession).filter(DebateSession.session_id == session_id).first()
+    async with database_module.AsyncSessionLocal() as db:
+        session_result = await db.execute(select(DebateSession).where(DebateSession.session_id == session_id))
+        session_obj = session_result.scalar_one_or_none()
         if session_obj is None:
             raise ValueError("session_id does not exist")
         if session_obj.user_id is None:
@@ -100,7 +101,10 @@ def save_pm_decision_record(
             holding_horizon_days=holding_horizon_days,
         )
 
-        record = db.query(PMDecisionRecord).filter(PMDecisionRecord.session_id == session_obj.session_id).first()
+        record_result = await db.execute(
+            select(PMDecisionRecord).where(PMDecisionRecord.session_id == session_obj.session_id)
+        )
+        record = record_result.scalar_one_or_none()
         if record is None:
             record = PMDecisionRecord(
                 session_id=session_obj.session_id,
@@ -118,13 +122,13 @@ def save_pm_decision_record(
         record.take_profit = payload["take_profit"]
         record.holding_horizon_days = payload["holding_horizon_days"]
         record.source = source
-        db.commit()
-        db.refresh(record)
+        await db.commit()
+        await db.refresh(record)
 
         result = record.to_dict()
 
     try:
-        sync_pm_discipline_to_position(
+        await sync_pm_discipline_to_position(
             session_id=session_id,
             user_id=result["user_id"],
             stock_code=result["stock_code"],
@@ -135,17 +139,19 @@ def save_pm_decision_record(
     return result
 
 
-def get_pm_decision_for_session(db: Session, session_id: UUID | str) -> PMDecisionRecord | None:
+async def get_pm_decision_for_session(session_id: UUID | str) -> dict[str, Any]:
     """查询指定会话的 PM 结构化决策。
 
     Args:
-        db: 数据库会话。
         session_id: Debate 会话 ID。
 
     Returns:
-        PM 决策记录；不存在时返回 None。
+        PM 决策字典；不存在时返回空字典。
     """
-    return db.query(PMDecisionRecord).filter(PMDecisionRecord.session_id == session_id).first()
+    async with database_module.AsyncSessionLocal() as db:
+        result = await db.execute(select(PMDecisionRecord).where(PMDecisionRecord.session_id == session_id))
+        record = result.scalar_one_or_none()
+        return record.to_dict() if record else {}
 
 
 def _normalize_optional_positive_float(value: Any) -> float | None:

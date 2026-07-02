@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     # Database Config
     DATABASE_URL: str = "postgresql://tradeuser:tradepassword@postgres:5432/trading"
+    ASYNC_DATABASE_URL: str = "postgresql+asyncpg://tradeuser:tradepassword@postgres:5432/trading"
 
     # Redis Config
     REDIS_URL: str = "redis://redis:6379"

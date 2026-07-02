@@ -366,7 +366,10 @@ async def test_review_records_write_memory_result_metadata(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def disable_llm_usage_log(monkeypatch):
-    monkeypatch.setattr(workflow, "record_llm_usage", lambda *args, **kwargs: None)
+    async def _noop_record_llm_usage(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(workflow, "record_llm_usage", _noop_record_llm_usage)
 
 
 @pytest.mark.asyncio
@@ -407,7 +410,11 @@ async def test_final_json_retry_uses_raw_llm_without_tools():
 async def test_final_json_retry_records_research_usage_lane(monkeypatch):
     usage_calls = []
     raw_llm = FakeRawLlm([AIMessage(content=json.dumps(_valid_review_payload(), ensure_ascii=False))])
-    monkeypatch.setattr(workflow, "record_llm_usage", lambda *args, **kwargs: usage_calls.append(kwargs))
+
+    async def _record_usage(*args, **kwargs):
+        usage_calls.append(kwargs)
+
+    monkeypatch.setattr(workflow, "record_llm_usage", _record_usage)
 
     result = await workflow._retry_final_experience_json(
         raw_llm=raw_llm,

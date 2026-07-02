@@ -2,10 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy.orm import Session
-
 from app.data.metadata.field_units import format_payload_values
-from app.models.account import Account
+from app.models.user import User
 from app.risk_control.service import portfolio_risk_control_service, serialize_config
 
 
@@ -53,15 +51,14 @@ def format_portfolio_risk_control_summary(config: dict[str, Any]) -> dict[str, A
     }
 
 
-def build_portfolio_risk_control_context(db: Session, account: Account) -> dict[str, Any]:
+async def build_portfolio_risk_control_context(*, user: User) -> dict[str, Any]:
     """读取账户风控配置并转换为 AI 上下文。
 
     Args:
-        db: 数据库会话。
-        account: 当前用户账户。
+        user: 当前用户。
 
     Returns:
         可直接放入 AI 静态上下文的组合风控摘要。
     """
-    risk_config = portfolio_risk_control_service.get_or_create_config(db, account)
+    risk_config = await portfolio_risk_control_service.get_or_create_config_for_user(user.id)
     return format_portfolio_risk_control_summary(serialize_config(risk_config))

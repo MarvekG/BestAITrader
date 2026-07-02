@@ -31,6 +31,7 @@
 ## 编码约定
 - Python 使用 3.11+、PEP 8、绝对导入、`logging`，不使用 `print`、裸 `except`、`eval`、`exec`。
 - 新增或修改公共 Python 函数时补中文 Google 风格 docstring。
+- 不跨服务/模块传递数据库 session；除直接子函数场景外，优先在使用点通过 `async with AsyncSessionLocal()` 打开，且数据库会话作用域尽量小。
 - 前端 API 放入 `frontend/src/api/*.ts` 并复用 `apiClient`；UI 优先使用 Ant Design 5 和现有组件。
 - 单测禁止访问真实 LLM、Redis、Tushare、NewsAPI、Tavily、浏览器外部服务。
 

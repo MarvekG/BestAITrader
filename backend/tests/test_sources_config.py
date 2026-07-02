@@ -71,7 +71,7 @@ async def test_tushare_config_test_uses_unsaved_request_config(monkeypatch):
             captured["stock_basic_kwargs"] = kwargs
             return [{"ts_code": "000001.SZ"}]
 
-    def fake_get_pro_client(token=None, api_url=None):
+    async def fake_get_pro_client(token=None, api_url=None):
         captured["token"] = token
         captured["api_url"] = api_url
         DataApi._DataApi__http_url = api_url

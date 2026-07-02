@@ -49,7 +49,6 @@ def test_main_module_import_does_not_load_database_or_security_layers() -> None:
         "import sys; "
         "import app.main; "
         "print(('app.core.database' in sys.modules), "
-        "('app.core.init_db' in sys.modules), "
         "('app.core.security' in sys.modules))"
     )
 
@@ -61,4 +60,4 @@ def test_main_module_import_does_not_load_database_or_security_layers() -> None:
         text=True,
     )
 
-    assert result.stdout.strip().splitlines()[-1] == "False False False"
+    assert result.stdout.strip().splitlines()[-1] == "False False"

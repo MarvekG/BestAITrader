@@ -1,4 +1,4 @@
-from unittest.mock import Mock
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -7,7 +7,7 @@ from app.ai.agentic.tool_output_summarizer import summarize_tool_output
 
 @pytest.mark.asyncio
 async def test_summarize_tool_output_records_usage(monkeypatch):
-    usage_recorder = Mock()
+    usage_recorder = AsyncMock()
 
     class _FakeResponse:
         content = "摘要结果"

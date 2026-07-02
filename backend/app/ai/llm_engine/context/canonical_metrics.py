@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from sqlalchemy import desc
+from sqlalchemy import desc, select
 
 from app.ai.llm_engine.context.types import AIContextLayer, AIContextPayload
 from app.data.metadata.field_units import format_payload_values
@@ -177,7 +177,7 @@ def _render_table(metrics: list[CanonicalMetric], valuation_date: str | None, ba
     return "\n".join(lines)
 
 
-def build_canonical_metrics(db: Any, stock_code: str) -> AIContextPayload:
+async def build_canonical_metrics(db: Any, stock_code: str) -> AIContextPayload:
     """从原始财务字段确定性计算高频派生指标。
 
     Args:
@@ -187,9 +187,12 @@ def build_canonical_metrics(db: Any, stock_code: str) -> AIContextPayload:
     Returns:
         含 ``table_markdown``（注入 prompt 的表格）与 ``metrics``（机器可读 key→value）的 payload。
     """
-    valuation = db.query(StockValuationHistory).filter(
-        StockValuationHistory.stock_code == stock_code,
-    ).order_by(desc(StockValuationHistory.data_date)).first()
+    result = await db.execute(
+        select(StockValuationHistory)
+        .where(StockValuationHistory.stock_code == stock_code)
+        .order_by(desc(StockValuationHistory.data_date))
+    )
+    valuation = result.scalars().first()
     if valuation is None:
         return {"status": "missing"}
 
@@ -231,6 +234,6 @@ class CanonicalMetricsProvider:
         runtime: Any,
         sections: Mapping[str, AIContextPayload],
     ) -> AIContextLayer:
-        with runtime.db_session() as db:
-            payload = build_canonical_metrics(db, runtime.stock_code)
+        async with runtime.async_session() as db:
+            payload = await build_canonical_metrics(db, runtime.stock_code)
             return AIContextLayer(self.name, payload)

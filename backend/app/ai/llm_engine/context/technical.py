@@ -1,6 +1,6 @@
 from typing import Dict, Any, List
-from sqlalchemy import desc
-from sqlalchemy.orm import Session
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.data.metadata.field_units import format_payload_values
 from app.models.data_storage import KlineData, StockRealtimeMarket, IndexDaily
 from app.models.stock_indicators import StockIndicators
@@ -15,11 +15,14 @@ class TechnicalSource:
     - Real-time market data
     """
 
-    def _get_recent_klines(self, db: Session, stock_code: str, days: int = 5) -> List[Dict[str, Any]]:
-        klines = db.query(KlineData).filter(
-            KlineData.stock_code == stock_code,
-            KlineData.freq == 'D'
-        ).order_by(desc(KlineData.date)).limit(days).all()
+    async def _get_recent_klines(self, db: AsyncSession, stock_code: str, days: int = 5) -> List[Dict[str, Any]]:
+        result = await db.execute(
+            select(KlineData)
+            .where(KlineData.stock_code == stock_code, KlineData.freq == 'D')
+            .order_by(desc(KlineData.date))
+            .limit(days)
+        )
+        klines = list(result.scalars().all())
 
         # Return in chronological order (oldest to newest)
         klines.reverse()
@@ -38,10 +41,13 @@ class TechnicalSource:
         ]
         return format_payload_values("technical.kline", payload)
 
-    def _get_latest_indicators(self, db: Session, stock_code: str) -> Dict[str, Any]:
-        ind = db.query(StockIndicators).filter(
-            StockIndicators.stock_code == stock_code
-        ).order_by(desc(StockIndicators.trade_date)).first()
+    async def _get_latest_indicators(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
+        result = await db.execute(
+            select(StockIndicators)
+            .where(StockIndicators.stock_code == stock_code)
+            .order_by(desc(StockIndicators.trade_date))
+        )
+        ind = result.scalars().first()
 
         if not ind:
             return {}
@@ -80,10 +86,13 @@ class TechnicalSource:
         }
         return format_payload_values("technical.indicators", payload)
 
-    def _get_realtime_market(self, db: Session, stock_code: str) -> Dict[str, Any]:
-        realtime = db.query(StockRealtimeMarket).filter(
-            StockRealtimeMarket.stock_code == stock_code
-        ).order_by(desc(StockRealtimeMarket.timestamp)).first()
+    async def _get_realtime_market(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
+        result = await db.execute(
+            select(StockRealtimeMarket)
+            .where(StockRealtimeMarket.stock_code == stock_code)
+            .order_by(desc(StockRealtimeMarket.timestamp))
+        )
+        realtime = result.scalars().first()
 
         if not realtime:
             return {}
@@ -104,14 +113,17 @@ class TechnicalSource:
         }
         return format_payload_values("technical.realtime_market", payload)
 
-    def _get_index_context(self, db: Session, index_code: str = "sh000001") -> Dict[str, Any]:
+    async def _get_index_context(self, db: AsyncSession, index_code: str = "sh000001") -> Dict[str, Any]:
         """
         获取大盘指数数据作为参考
         Get market index data for reference (default: Shanghai Composite)
         """
-        index = db.query(IndexDaily).filter(
-            IndexDaily.index_code == index_code
-        ).order_by(desc(IndexDaily.trade_date)).first()
+        result = await db.execute(
+            select(IndexDaily)
+            .where(IndexDaily.index_code == index_code)
+            .order_by(desc(IndexDaily.trade_date))
+        )
+        index = result.scalars().first()
 
         if not index:
             return {}

@@ -1,22 +1,22 @@
-from datetime import datetime  # noqa: F401
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.responses import JSONResponse
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List, Dict, Any
 from uuid import UUID
 
-from app.core.database import get_db
+from app.core.database import get_async_db
 from app.core.i18n import i18n_service
-from app.tasks.task_manager import task_manager
+from app.core.runtime_settings import get_runtime_settings
+from app.crud.session import crud_session
 from app.ai.llm_engine.debate_concurrency import (
     DebateConcurrencyLimitReached,
     DebateStockTaskAlreadyRunning,
-    ensure_debate_launch_available,
     find_running_debate_task_for_session,
     format_ai_analysis_task_name,
+    ensure_debate_launch_available,
 )
 from app.ai.llm_engine.runner import run_analysis_task  # 使用新的 LLM Engine
-from app.api.ownership import get_owned_session
 from app.api.endpoints.debate_ws import send_debate_status
 from app.models.debate_message import DebateMessage
 from app.models.pm_decision import PMDecisionRecord
@@ -24,6 +24,7 @@ from app.core.logger import logger
 from app.core.security import get_current_user
 from app.models.user import User
 from app.ai.llm_engine.roles import AGENT_ROLE_PORTFOLIO_MANAGER
+from app.tasks.task_manager import task_manager
 
 router = APIRouter()
 
@@ -32,7 +33,7 @@ router = APIRouter()
 async def run_debate(
     request: Dict[str, Any],
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -66,7 +67,9 @@ async def run_debate(
             raise HTTPException(status_code=400, detail="Invalid session_id format")
 
         # 检查 session 是否存在且状态为 active
-        session = get_owned_session(db, session_id, current_user)
+        session = await crud_session.get_owned(session_id=session_id, user_id=current_user.id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
 
         if session.status != "active":
             raise HTTPException(
@@ -78,10 +81,13 @@ async def run_debate(
             )
 
         # 检查该 session 是否已完成辩论 (检查 DebateMessage 中是否有 portfolio_manager 的报告)
-        existing_decision = db.query(DebateMessage).filter(
-            DebateMessage.session_id == session_id,
-            DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER
-        ).first()
+        existing_decision_result = await db.execute(
+            select(DebateMessage).where(
+                DebateMessage.session_id == session_id,
+                DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
+            )
+        )
+        existing_decision = existing_decision_result.scalar_one_or_none()
 
         if existing_decision:
             raise HTTPException(
@@ -93,15 +99,16 @@ async def run_debate(
             )
 
         # 如果有 debate 记录但没有 PM 决策，说明是断点续传/恢复
-        existing_debate_msgs = db.query(DebateMessage).filter(
-            DebateMessage.session_id == session_id
-        ).first()
+        existing_debate_result = await db.execute(
+            select(DebateMessage).where(DebateMessage.session_id == session_id)
+        )
+        existing_debate_msgs = existing_debate_result.scalar_one_or_none()
 
         if existing_debate_msgs:
             # 记录日志但不报错
             logger.info(f"Session {session_id} has existing debate records but no decision. Resuming debate...")
 
-        existing_session_task = find_running_debate_task_for_session(db, str(session_id))
+        existing_session_task = await find_running_debate_task_for_session(str(session_id))
         if existing_session_task:
             logger.info(
                 "Debate already running for session %s, reusing task %s",
@@ -132,15 +139,23 @@ async def run_debate(
             task_parameters["sync_before_analysis"] = True
 
         try:
-            ensure_debate_launch_available(db, stock_code)
+            await ensure_debate_launch_available(stock_code)
 
             # 提交任务到任务管理器
-            task_info = task_manager.submit_task(
-                db=db,
+            task_info = await task_manager.submit_task(
                 task_name=format_ai_analysis_task_name(stock_code),
                 task_type="ai_analysis",
                 parameters=task_parameters,
-                allow_concurrent=False  # 同一个Session不建议并行辩论?
+                allow_concurrent=False,
+                user_id=current_user.id,
+                task_func=run_analysis_task,
+                task_kwargs={
+                    "session_id": str(session_id),
+                    "stock_code": stock_code,
+                    "trading_frequency": trading_frequency,
+                    "trading_strategy": trading_strategy,
+                    **({"sync_before_analysis": True} if sync_before_analysis else {}),
+                },
                 # 其实可以并行,但前端可能乱。这里暂设为False，或者True?
                 # 这里的allow_concurrent是针对task_type + parameters.
                 # 我们的parameters包含session_id，所以如果同一个session_id再次提交，且allow_concurrent=False，会阻止。
@@ -171,19 +186,6 @@ async def run_debate(
         # 发送辩论开始状态
         await send_debate_status(str(session_id), "started")
 
-        launch_kwargs = {
-            "task_id": task_info["task_id"],
-            "session_id": str(session_id),
-            "stock_code": stock_code,
-            "trading_frequency": trading_frequency,
-            "trading_strategy": trading_strategy,
-        }
-        if sync_before_analysis:
-            launch_kwargs["sync_before_analysis"] = True
-
-        # 添加后台任务 (使用新的 runner)
-        background_tasks.add_task(run_analysis_task, **launch_kwargs)
-
         return {
             "task_id": task_info["task_id"],
             "session_id": str(session_id),
@@ -204,18 +206,20 @@ async def run_debate(
 @router.get("/history/{session_id}", response_model=List[Dict[str, Any]])
 async def get_debate_history(
     session_id: UUID,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
     """Get debate history"""
     try:
-        get_owned_session(db, session_id, current_user)
+        if not await crud_session.get_owned(session_id=session_id, user_id=current_user.id):
+            raise HTTPException(status_code=404, detail="Session not found")
         # Query debate messages
-        debate_messages = db.query(DebateMessage).filter(
-            DebateMessage.session_id == session_id
-        ).order_by(
-            DebateMessage.created_at.asc()
-        ).all()
+        result = await db.execute(
+            select(DebateMessage)
+            .where(DebateMessage.session_id == session_id)
+            .order_by(DebateMessage.created_at.asc())
+        )
+        debate_messages = result.scalars().all()
 
         # Convert to frontend format
         debate_history = [{
@@ -237,18 +241,20 @@ async def get_debate_history(
 @router.get("/threads/{session_id}", response_model=List[Dict[str, Any]])
 async def get_debate_threads(
     session_id: UUID,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
     """Get debate threads (actually debate messages)"""
     try:
-        get_owned_session(db, session_id, current_user)
+        if not await crud_session.get_owned(session_id=session_id, user_id=current_user.id):
+            raise HTTPException(status_code=404, detail="Session not found")
         # Query debate messages (not debate_threads table)
-        debate_messages = db.query(DebateMessage).filter(
-            DebateMessage.session_id == session_id
-        ).order_by(
-            DebateMessage.created_at
-        ).all()
+        result = await db.execute(
+            select(DebateMessage)
+            .where(DebateMessage.session_id == session_id)
+            .order_by(DebateMessage.created_at)
+        )
+        debate_messages = result.scalars().all()
 
         # Convert to frontend format matching DebateThread interface
         threads = [{
@@ -274,20 +280,24 @@ async def get_debate_threads(
 @router.get("/decisions/{session_id}", response_model=List[Dict[str, Any]])
 async def get_pm_decisions(
     session_id: UUID,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ):
     """Get PM decisions list (Includes execution details) Ratio/Action/Plan"""
     try:
-        get_owned_session(db, session_id, current_user)
+        if not await crud_session.get_owned(session_id=session_id, user_id=current_user.id):
+            raise HTTPException(status_code=404, detail="Session not found")
         # Query messages from DebateMessage table for PM decisions
-        rows = db.query(PMDecisionRecord, DebateMessage).join(
-            DebateMessage,
-            DebateMessage.session_id == PMDecisionRecord.session_id,
-        ).filter(
-            PMDecisionRecord.session_id == session_id,
-            DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
-        ).order_by(DebateMessage.created_at.asc()).all()
+        result = await db.execute(
+            select(PMDecisionRecord, DebateMessage)
+            .join(DebateMessage, DebateMessage.session_id == PMDecisionRecord.session_id)
+            .where(
+                PMDecisionRecord.session_id == session_id,
+                DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
+            )
+            .order_by(DebateMessage.created_at.asc())
+        )
+        rows = result.all()
 
         pm_decisions = []
         for pm_row, msg in rows:

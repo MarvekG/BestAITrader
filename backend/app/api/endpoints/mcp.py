@@ -48,7 +48,7 @@ async def list_registered_mcp_servers() -> Dict[str, Any]:
         MCP Server 完整配置列表。
     """
     try:
-        return list_mcp_servers()
+        return await list_mcp_servers()
     except ValueError as exc:
         return _error_response(str(exc))
 
@@ -66,7 +66,7 @@ async def create_registered_mcp_server(
         创建结果。
     """
     try:
-        return create_mcp_server(request)
+        return await create_mcp_server(request)
     except ValueError as exc:
         return _error_response(str(exc))
     except Exception as exc:
@@ -105,7 +105,7 @@ async def update_registered_mcp_server(
         更新结果。
     """
     try:
-        return update_mcp_server(name, request)
+        return await update_mcp_server(name, request)
     except ValueError as exc:
         return _error_response(str(exc))
     except Exception as exc:
@@ -124,7 +124,7 @@ async def delete_registered_mcp_server(name: str) -> Dict[str, Any]:
         删除结果。
     """
     try:
-        return delete_mcp_server(name)
+        return await delete_mcp_server(name)
     except ValueError as exc:
         return _error_response(str(exc))
     except Exception as exc:

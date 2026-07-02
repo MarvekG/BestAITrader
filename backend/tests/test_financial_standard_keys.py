@@ -60,7 +60,56 @@ class FakeSession:
         self.records = records
 
     def query(self, model):
-        return FakeQuery(self.records)
+        raise AssertionError("Async DB tests must use execute(), not query().")
+
+    async def execute(self, statement):
+        return FakeResult.from_statement(statement, self.records)
+
+
+class FakeScalarResult:
+    def __init__(self, records):
+        self.records = records
+
+    def all(self):
+        return self.records
+
+    def first(self):
+        return self.records[0] if self.records else None
+
+
+class FakeResult:
+    def __init__(self, records, rows=None):
+        self.records = records
+        self.rows = rows if rows is not None else records
+
+    @classmethod
+    def from_statement(cls, statement, records):
+        raw_columns = list(getattr(statement, "_raw_columns", []) or [])
+        raw = raw_columns[0] if raw_columns else None
+        entity = getattr(raw, "class_", None)
+        if entity is None:
+            rows = records
+        else:
+            key = getattr(raw, "key", None)
+            rows = [(getattr(record, key),) for record in records]
+            if getattr(statement, "_distinct", False):
+                rows = list(dict.fromkeys(rows))
+
+        limit_clause = getattr(statement, "_limit_clause", None)
+        if limit_clause is not None:
+            limit = int(limit_clause.value)
+            records = records[:limit]
+            rows = rows[:limit]
+        return cls(records, rows=rows)
+
+    def scalars(self):
+        return FakeScalarResult(self.records)
+
+    def all(self):
+        return self.rows
+
+    def first(self):
+        return self.rows[0] if self.rows else None
 
 
 class ModelMapSession:
@@ -68,7 +117,18 @@ class ModelMapSession:
         self.records_by_model = records_by_model
 
     def query(self, model):
-        return FakeQuery(self.records_by_model.get(model, []))
+        raise AssertionError("Async DB tests must use execute(), not query().")
+
+    async def execute(self, statement):
+        model = None
+        descriptions = getattr(statement, "column_descriptions", []) or []
+        if descriptions:
+            model = descriptions[0].get("entity")
+        raw_columns = list(getattr(statement, "_raw_columns", []) or [])
+        raw = raw_columns[0] if raw_columns else None
+        if model is None:
+            model = getattr(raw, "class_", None)
+        return FakeResult.from_statement(statement, self.records_by_model.get(model, []))
 
 
 @pytest.mark.asyncio
@@ -149,8 +209,32 @@ async def test_snapshot_provider_fetches_financial_reports_during_context_build(
     monkeypatch.setattr(settings, "SYSTEM_LANGUAGE", "zh")
 
     class EmptyReader:
-        def __getattr__(self, _name):
-            return lambda *_args, **_kwargs: {}
+        def wrap_dict(self, payload):
+            return payload
+
+        async def basic_info(self, *_args, **_kwargs):
+            return {}
+
+        async def industry_rank(self, *_args, **_kwargs):
+            return {}
+
+        async def valuation(self, *_args, **_kwargs):
+            return {}
+
+        async def northbound_flow(self, *_args, **_kwargs):
+            return {}
+
+        async def top_holders(self, *_args, **_kwargs):
+            return {}
+
+        async def fund_holding(self, *_args, **_kwargs):
+            return {}
+
+        async def northbound(self, *_args, **_kwargs):
+            return {}
+
+        async def dragon_tiger(self, *_args, **_kwargs):
+            return {}
 
     class Runtime:
         stock_code = "600519.SH"
@@ -160,12 +244,12 @@ async def test_snapshot_provider_fetches_financial_reports_during_context_build(
             capital_flow=EmptyReader(),
         )
 
-        def db_session(self):
+        def async_session(self):
             class SessionContext:
-                def __enter__(self):
+                async def __aenter__(self):
                     return FakeSession([])
 
-                def __exit__(self, *_args):
+                async def __aexit__(self, *_args):
                     return False
 
             return SessionContext()
@@ -518,27 +602,35 @@ class FundHoldingFakeSession:
         self._holding_query_count = 0
 
     def query(self, model):
-        if model is StockFundHolding.report_date:
+        raise AssertionError("Async DB tests must use execute(), not query().")
+
+    async def execute(self, statement):
+        model = None
+        descriptions = getattr(statement, "column_descriptions", []) or []
+        raw_columns = list(getattr(statement, "_raw_columns", []) or [])
+        raw = raw_columns[0] if raw_columns else None
+        if getattr(raw, "key", None) == "report_date":
             unique_dates = []
             seen = set()
             for holding in sorted(self.holdings, key=lambda item: item.report_date, reverse=True):
                 if holding.report_date not in seen:
                     seen.add(holding.report_date)
                     unique_dates.append((holding.report_date,))
-            return FakeQuery(unique_dates)
+            return FakeResult([], rows=unique_dates)
+        if descriptions:
+            model = descriptions[0].get("entity")
+        if model is None:
+            model = getattr(raw, "class_", None)
         if model is StockFundHolding:
             self._holding_query_count += 1
             sorted_holdings = sorted(self.holdings, key=lambda item: item.report_date, reverse=True)
             latest_date = sorted_holdings[0].report_date
-            prev_date = next(
-                (item.report_date for item in sorted_holdings if item.report_date != latest_date),
-                None,
-            )
+            prev_date = next((item.report_date for item in sorted_holdings if item.report_date != latest_date), None)
             if self._holding_query_count == 1:
-                return FakeQuery([item for item in self.holdings if item.report_date == latest_date])
+                return FakeResult([item for item in self.holdings if item.report_date == latest_date])
             if self._holding_query_count == 2 and prev_date is not None:
-                return FakeQuery([item for item in self.holdings if item.report_date == prev_date])
-        return FakeQuery(self.holdings)
+                return FakeResult([item for item in self.holdings if item.report_date == prev_date])
+        return FakeResult(self.holdings)
 
 
 class TopHoldersFakeSession:
@@ -547,23 +639,28 @@ class TopHoldersFakeSession:
         self._holder_query_count = 0
 
     def query(self, model):
-        if model is StockTopHolders.report_date:
-            unique_dates = []
-            seen = set()
-            for holder in sorted(self.holders, key=lambda item: item.report_date, reverse=True):
-                if holder.report_date not in seen:
-                    seen.add(holder.report_date)
-                    unique_dates.append((holder.report_date,))
-            return FakeQuery(unique_dates)
-        if model is StockTopHolders:
-            self._holder_query_count += 1
+        raise AssertionError("Async DB tests must use execute(), not query().")
+
+    async def execute(self, statement):
+        model = None
+        descriptions = getattr(statement, "column_descriptions", []) or []
+        raw_columns = list(getattr(statement, "_raw_columns", []) or [])
+        raw = raw_columns[0] if raw_columns else None
+        if getattr(raw, "key", None) == "report_date":
             latest_date = max(holder.report_date for holder in self.holders)
-            if self._holder_query_count >= 1:
-                return FakeQuery([holder for holder in self.holders if holder.report_date == latest_date])
-        return FakeQuery(self.holders)
+            return FakeResult([], rows=[(latest_date,)])
+        if descriptions:
+            model = descriptions[0].get("entity")
+        if model is None:
+            model = getattr(raw, "class_", None)
+        if model is StockTopHolders:
+            latest_date = max(holder.report_date for holder in self.holders)
+            return FakeResult([holder for holder in self.holders if holder.report_date == latest_date])
+        return FakeResult(self.holders)
 
 
-def test_top_holders_use_latest_period_only_and_mark_staleness():
+@pytest.mark.asyncio
+async def test_top_holders_use_latest_period_only_and_mark_staleness():
     latest_date = date.today() - timedelta(days=220)
     older_date = latest_date - timedelta(days=90)
     records = [
@@ -600,7 +697,7 @@ def test_top_holders_use_latest_period_only_and_mark_staleness():
     ]
 
     builder = FundamentalReader()
-    result = builder.top_holders(TopHoldersFakeSession(records), "600519.SH")
+    result = await builder.top_holders(TopHoldersFakeSession(records), "600519.SH")
 
     assert result["overview"]["report_date"] == str(latest_date)
     assert result["overview"]["reference_status"] == "stale"
@@ -621,7 +718,8 @@ def test_top_holder_change_labels_support_numeric_and_text_values():
     assert builder.normalize_holder_change_label("增加(10股)") == "增加(10股)"
 
 
-def test_northbound_flow_returns_structured_foreign_sentiment():
+@pytest.mark.asyncio
+async def test_northbound_flow_returns_structured_foreign_sentiment():
     latest = SimpleNamespace(
         stock_code="600519.SH",
         date=date.today() - timedelta(days=20),
@@ -660,7 +758,7 @@ def test_northbound_flow_returns_structured_foreign_sentiment():
     )
 
     builder = FundamentalReader()
-    result = builder.northbound_flow(
+    result = await builder.northbound_flow(
         ModelMapSession({NorthboundData: [latest, previous, older]}),
         "600519.SH",
     )
@@ -677,7 +775,8 @@ def test_northbound_flow_returns_structured_foreign_sentiment():
     assert result["recent_records"][2]["hold_ratio_pct"] == "1.35%"
 
 
-def test_capital_flow_northbound_formats_decimal_holding_ratio_as_percent():
+@pytest.mark.asyncio
+async def test_capital_flow_northbound_formats_decimal_holding_ratio_as_percent():
     latest = NorthboundData(
         stock_code="600519.SH",
         date=date.today() - timedelta(days=20),
@@ -698,8 +797,8 @@ def test_capital_flow_northbound_formats_decimal_holding_ratio_as_percent():
     source = CapitalFlowSource()
     session = ModelMapSession({NorthboundData: [latest, previous]})
 
-    latest_result = source._get_northbound(session, "600519.SH")
-    trend_result = source._get_northbound_trend(session, "600519.SH")
+    latest_result = await source._get_northbound(session, "600519.SH")
+    trend_result = await source._get_northbound_trend(session, "600519.SH")
 
     assert latest_result["hold_ratio"] == "4.38%"
     assert latest_result["net_buy_amount"] == "0.68亿元"
@@ -708,7 +807,8 @@ def test_capital_flow_northbound_formats_decimal_holding_ratio_as_percent():
     assert trend_result["ratio_change"] == "0.1%"
 
 
-def test_dragon_tiger_activity_returns_structured_trading_signal():
+@pytest.mark.asyncio
+async def test_dragon_tiger_activity_returns_structured_trading_signal():
     records = [
         SimpleNamespace(
             stock_code="600519.SH",
@@ -752,7 +852,7 @@ def test_dragon_tiger_activity_returns_structured_trading_signal():
     ]
 
     builder = FundamentalReader()
-    result = builder.dragon_tiger_activity(
+    result = await builder.dragon_tiger_activity(
         ModelMapSession({DragonTigerData: records}),
         "600519.SH",
     )
@@ -779,7 +879,8 @@ def test_dragon_tiger_activity_returns_structured_trading_signal():
     assert "Repeated Dragon Tiger appearances indicate elevated short-term trading intensity" in result["risk_flags"]
 
 
-def test_block_trade_values_append_units_without_extra_unit_fields():
+@pytest.mark.asyncio
+async def test_block_trade_values_append_units_without_extra_unit_fields():
     trades = [
         SimpleNamespace(
             stock_code="000651.SZ",
@@ -793,7 +894,7 @@ def test_block_trade_values_append_units_without_extra_unit_fields():
         )
     ]
 
-    result = CapitalFlowSource()._get_block_trade(
+    result = await CapitalFlowSource()._get_block_trade(
         ModelMapSession({StockBlockTrade: trades}),
         "000651.SZ",
     )
@@ -807,7 +908,8 @@ def test_block_trade_values_append_units_without_extra_unit_fields():
     assert "amount_unit" not in result["recent_trades"][0]
 
 
-def test_stock_money_flow_converts_yuan_amounts_to_10k_cny_unit():
+@pytest.mark.asyncio
+async def test_stock_money_flow_converts_yuan_amounts_to_10k_cny_unit():
     record = StockMoneyFlow(
         stock_code="000001.SZ",
         trade_date=date(2026, 6, 5),
@@ -824,8 +926,8 @@ def test_stock_money_flow_converts_yuan_amounts_to_10k_cny_unit():
     )
 
     source = CapitalFlowSource()
-    result = source._get_money_flow(ModelMapSession({StockMoneyFlow: [record]}), "000001.SZ")
-    trend = source._get_money_flow_trend(ModelMapSession({StockMoneyFlow: [record]}), "000001.SZ")
+    result = await source._get_money_flow(ModelMapSession({StockMoneyFlow: [record]}), "000001.SZ")
+    trend = await source._get_money_flow_trend(ModelMapSession({StockMoneyFlow: [record]}), "000001.SZ")
 
     assert result["net_inflow_main"] == "1200万元"
     assert result["net_inflow_retail"] == "150万元"
@@ -836,7 +938,8 @@ def test_stock_money_flow_converts_yuan_amounts_to_10k_cny_unit():
     assert trend[0]["net_inflow_main"] == "1200万元"
 
 
-def test_fund_holding_sorts_top_funds_and_keeps_tushare_unsupported_units_raw():
+@pytest.mark.asyncio
+async def test_fund_holding_sorts_top_funds_and_keeps_tushare_unsupported_units_raw():
     latest_date = date(2025, 12, 31)
     prev_date = date(2025, 9, 30)
     records = [
@@ -879,7 +982,7 @@ def test_fund_holding_sorts_top_funds_and_keeps_tushare_unsupported_units_raw():
     ]
 
     builder = FundamentalReader()
-    result = builder.fund_holding(FundHoldingFakeSession(records), "600519.SH")
+    result = await builder.fund_holding(FundHoldingFakeSession(records), "600519.SH")
 
     assert result["overview"]["fund_count"] == 3
     assert result["overview"]["total_hold_value_10k_cny"] == 1400.0
@@ -897,7 +1000,8 @@ def test_fund_holding_sorts_top_funds_and_keeps_tushare_unsupported_units_raw():
     assert "price move" in result["previous_report_delta"]["market_value_change_note"]
 
 
-def test_industry_rank_uses_latest_snapshot_and_structured_signal():
+@pytest.mark.asyncio
+async def test_industry_rank_uses_latest_snapshot_and_structured_signal():
     stock = SimpleNamespace(stock_code="600519.SH", industry="白酒")
     older = SimpleNamespace(
         board_name="白酒",
@@ -929,7 +1033,7 @@ def test_industry_rank_uses_latest_snapshot_and_structured_signal():
     )
 
     builder = FundamentalReader()
-    result = builder.industry_rank(
+    result = await builder.industry_rank(
         ModelMapSession({StockBasic: [stock], IndustryData: [latest, older]}),
         "600519.SH",
     )
@@ -946,7 +1050,8 @@ def test_industry_rank_uses_latest_snapshot_and_structured_signal():
     assert result["market_cap"]["total_market_cap_10k_cny"] == "560000万元"
 
 
-def test_insider_activity_returns_structured_signal_and_role_breakdown():
+@pytest.mark.asyncio
+async def test_insider_activity_returns_structured_signal_and_role_breakdown():
     today = date.today()
     records = [
         SimpleNamespace(
@@ -991,7 +1096,7 @@ def test_insider_activity_returns_structured_signal_and_role_breakdown():
     ]
 
     builder = FundamentalReader()
-    result = builder.insider_activity(
+    result = await builder.insider_activity(
         ModelMapSession({StockInsider: records}),
         "600519.SH",
         months=6,
@@ -1013,7 +1118,8 @@ def test_insider_activity_returns_structured_signal_and_role_breakdown():
     assert "Net insider flow is negative in both shares and cash value" in result["risk_flags"]
 
 
-def test_lockup_release_returns_structured_upcoming_pressure():
+@pytest.mark.asyncio
+async def test_lockup_release_returns_structured_upcoming_pressure():
     today = date.today()
     records = [
         SimpleNamespace(
@@ -1046,7 +1152,7 @@ def test_lockup_release_returns_structured_upcoming_pressure():
     ]
 
     builder = FundamentalReader()
-    result = builder.lockup_release(
+    result = await builder.lockup_release(
         ModelMapSession({StockRelease: records}),
         "600519.SH",
     )
@@ -1064,7 +1170,8 @@ def test_lockup_release_returns_structured_upcoming_pressure():
     assert "Upcoming lockup ratio is meaningful relative to float" in result["risk_flags"]
 
 
-def test_seo_history_returns_structured_dilution_signal():
+@pytest.mark.asyncio
+async def test_seo_history_returns_structured_dilution_signal():
     today = date.today()
     records = [
         SimpleNamespace(
@@ -1100,7 +1207,7 @@ def test_seo_history_returns_structured_dilution_signal():
     ]
 
     builder = FundamentalReader()
-    result = builder.seo_history(
+    result = await builder.seo_history(
         ModelMapSession({StockSEO: records}),
         "600519.SH",
     )
@@ -1117,7 +1224,8 @@ def test_seo_history_returns_structured_dilution_signal():
     assert "Recent equity financing may still weigh on dilution expectations" in result["risk_flags"]
 
 
-def test_margin_analysis_returns_structured_leverage_signal():
+@pytest.mark.asyncio
+async def test_margin_analysis_returns_structured_leverage_signal():
     records = [
         SimpleNamespace(
             stock_code="600519.SH",
@@ -1163,7 +1271,7 @@ def test_margin_analysis_returns_structured_leverage_signal():
     valuation = SimpleNamespace(stock_code="600519.SH", data_date=date(2026, 3, 20), total_market_value=1_000_000.0)
 
     builder = FundamentalReader()
-    result = builder.margin_analysis(
+    result = await builder.margin_analysis(
         ModelMapSession({StockMargin: records, StockValuationHistory: [valuation]}),
         "600519.SH",
     )

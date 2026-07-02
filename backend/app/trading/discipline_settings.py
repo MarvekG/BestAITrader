@@ -5,7 +5,6 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.ai.market_watch.schemas import MARKET_WATCH_TIME_PATTERN, parse_market_watch_time
-from app.core import database as database_module
 from app.crud.system_setting import system_setting
 from app.models.system_setting import SystemSetting
 
@@ -98,7 +97,7 @@ def _materialize_position_discipline_settings(
     return PositionDisciplineSettingsResponse(**data)
 
 
-def get_position_discipline_settings(user_id: int) -> PositionDisciplineSettingsResponse:
+async def get_position_discipline_settings(user_id: int) -> PositionDisciplineSettingsResponse:
     """获取用户止损止盈扫描设置。
 
     Args:
@@ -107,12 +106,11 @@ def get_position_discipline_settings(user_id: int) -> PositionDisciplineSettings
     Returns:
         完整设置；未配置时返回默认值。
     """
-    with database_module.SessionLocal() as db:
-        row = system_setting.get_by_key(db, POSITION_DISCIPLINE_SETTINGS_KEY, user_id=user_id)
-        return _materialize_position_discipline_settings(user_id, row)
+    row = await system_setting.get_by_key(POSITION_DISCIPLINE_SETTINGS_KEY, user_id=user_id)
+    return _materialize_position_discipline_settings(user_id, row)
 
 
-def upsert_position_discipline_settings(
+async def upsert_position_discipline_settings(
     user_id: int,
     update: PositionDisciplineSettingsUpdate,
 ) -> PositionDisciplineSettingsResponse:
@@ -125,18 +123,16 @@ def upsert_position_discipline_settings(
     Returns:
         合并后的完整设置。
     """
-    with database_module.SessionLocal() as db:
-        existing_row = system_setting.get_by_key(db, POSITION_DISCIPLINE_SETTINGS_KEY, user_id=user_id)
-        existing = _materialize_position_discipline_settings(user_id, existing_row)
-        data = existing.model_dump()
-        data.update(update.model_dump(exclude_none=True, exclude_unset=True))
-        merged = PositionDisciplineSettingsResponse(**data)
-        value = merged.model_dump(mode="json", exclude={"created_at", "updated_at"})
-        row = system_setting.set_value(
-            db,
-            key=POSITION_DISCIPLINE_SETTINGS_KEY,
-            value=value,
-            description=POSITION_DISCIPLINE_SETTINGS_DESCRIPTION,
-            user_id=user_id,
-        )
-        return PositionDisciplineSettingsResponse(**(value | {"created_at": row.created_at, "updated_at": row.updated_at}))
+    existing_row = await system_setting.get_by_key(POSITION_DISCIPLINE_SETTINGS_KEY, user_id=user_id)
+    existing = _materialize_position_discipline_settings(user_id, existing_row)
+    data = existing.model_dump()
+    data.update(update.model_dump(exclude_none=True, exclude_unset=True))
+    merged = PositionDisciplineSettingsResponse(**data)
+    value = merged.model_dump(mode="json", exclude={"created_at", "updated_at"})
+    row = await system_setting.set_value(
+        key=POSITION_DISCIPLINE_SETTINGS_KEY,
+        value=value,
+        description=POSITION_DISCIPLINE_SETTINGS_DESCRIPTION,
+        user_id=user_id,
+    )
+    return PositionDisciplineSettingsResponse(**(value | {"created_at": row.created_at, "updated_at": row.updated_at}))

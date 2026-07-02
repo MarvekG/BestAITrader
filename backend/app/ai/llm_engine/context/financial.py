@@ -9,7 +9,7 @@
 
 from datetime import datetime, timedelta
 from typing import Any, Awaitable, Callable, Dict, Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.llm_engine.context.section_wrappers import status_payload, wrap_snapshot_section
 from app.data.metadata.financial_report_localizer import (
     drop_nulls,
@@ -149,7 +149,7 @@ class FinancialSource:
 
     async def _get_financial_records(
         self,
-        db: Session,
+        db: AsyncSession,
         stock_code: str,
         data_type: str,
         *,
@@ -184,7 +184,7 @@ class FinancialSource:
 
     async def _get_latest_income_statement(
         self,
-        db: Session,
+        db: AsyncSession,
         stock_code: str,
         *,
         format_for_context: bool = True,
@@ -221,7 +221,7 @@ class FinancialSource:
 
     async def _get_latest_balance_sheet(
         self,
-        db: Session,
+        db: AsyncSession,
         stock_code: str,
         *,
         format_for_context: bool = True,
@@ -249,7 +249,7 @@ class FinancialSource:
 
     async def _get_latest_cashflow_statement(
         self,
-        db: Session,
+        db: AsyncSession,
         stock_code: str,
         *,
         format_for_context: bool = True,

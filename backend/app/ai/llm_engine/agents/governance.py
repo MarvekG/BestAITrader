@@ -93,7 +93,7 @@ class PortfolioManagerAgent(BaseAgent):
             - holding_horizon_days: 预期持有或复议周期天数；不适用时可留空。
             """
             try:
-                record = save_pm_decision_record(
+                record = await save_pm_decision_record(
                     session_id=self.session_id,
                     target_position=target_position,
                     confidence_score=confidence_score,
@@ -144,10 +144,7 @@ class PortfolioManagerAgent(BaseAgent):
             raise ValueError("PM structured decision requires session_id")
 
         from app.ai.llm_engine.pm_decision_service import get_pm_decision_for_session
-        from app.core.database import SessionLocal
-
-        with SessionLocal() as db:
-            pm_record = get_pm_decision_for_session(db, self.session_id)
+        pm_record = await get_pm_decision_for_session(self.session_id)
         if pm_record:
             return None
         return (

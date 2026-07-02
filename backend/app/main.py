@@ -69,14 +69,20 @@ def sanitize_query_string(query_string: str) -> str:
 
 @asynccontextmanager
 async def lifespan(app: Any):
-    from app.core.database import SessionLocal
-    from app.core.init_db import init_db
+    from app.core.startup_db import initialize_database
+    from app.core.startup_db import reset_active_analysis_sessions
 
     # Startup logic
     logger.info("Application starting, initializing database and background tasks")
-    with SessionLocal() as db:
-        init_db(db)
-        logger.info("Database initialization completed")
+    await initialize_database()
+    logger.info("Database initialization completed")
+    try:
+        from app.core.system_language import load_persisted_system_language
+
+        language = await load_persisted_system_language()
+        logger.info(f"System language initialized: {language}")
+    except Exception as exc:
+        logger.warning(f"Failed to initialize system language from database: {exc}")
 
     # Check if Redis is initialized, if not initialize it in the event loop
     from app.core.redis_client import redis_client
@@ -107,28 +113,25 @@ async def lifespan(app: Any):
     # Cleanup zombie tasks
     try:
         from app.tasks.task_manager import task_manager
-        with SessionLocal() as db:
-            task_manager.cleanup_zombie_tasks(db)
+
+        cleaned_tasks = await task_manager.cleanup_zombie_tasks()
+        if cleaned_tasks:
+            logger.warning(f"Cleaned up {cleaned_tasks} zombie tasks")
     except Exception as e:
         logger.error(f"Failed to cleanup zombie tasks: {e}")
 
     # Reset active AI analysis sessions to failed upon restart
     try:
-        from app.models.session import Session as AnalysisSession
-        with SessionLocal() as db:
-            active_sessions = db.query(AnalysisSession).filter(AnalysisSession.status == "active").all()
-            if active_sessions:
-                logger.info(f"Found {len(active_sessions)} active sessions on startup. Marking them as failed.")
-                for session in active_sessions:
-                    session.status = "failed"
-                db.commit()
+        reset_sessions = await reset_active_analysis_sessions()
+        if reset_sessions:
+            logger.info(f"Found {reset_sessions} active sessions on startup. Marking them as failed.")
     except Exception as e:
         logger.error(f"Failed to reset active sessions: {e}")
 
     # Reset interrupted experience review runs to failed upon restart
     try:
         from app.ai.experience.service import experience_service
-        cleaned_reviews = experience_service.cleanup_interrupted_review_runs()
+        cleaned_reviews = await experience_service.cleanup_interrupted_review_runs()
         if cleaned_reviews:
             logger.info(
                 f"Found {cleaned_reviews} interrupted experience review runs on startup. Marked them as failed."
@@ -320,8 +323,4 @@ def __getattr__(name: str):
     """
     if name == "app":
         return get_app()
-    if name == "SessionLocal":
-        from app.core.database import SessionLocal
-
-        return SessionLocal
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

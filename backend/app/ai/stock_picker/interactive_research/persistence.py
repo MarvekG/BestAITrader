@@ -4,8 +4,8 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.stock_picker.interactive_research.constants import (
     ACTIVE_RESEARCH_STATUSES,
@@ -17,7 +17,7 @@ from app.ai.stock_picker.interactive_research.models import (
     InteractiveResearchRun,
 )
 from app.ai.stock_picker.interactive_research.serializers import serialize_message, serialize_run_summary
-from app.core.database import SessionLocal
+import app.core.database as database_module
 from app.core.i18n import i18n_service
 
 
@@ -34,7 +34,7 @@ def _t(key: str, **kwargs: Any) -> str:
     return i18n_service.t(f"ai_stock_picker.interactive.backend.{key}", **kwargs)
 
 
-def create_run_record(
+async def create_run_record(
     user_id: int,
     request_data: Dict[str, Any],
     *,
@@ -53,16 +53,18 @@ def create_run_record(
     Raises:
         ValueError: 当前用户已有活跃 run 时抛出。
     """
-    with SessionLocal() as db:
-        active_run = (
-            db.query(InteractiveResearchRun)
-            .filter(
+    async with database_module.AsyncSessionLocal() as db:
+        await _lock_user_active_runs(db, user_id)
+        active_run = (await db.execute(
+            select(InteractiveResearchRun)
+            .where(
                 InteractiveResearchRun.user_id == user_id,
                 InteractiveResearchRun.status.in_(ACTIVE_RESEARCH_STATUSES),
             )
             .order_by(InteractiveResearchRun.created_at.desc())
-            .first()
-        )
+            .with_for_update()
+            .limit(1)
+        )).scalar_one_or_none()
         if active_run:
             raise ValueError(_t("errors.active_run_exists", run_id=active_run.run_id))
 
@@ -82,8 +84,8 @@ def create_run_record(
             },
         )
         db.add(run)
-        db.flush()
-        append_message(
+        await db.flush()
+        await append_message(
             db,
             run,
             role="user",
@@ -91,12 +93,12 @@ def create_run_record(
             content=requirement,
             payload={"request": request_data},
         )
-        db.commit()
-        db.refresh(run)
+        await db.commit()
+        await db.refresh(run)
         return {"run_id": run.run_id, "raw_requirement": run.raw_requirement}
 
 
-def list_run_records(user_id: int) -> List[InteractiveResearchRun]:
+async def list_run_records(user_id: int) -> List[InteractiveResearchRun]:
     """查询用户研究 run 列表。
 
     Args:
@@ -105,16 +107,15 @@ def list_run_records(user_id: int) -> List[InteractiveResearchRun]:
     Returns:
         按创建时间倒序排列的 run 列表。
     """
-    with SessionLocal() as db:
-        return (
-            db.query(InteractiveResearchRun)
-            .filter(InteractiveResearchRun.user_id == user_id)
+    async with database_module.AsyncSessionLocal() as db:
+        return (await db.execute(
+            select(InteractiveResearchRun)
+            .where(InteractiveResearchRun.user_id == user_id)
             .order_by(InteractiveResearchRun.created_at.desc())
-            .all()
-        )
+        )).scalars().all()
 
 
-def get_run_record(run_id: UUID, user_id: int) -> Optional[InteractiveResearchRun]:
+async def get_run_record(run_id: UUID, user_id: int) -> Optional[InteractiveResearchRun]:
     """查询用户拥有的单个研究 run。
 
     Args:
@@ -124,15 +125,16 @@ def get_run_record(run_id: UUID, user_id: int) -> Optional[InteractiveResearchRu
     Returns:
         找到时返回 run，否则返回 None。
     """
-    with SessionLocal() as db:
-        return (
-            db.query(InteractiveResearchRun)
-            .filter(InteractiveResearchRun.run_id == run_id, InteractiveResearchRun.user_id == user_id)
-            .first()
-        )
+    async with database_module.AsyncSessionLocal() as db:
+        return (await db.execute(
+            select(InteractiveResearchRun).where(
+                InteractiveResearchRun.run_id == run_id,
+                InteractiveResearchRun.user_id == user_id,
+            )
+        )).scalar_one_or_none()
 
 
-def delete_run_record(run_id: UUID, user_id: int) -> bool:
+async def delete_run_record(run_id: UUID, user_id: int) -> bool:
     """删除用户拥有的研究 run。
 
     Args:
@@ -142,19 +144,17 @@ def delete_run_record(run_id: UUID, user_id: int) -> bool:
     Returns:
         删除成功返回 True，否则返回 False。
     """
-    with SessionLocal() as db:
-        run = _get_user_run(db, run_id, user_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_user_run(db, run_id, user_id, for_update=True)
         if run is None:
             return False
-        db.query(InteractiveResearchMessage).filter(InteractiveResearchMessage.run_id == run_id).delete(
-            synchronize_session=False
-        )
-        db.delete(run)
-        db.commit()
+        await db.execute(delete(InteractiveResearchMessage).where(InteractiveResearchMessage.run_id == run_id))
+        await db.delete(run)
+        await db.commit()
         return True
 
 
-def append_user_message_record(
+async def append_user_message_record(
     run_id: UUID,
     user_id: int,
     content: str,
@@ -175,8 +175,8 @@ def append_user_message_record(
         LookupError: run 不存在或不属于用户时抛出。
         ValueError: 终态 run 不允许继续追加时抛出。
     """
-    with SessionLocal() as db:
-        run = _get_user_run(db, run_id, user_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_user_run(db, run_id, user_id)
         if run is None:
             raise LookupError(_t("errors.run_not_found"))
         if run.status in TERMINAL_RESEARCH_STATUSES:
@@ -190,7 +190,7 @@ def append_user_message_record(
         message_payload = dict(payload or {})
         if message_status == "queued":
             message_payload["queued_user_input"] = True
-        message = append_message(
+        message = await append_message(
             db,
             run,
             role="user",
@@ -201,7 +201,7 @@ def append_user_message_record(
             status=message_status,
         )
         if run_status == "awaiting_user_input":
-            transition_run(
+            await transition_run(
                 db,
                 run,
                 status="researching",
@@ -213,18 +213,18 @@ def append_user_message_record(
                 clear_pending=True,
             )
         elif run_status not in {"awaiting_plan_approval", "awaiting_user_input"}:
-            write_checkpoint(
+            await write_checkpoint(
                 db,
                 run,
                 reason="queued_user_input",
                 extra_payload={"queued_message_id": str(message.message_id)},
             )
-        db.commit()
-        db.refresh(message)
+        await db.commit()
+        await db.refresh(message)
         return {"message": message, "run_status": run_status}
 
 
-def approve_plan_record(run_id: UUID, user_id: int) -> Dict[str, Any]:
+async def approve_plan_record(run_id: UUID, user_id: int) -> Dict[str, Any]:
     """确认计划并把 run 切换到研究中。
 
     Args:
@@ -238,13 +238,13 @@ def approve_plan_record(run_id: UUID, user_id: int) -> Dict[str, Any]:
         LookupError: run 不存在或不属于用户时抛出。
         ValueError: run 状态不允许确认时抛出。
     """
-    with SessionLocal() as db:
-        run = _get_user_run(db, run_id, user_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_user_run(db, run_id, user_id, for_update=True)
         if run is None:
             raise LookupError(_t("errors.run_not_found"))
         if run.status != "awaiting_plan_approval":
             raise ValueError(_t("errors.only_awaiting_plan_approval_can_approve"))
-        transition_run(
+        await transition_run(
             db,
             run,
             status="researching",
@@ -252,12 +252,12 @@ def approve_plan_record(run_id: UUID, user_id: int) -> Dict[str, Any]:
             system_content=_t("messages.plan_approved"),
             checkpoint_reason="plan_approved",
         )
-        db.commit()
-        db.refresh(run)
+        await db.commit()
+        await db.refresh(run)
         return {"run": run}
 
 
-def cancel_run_record(run_id: UUID, user_id: int, reason: Optional[str] = None) -> InteractiveResearchRun:
+async def cancel_run_record(run_id: UUID, user_id: int, reason: Optional[str] = None) -> InteractiveResearchRun:
     """取消用户研究 run。
 
     Args:
@@ -272,13 +272,13 @@ def cancel_run_record(run_id: UUID, user_id: int, reason: Optional[str] = None) 
         LookupError: run 不存在或不属于用户时抛出。
         ValueError: 终态 run 不能重复取消时抛出。
     """
-    with SessionLocal() as db:
-        run = _get_user_run(db, run_id, user_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_user_run(db, run_id, user_id, for_update=True)
         if run is None:
             raise LookupError(_t("errors.run_not_found"))
         if run.status in TERMINAL_RESEARCH_STATUSES:
             raise ValueError(_t("errors.terminal_cannot_cancel"))
-        transition_run(
+        await transition_run(
             db,
             run,
             status="cancelled",
@@ -288,12 +288,12 @@ def cancel_run_record(run_id: UUID, user_id: int, reason: Optional[str] = None) 
             clear_pending=True,
             finished=True,
         )
-        db.commit()
-        db.refresh(run)
+        await db.commit()
+        await db.refresh(run)
         return run
 
 
-def list_message_records(run_id: UUID, user_id: int, *, visible_only: bool = True) -> List[InteractiveResearchMessage]:
+async def list_message_records(run_id: UUID, user_id: int, *, visible_only: bool = True) -> List[InteractiveResearchMessage]:
     """查询 run 的消息流。
 
     Args:
@@ -304,17 +304,17 @@ def list_message_records(run_id: UUID, user_id: int, *, visible_only: bool = Tru
     Returns:
         按 sequence_no 升序排列的消息列表。
     """
-    with SessionLocal() as db:
-        run = _get_user_run(db, run_id, user_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_user_run(db, run_id, user_id)
         if run is None:
             return []
-        query = db.query(InteractiveResearchMessage).filter(InteractiveResearchMessage.run_id == run_id)
+        query = select(InteractiveResearchMessage).where(InteractiveResearchMessage.run_id == run_id)
         if visible_only:
-            query = query.filter(InteractiveResearchMessage.visible_to_user.is_(True))
-        return query.order_by(InteractiveResearchMessage.sequence_no.asc()).all()
+            query = query.where(InteractiveResearchMessage.visible_to_user.is_(True))
+        return (await db.execute(query.order_by(InteractiveResearchMessage.sequence_no.asc()))).scalars().all()
 
 
-def fail_run_record(run_id: UUID, error_text: str, exception_type: str, exception_message: str) -> None:
+async def fail_run_record(run_id: UUID, error_text: str, exception_type: str, exception_message: str) -> None:
     """把 run 标记为失败并写入系统消息。
 
     Args:
@@ -323,11 +323,13 @@ def fail_run_record(run_id: UUID, error_text: str, exception_type: str, exceptio
         exception_type: 异常类型名称。
         exception_message: 异常消息。
     """
-    with SessionLocal() as db:
-        run = _get_run(db, run_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
             return
-        transition_run(
+        if run.status in TERMINAL_RESEARCH_STATUSES:
+            return
+        await transition_run(
             db,
             run,
             status="failed",
@@ -336,10 +338,10 @@ def fail_run_record(run_id: UUID, error_text: str, exception_type: str, exceptio
             checkpoint_reason="workflow_exception",
             error_message=error_text,
         )
-        db.commit()
+        await db.commit()
 
 
-def load_plan_turn_record(run_id: UUID) -> Optional[Dict[str, Any]]:
+async def load_plan_turn_record(run_id: UUID) -> Optional[Dict[str, Any]]:
     """读取计划阶段本轮所需的 run 与历史消息快照。
 
     Args:
@@ -348,11 +350,11 @@ def load_plan_turn_record(run_id: UUID) -> Optional[Dict[str, Any]]:
     Returns:
         run 存在时返回状态、运行配置和历史消息；否则返回 None。
     """
-    with SessionLocal() as db:
-        run = _get_run(db, run_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_run(db, run_id)
         if run is None:
             return None
-        persisted = _load_plan_messages(db, run)
+        persisted = await _load_plan_messages(db, run)
         return {
             "run_id": run.run_id,
             "status": run.status,
@@ -361,7 +363,7 @@ def load_plan_turn_record(run_id: UUID) -> Optional[Dict[str, Any]]:
         }
 
 
-def persist_plan_card_record(
+async def persist_plan_card_record(
     run_id: UUID,
     *,
     plan_message: str,
@@ -375,17 +377,16 @@ def persist_plan_card_record(
         plan_message: 计划 Agent Markdown 输出。
         reason: checkpoint 原因。
         bump_version: 是否递增 run 版本。
-
     Returns:
         写入结果和可推送通知 payload。
     """
-    with SessionLocal() as db:
-        run = _get_run(db, run_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
             raise LookupError(_t("errors.run_not_found"))
         if run.status != "awaiting_plan_approval":
             return {"persisted": False, "notification": None}
-        message = persist_plan_card(
+        message = await persist_plan_card(
             db,
             run,
             plan_message=plan_message,
@@ -393,27 +394,29 @@ def persist_plan_card_record(
             bump_version=bump_version,
         )
         payload = _notification_payload(run, message, "plan_card")
-        db.commit()
+        await db.commit()
         return {"persisted": True, "notification": payload}
 
 
-def start_research_run_record(run_id: UUID) -> Optional[Dict[str, Any]]:
+async def start_research_run_record(run_id: UUID) -> Optional[Dict[str, Any]]:
     """启动研究 loop 并返回运行快照和通知 payload。
 
     Returns:
         run 存在时返回快照和通知 payload；否则返回 None。
     """
-    with SessionLocal() as db:
-        run = _get_run(db, run_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
             return None
-        queued_messages = _process_queued_user_inputs(db, run)
+        if run.status in TERMINAL_RESEARCH_STATUSES:
+            return None
+        queued_messages = await _process_queued_user_inputs(db, run)
         run.status = "researching"
         run.current_stage = "researching"
         run.current_phase = "research"
         run.version += 1
         current_checkpoint = run.checkpoint_payload or {}
-        write_checkpoint(
+        await write_checkpoint(
             db,
             run,
             reason="agent_loop_started",
@@ -422,7 +425,7 @@ def start_research_run_record(run_id: UUID) -> Optional[Dict[str, Any]]:
                 "queued_message_ids": [message["message_id"] for message in queued_messages],
             },
         )
-        message = append_message(
+        message = await append_message(
             db,
             run,
             role="system",
@@ -431,7 +434,7 @@ def start_research_run_record(run_id: UUID) -> Optional[Dict[str, Any]]:
             payload={"phase_instruction": phase_instructions()["research"]},
         )
         payload = _notification_payload(run, message, "research_started")
-        plan_conversation = _build_plan_conversation_snapshot(_load_plan_messages(db, run))
+        plan_conversation = _build_plan_conversation_snapshot(await _load_plan_messages(db, run))
         snapshot = {
             "user_id": run.user_id,
             "raw_requirement": run.raw_requirement,
@@ -439,11 +442,11 @@ def start_research_run_record(run_id: UUID) -> Optional[Dict[str, Any]]:
             "queued_before": queued_messages,
             "plan_conversation": plan_conversation,
         }
-        db.commit()
+        await db.commit()
         return {"snapshot": snapshot, "notification": payload}
 
 
-def append_tool_start_record(
+async def append_tool_start_record(
     run_id: UUID,
     tool_name: str,
     tool_args: Dict[str, Any],
@@ -460,11 +463,13 @@ def append_tool_start_record(
     Returns:
         新消息 ID 和通知 payload；run 不存在时消息 ID 为空。
     """
-    with SessionLocal() as db:
-        run = _get_run(db, run_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
             return {"message_id": "", "notification": None}
-        message = append_message(
+        if run.status in TERMINAL_RESEARCH_STATUSES:
+            return {"message_id": "", "notification": None}
+        message = await append_message(
             db,
             run,
             role="tool",
@@ -474,11 +479,11 @@ def append_tool_start_record(
         )
         payload = _notification_payload(run, message, "tool_start")
         message_id = str(message.message_id)
-        db.commit()
+        await db.commit()
         return {"message_id": message_id, "notification": payload}
 
 
-def append_tool_result_and_progress_record(
+async def append_tool_result_and_progress_record(
     run_id: UUID,
     *,
     tool_name: str,
@@ -504,11 +509,13 @@ def append_tool_result_and_progress_record(
     Returns:
         需要推送的通知 payload 列表。
     """
-    with SessionLocal() as db:
-        run = _get_run(db, run_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
             return []
-        result_message = append_message(
+        if run.status in TERMINAL_RESEARCH_STATUSES:
+            return []
+        result_message = await append_message(
             db,
             run,
             role="tool",
@@ -524,7 +531,7 @@ def append_tool_result_and_progress_record(
                 "result_preview": result_text,
             },
         )
-        progress_message = append_message(
+        progress_message = await append_message(
             db,
             run,
             role="assistant",
@@ -536,7 +543,7 @@ def append_tool_result_and_progress_record(
             },
         )
         current_checkpoint = run.checkpoint_payload or {}
-        write_checkpoint(
+        await write_checkpoint(
             db,
             run,
             reason="tool_step_completed",
@@ -550,11 +557,11 @@ def append_tool_result_and_progress_record(
             _notification_payload(run, result_message, "tool_result"),
             _notification_payload(run, progress_message, "progress_update"),
         ]
-        db.commit()
+        await db.commit()
         return payloads
 
 
-def synthesize_final_message_record(
+async def synthesize_final_message_record(
     run_id: UUID,
     *,
     tool_trace: List[Dict[str, Any]],
@@ -574,9 +581,11 @@ def synthesize_final_message_record(
     Returns:
         需要推送的通知 payload 列表。
     """
-    with SessionLocal() as db:
-        run = _get_run(db, run_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
+            return []
+        if run.status in TERMINAL_RESEARCH_STATUSES:
             return []
         run.status = "synthesizing"
         run.current_stage = "synthesizing"
@@ -594,7 +603,7 @@ def synthesize_final_message_record(
             },
             "tool_trace": tool_trace,
         }
-        final_message = append_message(
+        final_message = await append_message(
             db,
             run,
             role="assistant",
@@ -607,8 +616,8 @@ def synthesize_final_message_record(
         run.current_stage = "completed"
         run.finished_at = datetime.now()
         run.version += 1
-        write_checkpoint(db, run, reason="final_message_created")
-        status_message = append_message(
+        await write_checkpoint(db, run, reason="final_message_created")
+        status_message = await append_message(
             db,
             run,
             role="system",
@@ -617,11 +626,11 @@ def synthesize_final_message_record(
             payload={},
         )
         completed_notification = _notification_payload(run, status_message, "completed")
-        db.commit()
+        await db.commit()
         return [final_notification, completed_notification]
 
 
-def pause_for_user_question_record(run_id: UUID, question_content: str) -> Optional[Dict[str, Any]]:
+async def pause_for_user_question_record(run_id: UUID, question_content: str) -> Optional[Dict[str, Any]]:
     """暂停研究并写入追问消息。
 
     Args:
@@ -631,14 +640,16 @@ def pause_for_user_question_record(run_id: UUID, question_content: str) -> Optio
     Returns:
         通知 payload；run 不存在时返回 None。
     """
-    with SessionLocal() as db:
-        run = _get_run(db, run_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
+            return None
+        if run.status in TERMINAL_RESEARCH_STATUSES:
             return None
         run.status = "awaiting_user_input"
         run.current_stage = "awaiting_user_input"
         run.version += 1
-        question = append_message(
+        question = await append_message(
             db,
             run,
             role="assistant",
@@ -647,13 +658,13 @@ def pause_for_user_question_record(run_id: UUID, question_content: str) -> Optio
             payload={"reason": "agent_asked_user"},
         )
         run.pending_message_id = question.message_id
-        write_checkpoint(db, run, reason="agent_asked_user")
+        await write_checkpoint(db, run, reason="agent_asked_user")
         payload = _notification_payload(run, question, "assistant_question")
-        db.commit()
+        await db.commit()
         return payload
 
 
-def append_assistant_text_record(run_id: UUID, content: str) -> Optional[Dict[str, Any]]:
+async def append_assistant_text_record(run_id: UUID, content: str) -> Optional[Dict[str, Any]]:
     """追加研究过程中的 assistant 文本。
 
     Args:
@@ -663,11 +674,13 @@ def append_assistant_text_record(run_id: UUID, content: str) -> Optional[Dict[st
     Returns:
         通知 payload；run 不存在时返回 None。
     """
-    with SessionLocal() as db:
-        run = _get_run(db, run_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
             return None
-        message = append_message(
+        if run.status in TERMINAL_RESEARCH_STATUSES:
+            return None
+        message = await append_message(
             db,
             run,
             role="assistant",
@@ -675,13 +688,13 @@ def append_assistant_text_record(run_id: UUID, content: str) -> Optional[Dict[st
             content=content,
             payload={},
         )
-        write_checkpoint(db, run, reason="assistant_text")
+        await write_checkpoint(db, run, reason="assistant_text")
         payload = _notification_payload(run, message, "assistant_text")
-        db.commit()
+        await db.commit()
         return payload
 
 
-def process_queued_user_inputs_record(run_id: UUID) -> List[Dict[str, str]]:
+async def process_queued_user_inputs_record(run_id: UUID) -> List[Dict[str, str]]:
     """处理运行中排队的用户输入。
 
     Args:
@@ -690,16 +703,18 @@ def process_queued_user_inputs_record(run_id: UUID) -> List[Dict[str, str]]:
     Returns:
         已处理的排队消息快照。
     """
-    with SessionLocal() as db:
-        run = _get_run(db, run_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
             return []
-        queued_messages = _process_queued_user_inputs(db, run)
-        db.commit()
+        if run.status in TERMINAL_RESEARCH_STATUSES:
+            return []
+        queued_messages = await _process_queued_user_inputs(db, run)
+        await db.commit()
         return queued_messages
 
 
-def append_queued_input_status_record(run_id: UUID, queued_messages: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+async def append_queued_input_status_record(run_id: UUID, queued_messages: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
     """记录排队输入已并入上下文。
 
     Args:
@@ -709,11 +724,13 @@ def append_queued_input_status_record(run_id: UUID, queued_messages: List[Dict[s
     Returns:
         通知 payload；run 不存在时返回 None。
     """
-    with SessionLocal() as db:
-        run = _get_run(db, run_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
             return None
-        message = append_message(
+        if run.status in TERMINAL_RESEARCH_STATUSES:
+            return None
+        message = await append_message(
             db,
             run,
             role="system",
@@ -722,11 +739,11 @@ def append_queued_input_status_record(run_id: UUID, queued_messages: List[Dict[s
             payload={"queued_message_ids": [message["message_id"] for message in queued_messages]},
         )
         payload = _notification_payload(run, message, "queued_input_appended")
-        db.commit()
+        await db.commit()
         return payload
 
 
-def build_recent_chat_messages_record(run_id: UUID) -> List[Dict[str, Any]]:
+async def build_recent_chat_messages_record(run_id: UUID) -> List[Dict[str, Any]]:
     """构造给 agent 使用的最近聊天消息。
 
     Args:
@@ -735,55 +752,85 @@ def build_recent_chat_messages_record(run_id: UUID) -> List[Dict[str, Any]]:
     Returns:
         最近消息的轻量结构。
     """
-    with SessionLocal() as db:
-        run = _get_run(db, run_id)
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_run(db, run_id)
         if run is None:
             return []
-        messages = (
-            db.query(InteractiveResearchMessage)
-            .filter(InteractiveResearchMessage.run_id == run.run_id)
+        messages = (await db.execute(
+            select(InteractiveResearchMessage)
+            .where(InteractiveResearchMessage.run_id == run.run_id)
             .order_by(InteractiveResearchMessage.sequence_no.desc())
             .limit(20)
-            .all()
-        )
+        )).scalars().all()
         return [
             {"role": message.role, "message_type": message.message_type, "content": message.content}
             for message in reversed(messages)
         ]
 
 
-def _get_run(db: Session, run_id: UUID) -> Optional[InteractiveResearchRun]:
+async def _get_run(
+    db: AsyncSession,
+    run_id: UUID,
+    *,
+    for_update: bool = False,
+) -> Optional[InteractiveResearchRun]:
     """在当前会话中按 ID 查询 run。
 
     Args:
         db: 数据库会话。
         run_id: 研究 run ID。
+        for_update: 是否锁定 run 行用于后续写入。
 
     Returns:
         找到时返回 run，否则返回 None。
     """
-    return db.query(InteractiveResearchRun).filter(InteractiveResearchRun.run_id == run_id).first()
+    query = select(InteractiveResearchRun).where(InteractiveResearchRun.run_id == run_id)
+    if for_update:
+        query = query.with_for_update()
+    return (await db.execute(
+        query
+    )).scalar_one_or_none()
 
 
-def _get_user_run(db: Session, run_id: UUID, user_id: int) -> Optional[InteractiveResearchRun]:
+async def _get_user_run(
+    db: AsyncSession,
+    run_id: UUID,
+    user_id: int,
+    *,
+    for_update: bool = False,
+) -> Optional[InteractiveResearchRun]:
     """在当前会话中查询用户拥有的 run。
 
     Args:
         db: 数据库会话。
         run_id: 研究 run ID。
         user_id: 当前用户 ID。
+        for_update: 是否锁定 run 行用于后续写入。
 
     Returns:
         找到时返回 run，否则返回 None。
     """
-    return (
-        db.query(InteractiveResearchRun)
-        .filter(InteractiveResearchRun.run_id == run_id, InteractiveResearchRun.user_id == user_id)
-        .first()
+    query = select(InteractiveResearchRun).where(
+        InteractiveResearchRun.run_id == run_id,
+        InteractiveResearchRun.user_id == user_id,
     )
+    if for_update:
+        query = query.with_for_update()
+    return (await db.execute(
+        query
+    )).scalar_one_or_none()
 
 
-def _load_plan_messages(db: Session, run: InteractiveResearchRun) -> List[Dict[str, str]]:
+async def _lock_user_active_runs(db: AsyncSession, user_id: int) -> None:
+    """在 PostgreSQL 上序列化同一用户创建活跃研究 run 的检查。"""
+    bind = db.get_bind()
+    dialect_name = getattr(getattr(bind, "dialect", None), "name", None)
+    if dialect_name != "postgresql":
+        return
+    await db.execute(select(func.pg_advisory_xact_lock(user_id)))
+
+
+async def _load_plan_messages(db: AsyncSession, run: InteractiveResearchRun) -> List[Dict[str, str]]:
     """读取计划阶段可见消息快照。
 
     Args:
@@ -793,16 +840,15 @@ def _load_plan_messages(db: Session, run: InteractiveResearchRun) -> List[Dict[s
     Returns:
         用于重建计划对话缓存的消息列表。
     """
-    persisted = (
-        db.query(InteractiveResearchMessage)
-        .filter(
+    persisted = (await db.execute(
+        select(InteractiveResearchMessage)
+        .where(
             InteractiveResearchMessage.run_id == run.run_id,
             InteractiveResearchMessage.visible_to_user.is_(True),
             InteractiveResearchMessage.message_type.in_(["user_input", "plan_card"]),
         )
         .order_by(InteractiveResearchMessage.sequence_no.asc())
-        .all()
-    )
+    )).scalars().all()
     return [
         {"role": item.role, "message_type": item.message_type, "content": item.content or ""}
         for item in persisted
@@ -843,7 +889,7 @@ def _build_plan_conversation_snapshot(plan_messages: List[Dict[str, str]]) -> Li
     return plan_conversation
 
 
-def _process_queued_user_inputs(db: Session, run: InteractiveResearchRun) -> List[Dict[str, str]]:
+async def _process_queued_user_inputs(db: AsyncSession, run: InteractiveResearchRun) -> List[Dict[str, str]]:
     """在当前会话中处理排队用户输入。
 
     Args:
@@ -853,16 +899,15 @@ def _process_queued_user_inputs(db: Session, run: InteractiveResearchRun) -> Lis
     Returns:
         已处理的排队消息列表。
     """
-    queued_messages = (
-        db.query(InteractiveResearchMessage)
-        .filter(
+    queued_messages = (await db.execute(
+        select(InteractiveResearchMessage)
+        .where(
             InteractiveResearchMessage.run_id == run.run_id,
             InteractiveResearchMessage.role == "user",
             InteractiveResearchMessage.status == "queued",
         )
         .order_by(InteractiveResearchMessage.sequence_no.asc())
-        .all()
-    )
+    )).scalars().all()
     message_snapshots = []
     for message in queued_messages:
         message_snapshots.append({"message_id": str(message.message_id), "content": message.content or ""})
@@ -893,8 +938,8 @@ def _notification_payload(
     }
 
 
-def append_message(
-    db: Session,
+async def append_message(
+    db: AsyncSession,
     run: InteractiveResearchRun,
     *,
     role: str,
@@ -928,17 +973,17 @@ def append_message(
         content=content,
         payload=payload or {},
         parent_message_id=parent_message_id,
-        sequence_no=next_message_sequence(db, run.run_id),
+        sequence_no=await next_message_sequence(db, run.run_id),
         status=status,
         visible_to_user=visible_to_user,
     )
     db.add(message)
-    db.flush()
+    await db.flush()
     return message
 
 
-def write_checkpoint(
-    db: Session,
+async def write_checkpoint(
+    db: AsyncSession,
     run: InteractiveResearchRun,
     *,
     reason: str,
@@ -968,7 +1013,7 @@ def write_checkpoint(
         **(extra_payload or {}),
     }
     run.checkpoint_payload = checkpoint_payload
-    db.flush()
+    await db.flush()
     return checkpoint_payload
 
 
@@ -986,8 +1031,8 @@ def _max_iterations_from_checkpoint(run: InteractiveResearchRun) -> int:
     return int(run_config["max_iterations"])
 
 
-def persist_plan_card(
-    db: Session,
+async def persist_plan_card(
+    db: AsyncSession,
     run: InteractiveResearchRun,
     *,
     plan_message: str,
@@ -1012,7 +1057,7 @@ def persist_plan_card(
     run.pending_message_id = None
     if bump_version:
         run.version += 1
-    message = append_message(
+    message = await append_message(
         db,
         run,
         role="assistant",
@@ -1020,12 +1065,12 @@ def persist_plan_card(
         content=plan_message,
         payload={"actions": ["approve", "cancel"]},
     )
-    write_checkpoint(db, run, reason=reason)
+    await write_checkpoint(db, run, reason=reason)
     return message
 
 
-def transition_run(
-    db: Session,
+async def transition_run(
+    db: AsyncSession,
     run: InteractiveResearchRun,
     *,
     status: str,
@@ -1071,7 +1116,7 @@ def transition_run(
     if error_message is not None:
         run.error_message = error_message
     run.version += 1
-    message = append_message(
+    message = await append_message(
         db,
         run,
         role="system",
@@ -1079,11 +1124,11 @@ def transition_run(
         content=system_content,
         payload=system_payload or {},
     )
-    write_checkpoint(db, run, reason=checkpoint_reason, extra_payload=checkpoint_extra)
+    await write_checkpoint(db, run, reason=checkpoint_reason, extra_payload=checkpoint_extra)
     return message
 
 
-def next_message_sequence(db: Session, run_id: UUID) -> int:
+async def next_message_sequence(db: AsyncSession, run_id: UUID) -> int:
     """计算 run 内下一条消息序号。
 
     Args:
@@ -1093,9 +1138,7 @@ def next_message_sequence(db: Session, run_id: UUID) -> int:
     Returns:
         下一条从 1 开始递增的序号。
     """
-    current = (
-        db.query(func.max(InteractiveResearchMessage.sequence_no))
-        .filter(InteractiveResearchMessage.run_id == run_id)
-        .scalar()
-    )
+    current = (await db.execute(
+        select(func.max(InteractiveResearchMessage.sequence_no)).where(InteractiveResearchMessage.run_id == run_id)
+    )).scalar_one_or_none()
     return int(current or 0) + 1

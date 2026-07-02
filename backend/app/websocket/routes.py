@@ -1,9 +1,11 @@
 import json
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import get_async_db
 from app.core.logger import get_logger
 from app.core.security import get_current_user
 from app.core.websocket_ticket import (
@@ -11,6 +13,7 @@ from app.core.websocket_ticket import (
     consume_websocket_ticket,
     create_websocket_ticket,
 )
+from app.models.session import Session as AnalysisSession
 from app.models.user import User
 from app.websocket.manager import ws_manager
 
@@ -23,19 +26,62 @@ router = APIRouter()
 @router.post("/ws-ticket/{session_id}")
 async def create_global_websocket_ticket(
     session_id: str,
+    db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user),
 ) -> dict[str, int | str]:
     """Create a short-lived ticket for the global WebSocket endpoint."""
+    session_uuid = _parse_session_uuid(session_id)
+    if session_uuid is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    if not await _user_owns_session(db, session_id=session_uuid, user_id=current_user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
     return {
-        "ticket": create_websocket_ticket(current_user.id, "global", session_id),
+        "ticket": create_websocket_ticket(current_user.id, "global", str(session_uuid)),
         "expires_in": WEBSOCKET_TICKET_TTL_SECONDS,
     }
 
 
-def _authenticate_websocket(db: Session, ticket: str | None, scope: str, resource_id: str | None) -> User | None:
+def _parse_session_uuid(session_id: str) -> UUID | None:
+    try:
+        return UUID(session_id)
+    except ValueError:
+        return None
+
+
+async def _user_owns_session(db: AsyncSession, *, session_id: UUID, user_id: int) -> bool:
+    result = await db.execute(
+        select(AnalysisSession.session_id).where(
+            AnalysisSession.session_id == session_id,
+            AnalysisSession.user_id == user_id,
+        )
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def _authenticate_websocket(
+    db: AsyncSession,
+    ticket: str | None,
+    scope: str,
+    resource_id: str | None,
+) -> User | None:
+    if scope == "global":
+        session_uuid = _parse_session_uuid(resource_id or "")
+        if session_uuid is None:
+            return None
+        resource_id = str(session_uuid)
+
     ticket_user_id = consume_websocket_ticket(ticket, scope, resource_id)
     if ticket_user_id is not None:
-        return db.query(User).filter(User.id == ticket_user_id).first()
+        if scope == "global" and not await _user_owns_session(
+            db,
+            session_id=UUID(resource_id),
+            user_id=ticket_user_id,
+        ):
+            return None
+        result = await db.execute(select(User).where(User.id == ticket_user_id))
+        return result.scalar_one_or_none()
     return None
 
 
@@ -44,10 +90,10 @@ async def websocket_endpoint(
     websocket: WebSocket,
     session_id: str,
     ticket: str | None = Query(None),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     session_id_str = session_id
-    current_user = _authenticate_websocket(
+    current_user = await _authenticate_websocket(
         db,
         ticket=ticket,
         scope="global",
@@ -138,9 +184,17 @@ async def websocket_endpoint(
 @router.get("/ws/status/{session_id}")
 async def get_ws_status(
     session_id: str,
-    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+    current_user: User = Depends(get_current_user),
 ):
-    del current_user
+    session_uuid = _parse_session_uuid(session_id)
+    if session_uuid is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    if not await _user_owns_session(db, session_id=session_uuid, user_id=current_user.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+
+    session_id = str(session_uuid)
     # 获取当前会话的订阅信息
     subscriptions = ws_manager.subscriptions.get(session_id, {})
 
