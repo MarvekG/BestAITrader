@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 from sqlalchemy import desc, select
 
@@ -48,9 +48,6 @@ def _build_metrics(
     pe_ttm: float | None,
     pb: float | None,
     dividend_yield: float | None,
-    money_cap: float | None,
-    st_borr: float | None,
-    lt_borr: float | None,
     valuation_date: str | None,
     balance_date: str | None,
 ) -> list[CanonicalMetric]:
@@ -72,62 +69,6 @@ def _build_metrics(
             "close_price * total_share"
             if close_price is not None and total_share
             else "stock_valuation_history.total_market_value"
-        ),
-    ))
-
-    net_cash = None
-    if money_cap is not None:
-        net_cash = money_cap - (st_borr or 0.0) - (lt_borr or 0.0)
-    metrics.append(CanonicalMetric(
-        key="net_cash",
-        label="Net cash",
-        value=net_cash,
-        formula=(
-            "money_cap - st_borr - lt_borr"
-            if money_cap is not None
-            else "stock_balance_sheet.data.money_cap missing"
-        ),
-    ))
-
-    per_share_net_cash = None
-    if net_cash is not None and total_share:
-        per_share_net_cash = net_cash / total_share
-    metrics.append(CanonicalMetric(
-        key="per_share_net_cash",
-        label="Net cash per share",
-        value=per_share_net_cash,
-        formula=(
-            "net_cash / total_share"
-            if net_cash is not None and total_share
-            else "net_cash or total_share missing"
-        ),
-    ))
-
-    net_cash_to_mcap = None
-    if net_cash is not None and market_cap:
-        net_cash_to_mcap = net_cash / market_cap * 100
-    metrics.append(CanonicalMetric(
-        key="net_cash_to_mcap",
-        label="Net cash to market capitalization",
-        value=net_cash_to_mcap,
-        formula=(
-            "net_cash / market_cap * 100"
-            if net_cash is not None and market_cap
-            else "net_cash or market_cap missing"
-        ),
-    ))
-
-    per_share_net_cash_to_price = None
-    if per_share_net_cash is not None and close_price:
-        per_share_net_cash_to_price = per_share_net_cash / close_price * 100
-    metrics.append(CanonicalMetric(
-        key="net_cash_to_price",
-        label="Net cash per share to price",
-        value=per_share_net_cash_to_price,
-        formula=(
-            "per_share_net_cash / close_price * 100"
-            if per_share_net_cash is not None and close_price
-            else "per_share_net_cash or close_price missing"
         ),
     ))
 
@@ -196,7 +137,6 @@ async def build_canonical_metrics(db: Any, stock_code: str) -> AIContextPayload:
     if valuation is None:
         return {"status": "missing"}
 
-    balance_data: Mapping[str, Any] = {}
     valuation_date = str(valuation.data_date) if valuation is not None else None
     balance_date = None
 
@@ -207,9 +147,6 @@ async def build_canonical_metrics(db: Any, stock_code: str) -> AIContextPayload:
         pe_ttm=_to_float(valuation.pe_ttm) if valuation else None,
         pb=_to_float(valuation.pb) if valuation else None,
         dividend_yield=_to_float(valuation.dividend_yield) if valuation else None,
-        money_cap=_to_float(balance_data.get("money_cap")),
-        st_borr=_to_float(balance_data.get("st_borr")),
-        lt_borr=_to_float(balance_data.get("lt_borr")),
         valuation_date=valuation_date,
         balance_date=balance_date,
     )
