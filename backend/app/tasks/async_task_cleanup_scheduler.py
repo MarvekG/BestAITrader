@@ -3,8 +3,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
+from sqlalchemy import delete
+
 from app.core.config import settings
-from app.core.database import SessionLocal
+from app.core import database as database_module
 from app.core.logger import get_logger
 from app.models.async_task import AsyncTask
 from app.tasks.scheduled_task_registry import ScheduledTask
@@ -126,7 +128,7 @@ def get_scheduled_tasks() -> ScheduledTaskSnapshot:
     )
 
 
-def cleanup_old_async_tasks(*, retention_days: int | None = None) -> dict[str, int]:
+async def cleanup_old_async_tasks(*, retention_days: int | None = None) -> dict[str, int]:
     """删除超过保留窗口的异步任务记录。
 
     Args:
@@ -145,9 +147,10 @@ def cleanup_old_async_tasks(*, retention_days: int | None = None) -> dict[str, i
         max_value=3650,
     )
     cutoff = _now() - timedelta(days=retention_days)
-    with SessionLocal() as db:
-        deleted = db.query(AsyncTask).filter(AsyncTask.created_at < cutoff).delete(synchronize_session=False)
-        db.commit()
+    async with database_module.AsyncSessionLocal() as db:
+        result = await db.execute(delete(AsyncTask).where(AsyncTask.created_at < cutoff))
+        await db.commit()
+        deleted = result.rowcount or 0
 
     if deleted:
         logger.info(

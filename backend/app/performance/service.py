@@ -4,9 +4,10 @@ from datetime import date
 from datetime import date as date_type
 from decimal import Decimal, ROUND_HALF_UP
 
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import database as database_module
 from app.models.account import Account
 from app.models.account_equity_snapshot import AccountEquitySnapshot
 from app.models.data_storage import IndexDaily
@@ -61,7 +62,7 @@ def _return_ratio(current: Decimal, previous: Decimal) -> Decimal | None:
     return _quantize((current / previous) - Decimal("1"), RETURN_QUANT)
 
 
-def _get_position_count(db: Session, account_id: object) -> int:
+async def _get_position_count(db: AsyncSession, account_id: object) -> int:
     """统计账户当前有效持仓数量。
 
     Args:
@@ -71,16 +72,17 @@ def _get_position_count(db: Session, account_id: object) -> int:
     Returns:
         当前有效持仓数量。
     """
-    return int(
-        db.query(func.count(Position.position_id))
-        .filter(Position.account_id == account_id, Position.total_shares > 0)
-        .scalar()
-        or 0
+    result = await db.execute(
+        select(func.count(Position.position_id)).where(
+            Position.account_id == account_id,
+            Position.total_shares > 0,
+        )
     )
+    return int(result.scalar_one() or 0)
 
 
-def _get_benchmark_close(
-    db: Session,
+async def _get_benchmark_close(
+    db: AsyncSession,
     *,
     benchmark_code: str,
     snapshot_date: date,
@@ -95,19 +97,20 @@ def _get_benchmark_close(
     Returns:
         最近可用基准收盘价；没有数据时返回 None。
     """
-    row = (
-        db.query(IndexDaily)
-        .filter(IndexDaily.index_code == benchmark_code, IndexDaily.trade_date <= snapshot_date)
+    result = await db.execute(
+        select(IndexDaily)
+        .where(IndexDaily.index_code == benchmark_code, IndexDaily.trade_date <= snapshot_date)
         .order_by(IndexDaily.trade_date.desc())
-        .first()
+        .limit(1)
     )
+    row = result.scalar_one_or_none()
     if row is None or row.close is None:
         return None
     return _quantize(Decimal(str(row.close)), BENCHMARK_QUANT)
 
 
-def _get_latest_snapshot(
-    db: Session,
+async def _get_latest_snapshot(
+    db: AsyncSession,
     *,
     account_id: object,
     benchmark_code: str,
@@ -124,20 +127,21 @@ def _get_latest_snapshot(
     Returns:
         最近一个账户快照；没有快照时返回 None。
     """
-    return (
-        db.query(AccountEquitySnapshot)
-        .filter(
+    result = await db.execute(
+        select(AccountEquitySnapshot)
+        .where(
             AccountEquitySnapshot.account_id == account_id,
             AccountEquitySnapshot.benchmark_code == benchmark_code,
             AccountEquitySnapshot.snapshot_date < before_date,
         )
         .order_by(AccountEquitySnapshot.snapshot_date.desc())
-        .first()
+        .limit(1)
     )
+    return result.scalar_one_or_none()
 
 
-def _get_first_snapshot(
-    db: Session,
+async def _get_first_snapshot(
+    db: AsyncSession,
     *,
     account_id: object,
     benchmark_code: str,
@@ -152,19 +156,20 @@ def _get_first_snapshot(
     Returns:
         最早的账户快照；没有快照时返回 None。
     """
-    return (
-        db.query(AccountEquitySnapshot)
-        .filter(
+    result = await db.execute(
+        select(AccountEquitySnapshot)
+        .where(
             AccountEquitySnapshot.account_id == account_id,
             AccountEquitySnapshot.benchmark_code == benchmark_code,
         )
         .order_by(AccountEquitySnapshot.snapshot_date.asc())
-        .first()
+        .limit(1)
     )
+    return result.scalar_one_or_none()
 
 
-def _get_existing_snapshot(
-    db: Session,
+async def _get_existing_snapshot(
+    db: AsyncSession,
     *,
     account_id: object,
     benchmark_code: str,
@@ -181,19 +186,19 @@ def _get_existing_snapshot(
     Returns:
         既有快照；不存在时返回 None。
     """
-    return (
-        db.query(AccountEquitySnapshot)
-        .filter(
+    result = await db.execute(
+        select(AccountEquitySnapshot)
+        .where(
             AccountEquitySnapshot.account_id == account_id,
             AccountEquitySnapshot.benchmark_code == benchmark_code,
             AccountEquitySnapshot.snapshot_date == snapshot_date,
         )
-        .first()
     )
+    return result.scalar_one_or_none()
 
 
-def _get_historical_peak_assets(
-    db: Session,
+async def _get_historical_peak_assets(
+    db: AsyncSession,
     *,
     account_id: object,
     benchmark_code: str,
@@ -210,20 +215,18 @@ def _get_historical_peak_assets(
     Returns:
         历史最高总资产；没有快照时返回 0。
     """
-    value = (
-        db.query(func.max(AccountEquitySnapshot.total_assets))
-        .filter(
+    result = await db.execute(
+        select(func.max(AccountEquitySnapshot.total_assets)).where(
             AccountEquitySnapshot.account_id == account_id,
             AccountEquitySnapshot.benchmark_code == benchmark_code,
             AccountEquitySnapshot.snapshot_date < before_date,
         )
-        .scalar()
     )
-    return _to_decimal(value)
+    return _to_decimal(result.scalar_one())
 
 
-def create_account_equity_snapshot(
-    db: Session,
+async def create_account_equity_snapshot(
+    db: AsyncSession,
     *,
     account: Account,
     snapshot_date: date,
@@ -243,15 +246,15 @@ def create_account_equity_snapshot(
     total_assets = _quantize(_to_decimal(account.total_assets), MONEY_QUANT)
     available_cash = _quantize(_to_decimal(account.available_cash), MONEY_QUANT)
     market_value = _quantize(_to_decimal(account.market_value), MONEY_QUANT)
-    position_count = _get_position_count(db, account.account_id)
-    previous = _get_latest_snapshot(
+    position_count = await _get_position_count(db, account.account_id)
+    previous = await _get_latest_snapshot(
         db,
         account_id=account.account_id,
         benchmark_code=benchmark_code,
         before_date=snapshot_date,
     )
-    first = _get_first_snapshot(db, account_id=account.account_id, benchmark_code=benchmark_code)
-    benchmark_close = _get_benchmark_close(db, benchmark_code=benchmark_code, snapshot_date=snapshot_date)
+    first = await _get_first_snapshot(db, account_id=account.account_id, benchmark_code=benchmark_code)
+    benchmark_close = await _get_benchmark_close(db, benchmark_code=benchmark_code, snapshot_date=snapshot_date)
     missing_benchmark_reason = None if benchmark_close is not None else "benchmark_close_missing"
 
     if previous is None:
@@ -283,7 +286,7 @@ def create_account_equity_snapshot(
             else None
         )
         previous_drawdown = _to_decimal(previous.max_drawdown)
-        historical_peak = _get_historical_peak_assets(
+        historical_peak = await _get_historical_peak_assets(
             db,
             account_id=account.account_id,
             benchmark_code=benchmark_code,
@@ -292,7 +295,7 @@ def create_account_equity_snapshot(
         current_drawdown = _return_ratio(total_assets, max(historical_peak, total_assets)) or Decimal("0.00000000")
         max_drawdown = min(previous_drawdown, current_drawdown)
 
-    snapshot = _get_existing_snapshot(
+    snapshot = await _get_existing_snapshot(
         db,
         account_id=account.account_id,
         benchmark_code=benchmark_code,
@@ -320,8 +323,8 @@ def create_account_equity_snapshot(
     snapshot.missing_benchmark_reason = missing_benchmark_reason
 
     db.add(snapshot)
-    db.commit()
-    db.refresh(snapshot)
+    await db.commit()
+    await db.refresh(snapshot)
     return snapshot
 
 
@@ -339,8 +342,7 @@ def _to_float(value: object) -> float | None:
     return float(value)
 
 
-def get_latest_performance_summary(
-    db: Session,
+async def get_latest_performance_summary(
     *,
     user_id: int,
     benchmark_code: str = DEFAULT_BENCHMARK_CODE,
@@ -348,67 +350,74 @@ def get_latest_performance_summary(
     """查询当前用户最新模拟盘绩效摘要。
 
     Args:
-        db: 数据库会话。
         user_id: 当前用户 ID。
         benchmark_code: 基准指数代码。
 
     Returns:
         最新绩效摘要。没有快照时返回空指标。
     """
-    account = db.query(Account).filter(Account.user_id == user_id).first()
-    if account is None:
-        return {
-            "snapshot_date": None,
-            "benchmark_code": benchmark_code,
-            "available_cash": None,
-            "market_value": None,
-            "position_count": 0,
-            "cumulative_return": None,
-            "benchmark_cumulative_return": None,
-            "excess_return": None,
-            "max_drawdown": None,
-            "total_trades": 0,
-        }
+    async with database_module.AsyncSessionLocal() as db:
+        account_result = await db.execute(select(Account).where(Account.user_id == user_id))
+        account = account_result.scalar_one_or_none()
+        if account is None:
+            return {
+                "snapshot_date": None,
+                "benchmark_code": benchmark_code,
+                "available_cash": None,
+                "market_value": None,
+                "position_count": 0,
+                "cumulative_return": None,
+                "benchmark_cumulative_return": None,
+                "excess_return": None,
+                "max_drawdown": None,
+                "total_trades": 0,
+            }
 
-    snapshot = (
-        db.query(AccountEquitySnapshot)
-        .filter(
-            AccountEquitySnapshot.account_id == account.account_id,
-            AccountEquitySnapshot.benchmark_code == benchmark_code,
+        snapshot_result = await db.execute(
+            select(AccountEquitySnapshot)
+            .where(
+                AccountEquitySnapshot.account_id == account.account_id,
+                AccountEquitySnapshot.benchmark_code == benchmark_code,
+            )
+            .order_by(AccountEquitySnapshot.snapshot_date.desc())
+            .limit(1)
         )
-        .order_by(AccountEquitySnapshot.snapshot_date.desc())
-        .first()
-    )
-    if snapshot is None:
+        snapshot = snapshot_result.scalar_one_or_none()
+        if snapshot is None:
+            count_result = await db.execute(
+                select(func.count(Position.position_id)).where(
+                    Position.account_id == account.account_id,
+                    Position.total_shares > 0,
+                )
+            )
+            return {
+                "snapshot_date": None,
+                "benchmark_code": benchmark_code,
+                "available_cash": _to_float(account.available_cash),
+                "market_value": _to_float(account.market_value),
+                "position_count": int(count_result.scalar_one() or 0),
+                "cumulative_return": None,
+                "benchmark_cumulative_return": None,
+                "excess_return": None,
+                "max_drawdown": None,
+                "total_trades": int(account.total_trades or 0),
+            }
+
         return {
-            "snapshot_date": None,
-            "benchmark_code": benchmark_code,
-            "available_cash": _to_float(account.available_cash),
-            "market_value": _to_float(account.market_value),
-            "position_count": _get_position_count(db, account.account_id),
-            "cumulative_return": None,
-            "benchmark_cumulative_return": None,
-            "excess_return": None,
-            "max_drawdown": None,
+            "snapshot_date": snapshot.snapshot_date.isoformat(),
+            "benchmark_code": snapshot.benchmark_code,
+            "available_cash": _to_float(snapshot.available_cash),
+            "market_value": _to_float(snapshot.market_value),
+            "position_count": int(snapshot.position_count or 0),
+            "cumulative_return": _to_float(snapshot.cumulative_return),
+            "benchmark_cumulative_return": _to_float(snapshot.benchmark_cumulative_return),
+            "excess_return": _to_float(snapshot.excess_return),
+            "max_drawdown": _to_float(snapshot.max_drawdown),
             "total_trades": int(account.total_trades or 0),
         }
 
-    return {
-        "snapshot_date": snapshot.snapshot_date.isoformat(),
-        "benchmark_code": snapshot.benchmark_code,
-        "available_cash": _to_float(snapshot.available_cash),
-        "market_value": _to_float(snapshot.market_value),
-        "position_count": int(snapshot.position_count or 0),
-        "cumulative_return": _to_float(snapshot.cumulative_return),
-        "benchmark_cumulative_return": _to_float(snapshot.benchmark_cumulative_return),
-        "excess_return": _to_float(snapshot.excess_return),
-        "max_drawdown": _to_float(snapshot.max_drawdown),
-        "total_trades": int(account.total_trades or 0),
-    }
 
-
-def get_equity_curve(
-    db: Session,
+async def get_equity_curve(
     *,
     user_id: int,
     benchmark_code: str = DEFAULT_BENCHMARK_CODE,
@@ -418,7 +427,6 @@ def get_equity_curve(
     """查询当前用户模拟账户净值曲线。
 
     Args:
-        db: 数据库会话。
         user_id: 当前用户 ID。
         benchmark_code: 基准指数代码。
         start_date: 查询开始日期。
@@ -427,33 +435,36 @@ def get_equity_curve(
     Returns:
         净值曲线和基准曲线数据。
     """
-    account = db.query(Account).filter(Account.user_id == user_id).first()
-    if account is None:
-        return {"benchmark_code": benchmark_code, "items": []}
+    async with database_module.AsyncSessionLocal() as db:
+        account_result = await db.execute(select(Account).where(Account.user_id == user_id))
+        account = account_result.scalar_one_or_none()
+        if account is None:
+            return {"benchmark_code": benchmark_code, "items": []}
 
-    query = db.query(AccountEquitySnapshot).filter(
-        AccountEquitySnapshot.account_id == account.account_id,
-        AccountEquitySnapshot.benchmark_code == benchmark_code,
-    )
-    if start_date is not None:
-        query = query.filter(AccountEquitySnapshot.snapshot_date >= start_date)
-    if end_date is not None:
-        query = query.filter(AccountEquitySnapshot.snapshot_date <= end_date)
+        stmt = select(AccountEquitySnapshot).where(
+            AccountEquitySnapshot.account_id == account.account_id,
+            AccountEquitySnapshot.benchmark_code == benchmark_code,
+        )
+        if start_date is not None:
+            stmt = stmt.where(AccountEquitySnapshot.snapshot_date >= start_date)
+        if end_date is not None:
+            stmt = stmt.where(AccountEquitySnapshot.snapshot_date <= end_date)
 
-    snapshots = query.order_by(AccountEquitySnapshot.snapshot_date.asc()).all()
-    return {
-        "benchmark_code": benchmark_code,
-        "items": [
-            {
-                "snapshot_date": snapshot.snapshot_date.isoformat(),
-                "daily_return": _to_float(snapshot.daily_return),
-                "cumulative_return": _to_float(snapshot.cumulative_return),
-                "benchmark_close": _to_float(snapshot.benchmark_close),
-                "benchmark_daily_return": _to_float(snapshot.benchmark_daily_return),
-                "benchmark_cumulative_return": _to_float(snapshot.benchmark_cumulative_return),
-                "excess_return": _to_float(snapshot.excess_return),
-                "max_drawdown": _to_float(snapshot.max_drawdown),
-            }
-            for snapshot in snapshots
-        ],
-    }
+        result = await db.execute(stmt.order_by(AccountEquitySnapshot.snapshot_date.asc()))
+        snapshots = result.scalars().all()
+        return {
+            "benchmark_code": benchmark_code,
+            "items": [
+                {
+                    "snapshot_date": snapshot.snapshot_date.isoformat(),
+                    "daily_return": _to_float(snapshot.daily_return),
+                    "cumulative_return": _to_float(snapshot.cumulative_return),
+                    "benchmark_close": _to_float(snapshot.benchmark_close),
+                    "benchmark_daily_return": _to_float(snapshot.benchmark_daily_return),
+                    "benchmark_cumulative_return": _to_float(snapshot.benchmark_cumulative_return),
+                    "excess_return": _to_float(snapshot.excess_return),
+                    "max_drawdown": _to_float(snapshot.max_drawdown),
+                }
+                for snapshot in snapshots
+            ],
+        }

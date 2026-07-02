@@ -5,9 +5,9 @@ from decimal import Decimal, ROUND_HALF_UP
 from statistics import stdev
 from typing import Any
 
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
 
+from app.core import database as database_module
 from app.models.account import Account
 from app.models.data_storage import KlineData, StockBasic, StockRealtimeMarket
 from app.models.position import Position
@@ -111,8 +111,8 @@ def _ratio(numerator: Decimal, denominator: Decimal) -> Decimal:
     return _quantize(numerator / denominator, RATIO_QUANT)
 
 
-def _get_position_rows(
-    db: Session,
+async def _get_position_rows(
+    db: Any,
     account_id: object,
 ) -> list[tuple[Position, str | None, str | None, object]]:
     """读取当前账户有效持仓及其最近有效行情和基础信息。
@@ -125,7 +125,7 @@ def _get_position_rows(
         持仓、股票名称、行业和最近有效价格的元组列表。
     """
     latest_market = (
-        db.query(
+        select(
             StockRealtimeMarket.stock_code,
             StockRealtimeMarket.current_price,
             func.row_number().over(
@@ -133,20 +133,20 @@ def _get_position_rows(
                 order_by=StockRealtimeMarket.timestamp.desc(),
             ).label("rn"),
         )
-        .filter(StockRealtimeMarket.current_price.isnot(None), StockRealtimeMarket.current_price > 0)
+        .where(StockRealtimeMarket.current_price.isnot(None), StockRealtimeMarket.current_price > 0)
         .subquery()
     )
 
-    return (
-        db.query(Position, StockBasic.name, StockBasic.industry, latest_market.c.current_price)
+    result = await db.execute(
+        select(Position, StockBasic.name, StockBasic.industry, latest_market.c.current_price)
         .outerjoin(StockBasic, Position.stock_code == StockBasic.stock_code)
         .outerjoin(
             latest_market,
             (Position.stock_code == latest_market.c.stock_code) & (latest_market.c.rn == 1),
         )
-        .filter(Position.account_id == account_id, Position.total_shares > 0)
-        .all()
+        .where(Position.account_id == account_id, Position.total_shares > 0)
     )
+    return result.all()
 
 
 def _build_industry_allocations(
@@ -222,7 +222,7 @@ def _position_stop_loss(position: Position) -> Decimal | None:
     return _safe_positive_decimal(stop_loss)
 
 
-def _get_recent_closes(db: Session, stock_code: str, limit: int) -> list[float]:
+async def _get_recent_closes(db: Any, stock_code: str, limit: int) -> list[float]:
     """读取指定股票最近的日线收盘价。
 
     Args:
@@ -233,13 +233,13 @@ def _get_recent_closes(db: Session, stock_code: str, limit: int) -> list[float]:
     Returns:
         按时间升序排列的有效收盘价列表。
     """
-    rows = (
-        db.query(KlineData.close)
-        .filter(KlineData.stock_code == stock_code, KlineData.freq == "D", KlineData.close.isnot(None))
+    result = await db.execute(
+        select(KlineData.close)
+        .where(KlineData.stock_code == stock_code, KlineData.freq == "D", KlineData.close.isnot(None))
         .order_by(KlineData.date.desc())
         .limit(limit + 1)
-        .all()
     )
+    rows = result.all()
     closes = [float(row[0]) for row in reversed(rows) if row[0] is not None and float(row[0]) > 0]
     return closes
 
@@ -265,8 +265,8 @@ def _annualized_volatility(closes: list[float]) -> Decimal | None:
     return _quantize(Decimal(str(stdev(returns) * math.sqrt(TRADING_DAYS_PER_YEAR))), RATIO_QUANT)
 
 
-def _estimate_portfolio_volatility(
-    db: Session,
+async def _estimate_portfolio_volatility(
+    db: Any,
     positions: list[dict[str, Any]],
     days: int,
 ) -> Decimal | None:
@@ -283,7 +283,7 @@ def _estimate_portfolio_volatility(
     weighted_variance = Decimal("0")
     has_volatility = False
     for item in positions:
-        volatility = _annualized_volatility(_get_recent_closes(db, item["stock_code"], days))
+        volatility = _annualized_volatility(await _get_recent_closes(db, item["stock_code"], days))
         if volatility is None:
             continue
         has_volatility = True
@@ -294,8 +294,8 @@ def _estimate_portfolio_volatility(
     return _quantize(Decimal(str(math.sqrt(float(weighted_variance)))), RATIO_QUANT)
 
 
-def _build_risk_metrics(
-    db: Session,
+async def _build_risk_metrics(
+    db: Any,
     positions: list[dict[str, Any]],
     industry_allocations: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -334,100 +334,100 @@ def _build_risk_metrics(
         "max_unrealized_loss_pct": _to_float(max_loss["unrealized_pnl_pct_decimal"] if max_loss else Decimal("0")),
         "max_unrealized_loss_stock_code": max_loss["stock_code"] if max_loss else None,
         "stop_loss_coverage_pct": _to_float(stop_loss_coverage),
-        "estimated_volatility_20d": _to_float(_estimate_portfolio_volatility(db, positions, 20)),
-        "estimated_volatility_60d": _to_float(_estimate_portfolio_volatility(db, positions, 60)),
+        "estimated_volatility_20d": _to_float(await _estimate_portfolio_volatility(db, positions, 20)),
+        "estimated_volatility_60d": _to_float(await _estimate_portfolio_volatility(db, positions, 60)),
     }
 
 
-def build_portfolio_valuation(db: Session, account: Account) -> dict[str, Any]:
+async def build_portfolio_valuation(account: Account) -> dict[str, Any]:
     """按统一动态估值口径聚合账户组合数据。
 
     Args:
-        db: 数据库会话。
         account: 当前用户账户。
 
     Returns:
         包含动态资产、持仓、行业分布和风险指标的内部估值结构。
     """
-    available_cash = _quantize(_to_decimal(account.available_cash), MONEY_QUANT)
-    frozen_cash = _quantize(_to_decimal(account.frozen_cash), MONEY_QUANT)
-    position_items = []
+    async with database_module.AsyncSessionLocal() as db:
+        available_cash = _quantize(_to_decimal(account.available_cash), MONEY_QUANT)
+        frozen_cash = _quantize(_to_decimal(account.frozen_cash), MONEY_QUANT)
+        position_items = []
 
-    for position, stock_name, industry, market_price in _get_position_rows(db, account.account_id):
-        shares = int(position.total_shares or 0)
-        share_fields = trading_engine.derive_share_fields(
-            shares,
-            position.purchase_details,
-            position.available_shares,
+        for position, stock_name, industry, market_price in await _get_position_rows(db, account.account_id):
+            shares = int(position.total_shares or 0)
+            share_fields = trading_engine.derive_share_fields(
+                shares,
+                position.purchase_details,
+                position.available_shares,
+            )
+            current_price = _quantize(_resolve_current_price(position, market_price), MONEY_QUANT)
+            avg_cost = _quantize(_to_decimal(position.avg_cost), MONEY_QUANT)
+            market_value = _quantize(current_price * Decimal(shares), MONEY_QUANT)
+            cost_value = avg_cost * Decimal(shares)
+            unrealized_pnl = _quantize(market_value - cost_value, MONEY_QUANT)
+            unrealized_pnl_pct = _ratio(unrealized_pnl, cost_value)
+
+            stop_loss = _position_stop_loss(position)
+            position_items.append(
+                {
+                    "position_id": str(position.position_id),
+                    "session_id": str(position.session_id) if position.session_id else None,
+                    "stock_code": position.stock_code,
+                    "stock_name": stock_name or UNKNOWN_STOCK_NAME,
+                    "industry": industry or UNKNOWN_INDUSTRY,
+                    "total_shares": shares,
+                    "available_shares": share_fields["available_shares"],
+                    "frozen_shares": share_fields["frozen_shares"],
+                    "avg_cost": _to_float(avg_cost),
+                    "avg_cost_decimal": avg_cost,
+                    "current_price": _to_float(current_price),
+                    "current_price_decimal": current_price,
+                    "market_value": _to_float(market_value),
+                    "market_value_decimal": market_value,
+                    "weight_decimal": Decimal("0"),
+                    "weight": 0.0,
+                    "unrealized_pnl": _to_float(unrealized_pnl),
+                    "unrealized_pnl_decimal": unrealized_pnl,
+                    "unrealized_pnl_pct": _to_float(unrealized_pnl_pct),
+                    "unrealized_pnl_pct_decimal": unrealized_pnl_pct,
+                    "stop_loss": _to_float(stop_loss),
+                    "stop_loss_decimal": stop_loss,
+                    "has_stop_loss": stop_loss is not None,
+                    "updated_at": position.updated_at.isoformat() if position.updated_at else None,
+                }
+            )
+
+        market_value = _quantize(
+            sum((item["market_value_decimal"] for item in position_items), Decimal("0")),
+            MONEY_QUANT,
         )
-        current_price = _quantize(_resolve_current_price(position, market_price), MONEY_QUANT)
-        avg_cost = _quantize(_to_decimal(position.avg_cost), MONEY_QUANT)
-        market_value = _quantize(current_price * Decimal(shares), MONEY_QUANT)
-        cost_value = avg_cost * Decimal(shares)
-        unrealized_pnl = _quantize(market_value - cost_value, MONEY_QUANT)
-        unrealized_pnl_pct = _ratio(unrealized_pnl, cost_value)
+        total_assets = _quantize(available_cash + frozen_cash + market_value, MONEY_QUANT)
 
-        stop_loss = _position_stop_loss(position)
-        position_items.append(
-            {
-                "position_id": str(position.position_id),
-                "session_id": str(position.session_id) if position.session_id else None,
-                "stock_code": position.stock_code,
-                "stock_name": stock_name or UNKNOWN_STOCK_NAME,
-                "industry": industry or UNKNOWN_INDUSTRY,
-                "total_shares": shares,
-                "available_shares": share_fields["available_shares"],
-                "frozen_shares": share_fields["frozen_shares"],
-                "avg_cost": _to_float(avg_cost),
-                "avg_cost_decimal": avg_cost,
-                "current_price": _to_float(current_price),
-                "current_price_decimal": current_price,
+        for item in position_items:
+            item["weight_decimal"] = _ratio(item["market_value_decimal"], total_assets)
+            item["weight"] = _to_float(item["weight_decimal"])
+
+        sorted_positions = sorted(position_items, key=lambda item: item["weight_decimal"], reverse=True)
+        industry_allocations = _build_industry_allocations(sorted_positions, total_assets)
+
+        return {
+            "summary": {
+                "total_assets": _to_float(total_assets),
+                "total_assets_decimal": total_assets,
+                "available_cash": _to_float(available_cash),
+                "available_cash_decimal": available_cash,
+                "frozen_cash": _to_float(frozen_cash),
+                "frozen_cash_decimal": frozen_cash,
                 "market_value": _to_float(market_value),
                 "market_value_decimal": market_value,
-                "weight_decimal": Decimal("0"),
-                "weight": 0.0,
-                "unrealized_pnl": _to_float(unrealized_pnl),
-                "unrealized_pnl_decimal": unrealized_pnl,
-                "unrealized_pnl_pct": _to_float(unrealized_pnl_pct),
-                "unrealized_pnl_pct_decimal": unrealized_pnl_pct,
-                "stop_loss": _to_float(stop_loss),
-                "stop_loss_decimal": stop_loss,
-                "has_stop_loss": stop_loss is not None,
-                "updated_at": position.updated_at.isoformat() if position.updated_at else None,
-            }
-        )
-
-    market_value = _quantize(
-        sum((item["market_value_decimal"] for item in position_items), Decimal("0")),
-        MONEY_QUANT,
-    )
-    total_assets = _quantize(available_cash + frozen_cash + market_value, MONEY_QUANT)
-
-    for item in position_items:
-        item["weight_decimal"] = _ratio(item["market_value_decimal"], total_assets)
-        item["weight"] = _to_float(item["weight_decimal"])
-
-    sorted_positions = sorted(position_items, key=lambda item: item["weight_decimal"], reverse=True)
-    industry_allocations = _build_industry_allocations(sorted_positions, total_assets)
-
-    return {
-        "summary": {
-            "total_assets": _to_float(total_assets),
-            "total_assets_decimal": total_assets,
-            "available_cash": _to_float(available_cash),
-            "available_cash_decimal": available_cash,
-            "frozen_cash": _to_float(frozen_cash),
-            "frozen_cash_decimal": frozen_cash,
-            "market_value": _to_float(market_value),
-            "market_value_decimal": market_value,
-            "cash_ratio": _to_float(_ratio(available_cash + frozen_cash, total_assets)),
-            "position_ratio": _to_float(_ratio(market_value, total_assets)),
-            "position_count": len(position_items),
-        },
-        "positions": sorted_positions,
-        "industry_allocations": industry_allocations,
-        "risk_metrics": _build_risk_metrics(db, sorted_positions, industry_allocations),
-    }
+                "cash_ratio": _to_float(_ratio(available_cash + frozen_cash, total_assets)),
+                "position_ratio": _to_float(_ratio(market_value, total_assets)),
+                "position_count": len(position_items),
+            },
+            "positions": sorted_positions,
+            "industry_allocations": industry_allocations,
+            "risk_metrics": await _build_risk_metrics(db, sorted_positions, industry_allocations),
+        }
 
 
 def build_portfolio_overview_payload(valuation: dict[str, Any]) -> dict[str, Any]:

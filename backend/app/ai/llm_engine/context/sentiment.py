@@ -1,6 +1,6 @@
 from typing import Dict, Any
-from sqlalchemy import desc
-from sqlalchemy.orm import Session
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.i18n import i18n_service
 from app.ai.llm_engine.context.section_wrappers import status_payload
@@ -14,20 +14,24 @@ class SentimentSource:
     def status_payload(data_status: str, **kwargs: Any) -> Dict[str, Any]:
         return status_payload(data_status, **kwargs)
 
-    def _get_hot_rank(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_hot_rank(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """
         获取个股最新的人气榜和飙升榜排名信息
         Get the latest Hot Rank and Rising Rank information for a stock
         """
-        hot = db.query(StockHotRank).filter(
-            StockHotRank.stock_code == stock_code,
-            StockHotRank.rank_type == 'hot'
-        ).order_by(desc(StockHotRank.timestamp)).first()
+        hot_result = await db.execute(
+            select(StockHotRank)
+            .where(StockHotRank.stock_code == stock_code, StockHotRank.rank_type == 'hot')
+            .order_by(desc(StockHotRank.timestamp))
+        )
+        hot = hot_result.scalars().first()
 
-        rising = db.query(StockHotRank).filter(
-            StockHotRank.stock_code == stock_code,
-            StockHotRank.rank_type == 'rising'
-        ).order_by(desc(StockHotRank.timestamp)).first()
+        rising_result = await db.execute(
+            select(StockHotRank)
+            .where(StockHotRank.stock_code == stock_code, StockHotRank.rank_type == 'rising')
+            .order_by(desc(StockHotRank.timestamp))
+        )
+        rising = rising_result.scalars().first()
 
         result = {}
         if hot:

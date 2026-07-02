@@ -1,8 +1,9 @@
 import pandas as pd
 from datetime import datetime
 from typing import Optional, List, Dict
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from app.core.database import engine
+from app.core.database import AsyncSessionLocal
 from app.core.utils.formatters import StockCodeStandardizer
 from app.models.data_storage import (
     Base, CommonData, KlineData, StockBasic, NorthboundData, DragonTigerData, StockValuationHistory,
@@ -21,7 +22,6 @@ logger = get_logger(__name__)
 
 class DataIngestionService:
     def __init__(self):
-        self.engine = engine
         self.metadata = Base.metadata
         # 建立表名到模型类的映射，用于快速查找
         self.table_map = {
@@ -68,10 +68,8 @@ class DataIngestionService:
             'data.stock_pledge_summary': StockPledgeSummary,
             'data.stock_top_holders': StockTopHolders
         }
-        # 确保表存在
-        Base.metadata.create_all(self.engine)
 
-    def write_dataframe(
+    async def write_dataframe(
         self,
         api_name: str,
         df: pd.DataFrame,
@@ -79,13 +77,17 @@ class DataIngestionService:
         force_sync: bool = False,
         target_table: Optional[str] = None,
     ):
-        """
-        通用数据写入方法
-        :param api_name: API名称 (用于 CommonData 的 api_name 字段)
-        :param df: Pandas DataFrame 数据
-        :param source: 数据来源
-        :param force_sync: 保留参数，当前写入逻辑不使用。
-        :param target_table: 目标表名 (如 'kline_data' 或 'common_data')。如果为 None，默认写入 CommonData
+        """异步写入 DataFrame 数据。
+
+        Args:
+            api_name: API 名称，用于 CommonData 的 api_name 字段。
+            df: 待写入的 Pandas DataFrame 数据。
+            source: 数据来源。
+            force_sync: 保留参数，当前写入逻辑不使用。
+            target_table: 目标表名，如 ``kline_data`` 或 ``common_data``；为空时写入 CommonData。
+
+        Returns:
+            写入成功返回 True；无有效数据或写入失败返回 False。
         """
         if df.empty:
             logger.warning(f"Skipping empty dataframe for {api_name}")
@@ -113,14 +115,13 @@ class DataIngestionService:
         if 'stock_code' in df.columns and target_model not in [StockBasic, SectorMoneyFlow, IndustryData]:
             try:
                 logger.info(f"Filtering stock_code for {api_name} against stock_basic...")
-                with self.engine.begin() as conn:
-                    valid_df = pd.read_sql("SELECT stock_code FROM data.stock_basic", conn)
-                
-                if valid_df.empty:
+                async with AsyncSessionLocal() as session:
+                    result = await session.execute(select(StockBasic.stock_code))
+                    valid_stock_codes = {str(code) for code in result.scalars().all()}
+
+                if not valid_stock_codes:
                     logger.error(f"TABLE stock_basic IS EMPTY! All records for {api_name} with stock_code will be filtered. Please sync stock_basic first.")
-                
-                valid_stock_codes = set(valid_df['stock_code'].astype(str).tolist())
-                
+
                 original_count = len(df)
                 # 记录被过滤的代码，以便调试
                 mask = df['stock_code'].astype(str).isin(valid_stock_codes)
@@ -184,7 +185,7 @@ class DataIngestionService:
                 logger.warning(f"No valid records prepared for {api_name}")
                 return False
 
-            self._bulk_upsert(target_model, records)
+            await self._bulk_upsert(target_model, records)
             return True
 
         except Exception as e:
@@ -207,7 +208,17 @@ class DataIngestionService:
         return obj
 
     def _prepare_records(self, df: pd.DataFrame, target_model, api_name: str, source: str) -> List[Dict]:
-        """准备写入数据库的记录"""
+        """准备写入数据库的记录。
+
+        Args:
+            df: 待转换的 DataFrame。
+            target_model: 目标 SQLAlchemy 模型。
+            api_name: API 名称。
+            source: 数据来源。
+
+        Returns:
+            可用于 SQLAlchemy Core 写入的记录列表。
+        """
         records = []
         
         # 获取目标模型的列名，用于过滤无效字段 (如果是专用表)
@@ -248,7 +259,16 @@ class DataIngestionService:
         return records
 
     def _prepare_common_data_record(self, row_dict: Dict, api_name: str, source: str) -> Dict:
-        """构建 CommonData 记录"""
+        """构建 CommonData 记录。
+
+        Args:
+            row_dict: 清洗后的单行数据。
+            api_name: API 名称。
+            source: 数据来源。
+
+        Returns:
+            CommonData 表记录。
+        """
         # 1. 提取 Stock Code
         stock_code = (
             row_dict.get('stock_code') or 
@@ -305,8 +325,13 @@ class DataIngestionService:
             "data_source": source
         }
 
-    def _bulk_upsert(self, model, records: List[Dict]):
-        """执行批量 Upsert"""
+    async def _bulk_upsert(self, model, records: List[Dict]):
+        """异步执行批量 Upsert。
+
+        Args:
+            model: 目标 SQLAlchemy 模型。
+            records: 待写入记录。
+        """
         if not records:
             return
 
@@ -371,8 +396,9 @@ class DataIngestionService:
             else:
                 stmt = stmt.on_conflict_do_nothing(index_elements=conflict_target)
 
-        with self.engine.begin() as conn:
-            conn.execute(stmt)
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await session.execute(stmt)
         
         logger.info(f"Upserted {len(records)} records to {model.__tablename__}")
 

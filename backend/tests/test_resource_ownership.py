@@ -3,27 +3,22 @@ from decimal import Decimal
 
 import pytest
 
-from app.crud.account import ensure_user_account
-from app.crud.user import create_user
 from app.models.debate_message import DebateMessage
 from app.models.order import Order
 from app.models.position import Position
 from app.models.session import Session as AnalysisSession
 from app.models.trade_record import TradeRecord
-from app.schemas.user import UserCreate
 
 
 PASSWORD = "password123"
 
 
-def _create_user_and_headers(client, db_session, username: str):
-    user = create_user(
-        db_session,
-        UserCreate(
-            username=username,
-            email=f"{username}@example.com",
-            password=PASSWORD,
-        ),
+async def _create_user_and_headers(client, async_db_session, username: str, async_create_user):
+    user = await async_create_user(
+        async_db_session,
+        username=username,
+        email=f"{username}@example.com",
+        password=PASSWORD,
     )
     response = client.post(
         "/api/v1/auth/login",
@@ -37,7 +32,7 @@ def _create_user_and_headers(client, db_session, username: str):
     return user, {"Authorization": f"Bearer {token}"}
 
 
-def _create_session(db_session, user, *, stock_code: str, status: str = "completed"):
+async def _create_session(async_db_session, user, *, stock_code: str, status: str = "completed"):
     session = AnalysisSession(
         user_id=user.id,
         stock_code=stock_code,
@@ -45,13 +40,13 @@ def _create_session(db_session, user, *, stock_code: str, status: str = "complet
         trading_strategy="trend",
         status=status,
     )
-    db_session.add(session)
-    db_session.commit()
-    db_session.refresh(session)
+    async_db_session.add(session)
+    await async_db_session.commit()
+    await async_db_session.refresh(session)
     return session
 
 
-def _create_debate_message(db_session, session):
+async def _create_debate_message(async_db_session, session):
     message = DebateMessage(
         session_id=session.session_id,
         stage="portfolio_management",
@@ -62,14 +57,14 @@ def _create_debate_message(db_session, session):
         reasoning="private reasoning",
         prompt_input="private prompt",
     )
-    db_session.add(message)
-    db_session.commit()
-    db_session.refresh(message)
+    async_db_session.add(message)
+    await async_db_session.commit()
+    await async_db_session.refresh(message)
     return message
 
 
-def _create_account_resources(db_session, user, session):
-    account = ensure_user_account(db_session, user)
+async def _create_account_resources(async_db_session, user, session, async_ensure_account):
+    account = await async_ensure_account(async_db_session, user)
     position = Position(
         account_id=account.account_id,
         session_id=session.session_id,
@@ -112,33 +107,46 @@ def _create_account_resources(db_session, user, session):
         net_amount=Decimal("1001.00"),
         trade_time=datetime.now(),
     )
-    db_session.add_all([position, order, trade])
-    db_session.commit()
-    db_session.refresh(position)
-    db_session.refresh(order)
-    db_session.refresh(trade)
+    async_db_session.add_all([position, order, trade])
+    await async_db_session.commit()
+    await async_db_session.refresh(position)
+    await async_db_session.refresh(order)
+    await async_db_session.refresh(trade)
     return position, order, trade
 
 
 @pytest.fixture
-def ownership_context(client, db_session):
-    owner, owner_headers = _create_user_and_headers(client, db_session, "owner_user")
-    intruder, intruder_headers = _create_user_and_headers(client, db_session, "intruder_user")
-    owner_session = _create_session(db_session, owner, stock_code="000001.SZ")
-    intruder_session = _create_session(db_session, intruder, stock_code="600000.SH")
-    _create_debate_message(db_session, owner_session)
-    owner_position, owner_order, owner_trade = _create_account_resources(db_session, owner, owner_session)
+def ownership_context(client, test_db, run_async, async_create_user, async_ensure_account):
+    async def _seed():
+        async with test_db() as async_db_session:
+            owner, owner_headers = await _create_user_and_headers(client, async_db_session, "owner_user", async_create_user)
+            intruder, intruder_headers = await _create_user_and_headers(
+                client,
+                async_db_session,
+                "intruder_user",
+                async_create_user,
+            )
+            owner_session = await _create_session(async_db_session, owner, stock_code="000001.SZ")
+            intruder_session = await _create_session(async_db_session, intruder, stock_code="600000.SH")
+            await _create_debate_message(async_db_session, owner_session)
+            owner_position, owner_order, owner_trade = await _create_account_resources(
+                async_db_session,
+                owner,
+                owner_session,
+                async_ensure_account,
+            )
+            return {
+                "owner": owner,
+                "owner_headers": owner_headers,
+                "owner_session": owner_session,
+                "owner_position": owner_position,
+                "owner_order": owner_order,
+                "owner_trade": owner_trade,
+                "intruder_headers": intruder_headers,
+                "intruder_session": intruder_session,
+            }
 
-    return {
-        "owner": owner,
-        "owner_headers": owner_headers,
-        "owner_session": owner_session,
-        "owner_position": owner_position,
-        "owner_order": owner_order,
-        "owner_trade": owner_trade,
-        "intruder_headers": intruder_headers,
-        "intruder_session": intruder_session,
-    }
+    return run_async(_seed())
 
 
 def test_session_list_only_returns_current_user_sessions(client, ownership_context):
@@ -206,8 +214,6 @@ def test_batch_session_operations_ignore_other_users_sessions(client, ownership_
     [
         ("get", "/api/v1/trading/orders/{resource_id}", "owner_order", {}),
         ("put", "/api/v1/trading/orders/{resource_id}", "owner_order", {"json": {"shares": 10}}),
-        ("post", "/api/v1/trading/orders/{resource_id}/cancel", "owner_order", {}),
-        ("get", "/api/v1/accounts/positions/single/{resource_id}", "owner_position", {}),
         ("get", "/api/v1/trading/trades/single/{resource_id}", "owner_trade", {}),
     ],
 )

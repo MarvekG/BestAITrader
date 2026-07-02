@@ -178,7 +178,7 @@ def _validate_command_argv(command_argv: List[str]) -> None:
             )
 
 
-def _build_skill_script_env() -> Dict[str, str]:
+async def _build_skill_script_env() -> Dict[str, str]:
     """
     构建 skill 脚本子进程环境变量。
 
@@ -190,8 +190,8 @@ def _build_skill_script_env() -> Dict[str, str]:
         for key in SKILL_SCRIPT_ENV_ALLOWLIST
         if (value := os.environ.get(key)) is not None
     }
-    tushare_api_url = get_data_source_config_value(TUSHARE_API_SETTING_KEY)
-    tushare_token = get_data_source_config_value(TUSHARE_TOKEN_SETTING_KEY)
+    tushare_api_url = await get_data_source_config_value(TUSHARE_API_SETTING_KEY)
+    tushare_token = await get_data_source_config_value(TUSHARE_TOKEN_SETTING_KEY)
     if tushare_api_url:
         env["TUSHARE_API"] = tushare_api_url
     if tushare_token:
@@ -252,7 +252,7 @@ async def run_skill_script(
         process = await asyncio.create_subprocess_exec(
             *command_argv,
             cwd=str(skill.root_path),
-            env=_build_skill_script_env(),
+            env=await _build_skill_script_env(),
             stdin=asyncio.subprocess.PIPE if stdin_payload is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

@@ -109,7 +109,7 @@ class PlanAgent:
 
         effective_history_input = (history_input or normalized_input).strip()
         llm_input = planning_initial_user_message(normalized_input) if initial else normalized_input
-        turn_record = load_plan_turn_record(run_id)
+        turn_record = await load_plan_turn_record(run_id)
         if turn_record is None:
             raise LookupError(_t("errors.run_not_found"))
         if turn_record["status"] != "awaiting_plan_approval":
@@ -140,7 +140,7 @@ class PlanAgent:
         )
         plan_message = await self._invoke_plan_markdown(run_id, messages, tools)
 
-        latest_turn_record = load_plan_turn_record(run_id)
+        latest_turn_record = await load_plan_turn_record(run_id)
         if latest_turn_record is None:
             raise LookupError(_t("errors.run_not_found"))
         if latest_turn_record["status"] != "awaiting_plan_approval":
@@ -150,7 +150,7 @@ class PlanAgent:
             )
             return
 
-        result = persist_plan_card_record(
+        result = await persist_plan_card_record(
             run_id,
             plan_message=plan_message,
             reason="plan_drafted" if initial else "plan_updated",
@@ -172,7 +172,7 @@ class PlanAgent:
             extra={"run_id": str(run_id), "initial": initial, "plan_length": len(plan_message)},
         )
 
-    def latest_plan_output(self, run_id: UUID) -> str:
+    async def latest_plan_output(self, run_id: UUID) -> str:
         """读取当前进程内指定 run 的最新计划输出。
 
         Args:
@@ -185,7 +185,7 @@ class PlanAgent:
         if latest_plan:
             return latest_plan
 
-        turn_record = load_plan_turn_record(run_id)
+        turn_record = await load_plan_turn_record(run_id)
         if turn_record is None:
             return ""
         for item in reversed(turn_record["persisted_messages"]):
@@ -301,7 +301,7 @@ class PlanAgent:
                 },
             )
             response = await llm_with_tools.ainvoke(messages)
-            self._record_llm_usage(run_id, response, iteration_index, call_kind="plan_markdown")
+            await self._record_llm_usage(run_id, response, iteration_index, call_kind="plan_markdown")
             response, invalid_tool_calls = self._llm_provider.sanitize_tool_call_response_for_replay(response)
             messages.append(response)
 
@@ -340,7 +340,7 @@ class PlanAgent:
         )
         messages.append(HumanMessage(content=_plan_iteration_budget_instruction(iteration_budget)))
         final_response = await llm.ainvoke(messages)
-        self._record_llm_usage(
+        await self._record_llm_usage(
             run_id,
             final_response,
             iteration_budget + 1,
@@ -477,7 +477,7 @@ class PlanAgent:
         Returns:
             新建 tool_start 消息 ID。
         """
-        result = append_tool_start_record(run_id, tool_name, tool_args, tool_call_id)
+        result = await append_tool_start_record(run_id, tool_name, tool_args, tool_call_id)
         await self._notify_change(result.get("notification"))
         return str(result.get("message_id") or "")
 
@@ -502,7 +502,7 @@ class PlanAgent:
             success: 工具是否调用成功。
             result_text: 工具返回文本。
         """
-        payloads = append_tool_result_and_progress_record(
+        payloads = await append_tool_result_and_progress_record(
             run_id,
             tool_name=tool_name,
             tool_args=tool_args,
@@ -515,7 +515,7 @@ class PlanAgent:
         for payload in payloads:
             await self._notify_change(payload)
 
-    def _record_llm_usage(
+    async def _record_llm_usage(
         self,
         run_id: UUID,
         response: Any,
@@ -532,7 +532,7 @@ class PlanAgent:
             call_kind: LLM 调用类型。
 
         """
-        record_llm_usage(
+        await record_llm_usage(
             response,
             settings.LLM_MODEL,
             "interactive_stock_research",

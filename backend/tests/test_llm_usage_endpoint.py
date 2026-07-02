@@ -3,38 +3,46 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy import create_engine
+import pytest_asyncio
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+import app.core.database as database_module
 from app.api.endpoints import llm
 import app.crud.llm_usage_log as usage_module
 from app.crud.llm_usage_log import llm_usage_log
 from app.models.llm_usage_log import LLMUsageLog
 
 
-@pytest.fixture
-def llm_usage_db():
-    engine = create_engine(
-        "sqlite://",
+@pytest_asyncio.fixture
+async def llm_usage_db():
+    engine = create_async_engine(
+        "sqlite+aiosqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
-    LLMUsageLog.__table__.create(engine)
-    session_factory = sessionmaker(bind=engine)
-    db = session_factory()
+    async with engine.begin() as conn:
+        await conn.run_sync(LLMUsageLog.__table__.create)
+    session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    original_async_session_local = database_module.AsyncSessionLocal
+    database_module.AsyncSessionLocal = session_factory
     try:
-        yield db, session_factory
+        yield session_factory
     finally:
-        db.close()
-        engine.dispose()
+        database_module.AsyncSessionLocal = original_async_session_local
+        await engine.dispose()
 
 
-def test_llm_usage_stats_include_cached_and_reasoning_tokens(llm_usage_db):
-    db, _session_factory = llm_usage_db
+async def _single_llm_usage_row(session_factory):
+    async with session_factory() as db:
+        return (await db.execute(select(LLMUsageLog))).scalar_one()
 
-    llm_usage_log.create(
-        db,
+
+@pytest.mark.asyncio
+async def test_llm_usage_stats_include_cached_and_reasoning_tokens(llm_usage_db):
+    await llm_usage_log.create(
         model="deepseek-test",
         role="generic",
         input_tokens=100,
@@ -43,8 +51,7 @@ def test_llm_usage_stats_include_cached_and_reasoning_tokens(llm_usage_db):
         cached_tokens=60,
         reasoning_tokens=5,
     )
-    llm_usage_log.create(
-        db,
+    await llm_usage_log.create(
         model="deepseek-test",
         role="generic",
         input_tokens=50,
@@ -54,7 +61,7 @@ def test_llm_usage_stats_include_cached_and_reasoning_tokens(llm_usage_db):
         reasoning_tokens=3,
     )
 
-    stats = llm_usage_log.get_stats(db)
+    stats = await llm_usage_log.get_stats()
 
     assert stats["total_calls"] == 2
     assert stats["input_tokens"] == 150
@@ -66,11 +73,9 @@ def test_llm_usage_stats_include_cached_and_reasoning_tokens(llm_usage_db):
     assert stats["by_role"] == {"generic": 2}
 
 
-def test_llm_usage_stats_include_cache_miss_and_observability_breakdowns(llm_usage_db):
-    db, _session_factory = llm_usage_db
-
-    llm_usage_log.create(
-        db,
+@pytest.mark.asyncio
+async def test_llm_usage_stats_include_cache_miss_and_observability_breakdowns(llm_usage_db):
+    await llm_usage_log.create(
         model="provider-test",
         role="fundamental",
         input_tokens=100,
@@ -86,8 +91,7 @@ def test_llm_usage_stats_include_cache_miss_and_observability_breakdowns(llm_usa
         cache_lane="research",
         api_key_alias="research_llm_api_key",
     )
-    llm_usage_log.create(
-        db,
+    await llm_usage_log.create(
         model="provider-test",
         role="fundamental_tool_summary",
         input_tokens=50,
@@ -104,7 +108,7 @@ def test_llm_usage_stats_include_cache_miss_and_observability_breakdowns(llm_usa
         api_key_alias="shared_llm_api_key",
     )
 
-    stats = llm_usage_log.get_stats(db)
+    stats = await llm_usage_log.get_stats()
 
     assert stats["cache_miss_tokens"] == 80
     assert stats["by_workflow"]["debate_analysis"] == {
@@ -129,10 +133,10 @@ def test_llm_usage_stats_include_cache_miss_and_observability_breakdowns(llm_usa
     assert stats["by_role_detail"]["fundamental"]["iteration_indexes"] == [1]
 
 
-def test_record_llm_usage_extracts_nested_usage_detail_tokens(monkeypatch, llm_usage_db):
-    db, session_factory = llm_usage_db
+@pytest.mark.asyncio
+async def test_record_llm_usage_extracts_nested_usage_detail_tokens(llm_usage_db):
+    session_factory = llm_usage_db
     real_usage_module = reload(usage_module)
-    monkeypatch.setattr("app.core.database.SessionLocal", session_factory)
     response = SimpleNamespace(
         usage=SimpleNamespace(
             prompt_tokens=100,
@@ -143,9 +147,9 @@ def test_record_llm_usage_extracts_nested_usage_detail_tokens(monkeypatch, llm_u
         )
     )
 
-    real_usage_module.record_llm_usage(response, "deepseek-test", "generic")
+    await real_usage_module.record_llm_usage(response, "deepseek-test", "generic")
 
-    row = db.query(LLMUsageLog).one()
+    row = await _single_llm_usage_row(session_factory)
     assert row.input_tokens == 100
     assert row.output_tokens == 25
     assert row.total_tokens == 125
@@ -154,10 +158,10 @@ def test_record_llm_usage_extracts_nested_usage_detail_tokens(monkeypatch, llm_u
     assert row.reasoning_tokens == 7
 
 
-def test_record_llm_usage_extracts_provider_cache_hit_and_miss_tokens(monkeypatch, llm_usage_db):
-    db, session_factory = llm_usage_db
+@pytest.mark.asyncio
+async def test_record_llm_usage_extracts_provider_cache_hit_and_miss_tokens(llm_usage_db):
+    session_factory = llm_usage_db
     real_usage_module = reload(usage_module)
-    monkeypatch.setattr("app.core.database.SessionLocal", session_factory)
     response = SimpleNamespace(
         usage=SimpleNamespace(
             prompt_tokens=100,
@@ -169,19 +173,19 @@ def test_record_llm_usage_extracts_provider_cache_hit_and_miss_tokens(monkeypatc
         )
     )
 
-    real_usage_module.record_llm_usage(response, "deepseek-test", "generic")
+    await real_usage_module.record_llm_usage(response, "deepseek-test", "generic")
 
-    row = db.query(LLMUsageLog).one()
+    row = await _single_llm_usage_row(session_factory)
     assert row.input_tokens == 100
     assert row.cached_tokens == 55
     assert row.cache_miss_tokens == 45
     assert row.reasoning_tokens == 9
 
 
-def test_record_llm_usage_extracts_langchain_response_metadata_cache_hits(monkeypatch, llm_usage_db):
-    db, session_factory = llm_usage_db
+@pytest.mark.asyncio
+async def test_record_llm_usage_extracts_langchain_response_metadata_cache_hits(llm_usage_db):
+    session_factory = llm_usage_db
     real_usage_module = reload(usage_module)
-    monkeypatch.setattr("app.core.database.SessionLocal", session_factory)
     response = SimpleNamespace(
         usage_metadata={
             "input_tokens": 100,
@@ -200,19 +204,19 @@ def test_record_llm_usage_extracts_langchain_response_metadata_cache_hits(monkey
         },
     )
 
-    real_usage_module.record_llm_usage(response, "deepseek-test", "generic")
+    await real_usage_module.record_llm_usage(response, "deepseek-test", "generic")
 
-    row = db.query(LLMUsageLog).one()
+    row = await _single_llm_usage_row(session_factory)
     assert row.input_tokens == 100
     assert row.cached_tokens == 55
     assert row.cache_miss_tokens == 45
     assert row.reasoning_tokens == 9
 
 
-def test_record_llm_usage_extracts_langchain_cache_read_tokens(monkeypatch, llm_usage_db):
-    db, session_factory = llm_usage_db
+@pytest.mark.asyncio
+async def test_record_llm_usage_extracts_langchain_cache_read_tokens(llm_usage_db):
+    session_factory = llm_usage_db
     real_usage_module = reload(usage_module)
-    monkeypatch.setattr("app.core.database.SessionLocal", session_factory)
     response = SimpleNamespace(
         usage_metadata={
             "input_tokens": 100,
@@ -222,17 +226,17 @@ def test_record_llm_usage_extracts_langchain_cache_read_tokens(monkeypatch, llm_
         }
     )
 
-    real_usage_module.record_llm_usage(response, "deepseek-test", "generic")
+    await real_usage_module.record_llm_usage(response, "deepseek-test", "generic")
 
-    row = db.query(LLMUsageLog).one()
+    row = await _single_llm_usage_row(session_factory)
     assert row.cached_tokens == 35
     assert row.cache_miss_tokens == 65
 
 
-def test_record_llm_usage_persists_observability_metadata(monkeypatch, llm_usage_db):
-    db, session_factory = llm_usage_db
+@pytest.mark.asyncio
+async def test_record_llm_usage_persists_observability_metadata(llm_usage_db):
+    session_factory = llm_usage_db
     real_usage_module = reload(usage_module)
-    monkeypatch.setattr("app.core.database.SessionLocal", session_factory)
     response = SimpleNamespace(
         usage=SimpleNamespace(
             prompt_tokens=100,
@@ -243,7 +247,7 @@ def test_record_llm_usage_persists_observability_metadata(monkeypatch, llm_usage
         )
     )
 
-    real_usage_module.record_llm_usage(
+    await real_usage_module.record_llm_usage(
         response,
         "provider-test",
         "fundamental",
@@ -255,7 +259,7 @@ def test_record_llm_usage_persists_observability_metadata(monkeypatch, llm_usage
         api_key_alias="research_llm_api_key",
     )
 
-    row = db.query(LLMUsageLog).one()
+    row = await _single_llm_usage_row(session_factory)
     assert row.workflow == "debate_analysis"
     assert row.stage == "layer1"
     assert row.call_kind == "agent"
@@ -316,11 +320,11 @@ async def test_get_llm_usage_stats_merges_backend_and_memory_usage(monkeypatch):
         },
     }
 
-    monkeypatch.setattr(llm, "llm_usage_log", MagicMock(get_stats=MagicMock(return_value=backend_stats)))
+    monkeypatch.setattr(llm, "llm_usage_log", MagicMock(get_stats=AsyncMock(return_value=backend_stats)))
     monkeypatch.setattr(llm.memory_client, "get_usage_stats", AsyncMock(return_value=memory_stats))
     monkeypatch.setattr(llm.memory_client, "get_last_error", MagicMock(return_value=None))
 
-    result = await llm.get_llm_usage_stats(db=MagicMock())
+    result = await llm.get_llm_usage_stats()
 
     assert result["total_calls"] == 13
     assert result["input_tokens"] == 600
@@ -366,11 +370,11 @@ async def test_get_llm_usage_stats_surfaces_memory_fetch_error_without_breaking(
         "error_type": "HTTPStatusError",
     }
 
-    monkeypatch.setattr(llm, "llm_usage_log", MagicMock(get_stats=MagicMock(return_value=backend_stats)))
+    monkeypatch.setattr(llm, "llm_usage_log", MagicMock(get_stats=AsyncMock(return_value=backend_stats)))
     monkeypatch.setattr(llm.memory_client, "get_usage_stats", AsyncMock(return_value={}))
     monkeypatch.setattr(llm.memory_client, "get_last_error", MagicMock(return_value=memory_error))
 
-    result = await llm.get_llm_usage_stats(db=MagicMock())
+    result = await llm.get_llm_usage_stats()
 
     assert result["total_calls"] == 4
     assert result["input_tokens"] == 100
@@ -384,13 +388,13 @@ async def test_get_llm_usage_stats_surfaces_memory_fetch_error_without_breaking(
 
 @pytest.mark.asyncio
 async def test_clear_llm_usage_stats_clears_backend_and_memory(monkeypatch):
-    backend_usage = MagicMock(clear=MagicMock(return_value=5))
+    backend_usage = MagicMock(clear=AsyncMock(return_value=5))
     memory_result = {"status": "ok", "deleted": 3}
     monkeypatch.setattr(llm, "llm_usage_log", backend_usage)
     monkeypatch.setattr(llm.memory_client, "clear_usage_stats", AsyncMock(return_value=memory_result))
     monkeypatch.setattr(llm.memory_client, "get_last_error", MagicMock(return_value=None))
 
-    result = await llm.clear_llm_usage_stats(db=MagicMock())
+    result = await llm.clear_llm_usage_stats()
 
     assert result == {
         "status": "ok",
@@ -408,11 +412,11 @@ async def test_clear_llm_usage_stats_returns_partial_when_memory_clear_fails(mon
         "message": "503 Server Error",
         "error_type": "HTTPStatusError",
     }
-    monkeypatch.setattr(llm, "llm_usage_log", MagicMock(clear=MagicMock(return_value=5)))
+    monkeypatch.setattr(llm, "llm_usage_log", MagicMock(clear=AsyncMock(return_value=5)))
     monkeypatch.setattr(llm.memory_client, "clear_usage_stats", AsyncMock(return_value={}))
     monkeypatch.setattr(llm.memory_client, "get_last_error", MagicMock(return_value=memory_error))
 
-    result = await llm.clear_llm_usage_stats(db=MagicMock())
+    result = await llm.clear_llm_usage_stats()
 
     assert result == {
         "status": "partial",

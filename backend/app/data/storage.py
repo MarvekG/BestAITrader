@@ -1,6 +1,8 @@
 from typing import Dict, Any, List, Optional
 from datetime import datetime, date
-from app.core.database import SessionLocal
+from sqlalchemy import select
+
+from app.core import database as database_module
 from app.models.data_storage import (
     StockBasic,
     KlineData,
@@ -25,7 +27,7 @@ logger = get_logger(__name__)
 class DataStorageService:
     """数据存储服务，用于处理不同类型数据的存储逻辑"""
 
-    def get_stock_realtime_market(self, stock_code: str) -> Optional[Dict[str, Any]]:
+    async def get_stock_realtime_market(self, stock_code: str) -> Optional[Dict[str, Any]]:
         """
         获取指定股票最近一条实时行情，供交易撮合和前端推送使用。
 
@@ -39,14 +41,14 @@ class DataStorageService:
             return None
 
         try:
-            with SessionLocal() as db:
-                record = db.query(StockRealtimeMarket).filter(
+            async with database_module.AsyncSessionLocal() as db:
+                record = (await db.execute(select(StockRealtimeMarket).where(
                     StockRealtimeMarket.stock_code == stock_code
                 ).order_by(
                     StockRealtimeMarket.timestamp.desc(),
                     StockRealtimeMarket.updated_at.desc(),
                     StockRealtimeMarket.created_at.desc(),
-                ).first()
+                ))).scalars().first()
                 if not record:
                     return None
 
@@ -62,7 +64,7 @@ class DataStorageService:
             logger.error("Failed to get realtime market data", extra={"stock_code": stock_code, "error": str(e)})
             return None
 
-    def save_stock_basic(self, data: Dict[str, Any]) -> bool:
+    async def save_stock_basic(self, data: Dict[str, Any]) -> bool:
         """存储股票基本信息
 
         Args:
@@ -72,7 +74,7 @@ class DataStorageService:
             是否存储成功
         """
         try:
-            with SessionLocal() as db:
+            async with database_module.AsyncSessionLocal() as db:
                 stock_code = data.get("stock_code")
                 if not stock_code:
                     logger.error("Stock code is required for stock basic information")
@@ -90,7 +92,9 @@ class DataStorageService:
                         list_date = None
 
                 # 查找现有记录
-                stock_basic = db.query(StockBasic).filter(StockBasic.stock_code == stock_code).first()
+                stock_basic = (await db.execute(
+                    select(StockBasic).where(StockBasic.stock_code == stock_code)
+                )).scalars().first()
 
                 if stock_basic:
                     # 更新现有记录
@@ -121,13 +125,13 @@ class DataStorageService:
                     )
                     db.add(stock_basic)
 
-                db.commit()
+                await db.commit()
                 return True
         except Exception as e:
             logger.error(f"Failed to save stock basic info {data.get('stock_code')}: {e}")
             return False
 
-    def save_kline_data(
+    async def save_kline_data(
         self,
         stock_code: str,
         data: List[Dict[str, Any]],
@@ -146,7 +150,7 @@ class DataStorageService:
             是否存储成功
         """
         try:
-            with SessionLocal() as db:
+            async with database_module.AsyncSessionLocal() as db:
                 if not stock_code or not data:
                     logger.error("Stock code and data are required for kline data")
                     return False
@@ -174,11 +178,11 @@ class DataStorageService:
                             continue
 
                     # 查找现有记录
-                    kline_data = db.query(KlineData).filter(
+                    kline_data = (await db.execute(select(KlineData).where(
                         KlineData.stock_code == stock_code,
                         KlineData.date == kline_date,
                         KlineData.freq == freq
-                    ).first()
+                    ))).scalars().first()
 
                     if kline_data:
                         # 更新现有记录
@@ -209,16 +213,14 @@ class DataStorageService:
                         )
                         db.add(kline_data)
 
-                db.commit()
+                await db.commit()
                 logger.info(f"Saved kline data for {stock_code}, frequency: {freq}")
                 return True
         except Exception as e:
             logger.error(f"Failed to save kline data: {e}")
-            if db:
-                db.rollback()
             return False
 
-    def save_industry_data(self, industry_name: str, data: Dict[str, Any]) -> bool:
+    async def save_industry_data(self, industry_name: str, data: Dict[str, Any]) -> bool:
         """存储行业数据
 
         Args:
@@ -229,7 +231,7 @@ class DataStorageService:
             是否存储成功
         """
         try:
-            with SessionLocal() as db:
+            async with database_module.AsyncSessionLocal() as db:
                 if not industry_name or not data:
                     logger.error("Industry name and data are required for industry data")
                     return False
@@ -253,9 +255,9 @@ class DataStorageService:
                 # However, for now, let's assume data might have it or use simple hash/name.
                 board_code = data.get("board_code", data.get("code", board_name))
 
-                industry_data = db.query(IndustryData).filter(
+                industry_data = (await db.execute(select(IndustryData).where(
                     IndustryData.board_name == board_name
-                ).first()
+                ))).scalars().first()
 
                 if industry_data:
                     # 更新现有记录
@@ -281,29 +283,27 @@ class DataStorageService:
                     )
                     db.add(industry_data)
 
-                db.commit()
+                await db.commit()
                 logger.info(f"Saved industry data for {industry_name}")
                 return True
         except Exception as e:
             logger.error(f"Failed to save industry data: {e}")
-            if db:
-                db.rollback()
             return False
 
-    def save_northbound_data(self, stock_code: str, data: Dict[str, Any]) -> bool:
+    async def save_northbound_data(self, stock_code: str, data: Dict[str, Any]) -> bool:
         """存储北向资金数据"""
         try:
-            with SessionLocal() as db:
+            async with database_module.AsyncSessionLocal() as db:
                 date_val = data.get("date")
                 if not date_val:
                     date_val = datetime.now().date()
                 elif isinstance(date_val, str):
                     date_val = datetime.strptime(date_val, "%Y-%m-%d").date()
 
-                nb_data = db.query(NorthboundData).filter(
+                nb_data = (await db.execute(select(NorthboundData).where(
                     NorthboundData.stock_code == stock_code,
                     NorthboundData.date == date_val
-                ).first()
+                ))).scalars().first()
 
                 if nb_data:
                     nb_data.hold_shares = data.get("hold_shares", nb_data.hold_shares)
@@ -331,16 +331,16 @@ class DataStorageService:
                         data_source=data.get("data_source", "unknown")
                     )
                     db.add(nb_data)
-                db.commit()
+                await db.commit()
                 return True
         except Exception as e:
             logger.error(f"Failed to save northbound data for {stock_code}: {e}")
             return False
 
-    def save_dragon_tiger_data(self, stock_code: str, data: Dict[str, Any]) -> bool:
+    async def save_dragon_tiger_data(self, stock_code: str, data: Dict[str, Any]) -> bool:
         """存储龙虎榜数据"""
         try:
-            with SessionLocal() as db:
+            async with database_module.AsyncSessionLocal() as db:
                 records = data.get("data", [])
                 if not isinstance(records, list):
                     return False
@@ -363,11 +363,11 @@ class DataStorageService:
                     listing_reason = record.get("listing_reason", "unknown")
 
                     # 查找现有记录
-                    dt_data = db.query(DragonTigerData).filter(
+                    dt_data = (await db.execute(select(DragonTigerData).where(
                         DragonTigerData.stock_code == stock_code,
                         DragonTigerData.trade_date == trade_date,
                         DragonTigerData.listing_reason == listing_reason
-                    ).first()
+                    ))).scalars().first()
 
                     fields = [
                         "sequence_number", "stock_name", "interpretation", "close_price",
@@ -400,19 +400,19 @@ class DataStorageService:
                                 setattr(new_dt, field, record[field])
                         db.add(new_dt)
 
-                db.commit()
+                await db.commit()
                 return True
         except Exception as e:
             logger.error(f"Failed to save dragon tiger data for {stock_code}: {e}")
             return False
 
-    def get_northbound_data(self, stock_code: str, limit: int = 1) -> Optional[List[Dict[str, Any]]]:
+    async def get_northbound_data(self, stock_code: str, limit: int = 1) -> Optional[List[Dict[str, Any]]]:
         """获取北向资金数据"""
         try:
-            with SessionLocal() as db:
-                data_list = db.query(NorthboundData).filter(
+            async with database_module.AsyncSessionLocal() as db:
+                data_list = (await db.execute(select(NorthboundData).where(
                     NorthboundData.stock_code == stock_code
-                ).order_by(NorthboundData.date.desc()).limit(limit).all()
+                ).order_by(NorthboundData.date.desc()).limit(limit))).scalars().all()
 
                 return [{
                     "stock_code": d.stock_code,
@@ -431,13 +431,13 @@ class DataStorageService:
             logger.error(f"Failed to get northbound data for {stock_code}: {e}")
             return None
 
-    def get_dragon_tiger_data(self, stock_code: str, limit: int = 1) -> Optional[List[Dict[str, Any]]]:
+    async def get_dragon_tiger_data(self, stock_code: str, limit: int = 1) -> Optional[List[Dict[str, Any]]]:
         """获取龙虎榜数据"""
         try:
-            with SessionLocal() as db:
-                data_list = db.query(DragonTigerData).filter(
+            async with database_module.AsyncSessionLocal() as db:
+                data_list = (await db.execute(select(DragonTigerData).where(
                     DragonTigerData.stock_code == stock_code
-                ).order_by(DragonTigerData.trade_date.desc()).limit(limit).all()
+                ).order_by(DragonTigerData.trade_date.desc()).limit(limit))).scalars().all()
 
                 return [{
                     "sequence_number": d.sequence_number,
@@ -468,7 +468,7 @@ class DataStorageService:
             logger.error(f"Failed to get dragon tiger data for {stock_code}: {e}")
             return None
 
-    def get_dragon_tiger_data_by_date(self, start_date: date, end_date: date = None) -> Optional[List[Dict[str, Any]]]:
+    async def get_dragon_tiger_data_by_date(self, start_date: date, end_date: date = None) -> Optional[List[Dict[str, Any]]]:
         """根据日期获取龙虎榜数据
 
         Args:
@@ -479,18 +479,18 @@ class DataStorageService:
             龙虎榜数据列表
         """
         try:
-            with SessionLocal() as db:
-                query = db.query(DragonTigerData).filter(
+            async with database_module.AsyncSessionLocal() as db:
+                query = select(DragonTigerData).where(
                     DragonTigerData.trade_date >= start_date
                 )
 
                 if end_date:
-                    query = query.filter(DragonTigerData.trade_date <= end_date)
+                    query = query.where(DragonTigerData.trade_date <= end_date)
                 else:
                     # 如果没有结束日期，就只查开始日期当天
-                    query = query.filter(DragonTigerData.trade_date <= start_date)
+                    query = query.where(DragonTigerData.trade_date <= start_date)
 
-                data_list = query.order_by(DragonTigerData.trade_date.desc()).all()
+                data_list = (await db.execute(query.order_by(DragonTigerData.trade_date.desc()))).scalars().all()
 
                 return [{
                     "sequence_number": d.sequence_number,
@@ -521,34 +521,41 @@ class DataStorageService:
             logger.error(f"Failed to get dragon tiger data by date {start_date}: {e}")
             return None
 
-    def get_stock_data_from_db(self, stock_code: str) -> Optional[Dict[str, Any]]:
+    async def get_stock_data_from_db(self, stock_code: str) -> Optional[Dict[str, Any]]:
         """从数据库获取完整的股票数据"""
         try:
             # 1. 获取基本信息
-            basic = self.get_stock_basic(stock_code)
+            basic = await self.get_stock_basic(stock_code)
             if not basic:
                 return None
 
             # 2. 获取实时行情
-            realtime = self.get_stock_realtime_market(stock_code)
+            realtime = await self.get_stock_realtime_market(stock_code)
             if not realtime:
                 return None
 
             # 3. 获取K线数据 (用于计算技术指标)
-            klines = self.get_latest_kline_data(stock_code, limit=180)
+            klines = await self.get_latest_kline_data(stock_code, limit=180)
             kline_dict = {"data": klines} if klines else None
 
             # 4. 获取北向资金
-            northbound = self.get_northbound_data(stock_code, limit=1)
+            northbound = await self.get_northbound_data(stock_code, limit=1)
             nb_data = northbound[0] if northbound else {}
 
             # 5. 获取龙虎榜
-            dragon_tiger = self.get_dragon_tiger_data(stock_code, limit=1)
+            dragon_tiger = await self.get_dragon_tiger_data(stock_code, limit=1)
             dt_data = dragon_tiger[0] if dragon_tiger else {}
 
             # 6. 获取行业数据
             industry_name = basic.get("industry", "未知")
-            industry_data = self.get_industry_data_latest(industry_name)
+            async with database_module.AsyncSessionLocal() as db:
+                industry_record = (await db.execute(
+                    select(IndustryData)
+                    .where(IndustryData.board_name == industry_name)
+                    .order_by(IndustryData.timestamp.desc())
+                    .limit(1)
+                )).scalars().first()
+                industry_data = self._to_dict(industry_record) if industry_record else None
 
             # 组装数据结构 (与 DataCollector.get_stock_data 返回结构一致)
             stock_data = {
@@ -609,7 +616,7 @@ class DataStorageService:
             logger.error(f"Failed to get complete stock data from DB for {stock_code}: {e}")
             return None
 
-    def get_stock_basic(self, stock_code: str) -> Optional[Dict[str, Any]]:
+    async def get_stock_basic(self, stock_code: str) -> Optional[Dict[str, Any]]:
         """获取股票基本信息
 
         Args:
@@ -619,8 +626,10 @@ class DataStorageService:
             股票基本信息数据
         """
         try:
-            with SessionLocal() as db:
-                stock_basic = db.query(StockBasic).filter(StockBasic.stock_code == stock_code).first()
+            async with database_module.AsyncSessionLocal() as db:
+                stock_basic = (await db.execute(
+                    select(StockBasic).where(StockBasic.stock_code == stock_code)
+                )).scalars().first()
                 if stock_basic:
                     return {
                         "id": str(stock_basic.id),
@@ -644,7 +653,7 @@ class DataStorageService:
             logger.error(f"Failed to get stock basic information for {stock_code}: {e}")
             return None
 
-    def get_kline_data(
+    async def get_kline_data(
         self,
         stock_code: str,
         start_date: str,
@@ -663,7 +672,7 @@ class DataStorageService:
             K线数据列表
         """
         try:
-            with SessionLocal() as db:
+            async with database_module.AsyncSessionLocal() as db:
 
                 # 转换日期格式，支持 YYYY-MM-DD 和 YYYYMMDD 两种格式
                 try:
@@ -681,12 +690,12 @@ class DataStorageService:
                     end = datetime.strptime(end_date, "%Y%m%d").date()
 
                 # 查询K线数据
-                kline_data_list = db.query(KlineData).filter(
+                kline_data_list = (await db.execute(select(KlineData).where(
                     KlineData.stock_code == stock_code,
                     KlineData.date >= start,
                     KlineData.date <= end,
                     KlineData.freq == freq
-                ).order_by(KlineData.date).all()
+                ).order_by(KlineData.date))).scalars().all()
 
                 # 转换为字典列表
                 result = []
@@ -709,7 +718,7 @@ class DataStorageService:
             logger.error(f"Failed to get kline data for {stock_code}: {e}")
             return None
 
-    def get_latest_kline_data(
+    async def get_latest_kline_data(
         self,
         stock_code: str,
         freq: str = "D",
@@ -726,13 +735,13 @@ class DataStorageService:
             K线数据列表
         """
         try:
-            with SessionLocal() as db:
+            async with database_module.AsyncSessionLocal() as db:
 
                 # 查询最新K线数据
-                kline_data_list = db.query(KlineData).filter(
+                kline_data_list = (await db.execute(select(KlineData).where(
                     KlineData.stock_code == stock_code,
                     KlineData.freq == freq
-                ).order_by(KlineData.date.desc()).limit(limit).all()
+                ).order_by(KlineData.date.desc()).limit(limit))).scalars().all()
 
                 # 转换为字典列表，并反转顺序，使其按日期升序排列
                 result = []
@@ -755,7 +764,7 @@ class DataStorageService:
             logger.error(f"Failed to get latest kline data for {stock_code}: {e}")
             return None
 
-    def check_kline_data_exists(self, stock_code: str, date: str, freq: str = "D") -> bool:
+    async def check_kline_data_exists(self, stock_code: str, date: str, freq: str = "D") -> bool:
         """检查指定日期的K线数据是否存在
 
         Args:
@@ -767,84 +776,84 @@ class DataStorageService:
             是否存在
         """
         try:
-            with SessionLocal() as db:
+            async with database_module.AsyncSessionLocal() as db:
 
                 # 转换日期格式
                 check_date = datetime.strptime(date, "%Y-%m-%d").date()
 
                 # 查询数据是否存在
-                exists = db.query(KlineData).filter(
+                exists = (await db.execute(select(KlineData).where(
                     KlineData.stock_code == stock_code,
                     KlineData.date == check_date,
                     KlineData.freq == freq
-                ).first() is not None
+                ))).scalars().first() is not None
 
                 return exists
         except Exception as e:
             logger.error(f"Failed to check kline data existence for {stock_code} on {date}: {e}")
             return False
 
-    def get_stock_limit_up_pool(self, trade_date: Optional[date] = None, limit: int = 100) -> List[Dict[str, Any]]:
+    async def get_stock_limit_up_pool(self, trade_date: Optional[date] = None, limit: int = 100) -> List[Dict[str, Any]]:
         """获取涨停池数据"""
-        with SessionLocal() as db:
-            query = db.query(StockLimitUpPool)
+        async with database_module.AsyncSessionLocal() as db:
+            query = select(StockLimitUpPool)
             if trade_date:
-                query = query.filter(StockLimitUpPool.trade_date == trade_date)
+                query = query.where(StockLimitUpPool.trade_date == trade_date)
             else:
                 # 获取最新交易日
-                latest = db.query(StockLimitUpPool.trade_date).order_by(StockLimitUpPool.trade_date.desc()).first()
+                latest = (await db.execute(select(StockLimitUpPool.trade_date).order_by(StockLimitUpPool.trade_date.desc()))).first()
                 if latest:
-                    query = query.filter(StockLimitUpPool.trade_date == latest[0])
+                    query = query.where(StockLimitUpPool.trade_date == latest[0])
 
-            records = query.order_by(StockLimitUpPool.limit_up_days.desc()).limit(limit).all()
+            records = (await db.execute(query.order_by(StockLimitUpPool.limit_up_days.desc()).limit(limit))).scalars().all()
             return [self._to_dict(r) for r in records]
 
-    def get_stock_money_flow(self, stock_code: str, limit: int = 10) -> List[Dict[str, Any]]:
+    async def get_stock_money_flow(self, stock_code: str, limit: int = 10) -> List[Dict[str, Any]]:
         """获取个股资金流向"""
-        with SessionLocal() as db:
-            records = db.query(StockMoneyFlow).filter(
+        async with database_module.AsyncSessionLocal() as db:
+            records = (await db.execute(select(StockMoneyFlow).where(
                 StockMoneyFlow.stock_code == stock_code
-            ).order_by(StockMoneyFlow.trade_date.desc()).limit(limit).all()
+            ).order_by(StockMoneyFlow.trade_date.desc()).limit(limit))).scalars().all()
             return [self._to_dict(r) for r in records]
 
-    def get_stock_shareholder_count(self, stock_code: str, limit: int = 10) -> List[Dict[str, Any]]:
+    async def get_stock_shareholder_count(self, stock_code: str, limit: int = 10) -> List[Dict[str, Any]]:
         """获取股东人数变动"""
-        with SessionLocal() as db:
-            records = db.query(StockShareholder).filter(
+        async with database_module.AsyncSessionLocal() as db:
+            records = (await db.execute(select(StockShareholder).where(
                 StockShareholder.stock_code == stock_code
-            ).order_by(StockShareholder.end_date.desc()).limit(limit).all()
+            ).order_by(StockShareholder.end_date.desc()).limit(limit))).scalars().all()
             return [self._to_dict(r) for r in records]
 
-    def get_stock_pledge_risk(self, stock_code: str) -> List[Dict[str, Any]]:
+    async def get_stock_pledge_risk(self, stock_code: str) -> List[Dict[str, Any]]:
         """获取个股质押风险"""
-        with SessionLocal() as db:
-            records = db.query(StockPledge).filter(
+        async with database_module.AsyncSessionLocal() as db:
+            records = (await db.execute(select(StockPledge).where(
                 StockPledge.stock_code == stock_code
-            ).order_by(StockPledge.pledge_date.desc()).all()
+            ).order_by(StockPledge.pledge_date.desc()))).scalars().all()
             return [self._to_dict(r) for r in records]
 
-    def get_stock_insider_trading(self, stock_code: str, limit: int = 20) -> List[Dict[str, Any]]:
+    async def get_stock_insider_trading(self, stock_code: str, limit: int = 20) -> List[Dict[str, Any]]:
         """获取大股东增减持"""
-        with SessionLocal() as db:
-            records = db.query(StockInsider).filter(
+        async with database_module.AsyncSessionLocal() as db:
+            records = (await db.execute(select(StockInsider).where(
                 StockInsider.stock_code == stock_code
-            ).order_by(StockInsider.ann_date.desc()).limit(limit).all()
+            ).order_by(StockInsider.ann_date.desc()).limit(limit))).scalars().all()
             return [self._to_dict(r) for r in records]
 
-    def get_stock_lockup_release(self, stock_code: str, limit: int = 10) -> List[Dict[str, Any]]:
+    async def get_stock_lockup_release(self, stock_code: str, limit: int = 10) -> List[Dict[str, Any]]:
         """获取个股解禁日程"""
-        with SessionLocal() as db:
-            records = db.query(StockRelease).filter(
+        async with database_module.AsyncSessionLocal() as db:
+            records = (await db.execute(select(StockRelease).where(
                 StockRelease.stock_code == stock_code
-            ).order_by(StockRelease.release_date.desc()).limit(limit).all()
+            ).order_by(StockRelease.release_date.desc()).limit(limit))).scalars().all()
             return [self._to_dict(r) for r in records]
 
-    def get_stock_margin_data(self, stock_code: str, limit: int = 30) -> List[Dict[str, Any]]:
+    async def get_stock_margin_data(self, stock_code: str, limit: int = 30) -> List[Dict[str, Any]]:
         """获取融资融券数据"""
-        with SessionLocal() as db:
-            records = db.query(StockMargin).filter(
+        async with database_module.AsyncSessionLocal() as db:
+            records = (await db.execute(select(StockMargin).where(
                 StockMargin.stock_code == stock_code
-            ).order_by(StockMargin.trade_date.desc()).limit(limit).all()
+            ).order_by(StockMargin.trade_date.desc()).limit(limit))).scalars().all()
             return [self._to_dict(r) for r in records]
 
     def _to_dict(self, record):

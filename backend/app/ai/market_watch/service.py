@@ -10,6 +10,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from fastapi import BackgroundTasks
+from sqlalchemy import select
 
 from app.ai.llm_engine.debate_concurrency import (
     DebateConcurrencyLimitReached,
@@ -41,7 +42,6 @@ from app.ai.market_watch.schemas import (
 from app.ai.market_watch.settings import get_market_watch_settings
 from app.ai.market_watch.web_sources import fetch_market_watch_documents
 from app.models.account import Account
-from app.models.async_task import AsyncTask
 from app.models.data_storage import StockBasic
 from app.models.market_watch import MarketWatchEvent
 from app.models.position import Position
@@ -154,7 +154,7 @@ async def scan_market_watch(
     Returns:
         Structured scan result with stock, news, AI decision, and launch status.
     """
-    settings = get_market_watch_settings(user_id)
+    settings = await get_market_watch_settings(user_id)
     scan_now = _normalize_shanghai_time(now) if now else _shanghai_now()
     logger.info(
         "Market watch scan started",
@@ -190,7 +190,7 @@ async def scan_market_watch(
             debate_launch={"status": "skipped", "reason": skip_reason},
         )
 
-    scan_context = _load_scan_context(user_id=user_id, settings=settings)
+    scan_context = await _load_scan_context(user_id=user_id, settings=settings)
 
     items = scan_context["items"]
     data_documents, news_documents = await asyncio.gather(
@@ -253,7 +253,7 @@ async def scan_market_watch(
             news_documents=news_document_items,
             account_summary=scan_context["account_summary"],
             positions=scan_context["positions"],
-            recent_debate_launches=_load_recent_debate_launches(
+            recent_debate_launches=await _load_recent_debate_launches(
                 user_id=user_id,
                 now=scan_now,
                 lookback_hours=settings.recent_debate_lookback_hours,
@@ -416,24 +416,27 @@ def _should_evaluate_watch_ai(
     return has_quote_context or has_data_documents or has_news
 
 
-def _load_scan_context(user_id: int, settings: Any) -> dict[str, Any]:
-    with database_module.SessionLocal() as db:
-        stocks = (
-            db.query(StockWarehouse)
-            .filter(StockWarehouse.user_id == user_id, StockWarehouse.is_active.is_(True))
+async def _load_scan_context(user_id: int, settings: Any) -> dict[str, Any]:
+    async with database_module.AsyncSessionLocal() as db:
+        stocks_result = await db.execute(
+            select(StockWarehouse)
+            .where(StockWarehouse.user_id == user_id, StockWarehouse.is_active.is_(True))
             .order_by(StockWarehouse.added_at.asc(), StockWarehouse.id.asc())
-            .all()
         )
+        stocks = stocks_result.scalars().all()
         stock_codes = [stock.stock_code for stock in stocks]
         basics = {}
         if stock_codes:
-            basic_rows = db.query(StockBasic).filter(StockBasic.stock_code.in_(stock_codes)).all()
+            basic_rows_result = await db.execute(select(StockBasic).where(StockBasic.stock_code.in_(stock_codes)))
+            basic_rows = basic_rows_result.scalars().all()
             basics = {row.stock_code: row for row in basic_rows}
 
-        account = db.query(Account).filter(Account.user_id == user_id).first()
+        account_result = await db.execute(select(Account).where(Account.user_id == user_id))
+        account = account_result.scalars().first()
         positions = {}
         if account is not None:
-            rows = db.query(Position).filter(Position.account_id == account.account_id).all()
+            rows_result = await db.execute(select(Position).where(Position.account_id == account.account_id))
+            rows = rows_result.scalars().all()
             positions = {row.stock_code: row for row in rows}
 
         items = [
@@ -613,7 +616,7 @@ def _build_watch_ai_payload(
     }
 
 
-def _load_recent_debate_launches(*, user_id: int, now: datetime, lookback_hours: int) -> list[dict[str, Any]]:
+async def _load_recent_debate_launches(*, user_id: int, now: datetime, lookback_hours: int) -> list[dict[str, Any]]:
     """读取近期成功启动过的辩论记录，作为盯盘 AI 判重输入。
 
     Args:
@@ -625,25 +628,28 @@ def _load_recent_debate_launches(*, user_id: int, now: datetime, lookback_hours:
         按时间倒序排列的近期启动记录，包含股票、触发原因、证据摘要和会话 ID。
     """
     cutoff = now - timedelta(hours=lookback_hours)
-    with database_module.SessionLocal() as db:
-        events = (
-            db.query(MarketWatchEvent)
-            .filter(
+    async with database_module.AsyncSessionLocal() as db:
+        events_result = await db.execute(
+            select(MarketWatchEvent)
+            .where(
                 MarketWatchEvent.user_id == user_id,
                 MarketWatchEvent.event_type == "debate_launched",
                 MarketWatchEvent.status == "success",
                 MarketWatchEvent.created_at >= cutoff,
             )
             .order_by(MarketWatchEvent.created_at.desc())
-            .all()
         )
-        failed_session_ids = {
-            str(session_id)
-            for session_id, in db.query(AnalysisSession.session_id).filter(
+        events = events_result.scalars().all()
+        failed_sessions_result = await db.execute(
+            select(AnalysisSession.session_id).where(
                 AnalysisSession.user_id == user_id,
                 AnalysisSession.status == "failed",
                 AnalysisSession.created_at >= cutoff,
             )
+        )
+        failed_session_ids = {
+            str(session_id)
+            for session_id in failed_sessions_result.scalars().all()
         }
 
     launches: list[dict[str, Any]] = []
@@ -746,7 +752,7 @@ async def _maybe_launch_debate(
         )
         return {"status": "skipped", "reason": "invalid_target_stock", "stock_code": stock_code}
 
-    if _find_existing_stock_task(stock_code):
+    if await _find_existing_stock_task(stock_code):
         logger.info(
             "Market watch debate launch skipped",
             extra={
@@ -779,7 +785,7 @@ async def _maybe_launch_debate(
         return {"status": "skipped", "reason": "auto_launch_disabled", "stock_code": stock_code}
 
     cooldown_broken = False
-    cooldown_active = _is_in_cooldown(user_id, stock_code, cooldown_minutes)
+    cooldown_active = await _is_in_cooldown(user_id, stock_code, cooldown_minutes)
     if cooldown_active:
         cooldown_broken = _can_break_cooldown(decision, settings)
         if not cooldown_broken:
@@ -904,8 +910,8 @@ async def _maybe_launch_debate(
     return {"status": "launched", "stock_code": stock_code, "cooldown_broken": cooldown_broken, **launch}
 
 
-def _is_in_cooldown(user_id: int, stock_code: str, cooldown_minutes: int) -> bool:
-    return audit_is_in_cooldown(user_id=user_id, stock_code=stock_code, cooldown_minutes=cooldown_minutes)
+async def _is_in_cooldown(user_id: int, stock_code: str, cooldown_minutes: int) -> bool:
+    return await audit_is_in_cooldown(user_id=user_id, stock_code=stock_code, cooldown_minutes=cooldown_minutes)
 
 
 def _can_break_cooldown(decision: Any, settings: dict[str, Any]) -> bool:
@@ -913,9 +919,8 @@ def _can_break_cooldown(decision: Any, settings: dict[str, Any]) -> bool:
     return decision.confidence >= confidence_threshold
 
 
-def _find_existing_stock_task(stock_code: str) -> bool:
-    with database_module.SessionLocal() as db:
-        return find_running_debate_task_for_stock(db, stock_code) is not None
+async def _find_existing_stock_task(stock_code: str) -> bool:
+    return await find_running_debate_task_for_stock(stock_code) is not None
 
 
 def _apply_stock_debate_preferences(
@@ -997,37 +1002,24 @@ async def _create_and_schedule_debate(
     stock_code = decision.stock_code
     trading_frequency = trading_frequency_label(parameters.trading_frequency)
     trading_strategy = trading_strategy_label(parameters.trading_strategy)
-    with database_module.SessionLocal() as db:
-        ensure_debate_launch_available(db, stock_code)
-        session = crud_session.create(
-            db,
-            obj_in=SessionCreate(
-                user_id=user_id,
-                stock_code=stock_code,
-                trading_frequency=trading_frequency,
-                trading_strategy=trading_strategy,
-                source=session_source,
-            ),
-        )
-        session_id = str(session.session_id)
-        task_parameters = {
-            "session_id": session_id,
-            "stock_code": stock_code,
-            "trading_frequency": trading_frequency,
-            "trading_strategy": trading_strategy,
-        }
-        task_info = task_manager.submit_task(
-            db=db,
-            task_name=format_ai_analysis_task_name(stock_code),
-            task_type="ai_analysis",
-            parameters=task_parameters,
-            allow_concurrent=False,
+    await ensure_debate_launch_available(stock_code)
+    session = await crud_session.create(
+        obj_in=SessionCreate(
             user_id=user_id,
-        )
-        task_id = task_info["task_id"]
-
+            stock_code=stock_code,
+            trading_frequency=trading_frequency,
+            trading_strategy=trading_strategy,
+            source=session_source,
+        ),
+    )
+    session_id = str(session.session_id)
+    task_parameters = {
+        "session_id": session_id,
+        "stock_code": stock_code,
+        "trading_frequency": trading_frequency,
+        "trading_strategy": trading_strategy,
+    }
     launch_kwargs = {
-        "task_id": task_id,
         "session_id": session_id,
         "stock_code": stock_code,
         "trading_frequency": trading_frequency,
@@ -1035,37 +1027,51 @@ async def _create_and_schedule_debate(
         "trigger_reason": decision.trigger_reason,
         "evidence_summary": decision.evidence_summary,
     }
+    task_info = await task_manager.submit_task(
+        task_name=format_ai_analysis_task_name(stock_code),
+        task_type="ai_analysis",
+        parameters=task_parameters,
+        allow_concurrent=False,
+        user_id=user_id,
+        task_func=run_analysis_task if debate_launcher is None else None,
+        task_kwargs=launch_kwargs if debate_launcher is None else None,
+    )
+    task_id = task_info["task_id"]
+
+    if debate_launcher is None:
+        return {"session_id": session_id, "task_id": task_id}
+
+    launch_kwargs["task_id"] = task_id
     try:
         await _schedule_debate_task(
             launch_kwargs=launch_kwargs,
             debate_launcher=debate_launcher,
-            background_tasks=background_tasks,
         )
     except LaunchSchedulingError as exc:
-        _mark_launch_records_failed(session_id=session_id, task_id=task_id, error_message=str(exc))
+        await _mark_launch_records_failed(session_id=session_id, task_id=task_id, error_message=str(exc))
         raise
     return {"session_id": session_id, "task_id": task_id}
 
 
-def _mark_launch_records_failed(*, session_id: str, task_id: str, error_message: str) -> None:
-    with database_module.SessionLocal() as db:
-        task = db.query(AsyncTask).filter(AsyncTask.task_id == task_id).first()
-        if task is not None:
-            task.status = "failed"
-            task.error_message = error_message
-            task.completed_at = datetime.now(timezone.utc)
+async def _mark_launch_records_failed(*, session_id: str, task_id: str, error_message: str) -> None:
+    await task_manager.update_task_status(
+        task_id=task_id,
+        status="failed",
+        error_message=error_message,
+    )
 
-        session = db.query(AnalysisSession).filter(AnalysisSession.session_id == UUID(session_id)).first()
+    async with database_module.AsyncSessionLocal() as db:
+        session_result = await db.execute(select(AnalysisSession).where(AnalysisSession.session_id == UUID(session_id)))
+        session = session_result.scalars().first()
         if session is not None:
             session.status = "failed"
-        db.commit()
+        await db.commit()
 
 
 async def _schedule_debate_task(
     *,
     launch_kwargs: dict[str, Any],
     debate_launcher: Any | None,
-    background_tasks: BackgroundTasks | None,
 ) -> None:
     if debate_launcher is not None:
         try:
@@ -1080,9 +1086,6 @@ async def _schedule_debate_task(
             ) from exc
         return
     try:
-        if background_tasks is not None:
-            background_tasks.add_task(run_analysis_task, **launch_kwargs)
-            return
         raise RuntimeError("market watch debate scheduler is unavailable")
     except Exception as exc:
         raise LaunchSchedulingError(
@@ -1104,7 +1107,7 @@ async def _persist_event(
     task_id: str | None = None,
     error_message: str | None = None,
 ) -> None:
-    with database_module.SessionLocal() as db:
+    async with database_module.AsyncSessionLocal() as db:
         event = MarketWatchEvent(
             user_id=user_id,
             event_type=event_type,
@@ -1117,8 +1120,8 @@ async def _persist_event(
             error_message=error_message,
         )
         db.add(event)
-        db.commit()
-        db.refresh(event)
+        await db.commit()
+        await db.refresh(event)
         payload = {
             "event_id": event.event_id,
             "user_id": event.user_id,

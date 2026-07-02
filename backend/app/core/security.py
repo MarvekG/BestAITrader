@@ -4,10 +4,10 @@ from typing import Optional
 from fastapi import Depends, HTTPException, WebSocket, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_async_db
 from app.core.request_context import set_current_user_id
 from app.crud.user import get_user_by_username
 from app.models.user import User
@@ -28,7 +28,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return encoded_jwt
 
 
-def get_user_from_token(db: Session, token: str) -> User | None:
+async def get_user_from_token(db: AsyncSession, token: str) -> User | None:
     """Return the user represented by a bearer token, or None if invalid."""
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
@@ -38,7 +38,7 @@ def get_user_from_token(db: Session, token: str) -> User | None:
     username: str | None = payload.get("sub")
     if username is None:
         return None
-    return get_user_by_username(db, username=username)
+    return await get_user_by_username(db, username=username)
 
 
 def extract_websocket_bearer_token(websocket: WebSocket, token: str | None = None) -> str | None:
@@ -52,7 +52,7 @@ def extract_websocket_bearer_token(websocket: WebSocket, token: str | None = Non
     return None
 
 
-async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_async_db)):
     """获取当前用户"""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -60,7 +60,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: Session = De
         headers={"WWW-Authenticate": "Bearer"},
     )
     
-    user = get_user_from_token(db, token)
+    user = await get_user_from_token(db, token)
     if user is None:
         raise credentials_exception
     set_current_user_id(user.id)

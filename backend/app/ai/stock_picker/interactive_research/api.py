@@ -53,7 +53,7 @@ def _raise_service_error(exc: Exception) -> None:
     ) from exc
 
 
-def _require_run(run_id: UUID, current_user: User):
+async def _require_run(run_id: UUID, current_user: User):
     """获取当前用户拥有的 run，不存在时抛出 404。
 
     Args:
@@ -66,7 +66,7 @@ def _require_run(run_id: UUID, current_user: User):
     Raises:
         HTTPException: run 不存在时抛出。
     """
-    run = interactive_research_service.get_run(run_id, current_user.id)
+    run = await interactive_research_service.get_run(run_id, current_user.id)
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_t("errors.run_not_found"))
     return run
@@ -103,7 +103,7 @@ async def create_interactive_research_run(
         run=InteractiveResearchRunSummary(**interactive_research_service.serialize_run_summary(run)),
         messages=[
             InteractiveResearchMessageResponse(**interactive_research_service.serialize_message(item))
-            for item in interactive_research_service.get_messages(run.run_id, current_user.id)
+            for item in await interactive_research_service.get_messages(run.run_id, current_user.id)
         ],
     )
 
@@ -120,7 +120,7 @@ async def list_interactive_research_runs(
     Returns:
         当前用户的 run 摘要列表。
     """
-    runs = interactive_research_service.list_runs(current_user.id)
+    runs = await interactive_research_service.list_runs(current_user.id)
     return [InteractiveResearchRunSummary(**interactive_research_service.serialize_run_summary(run)) for run in runs]
 
 
@@ -141,7 +141,7 @@ async def get_interactive_research_run(
     Raises:
         HTTPException: run 不存在时抛出。
     """
-    run = _require_run(run_id, current_user)
+    run = await _require_run(run_id, current_user)
     return InteractiveResearchRunSummary(**interactive_research_service.serialize_run_summary(run))
 
 
@@ -162,7 +162,7 @@ async def delete_interactive_research_run(
     Raises:
         HTTPException: run 不存在时抛出。
     """
-    deleted = interactive_research_service.delete_run(run_id, current_user.id)
+    deleted = await interactive_research_service.delete_run(run_id, current_user.id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_t("errors.run_not_found"))
     return {"message": _t("messages.run_deleted")}
@@ -185,8 +185,8 @@ async def get_interactive_research_messages(
     Raises:
         HTTPException: run 不存在时抛出。
     """
-    _require_run(run_id, current_user)
-    messages = interactive_research_service.get_messages(run_id, current_user.id)
+    await _require_run(run_id, current_user)
+    messages = await interactive_research_service.get_messages(run_id, current_user.id)
     return [
         InteractiveResearchMessageResponse(**interactive_research_service.serialize_message(item))
         for item in messages
@@ -229,7 +229,7 @@ async def append_interactive_research_message(
         )
     except Exception as exc:
         _raise_service_error(exc)
-    run = _require_run(run_id, current_user)
+    run = await _require_run(run_id, current_user)
     return InteractiveResearchMessageAppendResponse(
         run=InteractiveResearchRunSummary(**interactive_research_service.serialize_run_summary(run)),
         message=InteractiveResearchMessageResponse(**interactive_research_service.serialize_message(message)),
@@ -277,6 +277,6 @@ async def run_interactive_research_action(
         run=InteractiveResearchRunSummary(**interactive_research_service.serialize_run_summary(run)),
         messages=[
             InteractiveResearchMessageResponse(**interactive_research_service.serialize_message(item))
-            for item in interactive_research_service.get_messages(run_id, current_user.id)
+            for item in await interactive_research_service.get_messages(run_id, current_user.id)
         ],
     )

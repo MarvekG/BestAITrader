@@ -66,7 +66,7 @@ async def search(
     Returns:
         Normalized NewsAPI search results.
     """
-    api_keys = get_data_source_config_list(NEWS_API_KEY_SETTING_KEY)
+    api_keys = await get_data_source_config_list(NEWS_API_KEY_SETTING_KEY)
     return await search_with_api_keys(api_keys, keyword, limit, from_date, to_date)
 
 

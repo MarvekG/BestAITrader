@@ -78,6 +78,17 @@ def skills_root(tmp_path, monkeypatch):
     return root
 
 
+@pytest.fixture(autouse=True)
+def no_skill_script_db_config_lookup(monkeypatch):
+    async def _empty_data_source_config(_key: str) -> str:
+        return ""
+
+    monkeypatch.setattr(
+        "app.ai.agentic.skills_loader.skill_tools.get_data_source_config_value",
+        _empty_data_source_config,
+    )
+
+
 def test_discover_skills_reads_manifest(skills_root):
     skills = discover_skills()
 
@@ -368,7 +379,7 @@ async def test_run_skill_script_uses_whitelisted_environment(skills_root, monkey
     monkeypatch.setenv("LLM_API_KEY", "llm-secret")
     monkeypatch.setenv("TAVILY_API_KEY", "tavily-secret")
 
-    def _fake_data_source_config(key: str) -> str:
+    async def _fake_data_source_config(key: str) -> str:
         values = {
             "data_sources.tushare.api_url": "https://db.example.invalid",
             "data_sources.tushare.token": "db-token",

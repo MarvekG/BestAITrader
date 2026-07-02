@@ -8,8 +8,8 @@ from typing import Any, Dict, List
 from uuid import UUID
 import uuid
 
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.experience.horizons import (
     HORIZON_REQUIRED_MARKET_DAYS,
@@ -21,7 +21,7 @@ from app.ai.experience.horizons import (
     review_status_for_candidate,
 )
 from app.ai.experience.index_service import experience_index_service
-from app.core.database import SessionLocal
+from app.core import database as database_module
 from app.core.i18n import i18n_service
 from app.core.logger import get_logger
 from app.core.utils.converters import safe_float, safe_isoformat
@@ -134,7 +134,7 @@ class ExperienceService:
             return "20d"
         return None
 
-    def _get_market_day_count(self, db: Session, *, stock_code: str, decision_time: datetime | None) -> int:
+    async def _get_market_day_count(self, db: AsyncSession, *, stock_code: str, decision_time: datetime | None) -> int:
         """统计 PM 决策后的日 K 样本数量。
 
         Args:
@@ -148,13 +148,15 @@ class ExperienceService:
         if not stock_code or decision_time is None:
             return 0
         return int(
-            db.query(func.count(KlineData.date))
-            .filter(
+            (
+                await db.execute(
+                    select(func.count(KlineData.date)).where(
                 KlineData.stock_code == stock_code,
                 KlineData.freq == "D",
                 KlineData.date >= decision_time.date(),
-            )
-            .scalar()
+                    )
+                )
+            ).scalar()
             or 0
         )
 
@@ -187,9 +189,9 @@ class ExperienceService:
                 return horizon
         return None
 
-    def _review_horizon_buckets(
+    async def _review_horizon_buckets(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         user_id: int,
         session_ids: list[UUID],
@@ -211,15 +213,16 @@ class ExperienceService:
         if not session_ids:
             return buckets
         rows = (
-            db.query(ExperienceReviewEvent)
-            .filter(
-                ExperienceReviewEvent.user_id == user_id,
-                ExperienceReviewEvent.session_id.in_(session_ids),
-                ExperienceReviewEvent.stage == "experience_review",
+            await db.execute(
+                select(ExperienceReviewEvent)
+                .where(
+                    ExperienceReviewEvent.user_id == user_id,
+                    ExperienceReviewEvent.session_id.in_(session_ids),
+                    ExperienceReviewEvent.stage == "experience_review",
+                )
+                .order_by(ExperienceReviewEvent.created_at.desc())
             )
-            .order_by(ExperienceReviewEvent.created_at.desc())
-            .all()
-        )
+        ).scalars().all()
         for row in rows:
             horizon = self._extract_review_horizon_from_event(row)
             if horizon is None:
@@ -233,9 +236,8 @@ class ExperienceService:
                 session_bucket["failed"].append(horizon)
         return buckets
 
-    def list_review_candidates(
+    async def list_review_candidates(
         self,
-        db: Session,
         *,
         user_id: int,
         limit: int = 100,
@@ -243,92 +245,137 @@ class ExperienceService:
         """列出当前用户可复盘的会话候选项。
 
         Args:
-            db: 数据库会话。
             user_id: 用户 ID。
             limit: 最多扫描的已完成会话数量。
 
         Returns:
             候选项列表和按展示状态统计的摘要。
         """
-        sessions = (
-            db.query(DebateSession)
-            .filter(
-                DebateSession.user_id == user_id,
-                DebateSession.status == "completed",
-                DebateSession.stock_code.isnot(None),
-            )
-            .order_by(DebateSession.updated_at.desc(), DebateSession.created_at.desc())
-            .limit(limit)
-            .all()
-        )
-        if not sessions:
-            return {"items": [], "summary": {}}
+        async with database_module.AsyncSessionLocal() as db:
+            sessions = (
+                await db.execute(
+                    select(DebateSession)
+                    .where(
+                        DebateSession.user_id == user_id,
+                        DebateSession.status == "completed",
+                        DebateSession.stock_code.isnot(None),
+                    )
+                    .order_by(DebateSession.updated_at.desc(), DebateSession.created_at.desc())
+                    .limit(limit)
+                )
+            ).scalars().all()
+            if not sessions:
+                return {"items": [], "summary": {}}
 
-        session_ids = [item.session_id for item in sessions]
-        stock_codes = list({item.stock_code for item in sessions})
-        stock_rows = db.query(StockBasic).filter(StockBasic.stock_code.in_(stock_codes)).all()
-        stock_map = {item.stock_code: item for item in stock_rows}
+            session_ids = [item.session_id for item in sessions]
+            stock_codes = list({item.stock_code for item in sessions})
+            stock_rows = (
+                await db.execute(select(StockBasic).where(StockBasic.stock_code.in_(stock_codes)))
+            ).scalars().all()
+            stock_map = {item.stock_code: item for item in stock_rows}
 
-        pm_rows = db.query(PMDecisionRecord).filter(PMDecisionRecord.session_id.in_(session_ids)).all()
-        latest_pm_by_session: dict[UUID, PMDecisionRecord] = {}
-        for row in pm_rows:
-            latest_pm_by_session.setdefault(row.session_id, row)
+            pm_rows = (
+                await db.execute(select(PMDecisionRecord).where(PMDecisionRecord.session_id.in_(session_ids)))
+            ).scalars().all()
+            latest_pm_by_session: dict[UUID, PMDecisionRecord] = {}
+            for row in pm_rows:
+                latest_pm_by_session.setdefault(row.session_id, row)
 
-        horizon_buckets = self._review_horizon_buckets(db, user_id=user_id, session_ids=session_ids)
-        items: list[dict[str, Any]] = []
-        summary: dict[str, int] = defaultdict(int)
-        for session_obj in sessions:
-            pm_row = latest_pm_by_session.get(session_obj.session_id)
-            if not pm_row:
-                continue
-            stock = stock_map.get(session_obj.stock_code)
-            market_day_count = self._get_market_day_count(
-                db,
-                stock_code=session_obj.stock_code,
-                decision_time=pm_row.created_at,
-            )
-            eligible = eligible_horizons(market_day_count)
-            bucket = horizon_buckets.get(session_obj.session_id, {"completed": [], "active": [], "failed": []})
-            review_status = review_status_for_candidate(
-                eligible=eligible,
-                completed=bucket["completed"],
-                active=bucket["active"],
-                failed=bucket["failed"],
-            )
-            next_horizon, days_until_next_horizon = self._next_missing_horizon(market_day_count)
-            item = {
-                "session_id": session_obj.session_id,
-                "stock_code": session_obj.stock_code,
-                "stock_name": stock.name if stock else session_obj.stock_code,
-                "industry": stock.industry if stock else None,
-                "status": session_obj.status,
-                "trading_frequency": session_obj.trading_frequency,
-                "trading_strategy": session_obj.trading_strategy,
-                "pm_confidence": _normalize_confidence(pm_row.confidence_score),
-                "pm_created_at": pm_row.created_at,
-                "market_day_count": market_day_count,
-                "eligible_horizons": eligible,
-                "latest_completed_horizons": bucket["completed"],
-                "active_horizons": bucket["active"],
-                "failed_horizons": bucket["failed"],
-                "review_status": review_status,
-                "next_horizon": next_horizon,
-                "days_until_next_horizon": days_until_next_horizon,
+            horizon_buckets: dict[UUID, dict[str, list[ReviewHorizon]]] = {
+                session_id: {"completed": [], "active": [], "failed": []}
+                for session_id in session_ids
             }
-            items.append(item)
-            summary[review_status] += 1
-        return {"items": items, "summary": dict(summary)}
+            event_rows = (
+                await db.execute(
+                    select(ExperienceReviewEvent)
+                    .where(
+                        ExperienceReviewEvent.user_id == user_id,
+                        ExperienceReviewEvent.session_id.in_(session_ids),
+                        ExperienceReviewEvent.stage == "experience_review",
+                    )
+                    .order_by(ExperienceReviewEvent.created_at.desc())
+                )
+            ).scalars().all()
+            for row in event_rows:
+                horizon = self._extract_review_horizon_from_event(row)
+                if horizon is None:
+                    continue
+                session_bucket = horizon_buckets.setdefault(row.session_id, {"completed": [], "active": [], "failed": []})
+                if row.status == "completed" and horizon not in session_bucket["completed"]:
+                    session_bucket["completed"].append(horizon)
+                elif row.status in ACTIVE_REVIEW_STATUSES and horizon not in session_bucket["active"]:
+                    session_bucket["active"].append(horizon)
+                elif row.status == "failed" and horizon not in session_bucket["failed"]:
+                    session_bucket["failed"].append(horizon)
 
-    def _mark_review_runs_failed(
+            market_day_counts: dict[tuple[str, datetime], int] = {}
+            for session_obj in sessions:
+                pm_row = latest_pm_by_session.get(session_obj.session_id)
+                if not pm_row or not session_obj.stock_code or pm_row.created_at is None:
+                    continue
+                key = (session_obj.stock_code, pm_row.created_at)
+                market_day_counts[key] = int(
+                    (
+                        await db.execute(
+                            select(func.count(KlineData.date)).where(
+                                KlineData.stock_code == session_obj.stock_code,
+                                KlineData.freq == "D",
+                                KlineData.date >= pm_row.created_at.date(),
+                            )
+                        )
+                    ).scalar()
+                    or 0
+                )
+            items: list[dict[str, Any]] = []
+            summary: dict[str, int] = defaultdict(int)
+            for session_obj in sessions:
+                pm_row = latest_pm_by_session.get(session_obj.session_id)
+                if not pm_row:
+                    continue
+                stock = stock_map.get(session_obj.stock_code)
+                market_day_count = market_day_counts.get((session_obj.stock_code, pm_row.created_at), 0)
+                eligible = eligible_horizons(market_day_count)
+                bucket = horizon_buckets.get(session_obj.session_id, {"completed": [], "active": [], "failed": []})
+                review_status = review_status_for_candidate(
+                    eligible=eligible,
+                    completed=bucket["completed"],
+                    active=bucket["active"],
+                    failed=bucket["failed"],
+                )
+                next_horizon, days_until_next_horizon = self._next_missing_horizon(market_day_count)
+                item = {
+                    "session_id": session_obj.session_id,
+                    "stock_code": session_obj.stock_code,
+                    "stock_name": stock.name if stock else session_obj.stock_code,
+                    "industry": stock.industry if stock else None,
+                    "status": session_obj.status,
+                    "trading_frequency": session_obj.trading_frequency,
+                    "trading_strategy": session_obj.trading_strategy,
+                    "pm_confidence": _normalize_confidence(pm_row.confidence_score),
+                    "pm_created_at": pm_row.created_at,
+                    "market_day_count": market_day_count,
+                    "eligible_horizons": eligible,
+                    "latest_completed_horizons": bucket["completed"],
+                    "active_horizons": bucket["active"],
+                    "failed_horizons": bucket["failed"],
+                    "review_status": review_status,
+                    "next_horizon": next_horizon,
+                    "days_until_next_horizon": days_until_next_horizon,
+                }
+                items.append(item)
+                summary[review_status] += 1
+            return {"items": items, "summary": dict(summary)}
+
+    async def _mark_review_runs_failed(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         failed_runs: list[tuple[str, UUID, int, str | None]],
         failure_message: str,
         reason: str,
     ) -> int:
         for review_run_id, session_id, user_id, stage in failed_runs:
-            self._persist_review_event(
+            await self._persist_review_event(
                 db,
                 review_run_id=review_run_id,
                 session_id=session_id,
@@ -341,18 +388,18 @@ class ExperienceService:
             )
         return len(failed_runs)
 
-    def _cleanup_interrupted_review_runs_in_db(self, db: Session) -> int:
+    async def _cleanup_interrupted_review_runs_in_db(self, db: AsyncSession) -> int:
         rows = (
-            db.query(
-                ExperienceReviewEvent.review_run_id,
-                ExperienceReviewEvent.session_id,
-                ExperienceReviewEvent.user_id,
-                ExperienceReviewEvent.stage,
-                ExperienceReviewEvent.status,
+            await db.execute(
+                select(
+                    ExperienceReviewEvent.review_run_id,
+                    ExperienceReviewEvent.session_id,
+                    ExperienceReviewEvent.user_id,
+                    ExperienceReviewEvent.stage,
+                    ExperienceReviewEvent.status,
+                ).order_by(ExperienceReviewEvent.created_at.desc())
             )
-            .order_by(ExperienceReviewEvent.created_at.desc())
-            .all()
-        )
+        ).all()
         seen_run_ids: set[str] = set()
         interrupted_runs: list[tuple[str, UUID, int, str | None]] = []
         for review_run_id, session_id, user_id, stage, status in rows:
@@ -376,36 +423,46 @@ class ExperienceService:
                 stage,
             )
 
-        return self._mark_review_runs_failed(
-            db,
-            failed_runs=interrupted_runs,
-            failure_message=failure_message,
-            reason="restart_recovery",
-        )
+        for review_run_id, session_id, user_id, stage in interrupted_runs:
+            db.add(
+                ExperienceReviewEvent(
+                    review_run_id=review_run_id,
+                    session_id=session_id,
+                    user_id=user_id,
+                    event_type="experience_review_update",
+                    stage=stage or "experience_review",
+                    status="failed",
+                    message_key="experience.live_messages.failed",
+                    message_params={"error": failure_message},
+                    payload={"error": failure_message, "reason": "restart_recovery"},
+                )
+            )
+        await db.commit()
+        return len(interrupted_runs)
 
-    def cleanup_interrupted_review_runs(self) -> int:
-        with SessionLocal() as db:
-            return self._cleanup_interrupted_review_runs_in_db(db)
+    async def cleanup_interrupted_review_runs(self) -> int:
+        async with database_module.AsyncSessionLocal() as db:
+            return await self._cleanup_interrupted_review_runs_in_db(db)
 
-    def _cleanup_stale_review_runs(
+    async def _cleanup_stale_review_runs(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         user_id: int,
         session_id: UUID | None = None,
     ) -> None:
-        query = db.query(
+        query = select(
             ExperienceReviewEvent.review_run_id,
             ExperienceReviewEvent.session_id,
             ExperienceReviewEvent.user_id,
             ExperienceReviewEvent.stage,
             ExperienceReviewEvent.status,
             ExperienceReviewEvent.created_at,
-        ).filter(ExperienceReviewEvent.user_id == user_id)
+        ).where(ExperienceReviewEvent.user_id == user_id)
         if session_id is not None:
-            query = query.filter(ExperienceReviewEvent.session_id == session_id)
+            query = query.where(ExperienceReviewEvent.session_id == session_id)
 
-        rows = query.order_by(ExperienceReviewEvent.created_at.desc()).all()
+        rows = (await db.execute(query.order_by(ExperienceReviewEvent.created_at.desc()))).all()
         seen_run_ids: set[str] = set()
         stale_runs: list[tuple[str, UUID, int, str | None]] = []
         now = datetime.now()
@@ -420,30 +477,31 @@ class ExperienceService:
             stale_runs.append((review_run_id, row_session_id, row_user_id, stage))
 
         stale_error = i18n_service.t("experience.stale_review_recovered")
-        self._mark_review_runs_failed(
+        await self._mark_review_runs_failed(
             db,
             failed_runs=stale_runs,
             failure_message=stale_error,
             reason="stale_review_recovery",
         )
 
-    def _get_active_review_run_id(
+    async def _get_active_review_run_id(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         user_id: int,
         session_id: UUID,
     ) -> str | None:
-        self._cleanup_stale_review_runs(db, user_id=user_id, session_id=session_id)
+        await self._cleanup_stale_review_runs(db, user_id=user_id, session_id=session_id)
         rows = (
-            db.query(ExperienceReviewEvent.review_run_id, ExperienceReviewEvent.status)
-            .filter(
-                ExperienceReviewEvent.user_id == user_id,
-                ExperienceReviewEvent.session_id == session_id,
+            await db.execute(
+                select(ExperienceReviewEvent.review_run_id, ExperienceReviewEvent.status)
+                .where(
+                    ExperienceReviewEvent.user_id == user_id,
+                    ExperienceReviewEvent.session_id == session_id,
+                )
+                .order_by(ExperienceReviewEvent.created_at.desc())
             )
-            .order_by(ExperienceReviewEvent.created_at.desc())
-            .all()
-        )
+        ).all()
         seen_run_ids: set[str] = set()
         for review_run_id, status in rows:
             if review_run_id in seen_run_ids:
@@ -455,7 +513,6 @@ class ExperienceService:
 
     async def analyze(
         self,
-        db: Session,
         *,
         user_id: int,
         session_id: UUID,
@@ -464,7 +521,6 @@ class ExperienceService:
         """运行单个辩论会话的经验复盘。
 
         Args:
-            db: 数据库会话。
             user_id: 用户 ID。
             session_id: 需要复盘的辩论会话 ID。
             review_horizon: 可选复盘周期；未提供时使用当前最高可用周期。
@@ -478,16 +534,39 @@ class ExperienceService:
         review_run_id = str(uuid.uuid4())
         selected_review_horizon: ReviewHorizon | None = None
         market_day_count = 0
+        async with database_module.AsyncSessionLocal() as db:
+            return await self._analyze(
+                db,
+                user_id=user_id,
+                session_id=session_id,
+                review_horizon=review_horizon,
+                review_run_id=review_run_id,
+            )
+
+    async def _analyze(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        session_id: UUID,
+        review_horizon: str | None,
+        review_run_id: str,
+    ) -> Dict[str, Any]:
+        selected_review_horizon: ReviewHorizon | None = None
+        market_day_count = 0
         try:
             session_obj = (
-                db.query(DebateSession)
-                .filter(DebateSession.session_id == session_id, DebateSession.user_id == user_id)
-                .first()
-            )
+                await db.execute(
+                    select(DebateSession).where(
+                        DebateSession.session_id == session_id,
+                        DebateSession.user_id == user_id,
+                    )
+                )
+            ).scalars().first()
             if not session_obj:
                 raise ValueError(f"Session {session_id} not found")
 
-            active_review_run_id = self._get_active_review_run_id(
+            active_review_run_id = await self._get_active_review_run_id(
                 db,
                 user_id=user_id,
                 session_id=session_id,
@@ -497,7 +576,9 @@ class ExperienceService:
                     f"Experience review is already running for session {session_id} (run {active_review_run_id})"
                 )
 
-            stock = db.query(StockBasic).filter(StockBasic.stock_code == session_obj.stock_code).first()
+            stock = (
+                await db.execute(select(StockBasic).where(StockBasic.stock_code == session_obj.stock_code))
+            ).scalars().first()
             stock_name = stock.name if stock else session_obj.stock_code
             industry = stock.industry if stock else None
             style_bucket = _style_bucket_from_frequency(session_obj.trading_frequency)
@@ -507,11 +588,12 @@ class ExperienceService:
                 )
 
             debate_messages = (
-                db.query(DebateMessage)
-                .filter(DebateMessage.session_id == session_id)
-                .order_by(DebateMessage.created_at.asc())
-                .all()
-            )
+                await db.execute(
+                    select(DebateMessage)
+                    .where(DebateMessage.session_id == session_id)
+                    .order_by(DebateMessage.created_at.asc())
+                )
+            ).scalars().all()
             if not debate_messages:
                 raise ValueError(f"Session {session_id} has no debate messages")
 
@@ -519,7 +601,7 @@ class ExperienceService:
             if not pm_message:
                 raise ValueError(f"Session {session_id} has no PM decision")
 
-            market_day_count = self._get_market_day_count(
+            market_day_count = await self._get_market_day_count(
                 db,
                 stock_code=session_obj.stock_code,
                 decision_time=pm_message.created_at,
@@ -540,7 +622,7 @@ class ExperienceService:
                     f"only {market_day_count} are available."
                 )
 
-            debate_review_context = self._build_debate_review_context(
+            debate_review_context = await self._build_debate_review_context(
                 db=db,
                 session_obj=session_obj,
                 stock_name=stock_name,
@@ -564,7 +646,7 @@ class ExperienceService:
                 message_params: Dict[str, Any] | None = None,
                 payload: Dict[str, Any] | None = None,
             ) -> None:
-                self._persist_review_event(
+                await self._persist_review_event(
                     db,
                     review_run_id=review_run_id,
                     session_id=session_obj.session_id,
@@ -589,7 +671,7 @@ class ExperienceService:
                     "market_day_count": market_day_count,
                 },
             )
-            self._persist_review_event(
+            await self._persist_review_event(
                 db,
                 review_run_id=review_run_id,
                 session_id=session_obj.session_id,
@@ -669,7 +751,7 @@ class ExperienceService:
                     debate_correctness=normalized_payload.get("debate_correctness"),
                 ),
             )
-            self._persist_review_event(
+            await self._persist_review_event(
                 db,
                 review_run_id=review_run_id,
                 session_id=session_obj.session_id,
@@ -684,7 +766,7 @@ class ExperienceService:
                 ),
             )
             try:
-                experience_index_service.sync_from_review_result(db, user_id=user_id, result=result)
+                await experience_index_service.sync_from_review_result(db, user_id=user_id, result=result)
             except Exception as index_exc:
                 logger.warning(
                     "experience index sync failed",
@@ -710,7 +792,7 @@ class ExperienceService:
                     "market_day_count": market_day_count,
                 },
             )
-            self._persist_review_event(
+            await self._persist_review_event(
                 db,
                 review_run_id=review_run_id,
                 session_id=session_id,
@@ -727,91 +809,100 @@ class ExperienceService:
             )
             raise
 
-    def list_debate_sessions(self, db: Session, *, user_id: int, limit: int = 100) -> List[Dict[str, Any]]:
-        sessions = (
-            db.query(DebateSession)
-            .filter(DebateSession.user_id == user_id)
-            .order_by(DebateSession.updated_at.desc(), DebateSession.created_at.desc())
-            .limit(limit)
-            .all()
-        )
-        if not sessions:
-            return []
-
-        stock_codes = list({item.stock_code for item in sessions})
-        basics = db.query(StockBasic.stock_code, StockBasic.name).filter(StockBasic.stock_code.in_(stock_codes)).all()
-        stock_name_map = {code: name for code, name in basics}
-
-        session_ids = [item.session_id for item in sessions]
-        pm_rows = db.query(PMDecisionRecord).filter(PMDecisionRecord.session_id.in_(session_ids)).all()
-        latest_pm_by_session: Dict[UUID, PMDecisionRecord] = {}
-        for row in pm_rows:
-            latest_pm_by_session.setdefault(row.session_id, row)
-
-        reviewed_session_ids = {
-            session_id
-            for session_id, in (
-                db.query(ExperienceReviewEvent.session_id)
-                .filter(
-                    ExperienceReviewEvent.user_id == user_id,
-                    ExperienceReviewEvent.session_id.in_(session_ids),
+    async def list_debate_sessions(self, *, user_id: int, limit: int = 100) -> List[Dict[str, Any]]:
+        async with database_module.AsyncSessionLocal() as db:
+            sessions = (
+                await db.execute(
+                    select(DebateSession)
+                    .where(DebateSession.user_id == user_id)
+                    .order_by(DebateSession.updated_at.desc(), DebateSession.created_at.desc())
+                    .limit(limit)
                 )
-                .distinct()
-                .all()
-            )
-        }
+            ).scalars().all()
+            if not sessions:
+                return []
 
-        items: List[Dict[str, Any]] = []
-        for session_obj in sessions:
-            pm_row = latest_pm_by_session.get(session_obj.session_id)
-            if not pm_row:
-                continue
-            items.append(
-                {
-                    "session_id": session_obj.session_id,
-                    "stock_code": session_obj.stock_code,
-                    "stock_name": stock_name_map.get(session_obj.stock_code, session_obj.stock_code),
-                    "status": session_obj.status,
-                    "trading_frequency": session_obj.trading_frequency,
-                    "trading_strategy": session_obj.trading_strategy,
-                    "created_at": session_obj.created_at,
-                    "updated_at": session_obj.updated_at,
-                    "pm_confidence": _normalize_confidence(pm_row.confidence_score),
-                    "has_experience_review": session_obj.session_id in reviewed_session_ids,
-                }
-            )
-        return items
+            stock_codes = list({item.stock_code for item in sessions})
+            basics = (
+                await db.execute(select(StockBasic.stock_code, StockBasic.name).where(StockBasic.stock_code.in_(stock_codes)))
+            ).all()
+            stock_name_map = {code: name for code, name in basics}
 
-    def list_review_events(
+            session_ids = [item.session_id for item in sessions]
+            pm_rows = (
+                await db.execute(select(PMDecisionRecord).where(PMDecisionRecord.session_id.in_(session_ids)))
+            ).scalars().all()
+            latest_pm_by_session: Dict[UUID, PMDecisionRecord] = {}
+            for row in pm_rows:
+                latest_pm_by_session.setdefault(row.session_id, row)
+
+            reviewed_session_ids = {
+                session_id
+                for session_id, in (
+                    await db.execute(
+                        select(ExperienceReviewEvent.session_id)
+                        .where(
+                            ExperienceReviewEvent.user_id == user_id,
+                            ExperienceReviewEvent.session_id.in_(session_ids),
+                        )
+                        .distinct()
+                    )
+                ).all()
+            }
+
+            items: List[Dict[str, Any]] = []
+            for session_obj in sessions:
+                pm_row = latest_pm_by_session.get(session_obj.session_id)
+                if not pm_row:
+                    continue
+                items.append(
+                    {
+                        "session_id": session_obj.session_id,
+                        "stock_code": session_obj.stock_code,
+                        "stock_name": stock_name_map.get(session_obj.stock_code, session_obj.stock_code),
+                        "status": session_obj.status,
+                        "trading_frequency": session_obj.trading_frequency,
+                        "trading_strategy": session_obj.trading_strategy,
+                        "created_at": session_obj.created_at,
+                        "updated_at": session_obj.updated_at,
+                        "pm_confidence": _normalize_confidence(pm_row.confidence_score),
+                        "has_experience_review": session_obj.session_id in reviewed_session_ids,
+                    }
+                )
+            return items
+
+    async def list_review_events(
         self,
-        db: Session,
         *,
         user_id: int,
         session_id: UUID,
     ) -> List[Dict[str, Any]]:
-        latest_run_id = (
-            db.query(ExperienceReviewEvent.review_run_id)
-            .filter(
-                ExperienceReviewEvent.user_id == user_id,
-                ExperienceReviewEvent.session_id == session_id,
-            )
-            .order_by(ExperienceReviewEvent.created_at.desc())
-            .limit(1)
-            .scalar()
-        )
-        if not latest_run_id:
-            return []
+        async with database_module.AsyncSessionLocal() as db:
+            latest_run_id = (
+                await db.execute(
+                    select(ExperienceReviewEvent.review_run_id)
+                    .where(
+                        ExperienceReviewEvent.user_id == user_id,
+                        ExperienceReviewEvent.session_id == session_id,
+                    )
+                    .order_by(ExperienceReviewEvent.created_at.desc())
+                    .limit(1)
+                )
+            ).scalar()
+            if not latest_run_id:
+                return []
 
-        rows = (
-            db.query(ExperienceReviewEvent)
-            .filter(
-                ExperienceReviewEvent.user_id == user_id,
-                ExperienceReviewEvent.session_id == session_id,
-                ExperienceReviewEvent.review_run_id == latest_run_id,
-            )
-            .order_by(ExperienceReviewEvent.created_at.asc())
-            .all()
-        )
+            rows = (
+                await db.execute(
+                    select(ExperienceReviewEvent)
+                    .where(
+                        ExperienceReviewEvent.user_id == user_id,
+                        ExperienceReviewEvent.session_id == session_id,
+                        ExperienceReviewEvent.review_run_id == latest_run_id,
+                    )
+                    .order_by(ExperienceReviewEvent.created_at.asc())
+                )
+            ).scalars().all()
         return [
             {
                 "event_id": str(row.event_id),
@@ -827,9 +918,8 @@ class ExperienceService:
             for row in rows
         ]
 
-    def list_review_runs(
+    async def list_review_runs(
         self,
-        db: Session,
         *,
         user_id: int,
         limit: int = 50,
@@ -837,94 +927,99 @@ class ExperienceService:
         """列出当前用户最近的经验复盘运行摘要。
 
         Args:
-            db: 数据库会话。
             user_id: 用户 ID。
             limit: 返回运行摘要的最大数量。
 
         Returns:
             按更新时间倒序排列的复盘运行摘要列表。
         """
-        self._cleanup_stale_review_runs(db, user_id=user_id)
-        rows = (
-            db.query(ExperienceReviewEvent)
-            .filter(ExperienceReviewEvent.user_id == user_id)
-            .order_by(ExperienceReviewEvent.created_at.desc())
-            .all()
-        )
-        if not rows:
-            return []
+        async with database_module.AsyncSessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(ExperienceReviewEvent)
+                    .where(ExperienceReviewEvent.user_id == user_id)
+                    .order_by(ExperienceReviewEvent.created_at.desc())
+                )
+            ).scalars().all()
+            if not rows:
+                return []
 
-        latest_by_run: Dict[str, ExperienceReviewEvent] = {}
-        earliest_by_run: Dict[str, datetime] = {}
-        session_ids: set[UUID] = set()
-        for row in rows:
-            if row.review_run_id not in latest_by_run:
-                latest_by_run[row.review_run_id] = row
-            earliest_by_run[row.review_run_id] = min(
-                row.created_at,
-                earliest_by_run.get(row.review_run_id, row.created_at),
-            )
-            session_ids.add(row.session_id)
-            if len(latest_by_run) >= limit and row.review_run_id in latest_by_run:
-                # keep iterating for earlier timestamps of already-seen runs only
-                continue
+            latest_by_run: Dict[str, ExperienceReviewEvent] = {}
+            earliest_by_run: Dict[str, datetime] = {}
+            session_ids: set[UUID] = set()
+            for row in rows:
+                if row.review_run_id not in latest_by_run:
+                    latest_by_run[row.review_run_id] = row
+                earliest_by_run[row.review_run_id] = min(
+                    row.created_at,
+                    earliest_by_run.get(row.review_run_id, row.created_at),
+                )
+                session_ids.add(row.session_id)
+                if len(latest_by_run) >= limit and row.review_run_id in latest_by_run:
+                    continue
 
-        sessions = (
-            db.query(DebateSession)
-            .filter(DebateSession.user_id == user_id, DebateSession.session_id.in_(list(session_ids)))
-            .all()
-        )
-        session_map = {item.session_id: item for item in sessions}
+            sessions = (
+                await db.execute(
+                    select(DebateSession).where(
+                        DebateSession.user_id == user_id,
+                        DebateSession.session_id.in_(list(session_ids)),
+                    )
+                )
+            ).scalars().all()
+            session_map = {item.session_id: item for item in sessions}
 
-        stock_codes = list({item.stock_code for item in sessions})
-        basics = db.query(StockBasic.stock_code, StockBasic.name).filter(StockBasic.stock_code.in_(stock_codes)).all()
-        stock_name_map = {code: name for code, name in basics}
+            stock_codes = list({item.stock_code for item in sessions})
+            basics = (
+                await db.execute(select(StockBasic.stock_code, StockBasic.name).where(StockBasic.stock_code.in_(stock_codes)))
+            ).all()
+            stock_name_map = {code: name for code, name in basics}
 
-        items: List[Dict[str, Any]] = []
-        for review_run_id, latest in list(latest_by_run.items())[:limit]:
-            session_obj = session_map.get(latest.session_id)
-            if not session_obj:
-                continue
-            payload = latest.payload or {}
-            items.append(
-                {
-                    "review_run_id": review_run_id,
-                    "review_horizon": payload.get("review_horizon") or "20d",
-                    "market_day_count": payload.get("market_day_count"),
-                    "session_id": latest.session_id,
-                    "stock_code": session_obj.stock_code,
-                    "stock_name": stock_name_map.get(session_obj.stock_code, session_obj.stock_code),
-                    "trading_frequency": session_obj.trading_frequency,
-                    "trading_strategy": session_obj.trading_strategy,
-                    "status": latest.status,
-                    "stage": latest.stage,
-                    "message_key": latest.message_key,
-                    "message_params": latest.message_params or {},
-                    "recommended_action": payload.get("recommended_action"),
-                    "debate_correctness": payload.get("debate_correctness"),
-                    "created_at": earliest_by_run.get(review_run_id, latest.created_at),
-                    "updated_at": latest.created_at,
-                }
-            )
-        items.sort(key=lambda item: item["updated_at"], reverse=True)
-        return items[:limit]
+            items: List[Dict[str, Any]] = []
+            for review_run_id, latest in list(latest_by_run.items())[:limit]:
+                session_obj = session_map.get(latest.session_id)
+                if not session_obj:
+                    continue
+                payload = latest.payload or {}
+                items.append(
+                    {
+                        "review_run_id": review_run_id,
+                        "review_horizon": payload.get("review_horizon") or "20d",
+                        "market_day_count": payload.get("market_day_count"),
+                        "session_id": latest.session_id,
+                        "stock_code": session_obj.stock_code,
+                        "stock_name": stock_name_map.get(session_obj.stock_code, session_obj.stock_code),
+                        "trading_frequency": session_obj.trading_frequency,
+                        "trading_strategy": session_obj.trading_strategy,
+                        "status": latest.status,
+                        "stage": latest.stage,
+                        "message_key": latest.message_key,
+                        "message_params": latest.message_params or {},
+                        "recommended_action": payload.get("recommended_action"),
+                        "debate_correctness": payload.get("debate_correctness"),
+                        "created_at": earliest_by_run.get(review_run_id, latest.created_at),
+                        "updated_at": latest.created_at,
+                    }
+                )
+            items.sort(key=lambda item: item["updated_at"], reverse=True)
+            return items[:limit]
 
-    def list_review_events_by_run(
+    async def list_review_events_by_run(
         self,
-        db: Session,
         *,
         user_id: int,
         review_run_id: str,
     ) -> List[Dict[str, Any]]:
-        rows = (
-            db.query(ExperienceReviewEvent)
-            .filter(
-                ExperienceReviewEvent.user_id == user_id,
-                ExperienceReviewEvent.review_run_id == review_run_id,
-            )
-            .order_by(ExperienceReviewEvent.created_at.asc())
-            .all()
-        )
+        async with database_module.AsyncSessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(ExperienceReviewEvent)
+                    .where(
+                        ExperienceReviewEvent.user_id == user_id,
+                        ExperienceReviewEvent.review_run_id == review_run_id,
+                    )
+                    .order_by(ExperienceReviewEvent.created_at.asc())
+                )
+            ).scalars().all()
         return [
             {
                 "event_id": str(row.event_id),
@@ -941,113 +1036,116 @@ class ExperienceService:
             for row in rows
         ]
 
-    def get_review_run_result(
+    async def get_review_run_result(
         self,
-        db: Session,
         *,
         user_id: int,
         review_run_id: str,
     ) -> Dict[str, Any] | None:
-        rows = (
-            db.query(ExperienceReviewEvent)
-            .filter(
-                ExperienceReviewEvent.user_id == user_id,
-                ExperienceReviewEvent.review_run_id == review_run_id,
+        async with database_module.AsyncSessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(ExperienceReviewEvent)
+                    .where(
+                        ExperienceReviewEvent.user_id == user_id,
+                        ExperienceReviewEvent.review_run_id == review_run_id,
+                    )
+                    .order_by(ExperienceReviewEvent.created_at.asc())
+                )
+            ).scalars().all()
+            if not rows:
+                return None
+
+            completed_event = next(
+                (
+                    row
+                    for row in reversed(rows)
+                    if row.stage == "experience_review" and row.status == "completed"
+                ),
+                None,
             )
-            .order_by(ExperienceReviewEvent.created_at.asc())
-            .all()
-        )
-        if not rows:
-            return None
+            if not completed_event:
+                return None
 
-        completed_event = next(
-            (
-                row
-                for row in reversed(rows)
-                if row.stage == "experience_review" and row.status == "completed"
-            ),
-            None,
-        )
-        if not completed_event:
-            return None
+            completed_payload = completed_event.payload or {}
+            result = completed_payload.get("result")
+            if isinstance(result, dict) and result.get("analysis_payload"):
+                return result
 
-        completed_payload = completed_event.payload or {}
-        result = completed_payload.get("result")
-        if isinstance(result, dict) and result.get("analysis_payload"):
-            return result
+            return await self._build_review_run_result_fallback(
+                db,
+                review_run_id=review_run_id,
+                session_id=completed_event.session_id,
+                user_id=user_id,
+                completed_at=completed_event.created_at,
+                completed_payload=completed_payload,
+                events=rows,
+            )
 
-        return self._build_review_run_result_fallback(
-            db,
-            review_run_id=review_run_id,
-            session_id=completed_event.session_id,
-            user_id=user_id,
-            completed_at=completed_event.created_at,
-            completed_payload=completed_payload,
-            events=rows,
-        )
-
-    def delete_review_run(
+    async def delete_review_run(
         self,
-        db: Session,
         *,
         user_id: int,
         review_run_id: str,
     ) -> bool:
-        rows = (
-            db.query(ExperienceReviewEvent)
-            .filter(
-                ExperienceReviewEvent.user_id == user_id,
-                ExperienceReviewEvent.review_run_id == review_run_id,
+        async with database_module.AsyncSessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(ExperienceReviewEvent)
+                    .where(
+                        ExperienceReviewEvent.user_id == user_id,
+                        ExperienceReviewEvent.review_run_id == review_run_id,
+                    )
+                    .order_by(ExperienceReviewEvent.created_at.desc())
+                )
+            ).scalars().all()
+            if not rows:
+                return False
+            if rows[0].status in ACTIVE_REVIEW_STATUSES:
+                raise ValueError(i18n_service.t("experience.active_review_delete_forbidden"))
+
+            await db.execute(
+                delete(ExperienceReviewEvent).where(
+                    ExperienceReviewEvent.user_id == user_id,
+                    ExperienceReviewEvent.review_run_id == review_run_id,
+                )
             )
-            .order_by(ExperienceReviewEvent.created_at.desc())
-            .all()
-        )
-        if not rows:
-            return False
-        if rows[0].status in ACTIVE_REVIEW_STATUSES:
-            raise ValueError(i18n_service.t("experience.active_review_delete_forbidden"))
+            await db.commit()
+            return True
 
-        db.query(ExperienceReviewEvent).filter(
-            ExperienceReviewEvent.user_id == user_id,
-            ExperienceReviewEvent.review_run_id == review_run_id,
-        ).delete(synchronize_session=False)
-        db.commit()
-        return True
-
-    def delete_all_review_runs(
+    async def delete_all_review_runs(
         self,
-        db: Session,
         *,
         user_id: int,
     ) -> int:
-        rows = (
-            db.query(ExperienceReviewEvent.review_run_id, ExperienceReviewEvent.status)
-            .filter(ExperienceReviewEvent.user_id == user_id)
-            .order_by(ExperienceReviewEvent.created_at.desc())
-            .all()
-        )
-        if not rows:
-            return 0
+        async with database_module.AsyncSessionLocal() as db:
+            rows = (
+                await db.execute(
+                    select(ExperienceReviewEvent.review_run_id, ExperienceReviewEvent.status)
+                    .where(ExperienceReviewEvent.user_id == user_id)
+                    .order_by(ExperienceReviewEvent.created_at.desc())
+                )
+            ).all()
+            if not rows:
+                return 0
 
-        seen_run_ids: set[str] = set()
-        active_run_ids: list[str] = []
-        run_ids: list[str] = []
-        for review_run_id, status in rows:
-            if review_run_id in seen_run_ids:
-                continue
-            seen_run_ids.add(review_run_id)
-            run_ids.append(review_run_id)
-            if status in ACTIVE_REVIEW_STATUSES:
-                active_run_ids.append(review_run_id)
+            seen_run_ids: set[str] = set()
+            active_run_ids: list[str] = []
+            run_ids: list[str] = []
+            for review_run_id, status in rows:
+                if review_run_id in seen_run_ids:
+                    continue
+                seen_run_ids.add(review_run_id)
+                run_ids.append(review_run_id)
+                if status in ACTIVE_REVIEW_STATUSES:
+                    active_run_ids.append(review_run_id)
 
-        if active_run_ids:
-            raise ValueError(i18n_service.t("experience.active_review_clear_forbidden"))
+            if active_run_ids:
+                raise ValueError(i18n_service.t("experience.active_review_clear_forbidden"))
 
-        db.query(ExperienceReviewEvent).filter(
-            ExperienceReviewEvent.user_id == user_id,
-        ).delete(synchronize_session=False)
-        db.commit()
-        return len(run_ids)
+            await db.execute(delete(ExperienceReviewEvent).where(ExperienceReviewEvent.user_id == user_id))
+            await db.commit()
+            return len(run_ids)
 
     def _get_latest_pm_message(self, debate_messages: List[DebateMessage]) -> DebateMessage | None:
         for message in reversed(debate_messages):
@@ -1055,9 +1153,9 @@ class ExperienceService:
                 return message
         return None
 
-    def _build_debate_review_context(
+    async def _build_debate_review_context(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         session_obj: DebateSession,
         stock_name: str,
@@ -1082,19 +1180,23 @@ class ExperienceService:
         Returns:
             包含会话、PM 决策、辩论时间线、执行摘要和市场结果的复盘上下文。
         """
-        pm_record = db.query(PMDecisionRecord).filter(PMDecisionRecord.session_id == session_obj.session_id).first()
+        pm_record = (
+            await db.execute(select(PMDecisionRecord).where(PMDecisionRecord.session_id == session_obj.session_id))
+        ).scalars().first()
         orders = (
-            db.query(Order)
-            .filter(Order.session_id == session_obj.session_id)
-            .order_by(Order.created_at.asc())
-            .all()
-        )
+            await db.execute(
+                select(Order)
+                .where(Order.session_id == session_obj.session_id)
+                .order_by(Order.created_at.asc())
+            )
+        ).scalars().all()
         trades = (
-            db.query(TradeRecord)
-            .filter(TradeRecord.session_id == session_obj.session_id)
-            .order_by(TradeRecord.trade_time.asc(), TradeRecord.created_at.asc())
-            .all()
-        )
+            await db.execute(
+                select(TradeRecord)
+                .where(TradeRecord.session_id == session_obj.session_id)
+                .order_by(TradeRecord.trade_time.asc(), TradeRecord.created_at.asc())
+            )
+        ).scalars().all()
 
         grouped_positions: dict[str, list[str]] = defaultdict(list)
         debate_timeline: List[Dict[str, Any]] = []
@@ -1111,7 +1213,7 @@ class ExperienceService:
 
         target_position = safe_float(pm_record.target_position if pm_record else 0.0, 0.0)
         buy_fill_price = _weighted_buy_fill_price(trades)
-        market_outcome = self._build_market_outcome_summary(
+        market_outcome = await self._build_market_outcome_summary(
             db=db,
             stock_code=session_obj.stock_code,
             industry=industry,
@@ -1239,9 +1341,9 @@ class ExperienceService:
             return {}
         return parsed if isinstance(parsed, dict) else {}
 
-    def _build_market_outcome_summary(
+    async def _build_market_outcome_summary(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         stock_code: str,
         industry: str | None,
@@ -1269,16 +1371,17 @@ class ExperienceService:
 
         snapshot_day = decision_time.date()
         rows = (
-            db.query(KlineData.date, KlineData.open, KlineData.close, KlineData.high, KlineData.low)
-            .filter(
-                KlineData.stock_code == stock_code,
-                KlineData.freq == "D",
-                KlineData.date >= snapshot_day,
+            await db.execute(
+                select(KlineData.date, KlineData.open, KlineData.close, KlineData.high, KlineData.low)
+                .where(
+                    KlineData.stock_code == stock_code,
+                    KlineData.freq == "D",
+                    KlineData.date >= snapshot_day,
+                )
+                .order_by(KlineData.date.asc())
+                .limit(130)
             )
-            .order_by(KlineData.date.asc())
-            .limit(130)
-            .all()
-        )
+        ).all()
         if not rows:
             return {}
 
@@ -1318,16 +1421,17 @@ class ExperienceService:
             return max_dd
 
         index_rows = (
-            db.query(KlineData.close)
-            .filter(
-                KlineData.stock_code == "000300.SH",
-                KlineData.freq == "D",
-                KlineData.date >= snapshot_day,
+            await db.execute(
+                select(KlineData.close)
+                .where(
+                    KlineData.stock_code == "000300.SH",
+                    KlineData.freq == "D",
+                    KlineData.date >= snapshot_day,
+                )
+                .order_by(KlineData.date.asc())
+                .limit(21)
             )
-            .order_by(KlineData.date.asc())
-            .limit(21)
-            .all()
-        )
+        ).all()
         index_closes = [float(item.close) for item in index_rows if item.close is not None]
         relative_return_vs_index = None
         if len(index_closes) > 20:
@@ -1336,7 +1440,7 @@ class ExperienceService:
             if stock_return_20 is not None:
                 relative_return_vs_index = stock_return_20 - index_return_20
 
-        relative_return_vs_industry = self._compute_relative_vs_industry(
+        relative_return_vs_industry = await self._compute_relative_vs_industry(
             db=db,
             stock_code=stock_code,
             industry=industry,
@@ -1390,9 +1494,9 @@ class ExperienceService:
             "sample_lows": lows[:20],
         }
 
-    def _compute_relative_vs_industry(
+    async def _compute_relative_vs_industry(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         stock_code: str,
         industry: str | None,
@@ -1404,24 +1508,28 @@ class ExperienceService:
 
         peer_codes = [
             code
-            for code, in db.query(StockBasic.stock_code)
-            .filter(StockBasic.industry == industry, StockBasic.stock_code != stock_code)
-            .limit(40)
-            .all()
+            for code, in (
+                await db.execute(
+                    select(StockBasic.stock_code)
+                    .where(StockBasic.industry == industry, StockBasic.stock_code != stock_code)
+                    .limit(40)
+                )
+            ).all()
         ]
         if not peer_codes:
             return None
 
         rows = (
-            db.query(KlineData.stock_code, KlineData.close)
-            .filter(
-                KlineData.stock_code.in_(peer_codes),
-                KlineData.freq == "D",
-                KlineData.date >= snapshot_day,
+            await db.execute(
+                select(KlineData.stock_code, KlineData.close)
+                .where(
+                    KlineData.stock_code.in_(peer_codes),
+                    KlineData.freq == "D",
+                    KlineData.date >= snapshot_day,
+                )
+                .order_by(KlineData.stock_code.asc(), KlineData.date.asc())
             )
-            .order_by(KlineData.stock_code.asc(), KlineData.date.asc())
-            .all()
-        )
+        ).all()
         buckets: dict[str, list[float]] = defaultdict(list)
         for peer_code, close in rows:
             if close is not None:
@@ -1761,9 +1869,9 @@ class ExperienceService:
             "tool_trace": result.get("tool_trace") or [],
         }
 
-    def _build_review_run_result_fallback(
+    async def _build_review_run_result_fallback(
         self,
-        db: Session,
+        db,
         *,
         review_run_id: str,
         session_id: UUID,
@@ -1787,29 +1895,32 @@ class ExperienceService:
             可供 API 返回的复盘结果；会话不存在时返回 ``None``。
         """
         session_obj = (
-            db.query(DebateSession)
-            .filter(
-                DebateSession.user_id == user_id,
-                DebateSession.session_id == session_id,
+            await db.execute(
+                select(DebateSession).where(
+                    DebateSession.user_id == user_id,
+                    DebateSession.session_id == session_id,
+                )
             )
-            .first()
-        )
+        ).scalars().first()
         if not session_obj:
             return None
 
-        stock = db.query(StockBasic).filter(StockBasic.stock_code == session_obj.stock_code).first()
+        stock = (
+            await db.execute(select(StockBasic).where(StockBasic.stock_code == session_obj.stock_code))
+        ).scalars().first()
         stock_name = stock.name if stock else session_obj.stock_code
         industry = stock.industry if stock else None
         style_bucket = _style_bucket_from_frequency(session_obj.trading_frequency)
         pm_message = (
-            db.query(DebateMessage)
-            .filter(
-                DebateMessage.session_id == session_id,
-                DebateMessage.agent_role == PM_AGENT_ROLE,
+            await db.execute(
+                select(DebateMessage)
+                .where(
+                    DebateMessage.session_id == session_id,
+                    DebateMessage.agent_role == PM_AGENT_ROLE,
+                )
+                .order_by(DebateMessage.created_at.desc())
             )
-            .order_by(DebateMessage.created_at.desc())
-            .first()
-        )
+        ).scalars().first()
         tool_trace = completed_payload.get("tool_trace")
         if not isinstance(tool_trace, list) or not tool_trace:
             tool_trace = [
@@ -1873,9 +1984,9 @@ class ExperienceService:
         except Exception:
             pass
 
-    def _persist_review_event(
+    async def _persist_review_event(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         review_run_id: str,
         session_id: UUID,
@@ -1899,11 +2010,11 @@ class ExperienceService:
             payload=payload or {},
         )
         db.add(row)
-        db.commit()
+        await db.commit()
 
-    def _persist_review_event_batch(
+    async def _persist_review_event_batch(
         self,
-        db: Session,
+        db: AsyncSession,
         *,
         review_run_id: str,
         session_id: UUID,
@@ -1927,7 +2038,7 @@ class ExperienceService:
         if not rows:
             return
         db.add_all(rows)
-        db.commit()
+        await db.commit()
 
 
 experience_service = ExperienceService()

@@ -104,13 +104,14 @@ class DataRefreshScheduler:
 
             task_id = str(uuid.uuid4())
             logger.info(f"Triggering scheduled task: {task_name} ({task_id})")
+            runner_task_kwargs = dict(task_kwargs)
+            runner_task_kwargs.setdefault("task_name", f"[Auto] {task_name}")
 
             # 提交到应用内异步任务运行器，阻塞 I/O 由任务内部的 run_in_executor 处理。
             async_task_runner.submit_task(
                 task_id=task_id,
                 task_func=task_func,
-                task_kwargs=task_kwargs,
-                task_name=f"[Auto] {task_name}",
+                task_kwargs=runner_task_kwargs,
                 request_id=task_id,
                 persist_status=False,
             )

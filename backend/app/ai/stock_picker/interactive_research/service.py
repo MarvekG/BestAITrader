@@ -87,7 +87,7 @@ class InteractiveResearchService:
         Raises:
             ValueError: 当前用户已有未完成 Deep Research run 时抛出。
         """
-        created = create_run_record(
+        created = await create_run_record(
             user_id,
             request_data,
             title=self._build_title(str(request_data["requirement"])),
@@ -107,12 +107,12 @@ class InteractiveResearchService:
         )
 
         background_tasks.add_task(self.execute_plan_agent_background, run_id, raw_requirement, None, True)
-        created_run = self.get_run(run_id, user_id)
+        created_run = await self.get_run(run_id, user_id)
         if created_run is None:
             raise LookupError(_t("errors.run_not_found"))
         return created_run
 
-    def list_runs(self, user_id: int) -> List[InteractiveResearchRun]:
+    async def list_runs(self, user_id: int) -> List[InteractiveResearchRun]:
         """查询当前用户的研究 run 列表。
 
         Args:
@@ -121,9 +121,9 @@ class InteractiveResearchService:
         Returns:
             按创建时间倒序排列的 run 列表。
         """
-        return list_run_records(user_id)
+        return await list_run_records(user_id)
 
-    def get_run(self, run_id: UUID, user_id: int) -> Optional[InteractiveResearchRun]:
+    async def get_run(self, run_id: UUID, user_id: int) -> Optional[InteractiveResearchRun]:
         """查询当前用户拥有的单个研究 run。
 
         Args:
@@ -133,9 +133,9 @@ class InteractiveResearchService:
         Returns:
             找到时返回 run，否则返回 None。
         """
-        return get_run_record(run_id, user_id)
+        return await get_run_record(run_id, user_id)
 
-    def delete_run(self, run_id: UUID, user_id: int) -> bool:
+    async def delete_run(self, run_id: UUID, user_id: int) -> bool:
         """删除当前用户拥有的聊天式研究 run。
 
         Args:
@@ -145,7 +145,7 @@ class InteractiveResearchService:
         Returns:
             删除成功返回 True；run 不存在或不属于当前用户时返回 False。
         """
-        deleted = delete_run_record(run_id, user_id)
+        deleted = await delete_run_record(run_id, user_id)
         return deleted
 
     async def append_user_message(
@@ -173,7 +173,7 @@ class InteractiveResearchService:
             LookupError: run 不存在或不属于当前用户时抛出。
             ValueError: 终态 run 不允许继续追加时抛出。
         """
-        result = append_user_message_record(run_id, user_id, content, payload)
+        result = await append_user_message_record(run_id, user_id, content, payload)
         message = result["message"]
         run_status = result["run_status"]
         logger.info(
@@ -194,7 +194,7 @@ class InteractiveResearchService:
             background_tasks.add_task(
                 self.execute_workflow_background,
                 run_id,
-                self._plan_agent.latest_plan_output(run_id),
+                await self._plan_agent.latest_plan_output(run_id),
             )
             return message
         if run_status not in {"awaiting_plan_approval", "awaiting_user_input"}:
@@ -239,7 +239,7 @@ class InteractiveResearchService:
             return await self.approve_plan(run_id, user_id, background_tasks=background_tasks)
         if action == "cancel":
             reason = content or str((payload or {}).get("reason") or "")
-            return self.cancel_run(run_id, user_id, reason=reason)
+            return await self.cancel_run(run_id, user_id, reason=reason)
         raise ValueError(_t("errors.unsupported_action", action=action))
 
     async def approve_plan(
@@ -259,7 +259,7 @@ class InteractiveResearchService:
             LookupError: run 不存在或不属于当前用户时抛出。
             ValueError: run 不处于等待计划确认状态时抛出。
         """
-        result = approve_plan_record(run_id, user_id)
+        result = await approve_plan_record(run_id, user_id)
         run = result["run"]
         logger.info(
             "interactive research plan approved",
@@ -269,12 +269,12 @@ class InteractiveResearchService:
         background_tasks.add_task(
             self.execute_workflow_background,
             run.run_id,
-            self._plan_agent.latest_plan_output(run.run_id),
+            await self._plan_agent.latest_plan_output(run.run_id),
         )
 
         return run
 
-    def cancel_run(
+    async def cancel_run(
         self,
         run_id: UUID,
         user_id: int,
@@ -294,10 +294,10 @@ class InteractiveResearchService:
             LookupError: run 不存在或不属于当前用户时抛出。
             ValueError: 终态 run 不能重复取消时抛出。
         """
-        run = cancel_run_record(run_id, user_id, reason)
+        run = await cancel_run_record(run_id, user_id, reason)
         return run
 
-    def get_messages(
+    async def get_messages(
         self,
         run_id: UUID,
         user_id: int,
@@ -314,7 +314,7 @@ class InteractiveResearchService:
         Returns:
             按 sequence_no 升序排列的消息列表。
         """
-        return list_message_records(run_id, user_id, visible_only=visible_only)
+        return await list_message_records(run_id, user_id, visible_only=visible_only)
 
     def serialize_run_summary(self, run: InteractiveResearchRun) -> Dict[str, Any]:
         """序列化 run 摘要。
@@ -412,7 +412,7 @@ class InteractiveResearchService:
                 "interactive research workflow failed",
                 extra={"run_id": str(run_id), "exception": str(exc), "traceback": traceback.format_exc()},
             )
-            fail_run_record(run_id, _t("errors.workflow_failed", error=exc), type(exc).__name__, str(exc))
+            await fail_run_record(run_id, _t("errors.workflow_failed", error=exc), type(exc).__name__, str(exc))
 
     async def execute_plan_agent_background(
         self,
@@ -456,7 +456,7 @@ class InteractiveResearchService:
                 "interactive research plan agent failed",
                 extra={"run_id": str(run_id), "exception": str(exc), "traceback": traceback.format_exc()},
             )
-            fail_run_record(run_id, _t("errors.workflow_failed", error=exc), type(exc).__name__, str(exc))
+            await fail_run_record(run_id, _t("errors.workflow_failed", error=exc), type(exc).__name__, str(exc))
 
 
 interactive_research_service = InteractiveResearchService()

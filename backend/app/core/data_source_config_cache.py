@@ -69,7 +69,7 @@ def _normalize_setting_value(key: str, value: Any) -> str | list[str]:
     return _normalize_string_value(value)
 
 
-def get_data_source_config() -> dict[str, str | list[str]]:
+async def get_data_source_config() -> dict[str, str | list[str]]:
     """
     读取数据源配置，优先返回进程内缓存。
 
@@ -81,15 +81,20 @@ def get_data_source_config() -> dict[str, str | list[str]]:
         return dict(_data_source_config_cache)
 
     with _data_source_config_lock:
+        if _data_source_config_cache is not None:
+            return dict(_data_source_config_cache)
+
+    values = {
+        key: _normalize_setting_value(key, await read_system_setting(key, default=""))
+        for key in DATA_SOURCE_SETTING_KEYS
+    }
+    with _data_source_config_lock:
         if _data_source_config_cache is None:
-            _data_source_config_cache = {
-                key: _normalize_setting_value(key, read_system_setting(key, default=""))
-                for key in DATA_SOURCE_SETTING_KEYS
-            }
+            _data_source_config_cache = values
         return dict(_data_source_config_cache)
 
 
-def get_data_source_config_value(key: str) -> str:
+async def get_data_source_config_value(key: str) -> str:
     """
     从缓存配置中读取单个数据源配置值。
 
@@ -99,11 +104,11 @@ def get_data_source_config_value(key: str) -> str:
     Returns:
         配置值；未配置时返回空字符串。
     """
-    value = get_data_source_config().get(key, "")
+    value = (await get_data_source_config()).get(key, "")
     return value if isinstance(value, str) else ""
 
 
-def get_data_source_config_list(key: str) -> list[str]:
+async def get_data_source_config_list(key: str) -> list[str]:
     """
     从缓存配置中读取单个列表型数据源配置值。
 
@@ -113,7 +118,7 @@ def get_data_source_config_list(key: str) -> list[str]:
     Returns:
         配置列表；未配置时返回空列表。
     """
-    value = get_data_source_config().get(key, [])
+    value = (await get_data_source_config()).get(key, [])
     return list(value) if isinstance(value, list) else []
 
 

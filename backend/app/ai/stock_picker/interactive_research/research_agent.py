@@ -154,7 +154,7 @@ class InteractiveResearchAgent:
                 },
             )
             response = await llm_with_tools.ainvoke(messages)
-            self._record_llm_usage(
+            await self._record_llm_usage(
                 run_id,
                 response,
                 stage="agent_loop",
@@ -188,7 +188,7 @@ class InteractiveResearchAgent:
                 trace_item = await self._execute_tool_call(run_id, tool_map, messages, tool_call, iteration_index, llm)
                 tool_trace.append(trace_item)
 
-            queued_after_tool = self._process_queued_user_inputs(run_id)
+            queued_after_tool = await self._process_queued_user_inputs(run_id)
             if queued_after_tool:
                 logger.info(
                     "interactive research agent queued inputs merged",
@@ -249,7 +249,7 @@ class InteractiveResearchAgent:
             )
             for retry_index in range(MAX_FLOW_CONTROL_RETRIES + 1):
                 final_response = await llm_with_tools.ainvoke(messages)
-                self._record_llm_usage(
+                await self._record_llm_usage(
                     run_id,
                     final_response,
                     stage="agent_loop",
@@ -331,7 +331,7 @@ class InteractiveResearchAgent:
         Returns:
             run 快照；run 不存在时返回 None。
         """
-        result = start_research_run_record(run_id)
+        result = await start_research_run_record(run_id)
         if result is None:
             return None
         await self._notify_change(result["notification"])
@@ -462,7 +462,7 @@ class InteractiveResearchAgent:
         Returns:
             新建 tool_start 消息 ID。
         """
-        result = append_tool_start_record(run_id, tool_name, tool_args, tool_call_id)
+        result = await append_tool_start_record(run_id, tool_name, tool_args, tool_call_id)
         await self._notify_change(result.get("notification"))
         return str(result.get("message_id") or "")
 
@@ -487,7 +487,7 @@ class InteractiveResearchAgent:
             success: 工具是否调用成功。
             result_text: 工具结果文本。
         """
-        payloads = append_tool_result_and_progress_record(
+        payloads = await append_tool_result_and_progress_record(
             run_id,
             tool_name=tool_name,
             tool_args=tool_args,
@@ -518,7 +518,7 @@ class InteractiveResearchAgent:
             stopped_by_iteration_limit: 是否因迭代预算耗尽提前终止。
             iteration_budget: 本轮研究允许的最大迭代次数。
         """
-        payloads = synthesize_final_message_record(
+        payloads = await synthesize_final_message_record(
             run_id,
             tool_trace=tool_trace,
             final_content=final_content,
@@ -539,7 +539,7 @@ class InteractiveResearchAgent:
             run_id: 当前研究 run ID。
             question_content: LLM 生成的用户问题。
         """
-        await self._notify_change(pause_for_user_question_record(run_id, question_content))
+        await self._notify_change(await pause_for_user_question_record(run_id, question_content))
         logger.info(
             "interactive research agent paused for user question",
             extra={"run_id": str(run_id), "question_length": len(question_content)},
@@ -552,9 +552,9 @@ class InteractiveResearchAgent:
             run_id: 当前研究 run ID。
             content: LLM 输出的过程说明。
         """
-        await self._notify_change(append_assistant_text_record(run_id, content))
+        await self._notify_change(await append_assistant_text_record(run_id, content))
 
-    def _process_queued_user_inputs(self, run_id: UUID) -> List[Dict[str, str]]:
+    async def _process_queued_user_inputs(self, run_id: UUID) -> List[Dict[str, str]]:
         """处理运行中排队的用户输入消息。
 
         Args:
@@ -563,7 +563,7 @@ class InteractiveResearchAgent:
         Returns:
             已处理的排队消息列表。
         """
-        return process_queued_user_inputs_record(run_id)
+        return await process_queued_user_inputs_record(run_id)
 
     async def _append_queued_input_status(
         self, run_id: UUID, queued_messages: List[Dict[str, str]]
@@ -574,7 +574,7 @@ class InteractiveResearchAgent:
             run_id: 当前研究 run ID。
             queued_messages: 已处理的排队用户消息。
         """
-        await self._notify_change(append_queued_input_status_record(run_id, queued_messages))
+        await self._notify_change(await append_queued_input_status_record(run_id, queued_messages))
 
     def _build_agent_messages(
         self,
@@ -652,7 +652,7 @@ class InteractiveResearchAgent:
             return self._llm_factory()
         return build_chat_model(model=settings.LLM_MODEL, temperature=0.2)
 
-    def _record_llm_usage(
+    async def _record_llm_usage(
         self,
         run_id: UUID,
         response: Any,
@@ -670,7 +670,7 @@ class InteractiveResearchAgent:
             call_kind: LLM 调用类型。
             iteration_index: 调用迭代序号。
         """
-        record_llm_usage(
+        await record_llm_usage(
             response,
             settings.LLM_MODEL,
             "interactive_stock_research",

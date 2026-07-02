@@ -1,8 +1,9 @@
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage
 from pydantic import ValidationError
+
 from app.ai.stock_analysis.schemas import (
     MAX_STOCK_ANALYSIS_QUESTION_LENGTH,
     StockAnalysisRequest,
@@ -40,9 +41,10 @@ def test_stock_analysis_request_rejects_question_over_100000_chars() -> None:
         StockAnalysisRequest(stock_code="600519.SH", question=oversized_question)
 
 
-def test_stock_analysis_run_rejects_blank_question(client, auth_headers, db_session) -> None:
-    db_session.add(StockBasic(stock_code="600519.SH", name="贵州茅台", market="SH"))
-    db_session.commit()
+@pytest.mark.asyncio
+async def test_stock_analysis_run_rejects_blank_question(client, auth_headers, async_db_session) -> None:
+    async_db_session.add(StockBasic(stock_code="600519.SH", name="贵州茅台", market="SH"))
+    await async_db_session.commit()
 
     response = client.post(
         "/api/v1/stock-analysis/run",
@@ -53,13 +55,14 @@ def test_stock_analysis_run_rejects_blank_question(client, auth_headers, db_sess
     assert response.status_code == 422
 
 
-def test_stock_analysis_run_submits_owned_task(client, auth_headers, db_session) -> None:
-    db_session.add(StockBasic(stock_code="600519.SH", name="贵州茅台", market="SH"))
-    db_session.commit()
+@pytest.mark.asyncio
+async def test_stock_analysis_run_submits_owned_task(client, auth_headers, async_db_session) -> None:
+    async_db_session.add(StockBasic(stock_code="600519.SH", name="贵州茅台", market="SH"))
+    await async_db_session.commit()
 
     submitted = {}
 
-    def fake_submit_task(**kwargs):
+    async def fake_submit_task(**kwargs):
         submitted.update(kwargs)
         return {
             "task_id": "task-stock-1",
@@ -69,10 +72,7 @@ def test_stock_analysis_run_submits_owned_task(client, auth_headers, db_session)
             "new_task": True,
         }
 
-    with (
-        patch("app.ai.stock_analysis.service.task_manager.submit_task", side_effect=fake_submit_task),
-        patch("app.ai.stock_analysis.service.async_task_runner.submit_task", return_value=True) as submit_runner,
-    ):
+    with patch("app.ai.stock_analysis.service.task_manager.submit_task", side_effect=fake_submit_task):
         response = client.post(
             "/api/v1/stock-analysis/run",
             headers=auth_headers,
@@ -89,13 +89,13 @@ def test_stock_analysis_run_submits_owned_task(client, auth_headers, db_session)
         "question": "分析贵州茅台",
     }
     assert submitted["user_id"] is not None
-    assert submit_runner.called is True
+    assert submitted["task_kwargs"] == submitted["parameters"]
 
 
 def test_research_analysis_run_submits_task_without_stock(client, auth_headers) -> None:
     submitted = {}
 
-    def fake_submit_task(**kwargs):
+    async def fake_submit_task(**kwargs):
         submitted.update(kwargs)
         return {
             "task_id": "task-research-1",
@@ -105,10 +105,7 @@ def test_research_analysis_run_submits_task_without_stock(client, auth_headers) 
             "new_task": True,
         }
 
-    with (
-        patch("app.ai.stock_analysis.service.task_manager.submit_task", side_effect=fake_submit_task),
-        patch("app.ai.stock_analysis.service.async_task_runner.submit_task", return_value=True) as submit_runner,
-    ):
+    with patch("app.ai.stock_analysis.service.task_manager.submit_task", side_effect=fake_submit_task):
         response = client.post(
             "/api/v1/stock-analysis/run",
             headers=auth_headers,
@@ -123,8 +120,8 @@ def test_research_analysis_run_submits_task_without_stock(client, auth_headers) 
         "stock_name": None,
         "question": "分析半导体行业最近有没有机会",
     }
-    assert submit_runner.call_args.kwargs["task_kwargs"]["stock_code"] is None
-    assert submit_runner.call_args.kwargs["task_kwargs"]["stock_name"] is None
+    assert submitted["task_kwargs"]["stock_code"] is None
+    assert submitted["task_kwargs"]["stock_name"] is None
 
 
 def test_stock_analysis_run_returns_404_for_unknown_stock(client, auth_headers) -> None:
@@ -223,7 +220,7 @@ async def test_stock_analysis_runner_executes_tool_and_returns_markdown(monkeypa
     ])
     monkeypatch.setattr(runner, "build_chat_model", lambda **kwargs: fake_llm)
     monkeypatch.setattr(runner, "build_stock_analysis_tools", lambda: [FakeTool()])
-    monkeypatch.setattr(runner, "record_llm_usage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "record_llm_usage", AsyncMock(return_value=None))
 
     result = await runner.run_single_stock_analysis(
         stock_code="600519.SH",
@@ -248,7 +245,7 @@ async def test_research_runner_supports_question_without_stock(monkeypatch) -> N
     ])
     monkeypatch.setattr(runner, "build_chat_model", lambda **kwargs: fake_llm)
     monkeypatch.setattr(runner, "build_stock_analysis_tools", lambda: [FakeTool()])
-    monkeypatch.setattr(runner, "record_llm_usage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "record_llm_usage", AsyncMock(return_value=None))
 
     result = await runner.run_single_stock_analysis(
         stock_code=None,
@@ -287,7 +284,7 @@ async def test_stock_analysis_runner_uses_tool_output_compression(monkeypatch) -
     ])
     monkeypatch.setattr(runner, "build_chat_model", lambda **kwargs: fake_llm)
     monkeypatch.setattr(runner, "build_stock_analysis_tools", lambda: [FakeTool()])
-    monkeypatch.setattr(runner, "record_llm_usage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "record_llm_usage", AsyncMock(return_value=None))
     monkeypatch.setattr(runner, "should_summarize_tool_output", lambda tool_name, content: True)
 
     async def fake_summarize_tool_output(*args, **kwargs):
@@ -333,7 +330,7 @@ async def test_stock_analysis_runner_enters_final_mode_at_iteration_limit(monkey
     ])
     monkeypatch.setattr(runner, "build_chat_model", lambda **kwargs: fake_llm)
     monkeypatch.setattr(runner, "build_stock_analysis_tools", lambda: [FakeTool()])
-    monkeypatch.setattr(runner, "record_llm_usage", lambda *args, **kwargs: None)
+    monkeypatch.setattr(runner, "record_llm_usage", AsyncMock(return_value=None))
 
     result = await runner.run_single_stock_analysis(
         stock_code="600519.SH",
@@ -359,11 +356,7 @@ async def test_stock_analysis_task_returns_result_for_async_task_runner(monkeypa
     async def fake_run_single_stock_analysis(*args, **kwargs):
         return expected_result
 
-    def fail_session_local():
-        raise AssertionError("async_task_runner owns task status updates")
-
     monkeypatch.setattr(runner, "run_single_stock_analysis", fake_run_single_stock_analysis)
-    monkeypatch.setattr(runner, "SessionLocal", fail_session_local, raising=False)
 
     result = await runner.run_stock_analysis_task(
         task_id="task-stock-1",

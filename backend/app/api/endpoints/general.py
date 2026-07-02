@@ -2,9 +2,7 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
-from app.core.database import get_db
 from app.core.i18n import i18n_service
 from app.core.runtime_settings import RuntimeSettings, get_runtime_settings, update_runtime_settings
 from app.core.security import get_current_user
@@ -56,14 +54,12 @@ async def get_translations(lang: str) -> Dict[str, Any]:
 
 @router.get("/language", response_model=SystemLanguageResponse)
 async def get_system_language(
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> SystemLanguageResponse:
     """
     Get the current system language.
 
     Args:
-        db: Database session.
         current_user: Authenticated user.
 
     Returns:
@@ -71,7 +67,7 @@ async def get_system_language(
     """
     del current_user
     return SystemLanguageResponse(
-        language=get_persisted_system_language(db),
+        language=await get_persisted_system_language(),
         supported_languages=list(SUPPORTED_SYSTEM_LANGUAGES),
     )
 
@@ -79,7 +75,6 @@ async def get_system_language(
 @router.put("/language", response_model=SystemLanguageResponse)
 async def update_system_language(
     payload: SystemLanguageUpdate,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> SystemLanguageResponse:
     """
@@ -87,7 +82,6 @@ async def update_system_language(
 
     Args:
         payload: Language update payload.
-        db: Database session.
         current_user: Authenticated user.
 
     Returns:
@@ -95,7 +89,7 @@ async def update_system_language(
     """
     del current_user
     try:
-        language = set_system_language(db, payload.language)
+        language = await set_system_language(payload.language)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -110,37 +104,33 @@ async def update_system_language(
 
 @router.get("/runtime-settings", response_model=RuntimeSettings)
 async def read_runtime_settings(
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> RuntimeSettings:
     """Get system runtime settings.
 
     Args:
-        db: Database session.
         current_user: Authenticated user.
 
     Returns:
         Current system runtime settings.
     """
     del current_user
-    return get_runtime_settings(db)
+    return await get_runtime_settings()
 
 
 @router.put("/runtime-settings", response_model=RuntimeSettings)
 async def save_runtime_settings(
     payload: RuntimeSettingsUpdate,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> RuntimeSettings:
     """Update system runtime settings.
 
     Args:
         payload: Runtime settings update payload.
-        db: Database session.
         current_user: Authenticated user.
 
     Returns:
         Updated system runtime settings.
     """
     del current_user
-    return update_runtime_settings(db, payload)
+    return await update_runtime_settings(payload)

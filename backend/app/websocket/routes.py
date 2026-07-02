@@ -1,9 +1,10 @@
 import json
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import get_async_db
 from app.core.logger import get_logger
 from app.core.security import get_current_user
 from app.core.websocket_ticket import (
@@ -32,10 +33,16 @@ async def create_global_websocket_ticket(
     }
 
 
-def _authenticate_websocket(db: Session, ticket: str | None, scope: str, resource_id: str | None) -> User | None:
+async def _authenticate_websocket(
+    db: AsyncSession,
+    ticket: str | None,
+    scope: str,
+    resource_id: str | None,
+) -> User | None:
     ticket_user_id = consume_websocket_ticket(ticket, scope, resource_id)
     if ticket_user_id is not None:
-        return db.query(User).filter(User.id == ticket_user_id).first()
+        result = await db.execute(select(User).where(User.id == ticket_user_id))
+        return result.scalar_one_or_none()
     return None
 
 
@@ -44,10 +51,10 @@ async def websocket_endpoint(
     websocket: WebSocket,
     session_id: str,
     ticket: str | None = Query(None),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
 ):
     session_id_str = session_id
-    current_user = _authenticate_websocket(
+    current_user = await _authenticate_websocket(
         db,
         ticket=ticket,
         scope="global",

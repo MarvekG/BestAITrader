@@ -8,9 +8,10 @@ from typing import Dict, List
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, WebSocket, WebSocketDisconnect
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db
+from app.core.database import get_async_db
 from app.core.security import get_current_user
 from app.core.websocket_ticket import (
     WEBSOCKET_TICKET_TTL_SECONDS,
@@ -96,15 +97,16 @@ async def create_debate_websocket_ticket(
     }
 
 
-def _authenticate_debate_websocket(
-    db: Session,
+async def _authenticate_debate_websocket(
+    db: AsyncSession,
     *,
     ticket: str | None,
     session_id: str,
 ) -> User | None:
     ticket_user_id = consume_websocket_ticket(ticket, "debate", session_id)
     if ticket_user_id is not None:
-        return db.query(User).filter(User.id == ticket_user_id).first()
+        result = await db.execute(select(User).where(User.id == ticket_user_id))
+        return result.scalar_one_or_none()
     return None
 
 
@@ -113,14 +115,14 @@ async def debate_websocket(
     websocket: WebSocket,
     session_id: str,
     ticket: str | None = Query(None),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     辩论WebSocket端点
 
     客户端连接后会接收辩论过程中的实时消息
     """
-    current_user = _authenticate_debate_websocket(
+    current_user = await _authenticate_debate_websocket(
         db,
         ticket=ticket,
         session_id=session_id,
@@ -143,10 +145,12 @@ async def debate_websocket(
         # 发送历史消息(如果有)
         try:
             session_uuid = UUID(session_id)
-            history_messages = db.query(DebateMessage)\
-                .filter(DebateMessage.session_id == session_uuid)\
-                .order_by(DebateMessage.created_at.asc())\
-                .all()
+            result = await db.execute(
+                select(DebateMessage)
+                .where(DebateMessage.session_id == session_uuid)
+                .order_by(DebateMessage.created_at.asc())
+            )
+            history_messages = result.scalars().all()
 
             if history_messages:
                 await websocket.send_json({

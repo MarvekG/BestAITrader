@@ -21,10 +21,10 @@ class Session(Base):
     updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     status = Column(Enum("active", "completed", "failed", "archived", name="session_status"), default="active")
 
-    user = relationship("User")  # 添加到 User 的关系
+    user = relationship("User")
 
     debate_messages = relationship("DebateMessage", back_populates="session",
-                                   uselist=True, lazy="dynamic", cascade="all, delete-orphan")
+                                   uselist=True, cascade="all, delete-orphan")
     pm_decision = relationship(
         "PMDecisionRecord",
         back_populates="session",
@@ -32,5 +32,5 @@ class Session(Base):
         cascade="all, delete-orphan",
     )
     trade_records = relationship("TradeRecord", back_populates="session", uselist=True)
-    # account 关系已移除，改为通过 user.account 访问
+    # 账户需通过 Account.user_id 显式查询，避免 async ORM 隐式 lazy I/O。
     orders = relationship("Order", back_populates="session", uselist=True)

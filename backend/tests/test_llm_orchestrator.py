@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+import inspect
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch, MagicMock
 from uuid import uuid4
@@ -137,39 +138,40 @@ async def test_fetch_context_node(initial_state):
 
 
 @pytest.mark.asyncio
-async def test_fetch_context_metadata_uses_share_fields_from_valuation(initial_state, db_session):
-    user = User(
-        username="metadata_valuation_share_user",
-        email="metadata_valuation_share_user@example.com",
-        password_hash="hashed",
-    )
-    db_session.add(user)
-    db_session.flush()
-    db_session.add(
-        DebateSession(
-            user_id=user.id,
-            stock_code="000001.SZ",
-            trading_frequency="swing",
-            trading_strategy="momentum",
-            status="active",
-            session_id=initial_state["session_id"],
+async def test_fetch_context_metadata_uses_share_fields_from_valuation(initial_state, test_db):
+    async with test_db() as db:
+        user = User(
+            username="metadata_valuation_share_user",
+            email="metadata_valuation_share_user@example.com",
+            password_hash="hashed",
         )
-    )
-    db_session.add(StockBasic(stock_code="000001.SZ", name="平安银行", industry="银行"))
-    db_session.add(
-        StockValuationHistory(
-            stock_code="000001.SZ",
-            data_date=datetime(2026, 6, 10).date(),
-            total_share=5_000_000_000,
-            float_share=4_500_000_000,
+        db.add(user)
+        await db.flush()
+        db.add(
+            DebateSession(
+                user_id=user.id,
+                stock_code="000001.SZ",
+                trading_frequency="swing",
+                trading_strategy="momentum",
+                status="active",
+                session_id=initial_state["session_id"],
+            )
         )
-    )
-    db_session.commit()
+        db.add(StockBasic(stock_code="000001.SZ", name="平安银行", industry="银行"))
+        db.add(
+            StockValuationHistory(
+                stock_code="000001.SZ",
+                data_date=datetime(2026, 6, 10).date(),
+                total_share=5_000_000_000,
+                float_share=4_500_000_000,
+            )
+        )
+        await db.commit()
 
     from app.ai.llm_engine.context.providers import MetadataProvider
     from app.ai.llm_engine.context.service import AIContextService
 
-    with patch("app.ai.llm_engine.context.runtime.SessionLocal", return_value=db_session):
+    with patch("app.ai.llm_engine.context.runtime.database_module.AsyncSessionLocal", test_db):
         context = await AIContextService(providers=[MetadataProvider()]).build("000001.SZ")
 
     assert context["metadata"]["company"]["total_share"] == 5_000_000_000
@@ -202,16 +204,11 @@ async def test_fetch_context_node_keeps_portfolio_risk_control_in_build_context(
             },
         },
     }
+    fake_db = MagicMock()
     with patch("app.ai.llm_engine.orchestrator.AIContextService") as MockService, \
-         patch("app.core.database.SessionLocal") as mock_session_local, \
-         patch(
-             "app.ai.llm_engine.orchestrator._get_latest_position_price",
-             return_value=(11.0, "position_snapshot", None),
-         ):
+         patch("app.core.database.AsyncSessionLocal", return_value=_AsyncSessionLocalContext(fake_db)):
         mock_service = MockService.return_value
         mock_service.build = AsyncMock(return_value=ai_context)
-        mock_db = MagicMock()
-        mock_session_local.return_value.__enter__.return_value = mock_db
         mock_session = MagicMock()
         mock_account = MagicMock()
         mock_account.total_assets = 1000000
@@ -226,7 +223,11 @@ async def test_fetch_context_node_keeps_portfolio_risk_control_in_build_context(
         mock_position.profit_loss = 1000.0
         mock_position.profit_loss_pct = 0.1
 
-        mock_db.query.return_value.filter.return_value.first.side_effect = [mock_session, mock_account, mock_position]
+        fake_db.execute.side_effect = [
+            SimpleNamespace(scalar_one_or_none=lambda: mock_session),
+            SimpleNamespace(scalar_one_or_none=lambda: mock_account),
+            SimpleNamespace(scalar_one_or_none=lambda: mock_position),
+        ]
 
         result = await fetch_context(initial_state)
 
@@ -241,14 +242,14 @@ async def test_fetch_context_node_keeps_portfolio_risk_control_in_build_context(
 
 
 @pytest.mark.asyncio
-async def test_fetch_context_uses_portfolio_overview_position_as_pm_valuation_source(initial_state, db_session):
+async def test_fetch_context_uses_portfolio_overview_position_as_pm_valuation_source(initial_state, async_db_session):
     user = User(
         username="pm_revalue_user",
         email="pm_revalue_user@example.com",
         password_hash="hashed",
     )
-    db_session.add(user)
-    db_session.flush()
+    async_db_session.add(user)
+    await async_db_session.flush()
     account = Account(
         user_id=user.id,
         total_assets=Decimal("100000.00"),
@@ -258,10 +259,10 @@ async def test_fetch_context_uses_portfolio_overview_position_as_pm_valuation_so
         initial_capital=Decimal("100000.00"),
         total_profit_loss=Decimal("0.00"),
     )
-    db_session.add(account)
-    db_session.flush()
-    db_session.add(StockBasic(stock_code="000001.SZ", name="平安银行", industry="银行"))
-    db_session.flush()
+    async_db_session.add(account)
+    await async_db_session.flush()
+    async_db_session.add(StockBasic(stock_code="000001.SZ", name="平安银行", industry="银行"))
+    await async_db_session.flush()
     session = DebateSession(
         user_id=user.id,
         stock_code="000001.SZ",
@@ -269,7 +270,7 @@ async def test_fetch_context_uses_portfolio_overview_position_as_pm_valuation_so
         trading_strategy="momentum",
         status="active",
     )
-    db_session.add_all(
+    async_db_session.add_all(
         [
             session,
             Position(
@@ -290,7 +291,7 @@ async def test_fetch_context_uses_portfolio_overview_position_as_pm_valuation_so
             ),
         ]
     )
-    db_session.commit()
+    await async_db_session.commit()
     initial_state["session_id"] = session.session_id
     context_with_portfolio = {
         **MOCK_CONTEXT,
@@ -315,7 +316,7 @@ async def test_fetch_context_uses_portfolio_overview_position_as_pm_valuation_so
     }
 
     with patch("app.ai.llm_engine.orchestrator.AIContextService") as MockService, \
-         patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
+         patch("app.core.database.AsyncSessionLocal", return_value=_AsyncSessionLocalContext(async_db_session)):
         mock_service = MockService.return_value
         mock_service.build = AsyncMock(return_value=context_with_portfolio)
 
@@ -337,14 +338,14 @@ async def test_fetch_context_uses_portfolio_overview_position_as_pm_valuation_so
 
 
 @pytest.mark.asyncio
-async def test_fetch_context_keeps_portfolio_info_consistent_with_overview(initial_state, db_session):
+async def test_fetch_context_keeps_portfolio_info_consistent_with_overview(initial_state, async_db_session):
     user = User(
         username="pm_revalue_stale_realtime_user",
         email="pm_revalue_stale_realtime_user@example.com",
         password_hash="hashed",
     )
-    db_session.add(user)
-    db_session.flush()
+    async_db_session.add(user)
+    await async_db_session.flush()
     account = Account(
         user_id=user.id,
         total_assets=Decimal("100000.00"),
@@ -354,10 +355,10 @@ async def test_fetch_context_keeps_portfolio_info_consistent_with_overview(initi
         initial_capital=Decimal("100000.00"),
         total_profit_loss=Decimal("0.00"),
     )
-    db_session.add(account)
-    db_session.flush()
-    db_session.add(StockBasic(stock_code="000001.SZ", name="平安银行", industry="银行"))
-    db_session.flush()
+    async_db_session.add(account)
+    await async_db_session.flush()
+    async_db_session.add(StockBasic(stock_code="000001.SZ", name="平安银行", industry="银行"))
+    await async_db_session.flush()
     session = DebateSession(
         user_id=user.id,
         stock_code="000001.SZ",
@@ -365,7 +366,7 @@ async def test_fetch_context_keeps_portfolio_info_consistent_with_overview(initi
         trading_strategy="momentum",
         status="active",
     )
-    db_session.add_all(
+    async_db_session.add_all(
         [
             session,
             Position(
@@ -392,7 +393,7 @@ async def test_fetch_context_keeps_portfolio_info_consistent_with_overview(initi
             ),
         ]
     )
-    db_session.commit()
+    await async_db_session.commit()
     initial_state["session_id"] = session.session_id
     context_with_portfolio = {
         **MOCK_CONTEXT,
@@ -417,7 +418,7 @@ async def test_fetch_context_keeps_portfolio_info_consistent_with_overview(initi
     }
 
     with patch("app.ai.llm_engine.orchestrator.AIContextService") as MockService, \
-         patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
+         patch("app.core.database.AsyncSessionLocal", return_value=_AsyncSessionLocalContext(async_db_session)):
         mock_service = MockService.return_value
         mock_service.build = AsyncMock(return_value=context_with_portfolio)
 
@@ -551,28 +552,29 @@ async def test_strategic_round_nodes(initial_state):
 @pytest.mark.asyncio
 async def test_full_workflow_integration(initial_state):
     """Integration test for the full graph flow using mocks for all external calls"""
+    fake_db = MagicMock()
+    fake_db.execute.return_value = SimpleNamespace(scalar_one_or_none=lambda: None)
     with (
         patch("app.ai.llm_engine.orchestrator.AIContextService") as MockService,
         patch("app.ai.llm_engine.agents.base.BaseAgent.run", new_callable=AsyncMock) as mock_agent_run,
         patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock) as mock_persist,
+        patch("app.core.database.AsyncSessionLocal", return_value=_AsyncSessionLocalContext(fake_db)),
         patch(
             "app.trading.service.trading_service.execute_order_and_update_db",
             new_callable=AsyncMock,
         ) as mock_trade,
-        patch("app.core.database.SessionLocal") as mock_session_local,
+        patch("app.ai.llm_engine.orchestrator._get_same_stock_history", new_callable=AsyncMock, return_value={}),
+        patch("app.ai.llm_engine.orchestrator._get_pending_orders_for_pm", new_callable=AsyncMock, return_value=[]),
         patch(
             "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
-            return_value=_saved_pm_record(),
+            new_callable=AsyncMock,
+            return_value=_saved_pm_record().to_dict(),
         ),
-        patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", return_value={}),
+        patch("app.ai.llm_engine.orchestrator._get_previous_pm_decision", new_callable=AsyncMock, return_value={}),
     ):
 
         mock_service = MockService.return_value
         mock_service.build = AsyncMock(return_value=MOCK_CONTEXT)
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.first.return_value = None
-        mock_session_local.return_value.__enter__.return_value = mock_db
-
         # Return different data based on the agent's expected output model
         def mock_run_side_effect(static_context, context=None):
             assert static_context == _expected_static_context()
@@ -676,6 +678,9 @@ class _PersistDb:
     def rollback(self):
         return None
 
+    def execute(self, _statement):
+        return SimpleNamespace(scalar_one_or_none=lambda: self.session_obj.session_id)
+
 
 class _SessionLocalContext:
     def __init__(self, db):
@@ -686,6 +691,36 @@ class _SessionLocalContext:
 
     def __exit__(self, exc_type, exc, tb):
         return False
+
+
+class _AsyncSessionLocalContext:
+    def __init__(self, db):
+        self.db = db
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def execute(self, statement):
+        result = self.db.execute(statement)
+        if inspect.isawaitable(result):
+            return await result
+        return result
+
+    def add(self, obj):
+        self.db.add(obj)
+
+    async def commit(self):
+        result = self.db.commit()
+        if inspect.isawaitable(result):
+            await result
+
+    async def refresh(self, obj):
+        result = self.db.refresh(obj)
+        if inspect.isawaitable(result):
+            await result
 
 
 @pytest.mark.asyncio
@@ -705,9 +740,10 @@ async def test_persist_agent_report_saves_pm_report():
     )
 
     with (
-        patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(fake_db)),
+        patch("app.core.database.AsyncSessionLocal", return_value=_AsyncSessionLocalContext(fake_db)),
         patch(
             "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
+            new_callable=AsyncMock,
             return_value=saved_pm_decision,
         ),
         patch("app.api.endpoints.debate_ws.send_debate_message", new_callable=AsyncMock),
@@ -741,19 +777,23 @@ async def test_portfolio_management_passes_expected_top_level_keys(initial_state
         patch("app.ai.llm_engine.orchestrator.persist_agent_report", new_callable=AsyncMock),
         patch(
             "app.ai.llm_engine.orchestrator._get_previous_pm_decision",
+            new_callable=AsyncMock,
             return_value={"decision": "buy", "target_position": 0.3},
         ),
         patch(
             "app.ai.llm_engine.orchestrator._get_same_stock_history",
+            new_callable=AsyncMock,
             return_value={"recent_execution_summary": {"recent_realized_pnl": -100.0}},
         ),
         patch(
             "app.ai.llm_engine.orchestrator._get_pending_orders_for_pm",
+            new_callable=AsyncMock,
             return_value=[],
         ),
         patch(
             "app.ai.llm_engine.pm_decision_service.get_pm_decision_for_session",
-            return_value=_saved_pm_record(),
+            new_callable=AsyncMock,
+            return_value=_saved_pm_record().to_dict(),
         ),
     ):
         mock_agent = MockPM.return_value
@@ -784,14 +824,15 @@ async def test_portfolio_management_passes_expected_top_level_keys(initial_state
         assert pm_runtime_context["fact_arbitration_report"] == "Fact arbitration"
 
 
-def test_get_same_stock_history_includes_trades_pnl_and_stop_loss(db_session):
+@pytest.mark.asyncio
+async def test_get_same_stock_history_includes_trades_pnl_and_stop_loss(async_db_session):
     user = User(
         username="same_stock_history_user",
         email="same_stock_history_user@example.com",
         password_hash="hashed",
     )
-    db_session.add(user)
-    db_session.flush()
+    async_db_session.add(user)
+    await async_db_session.flush()
     account = Account(
         user_id=user.id,
         total_assets=Decimal("1000000.00"),
@@ -804,8 +845,8 @@ def test_get_same_stock_history_includes_trades_pnl_and_stop_loss(db_session):
         total_trades=2,
         win_rate=Decimal("0.00"),
     )
-    db_session.add(account)
-    db_session.flush()
+    async_db_session.add(account)
+    await async_db_session.flush()
     previous_session = DebateSession(
         user_id=user.id,
         stock_code="000001.SZ",
@@ -820,9 +861,9 @@ def test_get_same_stock_history_includes_trades_pnl_and_stop_loss(db_session):
         trading_strategy="trend_following",
         status="active",
     )
-    db_session.add_all([previous_session, current_session])
-    db_session.flush()
-    db_session.add(
+    async_db_session.add_all([previous_session, current_session])
+    await async_db_session.flush()
+    async_db_session.add(
         DebateMessage(
             session_id=previous_session.session_id,
             stage="portfolio_management",
@@ -834,7 +875,7 @@ def test_get_same_stock_history_includes_trades_pnl_and_stop_loss(db_session):
             created_at=datetime(2026, 6, 4, 13, 37),
         )
     )
-    db_session.add(
+    async_db_session.add(
         PMDecisionRecord(
             session_id=previous_session.session_id,
             user_id=user.id,
@@ -878,9 +919,9 @@ def test_get_same_stock_history_includes_trades_pnl_and_stop_loss(db_session):
         filled_at=datetime(2026, 6, 4, 14, 48),
         source=f"ai:{previous_session.session_id}",
     )
-    db_session.add_all([buy_order, sell_order])
-    db_session.flush()
-    db_session.add_all(
+    async_db_session.add_all([buy_order, sell_order])
+    await async_db_session.flush()
+    async_db_session.add_all(
         [
             TradeRecord(
                 session_id=previous_session.session_id,
@@ -914,10 +955,10 @@ def test_get_same_stock_history_includes_trades_pnl_and_stop_loss(db_session):
             ),
         ]
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
-        result = _get_same_stock_history(current_session.session_id, "000001.SZ")
+    with patch("app.core.database.AsyncSessionLocal", return_value=_AsyncSessionLocalContext(async_db_session)):
+        result = await _get_same_stock_history(current_session.session_id, "000001.SZ")
 
     summary = result["recent_execution_summary"]
     assert summary["has_orders"] is True
@@ -935,14 +976,15 @@ def test_get_same_stock_history_includes_trades_pnl_and_stop_loss(db_session):
     assert result["recent_pm_decisions"][0]["execution_summary"]["realized_pnl"] == -4916.02
 
 
-def test_get_same_stock_history_does_not_treat_rejected_sell_as_exit(db_session):
+@pytest.mark.asyncio
+async def test_get_same_stock_history_does_not_treat_rejected_sell_as_exit(async_db_session):
     user = User(
         username="same_stock_rejected_sell_user",
         email="same_stock_rejected_sell_user@example.com",
         password_hash="hashed",
     )
-    db_session.add(user)
-    db_session.flush()
+    async_db_session.add(user)
+    await async_db_session.flush()
     account = Account(
         user_id=user.id,
         total_assets=Decimal("1000000.00"),
@@ -951,8 +993,8 @@ def test_get_same_stock_history_does_not_treat_rejected_sell_as_exit(db_session)
         market_value=Decimal("500000.00"),
         initial_capital=Decimal("1000000.00"),
     )
-    db_session.add(account)
-    db_session.flush()
+    async_db_session.add(account)
+    await async_db_session.flush()
     previous_session = DebateSession(
         user_id=user.id,
         stock_code="000001.SZ",
@@ -967,9 +1009,9 @@ def test_get_same_stock_history_does_not_treat_rejected_sell_as_exit(db_session)
         trading_strategy="trend_following",
         status="active",
     )
-    db_session.add_all([previous_session, current_session])
-    db_session.flush()
-    db_session.add(
+    async_db_session.add_all([previous_session, current_session])
+    await async_db_session.flush()
+    async_db_session.add(
         Order(
             session_id=previous_session.session_id,
             account_id=account.account_id,
@@ -986,7 +1028,7 @@ def test_get_same_stock_history_does_not_treat_rejected_sell_as_exit(db_session)
             source=f"ai:{previous_session.session_id}",
         )
     )
-    db_session.add(
+    async_db_session.add(
         PMDecisionRecord(
             session_id=previous_session.session_id,
             user_id=user.id,
@@ -995,10 +1037,10 @@ def test_get_same_stock_history_does_not_treat_rejected_sell_as_exit(db_session)
             confidence_score=70,
         )
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
-        result = _get_same_stock_history(current_session.session_id, "000001.SZ")
+    with patch("app.core.database.AsyncSessionLocal", return_value=_AsyncSessionLocalContext(async_db_session)):
+        result = await _get_same_stock_history(current_session.session_id, "000001.SZ")
 
     summary = result["recent_execution_summary"]
     assert summary["has_orders"] is True
@@ -1026,14 +1068,15 @@ def test_pm_review_focus_uses_system_language(monkeypatch):
     ]
 
 
-def test_get_previous_pm_decision_includes_execution_summary_with_dates(db_session):
+@pytest.mark.asyncio
+async def test_get_previous_pm_decision_includes_execution_summary_with_dates(async_db_session):
     user = User(
         username="previous_pm_context_user",
         email="previous_pm_context_user@example.com",
         password_hash="hashed",
     )
-    db_session.add(user)
-    db_session.flush()
+    async_db_session.add(user)
+    await async_db_session.flush()
     previous_session = DebateSession(
         user_id=user.id,
         stock_code="000001.SZ",
@@ -1048,8 +1091,8 @@ def test_get_previous_pm_decision_includes_execution_summary_with_dates(db_sessi
         trading_strategy="momentum",
         status="active",
     )
-    db_session.add_all([previous_session, current_session])
-    db_session.flush()
+    async_db_session.add_all([previous_session, current_session])
+    await async_db_session.flush()
     pm_message = DebateMessage(
         session_id=previous_session.session_id,
         stage="portfolio_management",
@@ -1060,8 +1103,8 @@ def test_get_previous_pm_decision_includes_execution_summary_with_dates(db_sessi
         reasoning="# previous report",
         created_at=datetime(2026, 1, 1, 15, 0),
     )
-    db_session.add(pm_message)
-    db_session.add(
+    async_db_session.add(pm_message)
+    async_db_session.add(
         PMDecisionRecord(
             session_id=previous_session.session_id,
             user_id=user.id,
@@ -1073,7 +1116,7 @@ def test_get_previous_pm_decision_includes_execution_summary_with_dates(db_sessi
             holding_horizon_days=20,
         )
     )
-    db_session.add_all(
+    async_db_session.add_all(
         [
             Order(
                 session_id=previous_session.session_id,
@@ -1104,10 +1147,10 @@ def test_get_previous_pm_decision_includes_execution_summary_with_dates(db_sessi
             ),
         ]
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
-        result = _get_previous_pm_decision(current_session.session_id, "000001.SZ")
+    with patch("app.core.database.AsyncSessionLocal", return_value=_AsyncSessionLocalContext(async_db_session)):
+        result = await _get_previous_pm_decision(current_session.session_id, "000001.SZ")
 
     assert result["take_profit"] == 12.0
     assert result["holding_horizon_days"] == 20
@@ -1127,14 +1170,15 @@ def test_get_previous_pm_decision_includes_execution_summary_with_dates(db_sessi
     assert "experience_review_summary" not in result
 
 
-def test_get_previous_pm_decision_orders_execution_summary_by_order_time(db_session):
+@pytest.mark.asyncio
+async def test_get_previous_pm_decision_orders_execution_summary_by_order_time(async_db_session):
     user = User(
         username="previous_pm_multi_order_user",
         email="previous_pm_multi_order_user@example.com",
         password_hash="hashed",
     )
-    db_session.add(user)
-    db_session.flush()
+    async_db_session.add(user)
+    await async_db_session.flush()
     previous_session = DebateSession(
         user_id=user.id,
         stock_code="000001.SZ",
@@ -1149,9 +1193,9 @@ def test_get_previous_pm_decision_orders_execution_summary_by_order_time(db_sess
         trading_strategy="momentum",
         status="active",
     )
-    db_session.add_all([previous_session, current_session])
-    db_session.flush()
-    db_session.add(
+    async_db_session.add_all([previous_session, current_session])
+    await async_db_session.flush()
+    async_db_session.add(
         DebateMessage(
             session_id=previous_session.session_id,
             stage="portfolio_management",
@@ -1163,7 +1207,7 @@ def test_get_previous_pm_decision_orders_execution_summary_by_order_time(db_sess
             created_at=datetime(2026, 1, 1, 15, 0),
         )
     )
-    db_session.add(
+    async_db_session.add(
         PMDecisionRecord(
             session_id=previous_session.session_id,
             user_id=user.id,
@@ -1174,7 +1218,7 @@ def test_get_previous_pm_decision_orders_execution_summary_by_order_time(db_sess
     )
     later_order_id = uuid4()
     earlier_order_id = uuid4()
-    db_session.add_all(
+    async_db_session.add_all(
         [
             Order(
                 order_id=later_order_id,
@@ -1200,23 +1244,24 @@ def test_get_previous_pm_decision_orders_execution_summary_by_order_time(db_sess
             ),
         ]
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
-        result = _get_previous_pm_decision(current_session.session_id, "000001.SZ")
+    with patch("app.core.database.AsyncSessionLocal", return_value=_AsyncSessionLocalContext(async_db_session)):
+        result = await _get_previous_pm_decision(current_session.session_id, "000001.SZ")
 
     assert result["execution_summary"]["first_order_time"] == "2026-01-01T15:01:00"
     assert result["execution_summary"]["latest_order_time"] == "2026-01-01T15:03:00"
 
 
-def test_get_pending_orders_for_pm_returns_llm_order_ids(db_session):
+@pytest.mark.asyncio
+async def test_get_pending_orders_for_pm_returns_llm_order_ids(async_db_session):
     user = User(
         username="pending_order_context_user",
         email="pending_order_context_user@example.com",
         password_hash="hashed",
     )
-    db_session.add(user)
-    db_session.flush()
+    async_db_session.add(user)
+    await async_db_session.flush()
     account = Account(
         user_id=user.id,
         total_assets=Decimal("100000.0000"),
@@ -1232,10 +1277,10 @@ def test_get_pending_orders_for_pm_returns_llm_order_ids(db_session):
         trading_strategy="momentum",
         status="active",
     )
-    db_session.add_all([account, current_session])
-    db_session.flush()
+    async_db_session.add_all([account, current_session])
+    await async_db_session.flush()
     order_id = uuid4()
-    db_session.add(
+    async_db_session.add(
         Order(
             order_id=order_id,
             session_id=current_session.session_id,
@@ -1250,10 +1295,10 @@ def test_get_pending_orders_for_pm_returns_llm_order_ids(db_session):
             created_at=datetime(2026, 1, 1, 15, 1),
         )
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
-        result = _get_pending_orders_for_pm(current_session.session_id)
+    with patch("app.core.database.AsyncSessionLocal", return_value=_AsyncSessionLocalContext(async_db_session)):
+        result = await _get_pending_orders_for_pm(current_session.session_id)
 
     assert result == [
         {
@@ -1272,14 +1317,15 @@ def test_get_pending_orders_for_pm_returns_llm_order_ids(db_session):
     ]
 
 
-def test_get_previous_pm_decision_marks_missing_execution(db_session):
+@pytest.mark.asyncio
+async def test_get_previous_pm_decision_marks_missing_execution(async_db_session):
     user = User(
         username="previous_pm_no_result_user",
         email="previous_pm_no_result_user@example.com",
         password_hash="hashed",
     )
-    db_session.add(user)
-    db_session.flush()
+    async_db_session.add(user)
+    await async_db_session.flush()
     previous_session = DebateSession(
         user_id=user.id,
         stock_code="000001.SZ",
@@ -1294,9 +1340,9 @@ def test_get_previous_pm_decision_marks_missing_execution(db_session):
         trading_strategy="momentum",
         status="active",
     )
-    db_session.add_all([previous_session, current_session])
-    db_session.flush()
-    db_session.add(
+    async_db_session.add_all([previous_session, current_session])
+    await async_db_session.flush()
+    async_db_session.add(
         DebateMessage(
             session_id=previous_session.session_id,
             stage="portfolio_management",
@@ -1308,7 +1354,7 @@ def test_get_previous_pm_decision_marks_missing_execution(db_session):
             created_at=datetime(2026, 1, 1, 15, 0),
         )
     )
-    db_session.add(
+    async_db_session.add(
         PMDecisionRecord(
             session_id=previous_session.session_id,
             user_id=user.id,
@@ -1317,10 +1363,10 @@ def test_get_previous_pm_decision_marks_missing_execution(db_session):
             confidence_score=70,
         )
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    with patch("app.core.database.SessionLocal", return_value=_SessionLocalContext(db_session)):
-        result = _get_previous_pm_decision(current_session.session_id, "000001.SZ")
+    with patch("app.core.database.AsyncSessionLocal", return_value=_AsyncSessionLocalContext(async_db_session)):
+        result = await _get_previous_pm_decision(current_session.session_id, "000001.SZ")
 
     assert result["execution_summary"] == {
         "has_orders": False,

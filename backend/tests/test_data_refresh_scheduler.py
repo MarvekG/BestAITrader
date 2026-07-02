@@ -1,4 +1,4 @@
-import asyncio
+import pytest
 
 from app.data.refresh_scheduler import DataRefreshScheduler
 from app.tasks.task_functions import cleanup_stock_realtime_market_history
@@ -45,7 +45,8 @@ def test_setup_auto_tasks_schedules_realtime_quotes_every_minute_and_cleanup_hou
     assert cleanup_task["trading_time_only"] is False
 
 
-def test_scheduled_task_submission_skips_status_persistence(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_scheduled_task_submission_skips_status_persistence(monkeypatch) -> None:
     submitted: list[dict] = []
 
     class _FakeScheduler:
@@ -68,7 +69,7 @@ def test_scheduled_task_submission_skips_status_persistence(monkeypatch) -> None
     scheduler.scheduler = _FakeScheduler()
     scheduler.add_task(_task_func, "Realtime Quoter 1m", trigger_type="interval", minutes=1)
 
-    asyncio.run(scheduler.scheduler.func())
+    await scheduler.scheduler.func()
 
     assert submitted
     assert submitted[0]["persist_status"] is False

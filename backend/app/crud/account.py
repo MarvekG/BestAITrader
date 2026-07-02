@@ -1,7 +1,8 @@
 from decimal import Decimal
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.account import Account
 from app.models.user import User
@@ -10,27 +11,25 @@ from app.models.user import User
 DEFAULT_ACCOUNT_CAPITAL = Decimal("1000000.00")
 
 
-def ensure_user_account(
-    db: Session,
+async def ensure_user_account(
+    db: AsyncSession,
     user: User,
     initial_capital: Decimal = DEFAULT_ACCOUNT_CAPITAL,
     commit: bool = True,
 ) -> Account:
-    """Return the user's account, creating a default simulated trading account if missing.
+    """返回用户交易账户；不存在时创建默认模拟账户。
 
     Args:
-        db: Database session.
-        user: Current authenticated user.
-        initial_capital: Starting capital for a newly created account.
-        commit: Whether to commit the new account immediately.
+        db: 异步数据库会话。
+        user: 当前认证用户。
+        initial_capital: 新建账户的初始资金。
+        commit: 是否立即提交新账户。
 
     Returns:
-        The existing or newly created account.
+        已存在或新建的账户。
     """
-    if user.account:
-        return user.account
-
-    existing_account = db.query(Account).filter(Account.user_id == user.id).first()
+    result = await db.execute(select(Account).where(Account.user_id == user.id))
+    existing_account = result.scalar_one_or_none()
     if existing_account:
         return existing_account
 
@@ -49,13 +48,14 @@ def ensure_user_account(
     db.add(account)
     try:
         if commit:
-            db.commit()
+            await db.commit()
         else:
-            db.flush()
-        db.refresh(account)
+            await db.flush()
+        await db.refresh(account)
     except IntegrityError:
-        db.rollback()
-        existing_account = db.query(Account).filter(Account.user_id == user.id).first()
+        await db.rollback()
+        result = await db.execute(select(Account).where(Account.user_id == user.id))
+        existing_account = result.scalar_one_or_none()
         if not existing_account:
             raise
         return existing_account

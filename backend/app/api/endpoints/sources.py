@@ -76,7 +76,7 @@ class DataSourceConfigTestRequest(BaseModel):
 async def get_data_source_config():
     """获取数据源配置。"""
     try:
-        data_source_config = get_cached_data_source_config()
+        data_source_config = await get_cached_data_source_config()
         tushare_api_url = data_source_config.get(TUSHARE_API_SETTING_KEY, "")
         tushare_token = data_source_config.get(TUSHARE_TOKEN_SETTING_KEY, "")
         return {
@@ -100,20 +100,20 @@ async def update_data_source_config(config: DataSourceConfigUpdate):
     """保存数据源配置到 system_settings。"""
     try:
         if config.tushare_token:
-            save_system_setting(TUSHARE_TOKEN_SETTING_KEY, config.tushare_token, "Tushare API Token")
+            await save_system_setting(TUSHARE_TOKEN_SETTING_KEY, config.tushare_token, "Tushare API Token")
 
         if config.tushare_api_url:
-            save_system_setting(TUSHARE_API_SETTING_KEY, config.tushare_api_url, "Tushare API URL")
+            await save_system_setting(TUSHARE_API_SETTING_KEY, config.tushare_api_url, "Tushare API URL")
 
         if config.tavily_api_key is not None:
-            save_system_setting(
+            await save_system_setting(
                 TAVILY_API_KEY_SETTING_KEY,
                 _normalize_secret_list(config.tavily_api_key),
                 "Tavily API Key",
             )
 
         if config.news_api_key is not None:
-            save_system_setting(
+            await save_system_setting(
                 NEWS_API_KEY_SETTING_KEY,
                 _normalize_secret_list(config.news_api_key),
                 "NewsAPI API Key",
@@ -222,10 +222,10 @@ async def test_tushare_config_key(request: Optional[DataSourceConfigTestRequest]
 
             original_api_url = DataApi._DataApi__http_url
             should_restore_api_url = True
-        data = TushareIngestor.get_pro_client(
+        data = (await TushareIngestor.get_pro_client(
             token=config.tushare_token if config else None,
             api_url=config.tushare_api_url if config else None,
-        ).stock_basic(
+        )).stock_basic(
             ts_code="000001.SZ",
             fields="ts_code,symbol,name,area,industry,list_date",
         )
@@ -253,7 +253,7 @@ async def test_tavily_config_key(request: Optional[DataSourceConfigTestRequest] 
     if config and config.tavily_api_key is not None:
         raw_api_keys = _normalize_secret_list(config.tavily_api_key)
     else:
-        data_source_config = get_cached_data_source_config()
+        data_source_config = await get_cached_data_source_config()
         raw_api_keys = data_source_config.get(TAVILY_API_KEY_SETTING_KEY, [])
     api_keys = raw_api_keys if isinstance(raw_api_keys, list) else []
     api_keys = api_keys or [""]
@@ -286,7 +286,7 @@ async def test_newsapi_config_key(request: Optional[DataSourceConfigTestRequest]
     if config and config.news_api_key is not None:
         raw_api_keys = _normalize_secret_list(config.news_api_key)
     else:
-        data_source_config = get_cached_data_source_config()
+        data_source_config = await get_cached_data_source_config()
         raw_api_keys = data_source_config.get(NEWS_API_KEY_SETTING_KEY, [])
     api_keys = raw_api_keys if isinstance(raw_api_keys, list) else []
     api_keys = api_keys or [""]

@@ -1,7 +1,7 @@
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
-from sqlalchemy import desc, func
-from sqlalchemy.orm import Session
+from sqlalchemy import desc, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.i18n import i18n_service
 from app.ai.llm_engine.context import constants as ctx_const
@@ -59,22 +59,30 @@ class FundamentalSource:
         return status_payload(data_status, **kwargs)
 
     @staticmethod
-    def _get_latest_top_holder_rows(db: Session, stock_code: str) -> List[StockTopHolders]:
-        latest_report = db.query(StockTopHolders.report_date).filter(
-            StockTopHolders.stock_code == stock_code
-        ).order_by(desc(StockTopHolders.report_date)).first()
+    async def _get_latest_top_holder_rows(db: AsyncSession, stock_code: str) -> List[StockTopHolders]:
+        latest_result = await db.execute(
+            select(StockTopHolders.report_date)
+            .where(StockTopHolders.stock_code == stock_code)
+            .order_by(desc(StockTopHolders.report_date))
+        )
+        latest_report = latest_result.first()
 
         if not latest_report:
             return []
 
         report_date = latest_report[0]
-        return db.query(StockTopHolders).filter(
-            StockTopHolders.stock_code == stock_code,
-            StockTopHolders.report_date == report_date
-        ).order_by(
-            StockTopHolders.holder_rank.asc().nullslast(),
-            desc(StockTopHolders.hold_amount)
-        ).all()
+        result = await db.execute(
+            select(StockTopHolders)
+            .where(
+                StockTopHolders.stock_code == stock_code,
+                StockTopHolders.report_date == report_date,
+            )
+            .order_by(
+                StockTopHolders.holder_rank.asc().nullslast(),
+                desc(StockTopHolders.hold_amount),
+            )
+        )
+        return list(result.scalars().all())
 
     @staticmethod
     def _is_institutional_holder(holder: StockTopHolders) -> bool:
@@ -119,8 +127,9 @@ class FundamentalSource:
             return "减少"
         return "不变"
 
-    def _get_basic_info(self, db: Session, stock_code: str) -> Dict[str, Any]:
-        stock = db.query(StockBasic).filter(StockBasic.stock_code == stock_code).first()
+    async def _get_basic_info(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
+        result = await db.execute(select(StockBasic).where(StockBasic.stock_code == stock_code))
+        stock = result.scalars().first()
         if not stock:
             return {}
         payload = {
@@ -133,11 +142,14 @@ class FundamentalSource:
         }
         return payload
 
-    def _get_valuation(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_valuation(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         # Get latest valuation (from EM or other sources)
-        val = db.query(StockValuationHistory).filter(
-            StockValuationHistory.stock_code == stock_code
-        ).order_by(desc(StockValuationHistory.data_date)).first()
+        result = await db.execute(
+            select(StockValuationHistory)
+            .where(StockValuationHistory.stock_code == stock_code)
+            .order_by(desc(StockValuationHistory.data_date))
+        )
+        val = result.scalars().first()
 
         if not val:
             return {}
@@ -157,11 +169,15 @@ class FundamentalSource:
         }
         return format_payload_values("fundamental.valuation", payload)
 
-    def _get_northbound_flow(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_northbound_flow(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """北向资金最近 12 条记录，适合 LLM 判断外资情绪变化"""
-        records = db.query(NorthboundData).filter(
-            NorthboundData.stock_code == stock_code,
-        ).order_by(desc(NorthboundData.date)).limit(12).all()
+        result = await db.execute(
+            select(NorthboundData)
+            .where(NorthboundData.stock_code == stock_code)
+            .order_by(desc(NorthboundData.date))
+            .limit(12)
+        )
+        records = result.scalars().all()
 
         if not records:
             return {}
@@ -258,12 +274,15 @@ class FundamentalSource:
         }
         return format_payload_values("fundamental.northbound_flow", payload)
 
-    def _get_market_wide_dragon_tiger_activity(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_market_wide_dragon_tiger_activity(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """龙虎榜近 3 日全市场快照，供 LLM 判断市场短线博弈热度。"""
         cutoff_3d = datetime.now().date() - timedelta(days=3)
-        records = db.query(DragonTigerData).filter(
-            DragonTigerData.trade_date >= cutoff_3d,
-        ).order_by(desc(DragonTigerData.trade_date)).all()
+        result = await db.execute(
+            select(DragonTigerData)
+            .where(DragonTigerData.trade_date >= cutoff_3d)
+            .order_by(desc(DragonTigerData.trade_date))
+        )
+        records = result.scalars().all()
 
         if not records:
             return {}
@@ -341,9 +360,9 @@ class FundamentalSource:
         }
         return format_payload_values("fundamental.dragon_tiger_activity", payload)
 
-    def _get_top_holders(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_top_holders(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """获取十大股东持仓信息"""
-        holders = self._get_latest_top_holder_rows(db, stock_code)[:10]
+        holders = (await self._get_latest_top_holder_rows(db, stock_code))[:10]
 
         if not holders:
             return {}
@@ -413,12 +432,17 @@ class FundamentalSource:
         }
         return format_payload_values("fundamental.top_holders", payload)
 
-    def _get_fund_holding(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_fund_holding(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """获取公募基金持仓信息，含环比变化 | Get fund holdings with QoQ change"""
         # 获取最新两期报告期
-        report_dates = db.query(StockFundHolding.report_date).filter(
-            StockFundHolding.stock_code == stock_code
-        ).order_by(desc(StockFundHolding.report_date)).distinct().limit(2).all()
+        report_result = await db.execute(
+            select(StockFundHolding.report_date)
+            .where(StockFundHolding.stock_code == stock_code)
+            .order_by(desc(StockFundHolding.report_date))
+            .distinct()
+            .limit(2)
+        )
+        report_dates = report_result.all()
 
         if not report_dates:
             return {}
@@ -426,10 +450,13 @@ class FundamentalSource:
         latest_date = report_dates[0][0]
         prev_date = report_dates[1][0] if len(report_dates) > 1 else None
 
-        holdings = db.query(StockFundHolding).filter(
-            StockFundHolding.stock_code == stock_code,
-            StockFundHolding.report_date == latest_date
-        ).all()
+        holdings_result = await db.execute(
+            select(StockFundHolding).where(
+                StockFundHolding.stock_code == stock_code,
+                StockFundHolding.report_date == latest_date,
+            )
+        )
+        holdings = holdings_result.scalars().all()
         sorted_holdings = sorted(
             holdings,
             key=lambda h: (
@@ -506,10 +533,13 @@ class FundamentalSource:
 
         # 环比变化计算 (对比上期报告期) | QoQ change vs previous report period
         if prev_date:
-            prev_holdings = db.query(StockFundHolding).filter(
-                StockFundHolding.stock_code == stock_code,
-                StockFundHolding.report_date == prev_date
-            ).all()
+            prev_result = await db.execute(
+                select(StockFundHolding).where(
+                    StockFundHolding.stock_code == stock_code,
+                    StockFundHolding.report_date == prev_date,
+                )
+            )
+            prev_holdings = prev_result.scalars().all()
 
             prev_count = len(prev_holdings)
             prev_ratio = sum(h.hold_ratio_stock or 0 for h in prev_holdings)
@@ -542,27 +572,31 @@ class FundamentalSource:
 
         return format_payload_values("fundamental.fund_holding", result)
 
-    def _get_industry_rank(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_industry_rank(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """
         获取所属行业的排名和涨跌幅数据
         Get industry rank and change percent from IndustryData
         """
-        stock = db.query(StockBasic).filter(StockBasic.stock_code == stock_code).first()
+        stock_result = await db.execute(select(StockBasic).where(StockBasic.stock_code == stock_code))
+        stock = stock_result.scalars().first()
         if not stock or not stock.industry:
             return {}
 
         industry_name = stock.industry
-        industry_info = db.query(IndustryData).filter(
-            IndustryData.board_name == industry_name
-        ).order_by(
-            desc(
-                func.coalesce(
-                    IndustryData.updated_at,
-                    IndustryData.timestamp,
-                    IndustryData.created_at,
+        industry_result = await db.execute(
+            select(IndustryData)
+            .where(IndustryData.board_name == industry_name)
+            .order_by(
+                desc(
+                    func.coalesce(
+                        IndustryData.updated_at,
+                        IndustryData.timestamp,
+                        IndustryData.created_at,
+                    )
                 )
             )
-        ).first()
+        )
+        industry_info = industry_result.scalars().first()
 
         if not industry_info:
             return {
@@ -626,16 +660,22 @@ class FundamentalSource:
         }
         return format_payload_values("fundamental.industry_rank", payload)
 
-    def _get_insider_activity(self, db: Session, stock_code: str, months: int = 6) -> Dict[str, Any]:
+    async def _get_insider_activity(self, db: AsyncSession, stock_code: str, months: int = 6) -> Dict[str, Any]:
         """
         获取最近董监高与大股东增减持记录
         Get recent insider trading records
         """
         cutoff_date = datetime.now().date() - timedelta(days=months * 30)
-        records = db.query(StockInsider).filter(
-            StockInsider.stock_code == stock_code,
-            StockInsider.trade_date >= cutoff_date
-        ).order_by(desc(StockInsider.trade_date)).limit(10).all()
+        result = await db.execute(
+            select(StockInsider)
+            .where(
+                StockInsider.stock_code == stock_code,
+                StockInsider.trade_date >= cutoff_date,
+            )
+            .order_by(desc(StockInsider.trade_date))
+            .limit(10)
+        )
+        records = result.scalars().all()
 
         if not records:
             return {}
@@ -759,7 +799,7 @@ class FundamentalSource:
         }
         return format_payload_values("fundamental.insider_activity", payload)
 
-    def _get_lockup_release(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_lockup_release(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """
         获取限售股解禁日程
         Get lockup release schedule (past and future)
@@ -767,11 +807,16 @@ class FundamentalSource:
         today = datetime.now().date()
         start_date = today - timedelta(days=90)
         end_date = today + timedelta(days=365)
-        records = db.query(StockRelease).filter(
-            StockRelease.stock_code == stock_code,
-            StockRelease.release_date >= start_date,
-            StockRelease.release_date <= end_date,
-        ).order_by(StockRelease.release_date).all()
+        result = await db.execute(
+            select(StockRelease)
+            .where(
+                StockRelease.stock_code == stock_code,
+                StockRelease.release_date >= start_date,
+                StockRelease.release_date <= end_date,
+            )
+            .order_by(StockRelease.release_date)
+        )
+        records = result.scalars().all()
 
         if not records:
             return {}
@@ -843,18 +888,20 @@ class FundamentalSource:
         }
         return format_payload_values("fundamental.lockup_release", payload)
 
-    def _get_seo_history(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_seo_history(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """
         获取定增/增发历史
         Get SEO history
         """
         today = datetime.now().date()
         recent_cutoff = today - timedelta(days=365 * 3)
-        records = db.query(StockSEO).filter(
-            StockSEO.stock_code == stock_code
-        ).order_by(
-            desc(func.coalesce(StockSEO.announce_date, StockSEO.issue_date))
-        ).limit(5).all()
+        result = await db.execute(
+            select(StockSEO)
+            .where(StockSEO.stock_code == stock_code)
+            .order_by(desc(func.coalesce(StockSEO.announce_date, StockSEO.issue_date)))
+            .limit(5)
+        )
+        records = result.scalars().all()
 
         if not records:
             return {}
@@ -918,14 +965,17 @@ class FundamentalSource:
         }
         return format_payload_values("fundamental.seo_history", payload)
 
-    def _get_pledge_info(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_pledge_info(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """
         获取股权质押风险信息
         Get stock pledge risk info
         """
-        latest_pledge = db.query(StockPledgeSummary).filter(
-            StockPledgeSummary.stock_code == stock_code
-        ).order_by(desc(StockPledgeSummary.trade_date)).first()
+        result = await db.execute(
+            select(StockPledgeSummary)
+            .where(StockPledgeSummary.stock_code == stock_code)
+            .order_by(desc(StockPledgeSummary.trade_date))
+        )
+        latest_pledge = result.scalars().first()
 
         if not latest_pledge:
             return {}
@@ -947,11 +997,15 @@ class FundamentalSource:
             "warning": i18n_service.get("context.pledge_risk.high_warning") if risk_level == "High" else None
         }
 
-    def _get_margin_analysis(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_margin_analysis(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """获取融资融券博弈分析"""
-        margin_records = db.query(StockMargin).filter(
-            StockMargin.stock_code == stock_code
-        ).order_by(desc(StockMargin.trade_date)).limit(5).all()
+        margin_result = await db.execute(
+            select(StockMargin)
+            .where(StockMargin.stock_code == stock_code)
+            .order_by(desc(StockMargin.trade_date))
+            .limit(5)
+        )
+        margin_records = margin_result.scalars().all()
 
         if not margin_records:
             return {}
@@ -959,9 +1013,12 @@ class FundamentalSource:
         latest_margin = margin_records[0]
 
         market_cap = 0
-        valuation = db.query(StockValuationHistory).filter(
-            StockValuationHistory.stock_code == stock_code
-        ).order_by(desc(StockValuationHistory.data_date)).first()
+        valuation_result = await db.execute(
+            select(StockValuationHistory)
+            .where(StockValuationHistory.stock_code == stock_code)
+            .order_by(desc(StockValuationHistory.data_date))
+        )
+        valuation = valuation_result.scalars().first()
         if valuation:
             market_cap = valuation.total_market_value or 0
 

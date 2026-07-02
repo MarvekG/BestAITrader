@@ -67,8 +67,7 @@ class ExampleIngestor(BaseIngestor):
         df["stock_code"] = df["stock_code"].apply(StockCodeStandardizer.standardize)
         df["data_source"] = self.source
 
-        await self._run_in_executor(
-            self.ingestion_service.write_dataframe,
+        await self.ingestion_service.write_dataframe(
             "example_realtime",
             df,
             source=self.source,

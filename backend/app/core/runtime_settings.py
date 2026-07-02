@@ -1,7 +1,6 @@
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy.orm import Session
 
 from app.crud.system_setting import system_setting
 
@@ -35,18 +34,15 @@ class RuntimeSettings(BaseModel):
         return int(value)
 
 
-def get_runtime_settings(db: Session) -> RuntimeSettings:
+async def get_runtime_settings() -> RuntimeSettings:
     """读取系统运行参数并补齐默认值。
 
     Args:
-        db: 数据库会话。
-
     Returns:
         当前系统运行参数。
     """
     return RuntimeSettings(
-        ai_debate_max_concurrent=system_setting.get_value(
-            db,
+        ai_debate_max_concurrent=await system_setting.get_value(
             AI_DEBATE_MAX_CONCURRENT_SETTING_KEY,
             default=AI_DEBATE_MAX_CONCURRENT_DEFAULT,
             user_id=None,
@@ -54,21 +50,19 @@ def get_runtime_settings(db: Session) -> RuntimeSettings:
     )
 
 
-def update_runtime_settings(db: Session, payload: RuntimeSettings) -> RuntimeSettings:
+async def update_runtime_settings(payload: RuntimeSettings) -> RuntimeSettings:
     """保存系统运行参数。
 
     Args:
-        db: 数据库会话。
         payload: 已通过校验的运行参数。
 
     Returns:
         保存后的系统运行参数。
     """
-    system_setting.set_value(
-        db,
+    await system_setting.set_value(
         AI_DEBATE_MAX_CONCURRENT_SETTING_KEY,
         payload.ai_debate_max_concurrent,
         description=AI_DEBATE_MAX_CONCURRENT_DESCRIPTION,
         user_id=None,
     )
-    return get_runtime_settings(db)
+    return await get_runtime_settings()

@@ -4,10 +4,8 @@ import uuid
 import pytest
 from fastapi.routing import APIRoute
 
-from app.crud.user import create_user
 from app.core.security import get_current_user
 from app.main import app
-from app.schemas.user import UserCreate
 
 
 PUBLIC_HTTP_PATHS = {
@@ -57,7 +55,7 @@ def test_route_table_requires_authentication_for_non_public_http_routes():
     assert missing_auth == []
 
 
-def test_registration_is_disabled_and_login_remains_public(client, db_session):
+def test_registration_is_disabled_and_login_remains_public(client, test_db, run_async, async_create_user):
     username = f"auth_bootstrap_{uuid.uuid4().hex[:8]}"
     password = "password123"
 
@@ -72,14 +70,11 @@ def test_registration_is_disabled_and_login_remains_public(client, db_session):
     assert register_response.status_code == 403
     assert register_response.json()["detail"] == "User registration is disabled"
 
-    create_user(
-        db_session,
-        UserCreate(
-            username=username,
-            email=f"{username}@example.com",
-            password=password,
-        ),
-    )
+    async def _seed_user():
+        async with test_db() as db:
+            await async_create_user(db, username=username, email=f"{username}@example.com", password=password)
+
+    run_async(_seed_user())
 
     login_response = client.post(
         "/api/v1/auth/login",

@@ -9,7 +9,6 @@ from app.core.request_context import clear_request_id
 from app.core.request_context import set_request_id
 from app.ai.memory_client import MemoryServiceClient
 from app.tasks.async_task_runner import AsyncTaskRunner
-from app.tasks.process_executor import ProcessTaskExecutor
 
 
 def test_backend_generates_uuid4hex_request_id_header(client) -> None:
@@ -86,27 +85,15 @@ async def test_async_task_runner_binds_request_id(monkeypatch) -> None:
     observed: list[str | None] = []
     status_updates: list[str] = []
 
-    class _FakeSession:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb) -> None:
-            del exc_type, exc, tb
-
-        def commit(self) -> None:
-            return None
-
-    class _FakeTaskManager:
-        def update_task_status(self, db, task_id, status, result=None, error_message=None) -> None:
-            del db, task_id, result, error_message
-            status_updates.append(status)
-
     def _task() -> dict[str, str | None]:
         observed.append(get_request_id())
         return {"status": "ok"}
 
-    monkeypatch.setattr("app.tasks.async_task_runner.SessionLocal", lambda: _FakeSession())
-    monkeypatch.setattr("app.tasks.async_task_runner.task_manager", _FakeTaskManager())
+    async def _update_task_status(task_id, status, result=None, error_message=None) -> None:
+        del task_id, result, error_message
+        status_updates.append(status)
+
+    monkeypatch.setattr("app.tasks.task_manager.task_manager.update_task_status", _update_task_status)
 
     runner = AsyncTaskRunner(max_concurrent_tasks=1)
     success = runner.submit_task(
@@ -120,9 +107,3 @@ async def test_async_task_runner_binds_request_id(monkeypatch) -> None:
     assert observed == [request_id]
     assert status_updates == ["running", "completed"]
     assert get_request_id() is None
-
-
-def test_process_executor_stays_available_as_optional_runner() -> None:
-    executor = ProcessTaskExecutor()
-
-    assert executor.get_active_task_count() == 0

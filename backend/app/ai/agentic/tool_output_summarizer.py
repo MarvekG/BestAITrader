@@ -65,7 +65,7 @@ async def summarize_tool_output(
             ]
         )
         cache_lane, api_key_alias = get_shared_usage_lane()
-        record_llm_usage(
+        await record_llm_usage(
             response,
             _resolve_llm_model_name(summary_llm),
             f"{role_name}_tool_summary",

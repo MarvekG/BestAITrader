@@ -1,23 +1,24 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from app.crud.account import ensure_user_account
-from app.crud.user import create_user
+import pytest
+
 from app.models.position import Position
-from app.schemas.user import UserCreate
 from app.trading.pm_rules import evaluate_position_disciplines, sync_pm_discipline_to_position
 
 
-def _create_user(db_session):
-    user = create_user(
-        db_session,
-        UserCreate(username="pmrules", email="pmrules@example.com", password="password123"),
+async def _create_user(db, async_create_user, async_ensure_account):
+    user = await async_create_user(
+        db,
+        username="pmrules",
+        email="pmrules@example.com",
+        password="password123",
     )
-    account = ensure_user_account(db_session, user)
+    account = await async_ensure_account(db, user)
     return user, account
 
 
-def _create_position(db_session, account, *, stock_code="000001.SZ", current_price=Decimal("10.00")):
+async def _create_position(db, account, *, stock_code="000001.SZ", current_price=Decimal("10.00")):
     position = Position(
         account_id=account.account_id,
         stock_code=stock_code,
@@ -31,18 +32,22 @@ def _create_position(db_session, account, *, stock_code="000001.SZ", current_pri
         profit_loss_pct=Decimal("0.1000"),
         purchase_details={},
     )
-    db_session.add(position)
-    db_session.commit()
-    db_session.refresh(position)
+    db.add(position)
+    await db.commit()
+    await db.refresh(position)
     return position
 
 
-def test_sync_pm_discipline_to_position_writes_structured_fields(db_session, test_db, monkeypatch):
-    user, account = _create_user(db_session)
-    position = _create_position(db_session, account)
-    monkeypatch.setattr("app.trading.pm_rules.SessionLocal", test_db)
+@pytest.mark.asyncio
+async def test_sync_pm_discipline_to_position_writes_structured_fields(
+    async_db_session,
+    async_create_user,
+    async_ensure_account,
+):
+    user, account = await _create_user(async_db_session, async_create_user, async_ensure_account)
+    position = await _create_position(async_db_session, account)
 
-    synced = sync_pm_discipline_to_position(
+    synced = await sync_pm_discipline_to_position(
         session_id=None,
         user_id=user.id,
         stock_code=position.stock_code,
@@ -54,20 +59,24 @@ def test_sync_pm_discipline_to_position_writes_structured_fields(db_session, tes
         },
     )
 
-    db_session.refresh(position)
+    await async_db_session.refresh(position)
     assert synced is True
     assert position.stop_loss == Decimal("8.5")
     assert position.take_profit == Decimal("12.0")
     assert position.horizon_deadline is not None
 
 
-def test_sync_pm_discipline_to_position_ignores_non_positive_trigger_prices(db_session, test_db, monkeypatch):
+@pytest.mark.asyncio
+async def test_sync_pm_discipline_to_position_ignores_non_positive_trigger_prices(
+    async_db_session,
+    async_create_user,
+    async_ensure_account,
+):
     """PM 输出空仓目标时不把 0 写成持仓止损止盈触发线。"""
-    user, account = _create_user(db_session)
-    position = _create_position(db_session, account)
-    monkeypatch.setattr("app.trading.pm_rules.SessionLocal", test_db)
+    user, account = await _create_user(async_db_session, async_create_user, async_ensure_account)
+    position = await _create_position(async_db_session, account)
 
-    synced = sync_pm_discipline_to_position(
+    synced = await sync_pm_discipline_to_position(
         session_id=None,
         user_id=user.id,
         stock_code=position.stock_code,
@@ -79,54 +88,72 @@ def test_sync_pm_discipline_to_position_ignores_non_positive_trigger_prices(db_s
         },
     )
 
-    db_session.refresh(position)
+    await async_db_session.refresh(position)
     assert synced is True
     assert position.stop_loss is None
     assert position.take_profit is None
     assert position.horizon_deadline is not None
 
 
-def test_evaluate_position_disciplines_detects_stop_loss(db_session, monkeypatch):
-    user, account = _create_user(db_session)
-    position = _create_position(db_session, account)
+@pytest.mark.asyncio
+async def test_evaluate_position_disciplines_detects_stop_loss(
+    async_db_session,
+    async_create_user,
+    async_ensure_account,
+    monkeypatch,
+):
+    user, account = await _create_user(async_db_session, async_create_user, async_ensure_account)
+    position = await _create_position(async_db_session, account)
     position.stop_loss = Decimal("9.50")
-    db_session.commit()
+    await async_db_session.commit()
     monkeypatch.setattr(
         "app.ai.agentic.tools._resolve_latest_stock_price",
         lambda stock_code: {"success": True, "latest_price": "9.40"},
     )
 
-    triggered = evaluate_position_disciplines(db_session, user_id=user.id)
+    triggered = await evaluate_position_disciplines(user_id=user.id)
 
     assert triggered[0]["stock_code"] == "000001.SZ"
     assert triggered[0]["trigger"] == "stop_loss"
 
 
-def test_evaluate_position_disciplines_detects_take_profit(db_session, monkeypatch):
-    user, account = _create_user(db_session)
-    position = _create_position(db_session, account)
+@pytest.mark.asyncio
+async def test_evaluate_position_disciplines_detects_take_profit(
+    async_db_session,
+    async_create_user,
+    async_ensure_account,
+    monkeypatch,
+):
+    user, account = await _create_user(async_db_session, async_create_user, async_ensure_account)
+    position = await _create_position(async_db_session, account)
     position.take_profit = Decimal("11.00")
-    db_session.commit()
+    await async_db_session.commit()
     monkeypatch.setattr(
         "app.ai.agentic.tools._resolve_latest_stock_price",
         lambda stock_code: {"success": True, "latest_price": "11.10"},
     )
 
-    triggered = evaluate_position_disciplines(db_session, user_id=user.id)
+    triggered = await evaluate_position_disciplines(user_id=user.id)
 
     assert triggered[0]["trigger"] == "take_profit"
 
 
-def test_evaluate_position_disciplines_detects_horizon_expired(db_session, monkeypatch):
-    user, account = _create_user(db_session)
-    position = _create_position(db_session, account)
+@pytest.mark.asyncio
+async def test_evaluate_position_disciplines_detects_horizon_expired(
+    async_db_session,
+    async_create_user,
+    async_ensure_account,
+    monkeypatch,
+):
+    user, account = await _create_user(async_db_session, async_create_user, async_ensure_account)
+    position = await _create_position(async_db_session, account)
     position.horizon_deadline = datetime.now() - timedelta(days=1)
-    db_session.commit()
+    await async_db_session.commit()
     monkeypatch.setattr(
         "app.ai.agentic.tools._resolve_latest_stock_price",
         lambda stock_code: {"success": False},
     )
 
-    triggered = evaluate_position_disciplines(db_session, user_id=user.id)
+    triggered = await evaluate_position_disciplines(user_id=user.id)
 
     assert triggered[0]["trigger"] == "horizon_expired"

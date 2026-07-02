@@ -120,7 +120,7 @@ def _build_trade_gate_rejection(reason: str, message: str, details: Dict[str, An
     )
 
 
-def _resolve_latest_stock_price(stock_code: str) -> Dict[str, Any]:
+async def _resolve_latest_stock_price(stock_code: str) -> Dict[str, Any]:
     """查询股票最新价，供 PM 下单前确定限价基准。
 
     Args:
@@ -132,7 +132,7 @@ def _resolve_latest_stock_price(stock_code: str) -> Dict[str, Any]:
     from app.data.storage import data_storage_service
 
     try:
-        market_data = data_storage_service.get_stock_realtime_market(stock_code)
+        market_data = await data_storage_service.get_stock_realtime_market(stock_code)
     except Exception as exc:
         logger.exception("Failed to query latest stock price", extra={"stock_code": stock_code, "error": str(exc)})
         return {"success": False, "latest_price": None, "market_time": None}
@@ -176,7 +176,7 @@ async def get_pm_order_type_guidance(stock_code: str) -> Dict[str, Any]:
         }
 
     trading_time = bool(is_trading_time())
-    price_result = _resolve_latest_stock_price(stock_code)
+    price_result = await _resolve_latest_stock_price(stock_code)
     latest_price = price_result.get("latest_price")
     recommended_order_type = "market" if trading_time else "limit"
     return {
@@ -489,7 +489,7 @@ def _compact_order_id(order_id: Any) -> str:
     return str(order_id).replace("-", "")
 
 
-def _resolve_order_by_llm_id(db: Any, order_model: Any, account_id: Any, raw_order_id: str) -> Any:
+async def _resolve_order_by_llm_id(db: Any, order_model: Any, account_id: Any, raw_order_id: str) -> Any:
     """
     按订单 ID 解析当前账户待撤订单。
 
@@ -504,6 +504,8 @@ def _resolve_order_by_llm_id(db: Any, order_model: Any, account_id: Any, raw_ord
     """
     from uuid import UUID
 
+    from sqlalchemy import select
+
     cleaned_order_id = str(raw_order_id or "").strip()
     try:
         order_uuid = UUID(cleaned_order_id)
@@ -511,10 +513,12 @@ def _resolve_order_by_llm_id(db: Any, order_model: Any, account_id: Any, raw_ord
         compact_order_id = cleaned_order_id.replace("-", "").lower()
         if not compact_order_id:
             return None
-        candidates = db.query(order_model).filter(
-            order_model.account_id == account_id,
-            order_model.status == "pending",
-        ).all()
+        candidates = (await db.execute(
+            select(order_model).where(
+                order_model.account_id == account_id,
+                order_model.status == "pending",
+            )
+        )).scalars().all()
         matches = [
             order
             for order in candidates
@@ -522,10 +526,12 @@ def _resolve_order_by_llm_id(db: Any, order_model: Any, account_id: Any, raw_ord
         ]
         return matches[0] if len(matches) == 1 else None
 
-    return db.query(order_model).filter(
-        order_model.order_id == order_uuid,
-        order_model.account_id == account_id,
-    ).first()
+    return (await db.execute(
+        select(order_model).where(
+            order_model.order_id == order_uuid,
+            order_model.account_id == account_id,
+        )
+    )).scalar_one_or_none()
 
 
 @tool
@@ -651,7 +657,7 @@ async def query_stock_data(
                 generic_query_kwargs = {"start_time": start_t, "end_time": end_t}
                 if columns:
                     generic_query_kwargs["columns"] = columns
-                raw_data = StockTools.get_generic_db_data(
+                raw_data = await StockTools.get_generic_db_data(
                     model_map[data_type],
                     stock_code,
                     limit,
@@ -660,7 +666,7 @@ async def query_stock_data(
             else:
                 # 最后的兜底：调用原始 handler (注意：旧 handler 不一定支持 time 过滤)
                 handler = STOCK_QUERY_HANDLERS[data_type]
-                raw_data = handler(stock_code, limit)
+                raw_data = await handler(stock_code, limit)
 
             serial_data = make_json_serializable(raw_data)
             char_len = len(str(serial_data))
@@ -680,7 +686,7 @@ async def query_stock_data(
 
 
 @tool
-def query_market_data(
+async def query_market_data(
     queries: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
     """
@@ -739,7 +745,7 @@ def query_market_data(
                     "down": "StockLimitDownPool",
                     "zhaban": "StockZhabanPool",
                 }.get(pool_type, "StockLimitUpPool")
-                data = StockTools.get_generic_db_data(
+                data = await StockTools.get_generic_db_data(
                     model_name,
                     "",
                     limit=max(limit, 1),
@@ -758,7 +764,7 @@ def query_market_data(
             elif config.get("custom") == "futures":
                 futures_type = params.get("futures_type", "internal")
                 model_name = "InternalFuturesData" if futures_type == "internal" else "GlobalFuturesData"
-                data = StockTools.get_generic_db_data(
+                data = await StockTools.get_generic_db_data(
                     model_name,
                     identifier or "",
                     limit,
@@ -783,7 +789,7 @@ def query_market_data(
                         "data_type": data_type,
                     })
                     continue
-                data = StockTools.get_generic_db_data(
+                data = await StockTools.get_generic_db_data(
                     model_name,
                     identifier or "",
                     limit,
@@ -1251,16 +1257,16 @@ async def query_and_calculate(
     4. 注意：数据库中的某些数值可能为 null，请务必在代码中处理空值，确保健壮性。
     """
     import app.models.data_storage as models
-    from app.core.database import SessionLocal
-    from sqlalchemy import and_
+    import app.core.database as database_module
+    from sqlalchemy import and_, select
 
     model = getattr(models, table_name, None)
     if not model:
         return {"error": f"Table '{table_name}' not found."}
 
     try:
-        with SessionLocal() as db:
-            query = db.query(model)
+        async with database_module.AsyncSessionLocal() as db:
+            query = select(model)
 
             # 构建过滤条件
             ops = {
@@ -1290,10 +1296,10 @@ async def query_and_calculate(
                 filter_clauses.append(ops[op](col_attr, val))
 
             if filter_clauses:
-                query = query.filter(and_(*filter_clauses))
+                query = query.where(and_(*filter_clauses))
 
             # 执行查询
-            records = query.limit(limit).all()
+            records = (await db.execute(query.limit(limit))).scalars().all()
             # 序列化结果供计算使用
             data_for_calc = [
                 {k: v for k, v in r.__dict__.items() if not k.startswith('_')}
@@ -1360,11 +1366,12 @@ async def execute_trading_order(
     from app.trading.service import trading_service
     from app.models.session import Session as DbSession
     from app.models.user import User
+    from app.models.account import Account
     from app.models.position import Position
     from app.models.order import Order
-    from app.core.database import SessionLocal
+    import app.core.database as database_module
     from app.models.data_storage import StockRealtimeMarket
-    from sqlalchemy import desc
+    from sqlalchemy import desc, select
     import app.core.config as config
 
     if not config.settings.ENABLE_AUTO_TRADE:
@@ -1415,35 +1422,42 @@ async def execute_trading_order(
         return _format_trade_execution_result({"error": f"Invalid session_id format: {session_id}"})
 
     try:
-        with SessionLocal() as db:
+        async with database_module.AsyncSessionLocal() as db:
             # 1. 获取会话和用户信息
-            session_model = db.query(DbSession).filter(DbSession.session_id == session_uuid).first()
+            session_model = (await db.execute(
+                select(DbSession).where(DbSession.session_id == session_uuid)
+            )).scalar_one_or_none()
             if not session_model:
                 return _format_trade_execution_result({"error": f"Session {session_id} not found in database."})
 
-            user = db.query(User).filter(User.id == session_model.user_id).first()
-            if not user or not user.account:
+            user = (await db.execute(select(User).where(User.id == session_model.user_id))).scalar_one_or_none()
+            if not user:
                 return _format_trade_execution_result({"error": "Associated User or Account not found."})
 
-            account = user.account
+            account = (await db.execute(select(Account).where(Account.user_id == user.id))).scalar_one_or_none()
+            if not account:
+                return _format_trade_execution_result({"error": "Associated User or Account not found."})
 
             if normalized_operation == "cancel":
-                order = _resolve_order_by_llm_id(db, Order, account.account_id, str(order_id))
+                order = await _resolve_order_by_llm_id(db, Order, account.account_id, str(order_id))
                 if not order:
                     return _format_trade_execution_result({
                         "error": f"Order {order_id} not found or ambiguous.",
                         "reason": "order_not_found_or_ambiguous",
                     })
-                cancel_result = await trading_service.cancel_order(db, order)
+                cancel_result = await trading_service.cancel_order(order.order_id, user_id=user.id)
                 return _format_trade_execution_result(cancel_result)
 
             total_assets = float(account.total_assets or 0)
 
             # 2. 获取最新价格
             price = 0.0
-            latest_market = db.query(StockRealtimeMarket).filter(
-                StockRealtimeMarket.stock_code == stock_code
-            ).order_by(desc(StockRealtimeMarket.timestamp)).first()
+            latest_market = (await db.execute(
+                select(StockRealtimeMarket)
+                .where(StockRealtimeMarket.stock_code == stock_code)
+                .order_by(desc(StockRealtimeMarket.timestamp))
+                .limit(1)
+            )).scalar_one_or_none()
 
             if latest_market:
                 price = float(latest_market.current_price)
@@ -1451,9 +1465,12 @@ async def execute_trading_order(
             if price <= 0:
                 # 尝试从 Kline 补全
                 from app.models.data_storage import KlineData
-                latest_kline = db.query(KlineData).filter(
-                    KlineData.stock_code == stock_code
-                ).order_by(desc(KlineData.date)).first()
+                latest_kline = (await db.execute(
+                    select(KlineData)
+                    .where(KlineData.stock_code == stock_code)
+                    .order_by(desc(KlineData.date))
+                    .limit(1)
+                )).scalar_one_or_none()
                 if latest_kline:
                     price = float(latest_kline.close)
 
@@ -1468,10 +1485,12 @@ async def execute_trading_order(
             target_total_shares = (total_assets * target_position) / order_price
 
             # 4. 获取当前持仓
-            pos = db.query(Position).filter(
-                Position.account_id == account.account_id,
-                Position.stock_code == stock_code
-            ).first()
+            pos = (await db.execute(
+                select(Position).where(
+                    Position.account_id == account.account_id,
+                    Position.stock_code == stock_code,
+                )
+            )).scalar_one_or_none()
             current_total_shares = pos.total_shares if pos else 0
             current_available_shares = (
                 trading_engine.build_position_snapshot(pos)["available_shares"]
@@ -1556,9 +1575,8 @@ async def execute_trading_order(
 
             # 7. 调用交易服务
             trade_result = await trading_service.execute_order_and_update_db(
-                db=db,
                 session_id=session_uuid,
-                account=account,
+                account_id=account.account_id,
                 stock_code=stock_code,
                 action=act,
                 shares=suggested_shares,

@@ -8,7 +8,6 @@ import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from openai import AsyncOpenAI
-from sqlalchemy.orm import Session
 
 from app.ai.agentic.tools import get_all_tools
 from app.ai.agentic.mcp.runtime import get_mcp_tools
@@ -17,7 +16,6 @@ from app.ai.llm_routing import API_KEY_ALIAS_SHARED, CACHE_LANE_SHARED
 from app.ai.llm_providers.factory import build_chat_completion_kwargs, build_chat_model
 from app.ai.memory_client import memory_client
 from app.core.config import settings
-from app.core.database import SessionLocal, get_db
 from app.core.security import get_current_user
 from app.crud.llm_usage_log import llm_usage_log, record_llm_usage
 from app.models.user import User
@@ -178,25 +176,13 @@ def _build_ai_function_test_system_prompt(scenario: str) -> str:
     )
 
 
-def _get_ai_function_test_tools(scenario: str) -> list[Any]:
+async def _get_ai_function_test_tools(scenario: str) -> list[Any]:
+    """返回 AI 功能测试可绑定工具，包含启用的 MCP 工具。"""
     test_tools: list[Any] = []
     if _scenario_requires_ai_tools(scenario):
         test_tools.extend(_get_real_ai_tools())
     if _scenario_requires_skills(scenario):
         test_tools.extend(get_skills_loader_tools())
-    return test_tools
-
-
-async def _get_ai_function_test_tools_async(scenario: str) -> list[Any]:
-    """返回 AI 功能测试可绑定工具，包含启用的 MCP 工具。
-
-    Args:
-        scenario: 测试场景名称。
-
-    Returns:
-        当前场景应绑定的工具列表。
-    """
-    test_tools = _get_ai_function_test_tools(scenario)
     if _scenario_requires_ai_tools(scenario):
         try:
             test_tools.extend(await get_mcp_tools())
@@ -483,7 +469,7 @@ async def _request_llm_completion(
             max_retries=settings.LLM_MAX_RETRIES,
         )
         response = await client.chat.completions.create(**request_kwargs)
-    record_llm_usage(
+    await record_llm_usage(
         response,
         resolved_model,
         role,
@@ -522,7 +508,7 @@ def _cache_hit_rate(cached_tokens: int, input_tokens: int) -> float:
 
 
 @router.get("/usage-stats", response_model=LLMUsageStatsSchema)
-async def get_llm_usage_stats(db: Session = Depends(get_db)):
+async def get_llm_usage_stats():
     """
     获取 LLM 使用统计数据
     
@@ -530,7 +516,7 @@ async def get_llm_usage_stats(db: Session = Depends(get_db)):
         使用统计汇总
     """
     try:
-        backend_stats = llm_usage_log.get_stats(db)
+        backend_stats = await llm_usage_log.get_stats()
         memory_stats = await memory_client.get_usage_stats()
         memory_error = memory_client.get_last_error("usage_stats")
         if not memory_stats and memory_error:
@@ -603,11 +589,11 @@ async def get_llm_usage_stats(db: Session = Depends(get_db)):
 
 
 @router.delete("/usage-stats", response_model=Dict[str, Any])
-async def clear_llm_usage_stats(db: Session = Depends(get_db)):
+async def clear_llm_usage_stats():
     """清空 LLM 使用统计数据。"""
 
     try:
-        backend_deleted = llm_usage_log.clear(db)
+        backend_deleted = await llm_usage_log.clear()
         memory_result = await memory_client.clear_usage_stats()
         memory_error = memory_client.get_last_error("clear_usage_stats")
         if not memory_result and memory_error:
@@ -728,7 +714,7 @@ async def execute_ai_function_test(*, scenario: str, user_input: str) -> Dict[st
         _message_record("system", system_prompt),
         _message_record("user", user_input),
     ]
-    test_tools = await _get_ai_function_test_tools_async(scenario)
+    test_tools = await _get_ai_function_test_tools(scenario)
     expected_requirements = _expected_ai_function_test_requirements(scenario)
     skill_tool_names = {tool_obj.name for tool_obj in get_skills_loader_tools()}
     ai_tool_names = {tool_obj.name for tool_obj in test_tools if tool_obj.name not in skill_tool_names}
@@ -820,7 +806,6 @@ async def execute_ai_function_test(*, scenario: str, user_input: str) -> Dict[st
 async def run_ai_function_test(
     request: Dict[str, Any],
     background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
@@ -829,7 +814,6 @@ async def run_ai_function_test(
     Args:
         request: Scenario name and user input.
         background_tasks: FastAPI background task collector.
-        db: Database session.
         current_user: Authenticated user.
 
     Returns:
@@ -848,8 +832,7 @@ async def run_ai_function_test(
             detail={"error": "User input is required"},
         )
 
-    task_info = task_manager.submit_task(
-        db=db,
+    task_info = await task_manager.submit_task(
         task_name=f"AI Function Test - {AI_FUNCTION_TEST_SCENARIOS[scenario]}",
         task_type="ai_function_test",
         parameters={
@@ -888,15 +871,13 @@ async def run_ai_function_test_task(*, task_id: str, scenario: str, user_input: 
         scenario: Scenario name.
         user_input: User prompt for the scenario.
     """
-    with SessionLocal() as db:
-        task_manager.update_task_status(db, task_id, "running")
+    await task_manager.update_task_status(task_id=task_id, status="running")
 
     try:
         result = await execute_ai_function_test(scenario=scenario, user_input=user_input)
     except Exception as exc:
         logger.exception("AI function test task failed: task_id=%s scenario=%s", task_id, scenario)
-        with SessionLocal() as db:
-            task_manager.update_task_status(db, task_id, "failed", error_message=str(exc))
+        await task_manager.update_task_status(task_id=task_id, status="failed", error_message=str(exc))
         return
 
     notification_result = {
@@ -907,14 +888,12 @@ async def run_ai_function_test_task(*, task_id: str, scenario: str, user_input: 
         "elapsed_ms": result.get("elapsed_ms"),
         "result_available": True,
     }
-    with SessionLocal() as db:
-        task_manager.update_task_status(
-            db,
-            task_id,
-            "completed",
-            result=result,
-            notification_result=notification_result,
-        )
+    await task_manager.update_task_status(
+        task_id=task_id,
+        status="completed",
+        result=result,
+        notification_result=notification_result,
+    )
 
 
 @router.post("/test", response_model=Dict[str, Any])

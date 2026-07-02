@@ -91,10 +91,13 @@ class MemoryServiceClient:
     async def close(self) -> None:
         """关闭复用的 MemoFlux HTTP 客户端连接池。"""
 
-        if self._client is None:
-            return
-        await self._client.aclose()
+        client = self._client
         self._client = None
+        if client is None:
+            return
+        aclose = getattr(client, "aclose", None)
+        if aclose is not None:
+            await aclose()
 
     async def check_embedding_health(self) -> dict[str, Any]:
         if not self.enabled:

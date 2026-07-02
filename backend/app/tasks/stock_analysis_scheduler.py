@@ -1,10 +1,10 @@
-import asyncio
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 from typing import Any
 
 import pytz
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.llm_engine.debate_concurrency import (
     DebateConcurrencyLimitReached,
@@ -14,7 +14,7 @@ from app.ai.llm_engine.debate_concurrency import (
     format_ai_analysis_task_name,
 )
 from app.ai.llm_engine.runner import run_analysis_task
-from app.core.database import SessionLocal
+from app.core import database as database_module
 from app.core.logger import get_logger
 from app.crud.session import crud_session
 from app.data.market_utils import is_trading_day
@@ -133,8 +133,8 @@ async def run_due_auto_analyses() -> dict[str, Any]:
     now = _shanghai_now()
     launched: list[dict[str, Any]] = []
 
-    with SessionLocal() as db:
-        candidates = _load_due_auto_analysis_candidates(db, now)
+    async with database_module.AsyncSessionLocal() as db:
+        candidates = await _load_due_auto_analysis_candidates(db, now)
 
     for candidate in candidates:
         launch_info = await _launch_analysis(candidate.stock_id, now)
@@ -146,28 +146,28 @@ async def run_due_auto_analyses() -> dict[str, Any]:
     return {"launched": len(launched), "items": launched}
 
 
-def _load_enabled_stocks(db: Session) -> list[StockWarehouse]:
+async def _load_enabled_stocks(db: AsyncSession) -> list[StockWarehouse]:
     """Load active stocks with auto-analysis enabled."""
-    return (
-        db.query(StockWarehouse)
-        .filter(
+    result = await db.execute(
+        select(StockWarehouse)
+        .where(
             StockWarehouse.is_active.is_(True),
             StockWarehouse.auto_analysis_enabled.is_(True),
         )
         .order_by(StockWarehouse.last_auto_analysis_at.asc().nullsfirst(), StockWarehouse.id.asc())
-        .all()
     )
+    return list(result.scalars().all())
 
 
-def _load_due_auto_analysis_candidates(db: Session, now: datetime) -> list[AutoAnalysisCandidate]:
+async def _load_due_auto_analysis_candidates(db: AsyncSession, now: datetime) -> list[AutoAnalysisCandidate]:
     """Load due auto-analysis candidates without leaking ORM objects outside the session."""
     candidates: list[AutoAnalysisCandidate] = []
-    for stock in _load_enabled_stocks(db):
+    for stock in await _load_enabled_stocks(db):
         if len(candidates) >= AUTO_ANALYSIS_MAX_LAUNCHES_PER_TICK:
             break
         if not is_due_for_auto_analysis(stock, now):
             continue
-        if _has_running_analysis_task(db, stock):
+        if await _has_running_analysis_task(db, stock):
             continue
         candidates.append(
             AutoAnalysisCandidate(
@@ -179,9 +179,20 @@ def _load_due_auto_analysis_candidates(db: Session, now: datetime) -> list[AutoA
     return candidates
 
 
-def _has_running_analysis_task(db: Session, stock: StockWarehouse) -> bool:
+async def _has_running_analysis_task(db: AsyncSession, stock: StockWarehouse) -> bool:
     """Return whether the stock already has a running analysis task globally."""
-    return find_running_debate_task_for_stock(db, stock.stock_code) is not None
+    result = await db.execute(
+        select(AsyncTask).where(
+            AsyncTask.task_type == "ai_analysis",
+            AsyncTask.status.in_(["pending", "running"]),
+        )
+    )
+    task_name = format_ai_analysis_task_name(stock.stock_code)
+    for task in result.scalars().all():
+        parameters = task.parameters if isinstance(task.parameters, dict) else {}
+        if task.task_name == task_name or parameters.get("stock_code") == stock.stock_code:
+            return True
+    return False
 
 
 async def _launch_analysis(
@@ -191,8 +202,8 @@ async def _launch_analysis(
     """Create a session, submit an async task record, and run the analysis workflow."""
     stock_code = ""
     try:
-        with SessionLocal() as db:
-            stock = _load_launchable_stock(db, stock_id, launched_at)
+        async with database_module.AsyncSessionLocal() as db:
+            stock = await _load_launchable_stock(db, stock_id, launched_at)
             if not stock:
                 return None
             stock_code = stock.stock_code
@@ -200,15 +211,14 @@ async def _launch_analysis(
         # Sync stock data before launching AI analysis
         await sync_stock_data_before_analysis(stock_code)
 
-        with SessionLocal() as db:
-            stock = _load_launchable_stock(db, stock_id, launched_at)
+        async with database_module.AsyncSessionLocal() as db:
+            stock = await _load_launchable_stock(db, stock_id, launched_at)
             if not stock:
                 return None
             try:
-                ensure_debate_launch_available(db, stock.stock_code)
+                await ensure_debate_launch_available(stock.stock_code)
 
-                session = crud_session.create(
-                    db=db,
+                session = await crud_session.create(
                     obj_in=SessionCreate(
                         user_id=stock.user_id,
                         stock_code=stock.stock_code,
@@ -217,8 +227,13 @@ async def _launch_analysis(
                         source="scheduled",
                     ),
                 )
-                task_info = task_manager.submit_task(
-                    db=db,
+                launch_kwargs = {
+                    "session_id": str(session.session_id),
+                    "stock_code": stock.stock_code,
+                    "trading_frequency": session.trading_frequency,
+                    "trading_strategy": session.trading_strategy,
+                }
+                task_info = await task_manager.submit_task(
                     task_name=format_ai_analysis_task_name(stock.stock_code),
                     task_type="ai_analysis",
                     parameters={
@@ -232,6 +247,8 @@ async def _launch_analysis(
                     },
                     allow_concurrent=False,
                     user_id=stock.user_id,
+                    task_func=run_analysis_task,
+                    task_kwargs=launch_kwargs,
                 )
                 if not task_info.get("new_task", True):
                     return None
@@ -239,7 +256,7 @@ async def _launch_analysis(
                 logger.info("Auto analysis skipped for %s: %s", stock.stock_code, exc)
                 stock.last_auto_analysis_error = str(exc)[:1000]
                 db.add(stock)
-                db.commit()
+                await db.commit()
                 return None
 
             stock.last_auto_analysis_at = launched_at
@@ -248,14 +265,7 @@ async def _launch_analysis(
             stock.last_auto_analysis_error = None
             stock.auto_analysis_run_immediately = False
             db.add(stock)
-            db.commit()
-            launch_kwargs = {
-                "task_id": task_info["task_id"],
-                "session_id": str(session.session_id),
-                "stock_code": stock.stock_code,
-                "trading_frequency": session.trading_frequency,
-                "trading_strategy": session.trading_strategy,
-            }
+            await db.commit()
             launch_info = {
                 "stock_code": stock.stock_code,
                 "user_id": stock.user_id,
@@ -263,35 +273,31 @@ async def _launch_analysis(
                 "task_id": task_info["task_id"],
             }
 
-        asyncio.create_task(
-            run_analysis_task(**launch_kwargs),
-            name=f"auto-analysis-{launch_kwargs['task_id']}",
-        )
         return launch_info
     except Exception as exc:
         logger.exception("Failed to launch auto analysis for %s", stock_code or stock_id)
-        _record_launch_error(stock_id, exc)
+        await _record_launch_error(stock_id, exc)
         return None
 
 
-def _load_launchable_stock(db: Session, stock_id: int, launched_at: datetime) -> StockWarehouse | None:
+async def _load_launchable_stock(db: AsyncSession, stock_id: int, launched_at: datetime) -> StockWarehouse | None:
     """Load a stock if it is still due and has no running analysis task."""
-    stock = db.query(StockWarehouse).filter(StockWarehouse.id == stock_id).first()
+    stock = await db.get(StockWarehouse, stock_id)
     if not stock:
         return None
     if not is_due_for_auto_analysis(stock, launched_at):
         return None
-    if _has_running_analysis_task(db, stock):
+    if await find_running_debate_task_for_stock(stock.stock_code) is not None:
         return None
     return stock
 
 
-def _record_launch_error(stock_id: int, exc: Exception) -> None:
+async def _record_launch_error(stock_id: int, exc: Exception) -> None:
     """Persist the latest auto-analysis launch error for a warehouse stock."""
-    with SessionLocal() as db:
-        stock = db.query(StockWarehouse).filter(StockWarehouse.id == stock_id).first()
+    async with database_module.AsyncSessionLocal() as db:
+        stock = await db.get(StockWarehouse, stock_id)
         if not stock:
             return
         stock.last_auto_analysis_error = str(exc)[:1000]
         db.add(stock)
-        db.commit()
+        await db.commit()

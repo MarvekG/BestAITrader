@@ -11,13 +11,13 @@ import contextvars
 import inspect
 import logging
 from collections.abc import Callable
+from datetime import datetime
 from typing import Any
 
 from app.core.config import settings
-from app.core.database import SessionLocal
 from app.core.request_context import clear_request_id
+from app.core.request_context import get_or_create_request_id
 from app.core.request_context import set_request_id
-from app.tasks.task_manager import task_manager
 
 logger = logging.getLogger(__name__)
 
@@ -37,9 +37,8 @@ class AsyncTaskRunner:
         task_func: Callable[..., Any],
         task_args: tuple = (),
         task_kwargs: dict[str, Any] | None = None,
-        task_name: str | None = None,
         *,
-        request_id: str,
+        request_id: str | None = None,
         persist_status: bool = True,
     ) -> bool:
         """
@@ -50,8 +49,7 @@ class AsyncTaskRunner:
             task_func: 任务函数，支持同步函数和协程函数。
             task_args: 任务位置参数。
             task_kwargs: 任务关键字参数。
-            task_name: 可选任务展示名称，会传入任务函数以兼容现有任务签名。
-            request_id: 任务执行期间绑定的请求 ID。
+            request_id: 任务执行期间绑定的请求 ID，未传入时复用当前请求上下文。
             persist_status: 是否把任务状态写入异步任务表。
 
         Returns:
@@ -61,9 +59,7 @@ class AsyncTaskRunner:
             task_kwargs = {}
         else:
             task_kwargs = dict(task_kwargs)
-
-        if task_name:
-            task_kwargs["task_name"] = task_name
+        request_id = request_id or get_or_create_request_id()
 
         try:
             task = asyncio.create_task(
@@ -106,7 +102,7 @@ class AsyncTaskRunner:
         async with self._semaphore:
             request_token = set_request_id(request_id)
             try:
-                await asyncio.to_thread(self._update_status, task_id, "running", persist_status=persist_status)
+                await self._update_status(task_id, "running", persist_status=persist_status)
                 logger.info(
                     "Task started in async task runner",
                     extra={"task_id": task_id},
@@ -122,8 +118,7 @@ class AsyncTaskRunner:
 
                 is_failed, error_message = self._resolve_failure(result)
                 if is_failed:
-                    await asyncio.to_thread(
-                        self._update_status,
+                    await self._update_status(
                         task_id,
                         "failed",
                         result,
@@ -136,8 +131,7 @@ class AsyncTaskRunner:
                     )
                     return
 
-                await asyncio.to_thread(
-                    self._update_status,
+                await self._update_status(
                     task_id,
                     "completed",
                     result,
@@ -153,8 +147,7 @@ class AsyncTaskRunner:
                     extra={"task_id": task_id, "error": str(exc)},
                     exc_info=True,
                 )
-                await asyncio.to_thread(
-                    self._update_status,
+                await self._update_status(
                     task_id,
                     "failed",
                     None,
@@ -188,7 +181,7 @@ class AsyncTaskRunner:
             if task and not task.done():
                 task.cancel()
                 tasks_to_cancel.append(task)
-                self._update_status(
+                await self._update_status(
                     task_id,
                     "failed",
                     error_message="System reload or shutdown, task cancelled",
@@ -255,7 +248,7 @@ class AsyncTaskRunner:
         future.add_done_callback(_cleanup_blocking_future)
         return await asyncio.shield(future)
 
-    def _update_status(
+    async def _update_status(
         self,
         task_id: str,
         status: str,
@@ -276,15 +269,14 @@ class AsyncTaskRunner:
         if not persist_status:
             return
 
-        with SessionLocal() as db:
-            task_manager.update_task_status(
-                db=db,
-                task_id=task_id,
-                status=status,
-                result=result,
-                error_message=error_message,
-            )
-            db.commit()
+        from app.tasks.task_manager import task_manager
+
+        await task_manager.update_task_status(
+            task_id=task_id,
+            status=status,
+            result=result,
+            error_message=error_message,
+        )
 
     @staticmethod
     def _resolve_failure(result: Any) -> tuple[bool, str | None]:

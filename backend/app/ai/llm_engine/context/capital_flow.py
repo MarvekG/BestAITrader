@@ -1,7 +1,7 @@
 from typing import Dict, Any, List
 from datetime import datetime, timedelta
-from sqlalchemy import desc
-from sqlalchemy.orm import Session
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.i18n import i18n_service
 from app.ai.llm_engine.context import constants as ctx_const
@@ -27,15 +27,19 @@ class CapitalFlowSource:
     def status_payload(data_status: str, **kwargs: Any) -> Dict[str, Any]:
         return status_payload(data_status, **kwargs)
 
-    def _get_stock_name(self, db: Session, stock_code: str) -> str:
-        stock = db.query(StockBasic).filter(StockBasic.stock_code == stock_code).first()
+    async def _get_stock_name(self, db: AsyncSession, stock_code: str) -> str:
+        result = await db.execute(select(StockBasic).where(StockBasic.stock_code == stock_code))
+        stock = result.scalars().first()
         return stock.name if stock else "Unknown"
 
-    def _get_money_flow(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_money_flow(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         # Get latest
-        flow = db.query(StockMoneyFlow).filter(
-            StockMoneyFlow.stock_code == stock_code
-        ).order_by(desc(StockMoneyFlow.trade_date)).first()
+        result = await db.execute(
+            select(StockMoneyFlow)
+            .where(StockMoneyFlow.stock_code == stock_code)
+            .order_by(desc(StockMoneyFlow.trade_date))
+        )
+        flow = result.scalars().first()
 
         if not flow:
             return {}
@@ -55,14 +59,18 @@ class CapitalFlowSource:
         }
         return format_payload_values("capital_flow.money_flow", payload)
 
-    def _get_money_flow_trend(self, db: Session, stock_code: str, limit: int = 20) -> List[Dict[str, Any]]:
+    async def _get_money_flow_trend(self, db: AsyncSession, stock_code: str, limit: int = 20) -> List[Dict[str, Any]]:
         """
         获取主力资金流向趋势 (最近N天)
         Get main money flow trend (Last N days)
         """
-        flows = db.query(StockMoneyFlow).filter(
-            StockMoneyFlow.stock_code == stock_code
-        ).order_by(desc(StockMoneyFlow.trade_date)).limit(limit).all()
+        result = await db.execute(
+            select(StockMoneyFlow)
+            .where(StockMoneyFlow.stock_code == stock_code)
+            .order_by(desc(StockMoneyFlow.trade_date))
+            .limit(limit)
+        )
+        flows = result.scalars().all()
 
         trend = []
         for f in flows:
@@ -74,10 +82,13 @@ class CapitalFlowSource:
             })
         return format_payload_values("capital_flow.money_flow", trend)
 
-    def _get_northbound(self, db: Session, stock_code: str) -> Dict[str, Any]:
-        nb = db.query(NorthboundData).filter(
-            NorthboundData.stock_code == stock_code
-        ).order_by(desc(NorthboundData.date)).first()
+    async def _get_northbound(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
+        result = await db.execute(
+            select(NorthboundData)
+            .where(NorthboundData.stock_code == stock_code)
+            .order_by(desc(NorthboundData.date))
+        )
+        nb = result.scalars().first()
 
         if not nb:
             return self.status_payload(
@@ -111,11 +122,14 @@ class CapitalFlowSource:
         }
         return format_payload_values("capital_flow.northbound", payload)
 
-    def _get_dragon_tiger(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_dragon_tiger(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         # Get latest appearing on list
-        dt = db.query(DragonTigerData).filter(
-            DragonTigerData.stock_code == stock_code
-        ).order_by(desc(DragonTigerData.trade_date)).first()
+        result = await db.execute(
+            select(DragonTigerData)
+            .where(DragonTigerData.stock_code == stock_code)
+            .order_by(desc(DragonTigerData.trade_date))
+        )
+        dt = result.scalars().first()
 
         if not dt:
             return self.status_payload(
@@ -147,10 +161,13 @@ class CapitalFlowSource:
         }
         return format_payload_values("capital_flow.dragon_tiger", payload)
 
-    def _get_margin(self, db: Session, stock_code: str) -> Dict[str, Any]:
-        mg = db.query(StockMargin).filter(
-            StockMargin.stock_code == stock_code
-        ).order_by(desc(StockMargin.trade_date)).first()
+    async def _get_margin(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
+        result = await db.execute(
+            select(StockMargin)
+            .where(StockMargin.stock_code == stock_code)
+            .order_by(desc(StockMargin.trade_date))
+        )
+        mg = result.scalars().first()
 
         if not mg:
             return self.status_payload("missing", status="Data Unavailable")
@@ -165,17 +182,26 @@ class CapitalFlowSource:
         }
         return format_payload_values("capital_flow.margin", payload)
 
-    def _get_block_trade(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_block_trade(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """获取大宗交易数据（近 30 个自然日全量窗口 + 买方结构聚合）"""
         window_start = datetime.now().date() - timedelta(days=30)
-        trades = db.query(StockBlockTrade).filter(
-            StockBlockTrade.stock_code == stock_code,
-            StockBlockTrade.trade_date >= window_start,
-        ).order_by(desc(StockBlockTrade.trade_date)).all()
+        result = await db.execute(
+            select(StockBlockTrade)
+            .where(
+                StockBlockTrade.stock_code == stock_code,
+                StockBlockTrade.trade_date >= window_start,
+            )
+            .order_by(desc(StockBlockTrade.trade_date))
+        )
+        trades = result.scalars().all()
         if not trades:
-            trades = db.query(StockBlockTrade).filter(
-                StockBlockTrade.stock_code == stock_code
-            ).order_by(desc(StockBlockTrade.trade_date)).limit(10).all()
+            fallback_result = await db.execute(
+                select(StockBlockTrade)
+                .where(StockBlockTrade.stock_code == stock_code)
+                .order_by(desc(StockBlockTrade.trade_date))
+                .limit(10)
+            )
+            trades = fallback_result.scalars().all()
 
         if not trades:
             return self.status_payload(
@@ -268,11 +294,12 @@ class CapitalFlowSource:
         }
         return format_payload_values("capital_flow.block_trade", payload)
 
-    def _get_sector_flow(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_sector_flow(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """获取所属板块的资金流向数据"""
         # 首先获取股票所属行业
         from app.models.data_storage import StockBasic
-        stock = db.query(StockBasic).filter(StockBasic.stock_code == stock_code).first()
+        stock_result = await db.execute(select(StockBasic).where(StockBasic.stock_code == stock_code))
+        stock = stock_result.scalars().first()
 
         if not stock or not stock.industry:
             return self.status_payload("missing", status="Industry Info Unavailable")
@@ -280,9 +307,12 @@ class CapitalFlowSource:
         industry = stock.industry
         
         # 1. 尝试直接匹配
-        sector_flow = db.query(SectorMoneyFlow).filter(
-            SectorMoneyFlow.sector_name == industry
-        ).order_by(desc(SectorMoneyFlow.trade_date)).first()
+        sector_result = await db.execute(
+            select(SectorMoneyFlow)
+            .where(SectorMoneyFlow.sector_name == industry)
+            .order_by(desc(SectorMoneyFlow.trade_date))
+        )
+        sector_flow = sector_result.scalars().first()
 
         # 2. 如果直接匹配失败，尝试显式映射
         if not sector_flow:
@@ -295,21 +325,28 @@ class CapitalFlowSource:
             }
             if industry in mapping:
                 mapped_name = mapping[industry]
-                sector_flow = db.query(SectorMoneyFlow).filter(
-                    SectorMoneyFlow.sector_name == mapped_name
-                ).order_by(desc(SectorMoneyFlow.trade_date)).first()
+                mapped_result = await db.execute(
+                    select(SectorMoneyFlow)
+                    .where(SectorMoneyFlow.sector_name == mapped_name)
+                    .order_by(desc(SectorMoneyFlow.trade_date))
+                )
+                sector_flow = mapped_result.scalars().first()
 
         # 3. 如果仍然失败，尝试模糊匹配
         if not sector_flow:
             try:
-                all_sectors = db.query(SectorMoneyFlow.sector_name).distinct().all()
+                all_sectors_result = await db.execute(select(SectorMoneyFlow.sector_name).distinct())
+                all_sectors = all_sectors_result.all()
                 all_names = [s[0] for s in all_sectors]
                 from difflib import get_close_matches
                 matches = get_close_matches(industry, all_names, n=1, cutoff=0.3)
                 if matches:
-                    sector_flow = db.query(SectorMoneyFlow).filter(
-                        SectorMoneyFlow.sector_name == matches[0]
-                    ).order_by(desc(SectorMoneyFlow.trade_date)).first()
+                    fuzzy_result = await db.execute(
+                        select(SectorMoneyFlow)
+                        .where(SectorMoneyFlow.sector_name == matches[0])
+                        .order_by(desc(SectorMoneyFlow.trade_date))
+                    )
+                    sector_flow = fuzzy_result.scalars().first()
             except Exception:
                 pass
 
@@ -351,15 +388,19 @@ class CapitalFlowSource:
         }
         return format_payload_values("capital_flow.sector_flow", payload)
 
-    def _get_northbound_trend(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_northbound_trend(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """
         分析北向资金连续变动趋势
         Analyze northbound fund continuous trend
         """
         # 获取最近20日北向资金数据
-        data = db.query(NorthboundData).filter(
-            NorthboundData.stock_code == stock_code
-        ).order_by(desc(NorthboundData.date)).limit(20).all()
+        result = await db.execute(
+            select(NorthboundData)
+            .where(NorthboundData.stock_code == stock_code)
+            .order_by(desc(NorthboundData.date))
+            .limit(20)
+        )
+        data = result.scalars().all()
 
         # Since 2024.08, detailed stock data is quarterly (disclosed 5 days after quarter end).
         # We compare the latest record with the previous quarterly record (usually > 60 days apart).
@@ -406,16 +447,20 @@ class CapitalFlowSource:
         }
         return format_payload_values("capital_flow.northbound", payload)
 
-    def _analyze_dragon_tiger_effect(
-            self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _analyze_dragon_tiger_effect(
+            self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """
         分析龙虎榜历史效应
         Analyze dragon tiger list historical effect (post-event returns)
         """
         # 获取历史所有龙虎榜记录
-        records = db.query(DragonTigerData).filter(
-            DragonTigerData.stock_code == stock_code
-        ).order_by(desc(DragonTigerData.trade_date)).limit(20).all()
+        result = await db.execute(
+            select(DragonTigerData)
+            .where(DragonTigerData.stock_code == stock_code)
+            .order_by(desc(DragonTigerData.trade_date))
+            .limit(20)
+        )
+        records = result.scalars().all()
 
         if not records:
             return {}
@@ -465,15 +510,19 @@ class CapitalFlowSource:
         }
         return format_payload_values("capital_flow.dragon_tiger", payload)
 
-    def _get_shareholder(self, db: Session, stock_code: str) -> Dict[str, Any]:
+    async def _get_shareholder(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """
         获取股东人数及筹码分布趋势
         Get shareholder count and chip distribution trend
         """
         # 获取最近 5 期
-        records = db.query(StockShareholder).filter(
-            StockShareholder.stock_code == stock_code
-        ).order_by(desc(StockShareholder.end_date)).limit(5).all()
+        result = await db.execute(
+            select(StockShareholder)
+            .where(StockShareholder.stock_code == stock_code)
+            .order_by(desc(StockShareholder.end_date))
+            .limit(5)
+        )
+        records = result.scalars().all()
 
         if not records:
             return {}

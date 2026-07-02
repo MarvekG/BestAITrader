@@ -23,7 +23,6 @@ class ApiRegistry(Base):
 # 下面定义通用的 CommonData 结构供 Core 使用 (不直接用于 ORM mapping，除非指定 __tablename__)
 
 from sqlalchemy import Table, MetaData
-from app.core.database import engine
 
 metadata = MetaData()
 

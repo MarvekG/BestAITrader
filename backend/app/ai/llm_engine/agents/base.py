@@ -319,7 +319,7 @@ class BaseAgent(ABC):
             iteration_index=iteration_index,
         )
 
-    def _record_llm_usage(
+    async def _record_llm_usage(
         self,
         response: Any,
         *,
@@ -327,7 +327,7 @@ class BaseAgent(ABC):
         iteration_index: int | None = None,
     ) -> None:
         cache_lane, api_key_alias = get_research_usage_lane()
-        record_llm_usage(
+        await record_llm_usage(
             response,
             self.model_name,
             self.role_name,
@@ -407,7 +407,7 @@ class BaseAgent(ABC):
                     f"{i + 1}/{MAX_LLM_ITERATIONS}..."
                 )
                 response = await self.llm_with_tools.ainvoke(messages)
-                self._record_llm_usage(response, call_kind="agent", iteration_index=i + 1)
+                await self._record_llm_usage(response, call_kind="agent", iteration_index=i + 1)
 
                 response, invalid_tool_calls = self.llm_provider.sanitize_tool_call_response_for_replay(response)
                 messages.append(response)
@@ -535,7 +535,7 @@ class BaseAgent(ABC):
             )
             messages.append(HumanMessage(content=self._build_iteration_budget_exceeded_message()))
             final_response = await self.llm.ainvoke(messages)
-            self._record_llm_usage(
+            await self._record_llm_usage(
                 final_response,
                 call_kind="final_no_tools",
                 iteration_index=MAX_LLM_ITERATIONS + 1,
@@ -576,7 +576,7 @@ class BaseAgent(ABC):
                         f"{parser.get_format_instructions()}"
                     )))
                     retry_response = await self.llm.ainvoke(messages)
-                    self._record_llm_usage(
+                    await self._record_llm_usage(
                         retry_response,
                         call_kind="json_retry",
                         iteration_index=retry_index + 1,

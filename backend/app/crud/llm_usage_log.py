@@ -2,9 +2,9 @@ import uuid
 from collections.abc import Mapping
 from typing import Any, Dict, Optional
 
-from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy import delete, func, select
 
+from app.core import database as database_module
 from app.core.logger import get_logger
 from app.models.llm_usage_log import LLMUsageLog
 
@@ -121,51 +121,58 @@ def _usage_summary_from_row(row: Any) -> dict[str, Any]:
     }
 
 
-def _usage_breakdown(db: Session, field_name: str) -> dict[str, dict[str, Any]]:
+async def _usage_breakdown(db, field_name: str) -> dict[str, dict[str, Any]]:
     column = getattr(LLMUsageLog, field_name)
-    rows = db.query(
-        column.label("group_value"),
-        func.count(LLMUsageLog.id).label("calls"),
-        func.sum(LLMUsageLog.input_tokens).label("input_tokens"),
-        func.sum(LLMUsageLog.output_tokens).label("output_tokens"),
-        func.sum(LLMUsageLog.total_tokens).label("total_tokens"),
-        func.sum(LLMUsageLog.cached_tokens).label("cached_tokens"),
-        func.sum(LLMUsageLog.cache_miss_tokens).label("cache_miss_tokens"),
-        func.sum(LLMUsageLog.reasoning_tokens).label("reasoning_tokens"),
-    ).group_by(column).all()
+    result = await db.execute(
+        select(
+            column.label("group_value"),
+            func.count(LLMUsageLog.id).label("calls"),
+            func.sum(LLMUsageLog.input_tokens).label("input_tokens"),
+            func.sum(LLMUsageLog.output_tokens).label("output_tokens"),
+            func.sum(LLMUsageLog.total_tokens).label("total_tokens"),
+            func.sum(LLMUsageLog.cached_tokens).label("cached_tokens"),
+            func.sum(LLMUsageLog.cache_miss_tokens).label("cache_miss_tokens"),
+            func.sum(LLMUsageLog.reasoning_tokens).label("reasoning_tokens"),
+        ).group_by(column)
+    )
+    rows = result.all()
     return {_group_key(row.group_value): _usage_summary_from_row(row) for row in rows}
 
 
-def _usage_breakdown_by_fields(db: Session, field_names: tuple[str, ...]) -> dict[str, dict[str, Any]]:
+async def _usage_breakdown_by_fields(db, field_names: tuple[str, ...]) -> dict[str, dict[str, Any]]:
     columns = [getattr(LLMUsageLog, field_name) for field_name in field_names]
-    rows = db.query(
-        *columns,
-        func.count(LLMUsageLog.id).label("calls"),
-        func.sum(LLMUsageLog.input_tokens).label("input_tokens"),
-        func.sum(LLMUsageLog.output_tokens).label("output_tokens"),
-        func.sum(LLMUsageLog.total_tokens).label("total_tokens"),
-        func.sum(LLMUsageLog.cached_tokens).label("cached_tokens"),
-        func.sum(LLMUsageLog.cache_miss_tokens).label("cache_miss_tokens"),
-        func.sum(LLMUsageLog.reasoning_tokens).label("reasoning_tokens"),
-    ).group_by(*columns).all()
+    result = await db.execute(
+        select(
+            *columns,
+            func.count(LLMUsageLog.id).label("calls"),
+            func.sum(LLMUsageLog.input_tokens).label("input_tokens"),
+            func.sum(LLMUsageLog.output_tokens).label("output_tokens"),
+            func.sum(LLMUsageLog.total_tokens).label("total_tokens"),
+            func.sum(LLMUsageLog.cached_tokens).label("cached_tokens"),
+            func.sum(LLMUsageLog.cache_miss_tokens).label("cache_miss_tokens"),
+            func.sum(LLMUsageLog.reasoning_tokens).label("reasoning_tokens"),
+        ).group_by(*columns)
+    )
     breakdown: dict[str, dict[str, Any]] = {}
-    for row in rows:
+    for row in result.all():
         group_value = "/".join(_group_key(getattr(row, field_name)) for field_name in field_names)
         breakdown[group_value] = _usage_summary_from_row(row)
     return breakdown
 
 
-def _add_iteration_indexes(
+async def _add_iteration_indexes(
     breakdown: dict[str, dict[str, Any]],
-    db: Session,
+    db,
     field_name: str,
 ) -> dict[str, dict[str, Any]]:
     column = getattr(LLMUsageLog, field_name)
-    rows = db.query(column, LLMUsageLog.iteration_index).filter(
-        LLMUsageLog.iteration_index.isnot(None)
-    ).distinct().all()
+    result = await db.execute(
+        select(column, LLMUsageLog.iteration_index)
+        .where(LLMUsageLog.iteration_index.isnot(None))
+        .distinct()
+    )
     indexes_by_key: dict[str, list[int]] = {}
-    for group_value, iteration_index in rows:
+    for group_value, iteration_index in result.all():
         indexes_by_key.setdefault(_group_key(group_value), []).append(int(iteration_index))
     for group_value, indexes in indexes_by_key.items():
         if group_value in breakdown:
@@ -178,9 +185,8 @@ def _add_iteration_indexes(
 class CRUDLLMUsageLog:
     """LLM 使用日志 CRUD"""
 
-    def create(
+    async def create(
         self,
-        db: Session,
         *,
         model: str,
         role: str,
@@ -216,65 +222,65 @@ class CRUDLLMUsageLog:
             cache_lane=_normalize_observability_label(cache_lane),
             api_key_alias=_normalize_observability_label(api_key_alias),
         )
-        db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
+        async with database_module.AsyncSessionLocal() as db:
+            db.add(db_obj)
+            await db.commit()
+            await db.refresh(db_obj)
         return db_obj
 
-    def get_stats(self, db: Session) -> Dict[str, Any]:
+    async def get_stats(self) -> Dict[str, Any]:
         """获取汇总统计数据"""
-        # 总计
-        total_stats = db.query(
-            func.count(LLMUsageLog.id).label("total_calls"),
-            func.sum(LLMUsageLog.input_tokens).label("input_tokens"),
-            func.sum(LLMUsageLog.output_tokens).label("output_tokens"),
-            func.sum(LLMUsageLog.total_tokens).label("total_tokens"),
-            func.sum(LLMUsageLog.cached_tokens).label("cached_tokens"),
-            func.sum(LLMUsageLog.cache_miss_tokens).label("cache_miss_tokens"),
-            func.sum(LLMUsageLog.reasoning_tokens).label("reasoning_tokens"),
-        ).first()
+        async with database_module.AsyncSessionLocal() as db:
+            total_result = await db.execute(
+                select(
+                    func.count(LLMUsageLog.id).label("total_calls"),
+                    func.sum(LLMUsageLog.input_tokens).label("input_tokens"),
+                    func.sum(LLMUsageLog.output_tokens).label("output_tokens"),
+                    func.sum(LLMUsageLog.total_tokens).label("total_tokens"),
+                    func.sum(LLMUsageLog.cached_tokens).label("cached_tokens"),
+                    func.sum(LLMUsageLog.cache_miss_tokens).label("cache_miss_tokens"),
+                    func.sum(LLMUsageLog.reasoning_tokens).label("reasoning_tokens"),
+                )
+            )
+            total_stats = total_result.one()
+            role_result = await db.execute(
+                select(LLMUsageLog.role, func.count(LLMUsageLog.id).label("calls")).group_by(LLMUsageLog.role)
+            )
+            input_tokens = int(total_stats.input_tokens or 0)
+            cached_tokens = int(total_stats.cached_tokens or 0)
+            by_role_detail = await _add_iteration_indexes(await _usage_breakdown(db, "role"), db, "role")
+            return {
+                "total_calls": total_stats.total_calls or 0,
+                "input_tokens": input_tokens,
+                "output_tokens": int(total_stats.output_tokens or 0),
+                "total_tokens": int(total_stats.total_tokens or 0),
+                "cached_tokens": cached_tokens,
+                "cache_miss_tokens": int(total_stats.cache_miss_tokens or 0),
+                "reasoning_tokens": int(total_stats.reasoning_tokens or 0),
+                "cache_hit_rate": _cache_hit_rate(cached_tokens, input_tokens),
+                "by_role": {stat.role: stat.calls for stat in role_result.all()},
+                "by_role_detail": by_role_detail,
+                "by_workflow": await _usage_breakdown(db, "workflow"),
+                "by_stage": await _add_iteration_indexes(await _usage_breakdown(db, "stage"), db, "stage"),
+                "by_workflow_stage": await _usage_breakdown_by_fields(db, ("workflow", "stage")),
+                "by_workflow_call_kind": await _usage_breakdown_by_fields(db, ("workflow", "call_kind")),
+                "by_call_kind": await _usage_breakdown(db, "call_kind"),
+                "by_cache_lane": await _usage_breakdown(db, "cache_lane"),
+                "by_api_key_alias": await _usage_breakdown(db, "api_key_alias"),
+            }
 
-        # 按角色统计
-        role_stats = db.query(
-            LLMUsageLog.role,
-            func.count(LLMUsageLog.id).label("calls")
-        ).group_by(LLMUsageLog.role).all()
-
-        input_tokens = int(total_stats.input_tokens or 0)
-        cached_tokens = int(total_stats.cached_tokens or 0)
-        by_role_detail = _add_iteration_indexes(_usage_breakdown(db, "role"), db, "role")
-        return {
-            "total_calls": total_stats.total_calls or 0,
-            "input_tokens": input_tokens,
-            "output_tokens": int(total_stats.output_tokens or 0),
-            "total_tokens": int(total_stats.total_tokens or 0),
-            "cached_tokens": cached_tokens,
-            "cache_miss_tokens": int(total_stats.cache_miss_tokens or 0),
-            "reasoning_tokens": int(total_stats.reasoning_tokens or 0),
-            "cache_hit_rate": _cache_hit_rate(cached_tokens, input_tokens),
-            "by_role": {stat.role: stat.calls for stat in role_stats},
-            "by_role_detail": by_role_detail,
-            "by_workflow": _usage_breakdown(db, "workflow"),
-            "by_stage": _add_iteration_indexes(_usage_breakdown(db, "stage"), db, "stage"),
-            "by_workflow_stage": _usage_breakdown_by_fields(db, ("workflow", "stage")),
-            "by_workflow_call_kind": _usage_breakdown_by_fields(db, ("workflow", "call_kind")),
-            "by_call_kind": _usage_breakdown(db, "call_kind"),
-            "by_cache_lane": _usage_breakdown(db, "cache_lane"),
-            "by_api_key_alias": _usage_breakdown(db, "api_key_alias"),
-        }
-
-    def clear(self, db: Session) -> int:
+    async def clear(self) -> int:
         """删除所有 LLM 使用记录。"""
-
-        deleted = db.query(LLMUsageLog).delete(synchronize_session=False)
-        db.commit()
-        return int(deleted or 0)
+        async with database_module.AsyncSessionLocal() as db:
+            result = await db.execute(delete(LLMUsageLog))
+            await db.commit()
+            return int(result.rowcount or 0)
 
 
 llm_usage_log = CRUDLLMUsageLog()
 
 
-def record_llm_usage(
+async def record_llm_usage(
     response,
     model: str,
     role: str,
@@ -302,27 +308,24 @@ def record_llm_usage(
                 _cache_miss_tokens_from_usage(raw_usage)
                 or _cache_miss_tokens_from_usage(usage)
             )
-            from app.core.database import SessionLocal
-            with SessionLocal() as db:
-                db_obj = llm_usage_log.create(
-                    db=db,
-                    model=model,
-                    role=role,
-                    input_tokens=input_tokens,
-                    output_tokens=_usage_value(usage, "output_tokens"),
-                    total_tokens=_usage_value(usage, "total_tokens"),
-                    cached_tokens=cached_tokens,
-                    cache_miss_tokens=explicit_miss_tokens or _cache_miss_tokens(input_tokens, cached_tokens),
-                    reasoning_tokens=_reasoning_tokens_from_usage(raw_usage) or _reasoning_tokens_from_usage(usage),
-                    session_id=session_id,
-                    workflow=workflow,
-                    stage=stage,
-                    call_kind=call_kind,
-                    iteration_index=iteration_index,
-                    cache_lane=cache_lane,
-                    api_key_alias=api_key_alias,
-                )
-                return db_obj.to_dict()
+            db_obj = await llm_usage_log.create(
+                model=model,
+                role=role,
+                input_tokens=input_tokens,
+                output_tokens=_usage_value(usage, "output_tokens"),
+                total_tokens=_usage_value(usage, "total_tokens"),
+                cached_tokens=cached_tokens,
+                cache_miss_tokens=explicit_miss_tokens or _cache_miss_tokens(input_tokens, cached_tokens),
+                reasoning_tokens=_reasoning_tokens_from_usage(raw_usage) or _reasoning_tokens_from_usage(usage),
+                session_id=session_id,
+                workflow=workflow,
+                stage=stage,
+                call_kind=call_kind,
+                iteration_index=iteration_index,
+                cache_lane=cache_lane,
+                api_key_alias=api_key_alias,
+            )
+            return db_obj.to_dict()
 
         # OpenAI 格式: response.usage (object with prompt_tokens, etc.)
         usage_obj = getattr(response, "usage", None)
@@ -330,27 +333,24 @@ def record_llm_usage(
             input_tokens = _usage_value(usage_obj, "prompt_tokens")
             cached_tokens = _cached_tokens_from_usage(usage_obj)
             explicit_miss_tokens = _cache_miss_tokens_from_usage(usage_obj)
-            from app.core.database import SessionLocal
-            with SessionLocal() as db:
-                db_obj = llm_usage_log.create(
-                    db=db,
-                    model=model,
-                    role=role,
-                    input_tokens=input_tokens,
-                    output_tokens=_usage_value(usage_obj, "completion_tokens"),
-                    total_tokens=_usage_value(usage_obj, "total_tokens"),
-                    cached_tokens=cached_tokens,
-                    cache_miss_tokens=explicit_miss_tokens or _cache_miss_tokens(input_tokens, cached_tokens),
-                    reasoning_tokens=_reasoning_tokens_from_usage(usage_obj),
-                    session_id=session_id,
-                    workflow=workflow,
-                    stage=stage,
-                    call_kind=call_kind,
-                    iteration_index=iteration_index,
-                    cache_lane=cache_lane,
-                    api_key_alias=api_key_alias,
-                )
-                return db_obj.to_dict()
+            db_obj = await llm_usage_log.create(
+                model=model,
+                role=role,
+                input_tokens=input_tokens,
+                output_tokens=_usage_value(usage_obj, "completion_tokens"),
+                total_tokens=_usage_value(usage_obj, "total_tokens"),
+                cached_tokens=cached_tokens,
+                cache_miss_tokens=explicit_miss_tokens or _cache_miss_tokens(input_tokens, cached_tokens),
+                reasoning_tokens=_reasoning_tokens_from_usage(usage_obj),
+                session_id=session_id,
+                workflow=workflow,
+                stage=stage,
+                call_kind=call_kind,
+                iteration_index=iteration_index,
+                cache_lane=cache_lane,
+                api_key_alias=api_key_alias,
+            )
+            return db_obj.to_dict()
     except Exception as e:
         logger.exception(f"Failed to record LLM usage for {role}: {e}")
     return None

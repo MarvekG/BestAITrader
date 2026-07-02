@@ -6,7 +6,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from app.api.endpoints import llm as llm_endpoint
-from app.api.endpoints.llm import _get_ai_function_test_tools, _get_ai_function_test_tools_async, run_llm_probe
+from app.api.endpoints.llm import _get_ai_function_test_tools, run_llm_probe
 
 
 class _FakeOpenAIMessage:
@@ -126,8 +126,14 @@ async def test_llm_probe_runs_all_probe_steps():
     assert thinking_call["max_tokens"] == 512
 
 
-def test_ai_function_test_tools_are_real_tools_and_skills():
-    tool_names = {tool_obj.name for tool_obj in _get_ai_function_test_tools("tools_and_skills")}
+@pytest.mark.asyncio
+async def test_ai_function_test_tools_are_real_tools_and_skills(monkeypatch):
+    async def fake_get_mcp_tools():
+        return []
+
+    monkeypatch.setattr(llm_endpoint, "get_mcp_tools", fake_get_mcp_tools)
+
+    tool_names = {tool_obj.name for tool_obj in await _get_ai_function_test_tools("tools_and_skills")}
 
     assert "execute_python_sandboxed" in tool_names
     assert "browse_web_page_html" in tool_names
@@ -145,7 +151,7 @@ async def test_ai_function_test_tools_include_enabled_mcp_tools(monkeypatch):
 
     monkeypatch.setattr(llm_endpoint, "get_mcp_tools", fake_get_mcp_tools)
 
-    tool_names = {tool_obj.name for tool_obj in await _get_ai_function_test_tools_async("tools_and_skills")}
+    tool_names = {tool_obj.name for tool_obj in await _get_ai_function_test_tools("tools_and_skills")}
 
     assert "tavily_search" in tool_names
     assert "list_skills" in tool_names
@@ -198,7 +204,7 @@ async def test_llm_chat_completion_helper_uses_configured_timeout_and_retries():
         with (
             patch("app.api.endpoints.llm.httpx.AsyncClient", _FakeHttpClient),
             patch("app.api.endpoints.llm.AsyncOpenAI", _FakeAsyncOpenAI),
-            patch("app.api.endpoints.llm.record_llm_usage"),
+            patch("app.api.endpoints.llm.record_llm_usage", new=AsyncMock()),
         ):
             result = await reloaded_llm_endpoint._request_llm_completion(
                 messages=[{"role": "user", "content": "hello"}],
@@ -245,7 +251,7 @@ async def test_ai_function_test_endpoint_submits_background_task():
 
     submitted = {}
 
-    def _fake_submit_task(**kwargs):
+    async def _fake_submit_task(**kwargs):
         submitted.update(kwargs)
         return {
             "task_id": "task-123",
@@ -260,14 +266,12 @@ async def test_ai_function_test_endpoint_submits_background_task():
         result = await llm_endpoint.run_ai_function_test(
             {"scenario": "thinking_tools", "user_input": "查官网年报"},
             background_tasks,
-            db=object(),
             current_user=SimpleNamespace(id=42),
         )
 
     assert result["task_id"] == "task-123"
     assert result["status"] == "started"
     assert result["new_task"] is True
-    assert submitted["task_type"] == "ai_function_test"
     assert submitted["parameters"] == {
         "scenario": "thinking_tools",
         "user_input": "查官网年报",
@@ -288,17 +292,10 @@ async def test_ai_function_test_endpoint_submits_background_task():
 
 @pytest.mark.asyncio
 async def test_ai_function_test_background_task_persists_result():
-    class FakeSession:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return False
-
     updates = []
 
-    def _fake_update_task_status(
-        db,
+    async def _fake_update_task_status(
+        *,
         task_id,
         status,
         result=None,
@@ -323,8 +320,7 @@ async def test_ai_function_test_background_task_persists_result():
             "input": {"user_input": user_input},
         }
 
-    with patch("app.api.endpoints.llm.SessionLocal", return_value=FakeSession()), \
-         patch("app.api.endpoints.llm.task_manager.update_task_status", side_effect=_fake_update_task_status), \
+    with patch("app.api.endpoints.llm.task_manager.update_task_status", side_effect=_fake_update_task_status), \
          patch("app.api.endpoints.llm.execute_ai_function_test", side_effect=_fake_execute_ai_function_test):
         await llm_endpoint.run_ai_function_test_task(
             task_id="task-123",

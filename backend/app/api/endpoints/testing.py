@@ -10,7 +10,7 @@ from app.ai.agentic import tools
 from app.ai.agentic.skills_loader import skill_tools
 from app.ai.agentic.tooling.news_plugins import get_news_plugins
 from app.ai.memory_client import memory_client
-from app.core.database import SessionLocal
+from app.core import database as database_module
 from app.core.i18n import i18n_service
 from app.core.logger import get_logger
 from app.core.redis_client import redis_client
@@ -269,8 +269,8 @@ async def test_redis():
 async def test_db():
     try:
         start_time = time.time()
-        with SessionLocal() as db:
-            db.execute(text("SELECT 1"))
+        async with database_module.AsyncSessionLocal() as db:
+            await db.execute(text("SELECT 1"))
         elapsed = int((time.time() - start_time) * 1000)
         return {"status": "success", "message": i18n_service.t("testing.db_success"), "elapsed_ms": elapsed}
     except Exception as e:

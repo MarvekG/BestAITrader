@@ -1,23 +1,22 @@
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 
-from sqlalchemy import create_engine
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy.orm import Session
-from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
 
-# 创建 SQLAlchemy 引擎。全项目只使用这一套 engine/session，避免连接池配置分叉。
-engine = create_engine(
-    str(settings.DATABASE_URL),
-    pool_size=20,         # 基础连接池大小
-    max_overflow=40,      # 允许溢出的最大连接数 (合计 60)
-    pool_pre_ping=True,   # 检出连接前检查其有效性
-    pool_recycle=3600     # 1小时后自动回收连接，防止因超时被数据库关闭
+async_engine = create_async_engine(
+    str(settings.ASYNC_DATABASE_URL),
+    pool_size=20,
+    max_overflow=40,
+    pool_pre_ping=True,
+    pool_recycle=3600,
 )
 
-# 创建会话工厂
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+AsyncSessionLocal = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+
 
 class Base(DeclarativeBase):
     """Declarative base for all SQLAlchemy ORM models."""
@@ -25,23 +24,11 @@ class Base(DeclarativeBase):
     pass
 
 
-def get_db() -> Iterator[Session]:
-    """
-    Provide a database session for FastAPI dependencies.
+async def get_async_db() -> AsyncIterator[AsyncSession]:
+    """提供应用运行时使用的异步数据库会话。
 
     Yields:
-        SQLAlchemy session bound to the application engine.
+        绑定异步引擎的 SQLAlchemy 异步会话。
     """
-    with SessionLocal() as db:
-        yield db
-
-
-def get_db_session() -> Iterator[Session]:
-    """
-    Provide a database session generator for non-FastAPI call sites.
-
-    Yields:
-        SQLAlchemy session bound to the application engine.
-    """
-    with SessionLocal() as db:
+    async with AsyncSessionLocal() as db:
         yield db

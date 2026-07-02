@@ -1,19 +1,21 @@
 from datetime import datetime
 
-from app.data import storage as storage_module
+import pytest
+
 from app.data.storage import DataStorageService
 from app.models.data_storage import StockBasic, StockRealtimeMarket
 
 
-def test_get_stock_realtime_market_returns_latest_quote(db_session, test_db, monkeypatch):
-    db_session.add(
+@pytest.mark.asyncio
+async def test_get_stock_realtime_market_returns_latest_quote(async_db_session):
+    async_db_session.add(
         StockBasic(
             stock_code="000651.SZ",
             name="格力电器",
             market="SZ",
         )
     )
-    db_session.add_all(
+    async_db_session.add_all(
         [
             StockRealtimeMarket(
                 stock_code="000651.SZ",
@@ -31,10 +33,9 @@ def test_get_stock_realtime_market_returns_latest_quote(db_session, test_db, mon
             ),
         ]
     )
-    db_session.commit()
-    monkeypatch.setattr(storage_module, "SessionLocal", test_db)
+    await async_db_session.commit()
 
-    result = DataStorageService().get_stock_realtime_market("000651.SZ")
+    result = await DataStorageService().get_stock_realtime_market("000651.SZ")
 
     assert result["latest_price"] == 37.16
     assert result["current_price"] == 37.16

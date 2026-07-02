@@ -3,6 +3,8 @@ from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from sqlalchemy import select
+
 from app.crud.user import create_user
 from app.models.async_task import AsyncTask
 from app.models.account import Account
@@ -12,24 +14,26 @@ from app.models.user import User
 from app.schemas.user import UserCreate
 
 
-def _seed_stock_basic(
-    db_session,
+async def _seed_stock_basic(
+    test_db,
     *,
     stock_code: str,
     name: str,
     industry: str = "Banking",
     market: str = "SZSE",
 ):
-    record = StockBasic(
-        stock_code=stock_code,
-        name=name,
-        industry=industry,
-        market=market,
-        data_source="test",
-    )
-    db_session.add(record)
-    db_session.commit()
-    return record
+    async with test_db() as db:
+        record = StockBasic(
+            stock_code=stock_code,
+            name=name,
+            industry=industry,
+            market=market,
+            data_source="test",
+        )
+        db.add(record)
+        await db.commit()
+        await db.refresh(record)
+        return record
 
 
 def _session_payload(stock_code: str) -> dict:
@@ -50,27 +54,21 @@ def _create_session(client, auth_headers, stock_code: str) -> str:
     return response.json()["session_id"]
 
 
-def _create_user(db_session, *, username: str, password: str) -> None:
-    create_user(
-        db_session,
-        UserCreate(
-            username=username,
-            email=f"{username}@example.com",
-            password=password,
-        ),
-    )
+async def _create_user(test_db, *, username: str, password: str) -> User | None:
+    async with test_db() as db:
+        return await create_user(
+            db,
+            UserCreate(
+                username=username,
+                email=f"{username}@example.com",
+                password=password,
+            ),
+        )
 
 
-def _create_authenticated_user(client, db_session, *, username: str):
+def _create_authenticated_user(client, test_db, run_async, *, username: str):
     password = "password123"
-    create_user(
-        db_session,
-        UserCreate(
-            username=username,
-            email=f"{username}@example.com",
-            password=password,
-        ),
-    )
+    run_async(_create_user(test_db, username=username, password=password))
     response = client.post(
         "/api/v1/auth/login",
         data={"username": username, "password": password},
@@ -91,8 +89,8 @@ class TestAuthAPI:
         assert response.status_code == 403
         assert response.json()["detail"] == "User registration is disabled"
 
-    def test_login(self, client, db_session):
-        _create_user(db_session, username="login_user", password="password123")
+    def test_login(self, client, test_db, run_async):
+        run_async(_create_user(test_db, username="login_user", password="password123"))
         response = client.post(
             "/api/v1/auth/login",
             data={
@@ -110,8 +108,8 @@ class TestStockWarehouseAPI:
         assert response.status_code == 200, response.text
         assert response.json() == []
 
-    def test_add_stock(self, client, auth_headers, db_session):
-        _seed_stock_basic(db_session, stock_code="600519.SH", name="Kweichow Moutai", industry="Liquor", market="SSE")
+    def test_add_stock(self, client, auth_headers, test_db, run_async):
+        run_async(_seed_stock_basic(test_db, stock_code="600519.SH", name="Kweichow Moutai", industry="Liquor", market="SSE"))
 
         response = client.post(
             "/api/v1/stock-warehouse/",
@@ -124,8 +122,8 @@ class TestStockWarehouseAPI:
         assert response.json()["auto_analysis_enabled"] is False
         assert response.json()["auto_analysis_frequency"] == "daily"
 
-    def test_update_stock_auto_analysis_config(self, client, auth_headers, db_session):
-        _seed_stock_basic(db_session, stock_code="600519.SH", name="Kweichow Moutai", industry="Liquor", market="SSE")
+    def test_update_stock_auto_analysis_config(self, client, auth_headers, test_db, run_async):
+        run_async(_seed_stock_basic(test_db, stock_code="600519.SH", name="Kweichow Moutai", industry="Liquor", market="SSE"))
         client.post(
             "/api/v1/stock-warehouse/",
             json={"stock_code": "600519.SH"},
@@ -153,8 +151,8 @@ class TestStockWarehouseAPI:
         assert payload["auto_analysis_trading_frequency"] == "Swing Trading"
         assert payload["auto_analysis_run_immediately"] is True
 
-    def test_update_stock_auto_analysis_rejects_null_config(self, client, auth_headers, db_session):
-        _seed_stock_basic(db_session, stock_code="600519.SH", name="Kweichow Moutai", industry="Liquor", market="SSE")
+    def test_update_stock_auto_analysis_rejects_null_config(self, client, auth_headers, test_db, run_async):
+        run_async(_seed_stock_basic(test_db, stock_code="600519.SH", name="Kweichow Moutai", industry="Liquor", market="SSE"))
         client.post(
             "/api/v1/stock-warehouse/",
             json={"stock_code": "600519.SH"},
@@ -169,10 +167,10 @@ class TestStockWarehouseAPI:
 
         assert response.status_code == 422
 
-    def test_stock_warehouse_entries_are_isolated_by_user(self, client, db_session):
-        _seed_stock_basic(db_session, stock_code="600519.SH", name="Kweichow Moutai", industry="Liquor", market="SSE")
-        owner_headers = _create_authenticated_user(client, db_session, username="warehouse_owner")
-        other_headers = _create_authenticated_user(client, db_session, username="warehouse_other")
+    def test_stock_warehouse_entries_are_isolated_by_user(self, client, test_db, run_async):
+        run_async(_seed_stock_basic(test_db, stock_code="600519.SH", name="Kweichow Moutai", industry="Liquor", market="SSE"))
+        owner_headers = _create_authenticated_user(client, test_db, run_async, username="warehouse_owner")
+        other_headers = _create_authenticated_user(client, test_db, run_async, username="warehouse_other")
 
         create_response = client.post(
             "/api/v1/stock-warehouse/",
@@ -222,7 +220,7 @@ class TestSourcesAPI:
         assert "sources" in payload
         assert "default_source" in payload
 
-    def test_data_source_config_persists_to_system_settings(self, client, auth_headers, db_session):
+    def test_data_source_config_persists_to_system_settings(self, client, auth_headers, test_db, run_async):
         from app.models.system_setting import SystemSetting
 
         response = client.post(
@@ -237,19 +235,23 @@ class TestSourcesAPI:
         )
 
         assert response.status_code == 200, response.text
-        values = {
-            row.key: row.value
-            for row in db_session.query(SystemSetting).filter(
-                SystemSetting.key.in_(
-                    [
-                        "data_sources.tushare.token",
-                        "data_sources.tushare.api_url",
-                        "data_sources.tavily.api_key",
-                        "data_sources.newsapi.api_key",
-                    ]
+        async def _load_values():
+            async with test_db() as db:
+                result = await db.execute(
+                    select(SystemSetting).where(
+                        SystemSetting.key.in_(
+                            [
+                                "data_sources.tushare.token",
+                                "data_sources.tushare.api_url",
+                                "data_sources.tavily.api_key",
+                                "data_sources.newsapi.api_key",
+                            ]
+                        )
+                    )
                 )
-            )
-        }
+                return {row.key: row.value for row in result.scalars().all()}
+
+        values = run_async(_load_values())
         assert values == {
             "data_sources.tushare.token": "tushare-secret",
             "data_sources.tushare.api_url": "https://api.example.com/tushare",
@@ -353,8 +355,8 @@ class TestSourcesAPI:
 
 
 class TestSessionAPI:
-    def test_create_session(self, client, auth_headers, db_session):
-        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+    def test_create_session(self, client, auth_headers, test_db, run_async):
+        run_async(_seed_stock_basic(test_db, stock_code="000001.SZ", name="Ping An Bank"))
 
         response = client.post(
             "/api/v1/sessions/",
@@ -367,20 +369,25 @@ class TestSessionAPI:
         assert payload["stock_code"] == "000001.SZ"
         assert payload["stock_name"] == "Ping An Bank"
 
-    def test_get_sessions(self, client, auth_headers, db_session):
-        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+    def test_get_sessions(self, client, auth_headers, test_db, run_async):
+        run_async(_seed_stock_basic(test_db, stock_code="000001.SZ", name="Ping An Bank"))
         session_id = _create_session(client, auth_headers, "000001.SZ")
-        db_session.add(
-            AsyncTask(
-                task_id="task-1",
-                task_name="AI Analysis - 000001.SZ",
-                task_type="ai_analysis",
-                status="completed",
-                parameters={"session_id": session_id},
-                completed_at=datetime(2024, 1, 2, 3, 4, 5),
-            )
-        )
-        db_session.commit()
+
+        async def _seed_task():
+            async with test_db() as db:
+                db.add(
+                    AsyncTask(
+                        task_id="task-1",
+                        task_name="AI Analysis - 000001.SZ",
+                        task_type="ai_analysis",
+                        status="completed",
+                        parameters={"session_id": session_id},
+                        completed_at=datetime(2024, 1, 2, 3, 4, 5),
+                    )
+                )
+                await db.commit()
+
+        run_async(_seed_task())
 
         response = client.get("/api/v1/sessions/", headers=auth_headers)
 
@@ -389,9 +396,9 @@ class TestSessionAPI:
         assert len(payload) == 1
         assert payload[0]["ended_at"] == "2024-01-02T03:04:05"
 
-    def test_get_sessions_paginated_searches_stock_name(self, client, auth_headers, db_session):
-        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
-        _seed_stock_basic(db_session, stock_code="600519.SH", name="Kweichow Moutai")
+    def test_get_sessions_paginated_searches_stock_name(self, client, auth_headers, test_db, run_async):
+        run_async(_seed_stock_basic(test_db, stock_code="000001.SZ", name="Ping An Bank"))
+        run_async(_seed_stock_basic(test_db, stock_code="600519.SH", name="Kweichow Moutai"))
         _create_session(client, auth_headers, "000001.SZ")
         _create_session(client, auth_headers, "600519.SH")
 
@@ -424,7 +431,7 @@ class TestDataAPI:
     def test_get_stock_data(self, client, auth_headers):
         with patch(
             "app.api.endpoints.data.data_storage_service.get_stock_data_from_db",
-            return_value={"stock_code": "000001.SZ", "name": "Ping An Bank"},
+            new=AsyncMock(return_value={"stock_code": "000001.SZ", "name": "Ping An Bank"}),
         ):
             response = client.get("/api/v1/data/stocks/000001", headers=auth_headers)
 
@@ -434,7 +441,7 @@ class TestDataAPI:
     def test_get_stock_name(self, client, auth_headers):
         with patch(
             "app.api.endpoints.data.data_storage_service.get_stock_basic",
-            return_value={"stock_code": "000001.SZ", "name": "Ping An Bank"},
+            new=AsyncMock(return_value={"stock_code": "000001.SZ", "name": "Ping An Bank"}),
         ):
             response = client.get("/api/v1/data/stock/name/000001", headers=auth_headers)
 
@@ -449,8 +456,8 @@ class TestTradingAPI:
         assert response.status_code == 200
         assert response.json() == []
 
-    def test_place_order(self, client, auth_headers, db_session):
-        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+    def test_place_order(self, client, auth_headers, test_db, run_async):
+        run_async(_seed_stock_basic(test_db, stock_code="000001.SZ", name="Ping An Bank"))
         session_id = _create_session(client, auth_headers, "000001.SZ")
 
         mocked_trade_result = {
@@ -494,8 +501,8 @@ class TestTradingAPI:
         assert response.status_code == 201
         assert response.json()["success"] is True
 
-    def test_place_order_rejects_invalid_stop_loss(self, client, auth_headers, db_session):
-        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+    def test_place_order_rejects_invalid_stop_loss(self, client, auth_headers, test_db, run_async):
+        run_async(_seed_stock_basic(test_db, stock_code="000001.SZ", name="Ping An Bank"))
         session_id = _create_session(client, auth_headers, "000001.SZ")
 
         response = client.post(
@@ -516,8 +523,8 @@ class TestTradingAPI:
         assert response.status_code == 422
         assert response.json()["detail"][0]["loc"][-1] == "stop_loss"
 
-    def test_place_order_rejects_missing_stop_loss_by_risk_control(self, client, auth_headers, db_session):
-        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+    def test_place_order_rejects_missing_stop_loss_by_risk_control(self, client, auth_headers, test_db, run_async):
+        run_async(_seed_stock_basic(test_db, stock_code="000001.SZ", name="Ping An Bank"))
         session_id = _create_session(client, auth_headers, "000001.SZ")
 
         response = client.post(
@@ -538,8 +545,8 @@ class TestTradingAPI:
         assert response.json()["detail"]["reason"] == "risk_control_blocked"
         assert response.json()["detail"]["blocks"][0]["rule"] == "require_stop_loss"
 
-    def test_place_order_returns_400_when_service_risk_control_blocks(self, client, auth_headers, db_session):
-        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+    def test_place_order_returns_400_when_service_risk_control_blocks(self, client, auth_headers, test_db, run_async):
+        run_async(_seed_stock_basic(test_db, stock_code="000001.SZ", name="Ping An Bank"))
         session_id = _create_session(client, auth_headers, "000001.SZ")
         risk_result = {
             "enabled": True,
@@ -583,8 +590,8 @@ class TestTradingAPI:
         assert response.json()["detail"]["risk_control"] == risk_result
         mock_precheck.assert_not_called()
 
-    def test_place_order_rejects_invalid_action_schema(self, client, auth_headers, db_session):
-        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+    def test_place_order_rejects_invalid_action_schema(self, client, auth_headers, test_db, run_async):
+        run_async(_seed_stock_basic(test_db, stock_code="000001.SZ", name="Ping An Bank"))
         session_id = _create_session(client, auth_headers, "000001.SZ")
 
         response = client.post(
@@ -604,8 +611,8 @@ class TestTradingAPI:
 
         assert response.status_code == 422
 
-    def test_place_order_rejects_non_positive_shares_schema(self, client, auth_headers, db_session):
-        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+    def test_place_order_rejects_non_positive_shares_schema(self, client, auth_headers, test_db, run_async):
+        run_async(_seed_stock_basic(test_db, stock_code="000001.SZ", name="Ping An Bank"))
         session_id = _create_session(client, auth_headers, "000001.SZ")
 
         response = client.post(
@@ -625,8 +632,8 @@ class TestTradingAPI:
 
         assert response.status_code == 422
 
-    def test_place_order_rejects_negative_price_schema(self, client, auth_headers, db_session):
-        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+    def test_place_order_rejects_negative_price_schema(self, client, auth_headers, test_db, run_async):
+        run_async(_seed_stock_basic(test_db, stock_code="000001.SZ", name="Ping An Bank"))
         session_id = _create_session(client, auth_headers, "000001.SZ")
 
         response = client.post(
@@ -674,8 +681,8 @@ class TestAccountAPI:
         assert float(assets_response.json()["cash_balance"]) == 1000000.0
         assert positions_response.json() == []
 
-    def test_get_my_account_assets(self, client, auth_headers, db_session):
-        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+    def test_get_my_account_assets(self, client, auth_headers, test_db, run_async):
+        run_async(_seed_stock_basic(test_db, stock_code="000001.SZ", name="Ping An Bank"))
         _create_session(client, auth_headers, "000001.SZ")
 
         response = client.get("/api/v1/accounts/my-assets", headers=auth_headers)
@@ -685,8 +692,8 @@ class TestAccountAPI:
         assert "cash_balance" in payload
         assert "user_id" in payload
 
-    def test_my_total_funds(self, client, auth_headers, db_session):
-        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
+    def test_my_total_funds(self, client, auth_headers, test_db, run_async):
+        run_async(_seed_stock_basic(test_db, stock_code="000001.SZ", name="Ping An Bank"))
         _create_session(client, auth_headers, "000001.SZ")
 
         get_response = client.get("/api/v1/accounts/my-total-funds", headers=auth_headers)
@@ -701,41 +708,54 @@ class TestAccountAPI:
         assert put_response.status_code == 200
         assert float(put_response.json()["total_funds"]) == 200000.0
 
-    def test_my_total_funds_uses_dynamic_portfolio_valuation(self, client, auth_headers, db_session):
-        user = db_session.query(User).filter(User.username.like("test_%")).first()
-        account = Account(
-            user_id=user.id,
-            total_assets=Decimal("1000000.0000"),
-            available_cash=Decimal("300000.0000"),
-            frozen_cash=Decimal("10000.0000"),
-            market_value=Decimal("100000.0000"),
-            initial_capital=Decimal("1000000.0000"),
-            total_profit_loss=Decimal("0.0000"),
-        )
-        db_session.add(account)
-        db_session.flush()
-        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
-        db_session.add_all([
-            StockRealtimeMarket(
-                stock_code="000001.SZ",
-                current_price=Decimal("12.0000"),
-                timestamp=datetime(2026, 6, 2, 10, 0, 0),
-            ),
-            Position(
-                account_id=account.account_id,
-                stock_code="000001.SZ",
-                total_shares=10000,
-                available_shares=10000,
-                frozen_shares=0,
-                avg_cost=Decimal("10.0000"),
-                current_price=Decimal("10.0000"),
-                market_value=Decimal("100000.0000"),
-                profit_loss=Decimal("0.0000"),
-                profit_loss_pct=Decimal("0.0000"),
-                purchase_details={"ledger": []},
-            ),
-        ])
-        db_session.commit()
+    def test_my_total_funds_uses_dynamic_portfolio_valuation(self, client, auth_headers, test_db, run_async):
+        async def _seed_account_data():
+            async with test_db() as db:
+                result = await db.execute(select(User).where(User.username.like("test_%")))
+                user = result.scalars().first()
+                account = Account(
+                    user_id=user.id,
+                    total_assets=Decimal("1000000.0000"),
+                    available_cash=Decimal("300000.0000"),
+                    frozen_cash=Decimal("10000.0000"),
+                    market_value=Decimal("100000.0000"),
+                    initial_capital=Decimal("1000000.0000"),
+                    total_profit_loss=Decimal("0.0000"),
+                )
+                db.add(account)
+                await db.flush()
+                db.add(
+                    StockBasic(
+                        stock_code="000001.SZ",
+                        name="Ping An Bank",
+                        industry="Banking",
+                        market="SZSE",
+                        data_source="test",
+                    )
+                )
+                db.add_all([
+                    StockRealtimeMarket(
+                        stock_code="000001.SZ",
+                        current_price=Decimal("12.0000"),
+                        timestamp=datetime(2026, 6, 2, 10, 0, 0),
+                    ),
+                    Position(
+                        account_id=account.account_id,
+                        stock_code="000001.SZ",
+                        total_shares=10000,
+                        available_shares=10000,
+                        frozen_shares=0,
+                        avg_cost=Decimal("10.0000"),
+                        current_price=Decimal("10.0000"),
+                        market_value=Decimal("100000.0000"),
+                        profit_loss=Decimal("0.0000"),
+                        profit_loss_pct=Decimal("0.0000"),
+                        purchase_details={"ledger": []},
+                    ),
+                ])
+                await db.commit()
+
+        run_async(_seed_account_data())
 
         response = client.get("/api/v1/accounts/my-total-funds", headers=auth_headers)
 
@@ -744,54 +764,67 @@ class TestAccountAPI:
         assert float(payload["market_value"]) == 120000.0
         assert float(payload["total_funds"]) == 430000.0
 
-    def test_my_positions_ignore_latest_zero_realtime_price(self, client, auth_headers, db_session):
+    def test_my_positions_ignore_latest_zero_realtime_price(self, client, auth_headers, test_db, run_async):
         """
         账户持仓应忽略时间更新但价格无效的实时行情。
 
         Args:
             client: 测试 HTTP 客户端。
             auth_headers: 已登录用户的鉴权请求头。
-            db_session: 测试数据库会话。
+            test_db: 异步测试数据库会话工厂。
         """
-        user = db_session.query(User).filter(User.username.like("test_%")).first()
-        account = Account(
-            user_id=user.id,
-            total_assets=Decimal("1000000.0000"),
-            available_cash=Decimal("900000.0000"),
-            frozen_cash=Decimal("0.0000"),
-            market_value=Decimal("100000.0000"),
-            initial_capital=Decimal("1000000.0000"),
-            total_profit_loss=Decimal("0.0000"),
-        )
-        db_session.add(account)
-        db_session.flush()
-        _seed_stock_basic(db_session, stock_code="000001.SZ", name="Ping An Bank")
-        db_session.add_all([
-            StockRealtimeMarket(
-                stock_code="000001.SZ",
-                current_price=12.0,
-                timestamp=datetime(2026, 6, 10, 15, 0, 0),
-            ),
-            StockRealtimeMarket(
-                stock_code="000001.SZ",
-                current_price=0.0,
-                timestamp=datetime(2026, 6, 11, 9, 20, 0),
-            ),
-            Position(
-                account_id=account.account_id,
-                stock_code="000001.SZ",
-                total_shares=100,
-                available_shares=100,
-                frozen_shares=0,
-                avg_cost=Decimal("10.0000"),
-                current_price=Decimal("10.0000"),
-                market_value=Decimal("1000.0000"),
-                profit_loss=Decimal("0.0000"),
-                profit_loss_pct=Decimal("0.0000"),
-                purchase_details={"ledger": []},
-            ),
-        ])
-        db_session.commit()
+        async def _seed_position_data():
+            async with test_db() as db:
+                result = await db.execute(select(User).where(User.username.like("test_%")))
+                user = result.scalars().first()
+                account = Account(
+                    user_id=user.id,
+                    total_assets=Decimal("1000000.0000"),
+                    available_cash=Decimal("900000.0000"),
+                    frozen_cash=Decimal("0.0000"),
+                    market_value=Decimal("100000.0000"),
+                    initial_capital=Decimal("1000000.0000"),
+                    total_profit_loss=Decimal("0.0000"),
+                )
+                db.add(account)
+                await db.flush()
+                db.add(
+                    StockBasic(
+                        stock_code="000001.SZ",
+                        name="Ping An Bank",
+                        industry="Banking",
+                        market="SZSE",
+                        data_source="test",
+                    )
+                )
+                db.add_all([
+                    StockRealtimeMarket(
+                        stock_code="000001.SZ",
+                        current_price=12.0,
+                        timestamp=datetime(2026, 6, 10, 15, 0, 0),
+                    ),
+                    StockRealtimeMarket(
+                        stock_code="000001.SZ",
+                        current_price=0.0,
+                        timestamp=datetime(2026, 6, 11, 9, 20, 0),
+                    ),
+                    Position(
+                        account_id=account.account_id,
+                        stock_code="000001.SZ",
+                        total_shares=100,
+                        available_shares=100,
+                        frozen_shares=0,
+                        avg_cost=Decimal("10.0000"),
+                        current_price=Decimal("10.0000"),
+                        market_value=Decimal("1000.0000"),
+                        profit_loss=Decimal("0.0000"),
+                        profit_loss_pct=Decimal("0.0000"),
+                        purchase_details={"ledger": []},
+                    ),
+                ])
+                await db.commit()
+
+        run_async(_seed_position_data())
 
         response = client.get("/api/v1/accounts/my-positions", headers=auth_headers)
 
@@ -833,7 +866,7 @@ class TestTaskAPI:
         assert payload["status"] == "pending"
         assert "2024-01-01" in payload["task_name"]
 
-    def test_get_task_status(self, client, auth_headers, db_session):
+    def test_get_task_status(self, client, auth_headers):
         with patch("app.tasks.async_task_runner.async_task_runner.submit_task", return_value=True):
             create_response = client.post("/api/v1/data/db/sync/stock-basic", headers=auth_headers)
 
@@ -843,7 +876,7 @@ class TestTaskAPI:
         assert response.status_code == 200
         assert response.json()["task_id"] == task_id
 
-    def test_get_task_list(self, client, auth_headers, db_session):
+    def test_get_task_list(self, client, auth_headers):
         with patch("app.tasks.async_task_runner.async_task_runner.submit_task", return_value=True):
             create_response = client.post("/api/v1/data/db/sync/stock-basic", headers=auth_headers)
 

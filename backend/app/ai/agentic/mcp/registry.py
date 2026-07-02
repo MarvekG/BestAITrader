@@ -36,7 +36,7 @@ def _default_payload() -> Dict[str, Any]:
     return {"servers": DEFAULT_MCP_SERVERS}
 
 
-def _read_raw_payload() -> Dict[str, Any]:
+async def _read_raw_payload() -> Dict[str, Any]:
     """读取 MCP 系统配置。
 
     Returns:
@@ -45,7 +45,7 @@ def _read_raw_payload() -> Dict[str, Any]:
     Raises:
         ValueError: 配置不是合法 JSON 对象时抛出。
     """
-    payload = read_system_setting(MCP_SETTINGS_KEY, default=_default_payload(), user_id=None)
+    payload = await read_system_setting(MCP_SETTINGS_KEY, default=_default_payload(), user_id=None)
     if not isinstance(payload, dict):
         raise ValueError("MCP server system config must be a JSON object")
     servers = payload.get("servers")
@@ -56,7 +56,7 @@ def _read_raw_payload() -> Dict[str, Any]:
     return payload
 
 
-def _write_configs(configs: List[MCPServerConfig]) -> None:
+async def _write_configs(configs: List[MCPServerConfig]) -> None:
     """将 MCP Server 配置写入系统配置。
 
     Args:
@@ -65,7 +65,7 @@ def _write_configs(configs: List[MCPServerConfig]) -> None:
     payload = {
         "servers": [config.model_dump(mode="json") for config in sorted(configs, key=lambda item: item.name)],
     }
-    save_system_setting(MCP_SETTINGS_KEY, payload, description=MCP_SETTINGS_DESCRIPTION, user_id=None)
+    await save_system_setting(MCP_SETTINGS_KEY, payload, description=MCP_SETTINGS_DESCRIPTION, user_id=None)
 
 
 def _validate_server_name(name: str) -> str:
@@ -138,23 +138,23 @@ def _public_config(config: MCPServerConfig) -> Dict[str, Any]:
     return payload
 
 
-def list_mcp_servers() -> Dict[str, Any]:
+async def list_mcp_servers() -> Dict[str, Any]:
     """列出 MCP Server 配置。
 
     Returns:
         管理 API 使用的配置列表响应。
     """
-    items = [_public_config(config) for config in load_mcp_server_configs()]
+    items = [_public_config(config) for config in await load_mcp_server_configs()]
     return {"status": "success", "count": len(items), "items": items}
 
 
-def load_mcp_server_configs() -> List[MCPServerConfig]:
+async def load_mcp_server_configs() -> List[MCPServerConfig]:
     """加载全部 MCP Server 配置。
 
     Returns:
         MCP Server 配置对象列表。
     """
-    payload = _read_raw_payload()
+    payload = await _read_raw_payload()
     configs: List[MCPServerConfig] = []
     for item in payload.get("servers", []):
         if not isinstance(item, dict):
@@ -163,7 +163,7 @@ def load_mcp_server_configs() -> List[MCPServerConfig]:
     return configs
 
 
-def get_mcp_server_config(name: str) -> MCPServerConfig | None:
+async def get_mcp_server_config(name: str) -> MCPServerConfig | None:
     """按名称查询 MCP Server 配置。
 
     Args:
@@ -172,19 +172,19 @@ def get_mcp_server_config(name: str) -> MCPServerConfig | None:
         找到时返回配置对象，否则返回 None。
     """
     normalized_name = _validate_server_name(name)
-    return next((config for config in load_mcp_server_configs() if config.name == normalized_name), None)
+    return next((config for config in await load_mcp_server_configs() if config.name == normalized_name), None)
 
 
-def get_enabled_mcp_server_configs() -> List[MCPServerConfig]:
+async def get_enabled_mcp_server_configs() -> List[MCPServerConfig]:
     """查询已启用 MCP Server 配置。
 
     Returns:
         已启用的 MCP Server 配置。
     """
-    return [config for config in load_mcp_server_configs() if config.enabled]
+    return [config for config in await load_mcp_server_configs() if config.enabled]
 
 
-def create_mcp_server(request: MCPServerCreateRequest) -> Dict[str, Any]:
+async def create_mcp_server(request: MCPServerCreateRequest) -> Dict[str, Any]:
     """创建 MCP Server 配置。
 
     Args:
@@ -195,18 +195,18 @@ def create_mcp_server(request: MCPServerCreateRequest) -> Dict[str, Any]:
     Raises:
         ValueError: 名称重复或配置非法时抛出。
     """
-    configs = load_mcp_server_configs()
+    configs = await load_mcp_server_configs()
     if any(config.name == request.name for config in configs):
         raise ValueError(f"MCP server already exists: {request.name}")
     config = _validate_config(
         MCPServerConfig(**request.model_dump())
     )
     configs.append(config)
-    _write_configs(configs)
+    await _write_configs(configs)
     return {"status": "success", "server": _public_config(config)}
 
 
-def update_mcp_server(name: str, request: MCPServerUpdateRequest) -> Dict[str, Any]:
+async def update_mcp_server(name: str, request: MCPServerUpdateRequest) -> Dict[str, Any]:
     """更新 MCP Server 配置。
 
     Args:
@@ -219,7 +219,7 @@ def update_mcp_server(name: str, request: MCPServerUpdateRequest) -> Dict[str, A
         ValueError: 名称不存在或配置非法时抛出。
     """
     normalized_name = _validate_server_name(name)
-    configs = load_mcp_server_configs()
+    configs = await load_mcp_server_configs()
     target_index = next((index for index, config in enumerate(configs) if config.name == normalized_name), None)
     if target_index is None:
         raise ValueError(f"MCP server not found: {normalized_name}")
@@ -236,11 +236,11 @@ def update_mcp_server(name: str, request: MCPServerUpdateRequest) -> Dict[str, A
         )
     )
     configs[target_index] = next_config
-    _write_configs(configs)
+    await _write_configs(configs)
     return {"status": "success", "server": _public_config(next_config)}
 
 
-def delete_mcp_server(name: str) -> Dict[str, Any]:
+async def delete_mcp_server(name: str) -> Dict[str, Any]:
     """删除 MCP Server 配置。
 
     Args:
@@ -252,9 +252,9 @@ def delete_mcp_server(name: str) -> Dict[str, Any]:
         ValueError: 名称不存在时抛出。
     """
     normalized_name = _validate_server_name(name)
-    configs = load_mcp_server_configs()
+    configs = await load_mcp_server_configs()
     remaining = [config for config in configs if config.name != normalized_name]
     if len(remaining) == len(configs):
         raise ValueError(f"MCP server not found: {normalized_name}")
-    _write_configs(remaining)
+    await _write_configs(remaining)
     return {"status": "success", "name": normalized_name}

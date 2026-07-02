@@ -2,6 +2,7 @@ from datetime import datetime
 import uuid
 
 import pytest
+from sqlalchemy import select
 
 from app.ai.experience import service as experience_service_module
 from app.ai.experience.index_service import experience_index_service
@@ -15,15 +16,15 @@ from app.models.session import Session as DebateSession
 from app.models.user import User
 
 
-def _create_user_and_session(db_session):
+async def _create_user_and_session(db):
     user = User(
         username=f"experience_index_{uuid.uuid4().hex[:8]}",
         email=f"experience_index_{uuid.uuid4().hex[:8]}@example.com",
         password_hash="hashed",
     )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
 
     session = DebateSession(
         user_id=user.id,
@@ -32,9 +33,9 @@ def _create_user_and_session(db_session):
         trading_strategy="trend",
         status="completed",
     )
-    db_session.add(session)
-    db_session.commit()
-    db_session.refresh(session)
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
     return user, session
 
 
@@ -112,16 +113,16 @@ def _serializable_review_result(result):
     return payload
 
 
-def _create_stock_pm_and_klines(db_session, session):
+async def _create_stock_pm_and_klines(db, session):
     stock = StockBasic(
         stock_code=session.stock_code,
         name="平安银行",
         industry="银行",
         market="SZSE",
     )
-    db_session.add(stock)
-    db_session.commit()
-    db_session.add(
+    db.add(stock)
+    await db.commit()
+    db.add(
         DebateMessage(
             session_id=session.session_id,
             stage="portfolio_manager",
@@ -133,7 +134,7 @@ def _create_stock_pm_and_klines(db_session, session):
             created_at=datetime(2026, 1, 1, 15, 0),
         )
     )
-    db_session.add_all(
+    db.add_all(
         [
             KlineData(
                 stock_code=session.stock_code,
@@ -147,16 +148,18 @@ def _create_stock_pm_and_klines(db_session, session):
             for index in range(21)
         ]
     )
-    db_session.commit()
+    await db.commit()
 
 
-def test_sync_from_review_result_indexes_successful_memory_writes(db_session):
-    user, session = _create_user_and_session(db_session)
+@pytest.mark.asyncio
+async def test_sync_from_review_result_indexes_successful_memory_writes(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
     result = _review_result(session)
 
-    stats = experience_index_service.sync_from_review_result(db_session, user_id=user.id, result=result)
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        stats = await experience_index_service.sync_from_review_result(db, user_id=user.id, result=result)
 
-    rows = db_session.query(ExperienceIndex).all()
+    rows = (await async_db_session.execute(select(ExperienceIndex))).scalars().all()
     assert stats == {"created": 1, "updated": 0, "skipped": 1}
     assert len(rows) == 1
     assert rows[0].memory_observation_id == "obs-memory-1"
@@ -175,45 +178,50 @@ def test_sync_from_review_result_indexes_successful_memory_writes(db_session):
     assert rows[0].tags["failure_lesson_tags"] == ["追高"]
 
 
-def test_sync_from_review_result_indexes_accepted_memory_writes(db_session):
-    user, session = _create_user_and_session(db_session)
+@pytest.mark.asyncio
+async def test_sync_from_review_result_indexes_accepted_memory_writes(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
     result = _review_result(session)
     result["analysis_payload"]["written_memories"][0]["status"] = "accepted"
 
-    stats = experience_index_service.sync_from_review_result(db_session, user_id=user.id, result=result)
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        stats = await experience_index_service.sync_from_review_result(db, user_id=user.id, result=result)
 
-    rows = db_session.query(ExperienceIndex).all()
+    rows = (await async_db_session.execute(select(ExperienceIndex))).scalars().all()
     assert stats == {"created": 1, "updated": 0, "skipped": 1}
     assert len(rows) == 1
     assert rows[0].memory_observation_id == "obs-memory-1"
 
 
-def test_sync_from_review_result_is_idempotent_by_memory_observation_id(db_session):
-    user, session = _create_user_and_session(db_session)
+@pytest.mark.asyncio
+async def test_sync_from_review_result_is_idempotent_by_memory_observation_id(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
     result = _review_result(session)
 
-    first = experience_index_service.sync_from_review_result(db_session, user_id=user.id, result=result)
-    second = experience_index_service.sync_from_review_result(db_session, user_id=user.id, result=result)
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        first = await experience_index_service.sync_from_review_result(db, user_id=user.id, result=result)
+        second = await experience_index_service.sync_from_review_result(db, user_id=user.id, result=result)
 
     assert first == {"created": 1, "updated": 0, "skipped": 1}
     assert second == {"created": 0, "updated": 1, "skipped": 1}
-    assert db_session.query(ExperienceIndex).count() == 1
+    rows = (await async_db_session.execute(select(ExperienceIndex))).scalars().all()
+    assert len(rows) == 1
 
 
-def test_list_items_filters_by_horizon_tag_keyword_and_stock(db_session):
-    user, session = _create_user_and_session(db_session)
-    experience_index_service.sync_from_review_result(db_session, user_id=user.id, result=_review_result(session))
+@pytest.mark.asyncio
+async def test_list_items_filters_by_horizon_tag_keyword_and_stock(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        await experience_index_service.sync_from_review_result(db, user_id=user.id, result=_review_result(session))
 
-    matched = experience_index_service.list_items(
-        db_session,
+    matched = await experience_index_service.list_items(
         user_id=user.id,
         review_horizon="20d",
         tag="追高",
         keyword="成交确认",
         stock_code="000001.SZ",
     )
-    missed = experience_index_service.list_items(
-        db_session,
+    missed = await experience_index_service.list_items(
         user_id=user.id,
         review_horizon="60d",
     )
@@ -223,9 +231,11 @@ def test_list_items_filters_by_horizon_tag_keyword_and_stock(db_session):
     assert missed["total"] == 0
 
 
-def test_list_items_uses_fuzzy_matching_for_each_filter_field(db_session):
-    user, session = _create_user_and_session(db_session)
-    experience_index_service.sync_from_review_result(db_session, user_id=user.id, result=_review_result(session))
+@pytest.mark.asyncio
+async def test_list_items_uses_fuzzy_matching_for_each_filter_field(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        await experience_index_service.sync_from_review_result(db, user_id=user.id, result=_review_result(session))
 
     filter_cases = [
         {"stock_code": "000001"},
@@ -238,29 +248,32 @@ def test_list_items_uses_fuzzy_matching_for_each_filter_field(db_session):
     ]
 
     for filters in filter_cases:
-        result = experience_index_service.list_items(db_session, user_id=user.id, **filters)
+        result = await experience_index_service.list_items(user_id=user.id, **filters)
         assert result["total"] == 1, filters
         assert result["items"][0]["memory_observation_id"] == "obs-memory-1"
 
 
-def test_list_items_keyword_searches_multiple_index_fields_and_tags(db_session):
-    user, session = _create_user_and_session(db_session)
-    experience_index_service.sync_from_review_result(db_session, user_id=user.id, result=_review_result(session))
+@pytest.mark.asyncio
+async def test_list_items_keyword_searches_multiple_index_fields_and_tags(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        await experience_index_service.sync_from_review_result(db, user_id=user.id, result=_review_result(session))
 
     keyword_cases = ["平安", "银行", "trend", "20d", "profit", "partial", "high", "追"]
 
     for keyword in keyword_cases:
-        result = experience_index_service.list_items(db_session, user_id=user.id, keyword=keyword)
+        result = await experience_index_service.list_items(user_id=user.id, keyword=keyword)
         assert result["total"] == 1, keyword
         assert result["items"][0]["memory_observation_id"] == "obs-memory-1"
 
 
-def test_list_items_fuzzy_search_returns_empty_when_no_field_matches(db_session):
-    user, session = _create_user_and_session(db_session)
-    experience_index_service.sync_from_review_result(db_session, user_id=user.id, result=_review_result(session))
+@pytest.mark.asyncio
+async def test_list_items_fuzzy_search_returns_empty_when_no_field_matches(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        await experience_index_service.sync_from_review_result(db, user_id=user.id, result=_review_result(session))
 
-    result = experience_index_service.list_items(
-        db_session,
+    result = await experience_index_service.list_items(
         user_id=user.id,
         stock_code="999999",
         keyword="不存在的经验",
@@ -270,8 +283,9 @@ def test_list_items_fuzzy_search_returns_empty_when_no_field_matches(db_session)
     assert result["items"] == []
 
 
-def test_get_detail_returns_review_payload_context(db_session):
-    user, session = _create_user_and_session(db_session)
+@pytest.mark.asyncio
+async def test_get_detail_returns_review_payload_context(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
     result = _review_result(session)
     completed = ExperienceReviewEvent(
         review_run_id="review-1",
@@ -283,12 +297,13 @@ def test_get_detail_returns_review_payload_context(db_session):
         payload={"result": _serializable_review_result(result)},
         created_at=datetime(2026, 1, 2, 15, 0),
     )
-    db_session.add(completed)
-    db_session.commit()
-    experience_index_service.sync_from_review_result(db_session, user_id=user.id, result=result)
-    row = db_session.query(ExperienceIndex).one()
+    async_db_session.add(completed)
+    await async_db_session.commit()
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        await experience_index_service.sync_from_review_result(db, user_id=user.id, result=result)
+    row = (await async_db_session.execute(select(ExperienceIndex))).scalar_one()
 
-    detail = experience_index_service.get_detail(db_session, user_id=user.id, index_id=row.id)
+    detail = await experience_index_service.get_detail(user_id=user.id, index_id=row.id)
 
     assert detail is not None
     assert detail["id"] == str(row.id)
@@ -298,10 +313,11 @@ def test_get_detail_returns_review_payload_context(db_session):
     }
 
 
-def test_rebuild_for_user_indexes_completed_review_events(db_session):
-    user, session = _create_user_and_session(db_session)
+@pytest.mark.asyncio
+async def test_rebuild_for_user_indexes_completed_review_events(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
     result = _review_result(session, review_run_id="review-rebuild")
-    db_session.add(
+    async_db_session.add(
         ExperienceReviewEvent(
             review_run_id="review-rebuild",
             session_id=session.session_id,
@@ -312,21 +328,22 @@ def test_rebuild_for_user_indexes_completed_review_events(db_session):
             payload={"result": _serializable_review_result(result)},
         )
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    stats = experience_index_service.rebuild_for_user(db_session, user_id=user.id)
+    stats = await experience_index_service.rebuild_for_user(user_id=user.id)
 
     assert stats["created"] == 1
     assert stats["updated"] == 0
     assert stats["skipped"] == 1
     assert stats["failed"] == 0
-    assert db_session.query(ExperienceIndex).count() == 1
+    rows = (await async_db_session.execute(select(ExperienceIndex))).scalars().all()
+    assert len(rows) == 1
 
 
 @pytest.mark.asyncio
-async def test_analyze_syncs_successful_memory_writes_to_experience_index(db_session, monkeypatch):
-    user, session = _create_user_and_session(db_session)
-    _create_stock_pm_and_klines(db_session, session)
+async def test_analyze_syncs_successful_memory_writes_to_experience_index(async_db_session, monkeypatch):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_pm_and_klines(async_db_session, session)
 
     class FakeWorkflow:
         async def ainvoke(self, state):
@@ -341,13 +358,12 @@ async def test_analyze_syncs_successful_memory_writes_to_experience_index(db_ses
     monkeypatch.setattr(experience_service_module, "create_experience_workflow", lambda: FakeWorkflow())
 
     result = await experience_service.analyze(
-        db_session,
         user_id=user.id,
         session_id=session.session_id,
         review_horizon="20d",
     )
 
-    rows = db_session.query(ExperienceIndex).all()
+    rows = (await async_db_session.execute(select(ExperienceIndex))).scalars().all()
     assert result["review_horizon"] == "20d"
     assert len(rows) == 1
     assert rows[0].review_run_id == result["review_run_id"]
@@ -355,9 +371,9 @@ async def test_analyze_syncs_successful_memory_writes_to_experience_index(db_ses
 
 
 @pytest.mark.asyncio
-async def test_analyze_keeps_completed_result_when_experience_index_sync_fails(db_session, monkeypatch, caplog):
-    user, session = _create_user_and_session(db_session)
-    _create_stock_pm_and_klines(db_session, session)
+async def test_analyze_keeps_completed_result_when_experience_index_sync_fails(async_db_session, monkeypatch, caplog):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_pm_and_klines(async_db_session, session)
 
     class FakeWorkflow:
         async def ainvoke(self, state):
@@ -369,58 +385,65 @@ async def test_analyze_keeps_completed_result_when_experience_index_sync_fails(d
                 "tool_trace": [],
             }
 
-    def fail_sync(*args, **kwargs):
+    async def fail_sync(*args, **kwargs):
         raise RuntimeError("index offline")
 
     monkeypatch.setattr(experience_service_module, "create_experience_workflow", lambda: FakeWorkflow())
     monkeypatch.setattr(experience_service_module.experience_index_service, "sync_from_review_result", fail_sync)
 
     result = await experience_service.analyze(
-        db_session,
         user_id=user.id,
         session_id=session.session_id,
         review_horizon="20d",
     )
 
-    completed_events = db_session.query(ExperienceReviewEvent).filter(
-        ExperienceReviewEvent.review_run_id == result["review_run_id"],
-        ExperienceReviewEvent.status == "completed",
-    ).all()
-    failed_events = db_session.query(ExperienceReviewEvent).filter(
-        ExperienceReviewEvent.review_run_id == result["review_run_id"],
-        ExperienceReviewEvent.status == "failed",
-    ).all()
+    completed_events = (await async_db_session.execute(
+        select(ExperienceReviewEvent).where(
+            ExperienceReviewEvent.review_run_id == result["review_run_id"],
+            ExperienceReviewEvent.status == "completed",
+        )
+    )).scalars().all()
+    failed_events = (await async_db_session.execute(
+        select(ExperienceReviewEvent).where(
+            ExperienceReviewEvent.review_run_id == result["review_run_id"],
+            ExperienceReviewEvent.status == "failed",
+        )
+    )).scalars().all()
     assert result["review_horizon"] == "20d"
     assert len(completed_events) == 1
     assert failed_events == []
     assert "experience index sync failed" in caplog.text
 
 
-def test_experience_library_api_lists_details_and_rebuilds(client, auth_headers, db_session):
-    user = db_session.query(User).one()
-    session = DebateSession(
-        user_id=user.id,
-        stock_code="000001.SZ",
-        trading_frequency="swing",
-        trading_strategy="trend",
-        status="completed",
-    )
-    db_session.add(session)
-    db_session.commit()
-    db_session.refresh(session)
-    result = _review_result(session, review_run_id="api-review")
-    db_session.add(
-        ExperienceReviewEvent(
-            review_run_id="api-review",
-            session_id=session.session_id,
-            user_id=user.id,
-            stage="experience_review",
-            status="completed",
-            message_key="experience.live_messages.completed",
-            payload={"result": _serializable_review_result(result)},
-        )
-    )
-    db_session.commit()
+def test_experience_library_api_lists_details_and_rebuilds(client, auth_headers, test_db, run_async):
+    async def _seed_review_event():
+        async with test_db() as db:
+            user = (await db.execute(select(User))).scalar_one()
+            session = DebateSession(
+                user_id=user.id,
+                stock_code="000001.SZ",
+                trading_frequency="swing",
+                trading_strategy="trend",
+                status="completed",
+            )
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
+            result = _review_result(session, review_run_id="api-review")
+            db.add(
+                ExperienceReviewEvent(
+                    review_run_id="api-review",
+                    session_id=session.session_id,
+                    user_id=user.id,
+                    stage="experience_review",
+                    status="completed",
+                    message_key="experience.live_messages.completed",
+                    payload={"result": _serializable_review_result(result)},
+                )
+            )
+            await db.commit()
+
+    run_async(_seed_review_event())
 
     rebuild_response = client.post("/api/v1/experience/library/rebuild", headers=auth_headers)
     list_response = client.get(

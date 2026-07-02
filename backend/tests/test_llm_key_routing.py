@@ -110,7 +110,11 @@ async def test_experience_review_uses_litellm_backend_model_and_usage_lane(monke
     monkeypatch.setattr(workflow, "get_all_tools", lambda: [])
     monkeypatch.setattr(workflow, "get_skills_loader_tools", lambda: [])
     monkeypatch.setattr(workflow, "build_memory_tools", lambda state: [])
-    monkeypatch.setattr(workflow, "record_llm_usage", lambda *args, **kwargs: usage_calls.append(kwargs))
+
+    async def _record_workflow_usage(*args, **kwargs):
+        usage_calls.append(kwargs)
+
+    monkeypatch.setattr(workflow, "record_llm_usage", _record_workflow_usage)
 
     result = await workflow.review_debate_conclusion(
         {
@@ -134,9 +138,13 @@ async def test_tool_output_summary_uses_default_shared_llm_without_dedicated_new
     source_llm = FakeLLM()
     usage_calls = []
     monkeypatch.setattr("app.ai.agentic.tool_output_summarizer.get_llm_provider", lambda: provider)
+
+    async def _record_summary_usage(*args, **kwargs):
+        usage_calls.append(kwargs)
+
     monkeypatch.setattr(
         "app.ai.agentic.tool_output_summarizer.record_llm_usage",
-        lambda *args, **kwargs: usage_calls.append(kwargs),
+        _record_summary_usage,
     )
 
     result = await summarize_tool_output(

@@ -1,8 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from typing import Dict
-from sqlalchemy.orm import Session
 
-from app.core.database import get_db
 from app.schemas.prompt import PromptTemplate, PromptStats
 from app.ai.llm_engine.prompts.templates import PROMPT_MAP
 from app.core.config import settings
@@ -38,10 +36,8 @@ def get_prompt_by_role(role: str):
 
 
 @router.get("/stats/usage", response_model=PromptStats)
-def get_prompt_usage_stats(
-    db: Session = Depends(get_db)
-):
+async def get_prompt_usage_stats():
     """获取提示词使用统计信息"""
     from app.crud.llm_usage_log import llm_usage_log
-    stats = llm_usage_log.get_stats(db)
+    stats = await llm_usage_log.get_stats()
     return PromptStats(**stats)

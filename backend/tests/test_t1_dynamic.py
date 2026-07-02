@@ -1,4 +1,3 @@
-import asyncio
 import pytest
 from datetime import datetime, timedelta
 from app.trading.trading_engine import TradingEngine
@@ -54,6 +53,3 @@ async def test_t1_dynamic_logic():
     
     # 验证卖出后账本为空
     assert len(result_sell["updated_position"]["purchase_details"]["ledger"]) == 0 if result_sell["updated_position"] else True
-
-if __name__ == "__main__":
-    asyncio.run(test_t1_dynamic_logic())

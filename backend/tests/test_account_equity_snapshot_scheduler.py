@@ -23,8 +23,7 @@ def test_account_equity_snapshot_scheduler_registers_daily_job() -> None:
 @pytest.mark.asyncio
 async def test_generate_daily_account_equity_snapshots_creates_snapshot(
     monkeypatch,
-    sqlite_session_factory,
-    db_session,
+    async_db_session,
 ) -> None:
     """每日快照任务应为所有有账户的用户生成快照。"""
     user = User(id=201, username="snapshot_user", email="snapshot@example.com", password_hash="hash", is_active=True)
@@ -38,11 +37,10 @@ async def test_generate_daily_account_equity_snapshots_creates_snapshot(
         total_profit_loss=Decimal("0.0000"),
         total_trades=0,
     )
-    db_session.add(user)
-    db_session.add(account)
-    db_session.add(IndexDaily(index_code="000300.SH", trade_date=date(2026, 5, 22), close=4000.0))
-    db_session.commit()
-    monkeypatch.setattr(scheduler_module, "SessionLocal", sqlite_session_factory)
+    async_db_session.add(user)
+    async_db_session.add(account)
+    async_db_session.add(IndexDaily(index_code="000300.SH", trade_date=date(2026, 5, 22), close=4000.0))
+    await async_db_session.commit()
     monkeypatch.setattr(scheduler_module, "_today", lambda: date(2026, 5, 22))
 
     result = await scheduler_module.generate_daily_account_equity_snapshots()

@@ -22,7 +22,7 @@ async def get_mcp_tools() -> List[Any]:
         已启用 MCP Server 暴露的 MCP 工具列表。
     """
     tools: List[Any] = []
-    for config in get_enabled_mcp_server_configs():
+    for config in await get_enabled_mcp_server_configs():
         try:
             server_tools = await list_mcp_langchain_tools(config.name)
         except Exception as exc:
@@ -35,13 +35,13 @@ async def get_mcp_tools() -> List[Any]:
     return tools
 
 
-def build_mcp_catalog_prompt() -> str:
+async def build_mcp_catalog_prompt() -> str:
     """生成可用 MCP Server 摘要。
 
     Returns:
         可注入系统提示词的 MCP catalog 文本。
     """
-    configs = load_mcp_server_configs()
+    configs = await load_mcp_server_configs()
     enabled_configs = [config for config in configs if config.enabled and config.allowed_tools]
     if not enabled_configs:
         return "No MCP tools are enabled for LLM use."
@@ -58,7 +58,7 @@ async def build_mcp_tools_documentation() -> str:
     Returns:
         已启用 MCP Server 的工具描述和入参 schema 文本；没有启用工具时返回简短提示。
     """
-    enabled_configs = [config for config in load_mcp_server_configs() if config.enabled and config.allowed_tools]
+    enabled_configs = [config for config in await load_mcp_server_configs() if config.enabled and config.allowed_tools]
     if not enabled_configs:
         return "No MCP tools are enabled for LLM use."
 
@@ -108,7 +108,7 @@ async def list_mcp_langchain_tools(name: str) -> List[Any]:
     Raises:
         MCPRuntimeError: 配置不存在、依赖缺失或工具获取失败时抛出。
     """
-    config = get_mcp_server_config(name)
+    config = await get_mcp_server_config(name)
     if config is None:
         raise MCPRuntimeError(f"MCP server not found: {name}")
     try:
@@ -185,7 +185,7 @@ async def list_mcp_tools(name: str) -> Dict[str, Any]:
         工具列表响应。
     """
     tools = await list_mcp_langchain_tools(name)
-    config = get_mcp_server_config(name)
+    config = await get_mcp_server_config(name)
     if config is None:
         raise MCPRuntimeError(f"MCP server not found: {name}")
     items = [tool_to_item(name, tool) for tool in filter_allowed_tools(config, tools)]
@@ -206,7 +206,7 @@ async def invoke_mcp_tool(name: str, tool_name: str, arguments: Dict[str, Any]) 
     Raises:
         MCPRuntimeError: 工具不存在或调用失败时抛出。
     """
-    config = get_mcp_server_config(name)
+    config = await get_mcp_server_config(name)
     if config is None:
         raise MCPRuntimeError(f"MCP server not found: {name}")
     for tool in filter_allowed_tools(config, await list_mcp_langchain_tools(name)):

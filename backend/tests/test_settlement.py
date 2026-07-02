@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
+
 from app.tasks.settlement import execute_daily_settlement
 
 
@@ -18,13 +20,13 @@ class _SettlementDB:
         self.committed = False
         self.rolled_back = False
 
-    def query(self, _model):
-        return _SettlementQuery(self.positions)
+    async def execute(self, _statement):
+        return SimpleNamespace(scalars=lambda: _SettlementQuery(self.positions))
 
-    def commit(self):
+    async def commit(self):
         self.committed = True
 
-    def rollback(self):
+    async def rollback(self):
         self.rolled_back = True
 
 
@@ -32,14 +34,15 @@ class _SettlementContext:
     def __init__(self, db):
         self.db = db
 
-    def __enter__(self):
+    async def __aenter__(self):
         return self.db
 
-    def __exit__(self, exc_type, exc, tb):
+    async def __aexit__(self, exc_type, exc, tb):
         return False
 
 
-def test_execute_daily_settlement_clamps_available_shares(monkeypatch):
+@pytest.mark.asyncio
+async def test_execute_daily_settlement_clamps_available_shares(monkeypatch):
     yesterday = (datetime.now() - timedelta(days=1)).isoformat()
     position = SimpleNamespace(
         total_shares=100,
@@ -49,9 +52,9 @@ def test_execute_daily_settlement_clamps_available_shares(monkeypatch):
     )
     db = _SettlementDB([position])
 
-    monkeypatch.setattr("app.tasks.settlement.SessionLocal", lambda: _SettlementContext(db))
+    monkeypatch.setattr("app.tasks.settlement.database_module.AsyncSessionLocal", lambda: _SettlementContext(db))
 
-    execute_daily_settlement()
+    await execute_daily_settlement()
 
     assert db.committed is True
     assert position.available_shares == 100

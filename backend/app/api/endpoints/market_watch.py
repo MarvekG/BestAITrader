@@ -4,8 +4,10 @@ from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
 
 from app.core import database as database_module
+from app.core.config import settings
 from app.core.security import get_current_user
 from app.core.websocket_ticket import (
     WEBSOCKET_TICKET_TTL_SECONDS,
@@ -39,21 +41,21 @@ router = APIRouter()
 
 
 @router.get("/settings", response_model=MarketWatchSettingsResponse)
-def read_market_watch_settings(
+async def read_market_watch_settings(
     current_user: User = Depends(get_current_user),
 ) -> MarketWatchSettingsResponse:
     """Return current user's market watch settings."""
-    return get_market_watch_settings(current_user.id)
+    return await get_market_watch_settings(current_user.id)
 
 
 @router.put("/settings", response_model=MarketWatchSettingsResponse)
-def update_market_watch_settings(
+async def update_market_watch_settings(
     payload: MarketWatchSettingsUpdate,
     current_user: User = Depends(get_current_user),
 ) -> MarketWatchSettingsResponse:
     """Persist current user's market watch settings update."""
     try:
-        updated = upsert_market_watch_settings(current_user.id, payload)
+        updated = await upsert_market_watch_settings(current_user.id, payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     async_task_scheduler.refresh_schedule()
@@ -107,14 +109,14 @@ async def preview_market_watch_source(
 
 
 @router.get("/events", response_model=list[MarketWatchEventSchema])
-def read_market_watch_events(
+async def read_market_watch_events(
     limit: int = Query(50, ge=1, le=200),
     event_type: str | None = None,
     since: datetime | None = None,
     current_user: User = Depends(get_current_user),
 ) -> list[MarketWatchEventSchema]:
     """Return current user's recent market watch audit events."""
-    return query_market_watch_events(
+    return await query_market_watch_events(
         user_id=current_user.id,
         limit=limit,
         event_type=event_type,
@@ -123,7 +125,7 @@ def read_market_watch_events(
 
 
 @router.get("/decisions", response_model=MarketWatchDecisionPage)
-def read_market_watch_decisions(
+async def read_market_watch_decisions(
     page: int = Query(1, ge=1),
     page_size: int = Query(5, ge=1, le=50),
     current_user: User = Depends(get_current_user),
@@ -139,7 +141,7 @@ def read_market_watch_decisions(
     Returns:
         当前页决策事件、总轮次数和分页参数。
     """
-    items, total = query_market_watch_decisions(
+    items, total = await query_market_watch_decisions(
         user_id=current_user.id,
         page=page,
         page_size=page_size,
@@ -163,12 +165,13 @@ def create_market_watch_websocket_ticket(
     }
 
 
-def _authenticate_market_watch_ws(ticket: str | None) -> User | None:
+async def _authenticate_market_watch_ws(ticket: str | None) -> User | None:
     ticket_user_id = consume_websocket_ticket(ticket, "market_watch")
-    with database_module.SessionLocal() as db:
-        if ticket_user_id is not None:
-            return db.query(User).filter(User.id == ticket_user_id).first()
+    if ticket_user_id is None:
         return None
+    async with database_module.AsyncSessionLocal() as db:
+        result = await db.execute(select(User).where(User.id == ticket_user_id))
+        return result.scalar_one_or_none()
 
 
 @router.websocket("/ws")
@@ -177,7 +180,7 @@ async def market_watch_websocket(
     ticket: str | None = Query(None),
 ) -> None:
     """Push market watch events to the authenticated user."""
-    user = _authenticate_market_watch_ws(ticket)
+    user = await _authenticate_market_watch_ws(ticket)
     if user is None:
         await websocket.close(code=1008)
         return

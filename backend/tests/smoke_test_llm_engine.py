@@ -1,6 +1,9 @@
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
+import pytest
+from sqlalchemy import update
+
 from app.ai.llm_engine.roles import AGENT_ROLE_PORTFOLIO_MANAGER
 from app.models.async_task import AsyncTask
 from app.models.data_storage import StockBasic
@@ -8,8 +11,8 @@ from app.models.debate_message import DebateMessage
 from app.models.session import Session as SessionModel
 
 
-def _seed_stock_basic(db_session, stock_code: str, name: str) -> None:
-    db_session.add(
+async def _seed_stock_basic(async_db_session, stock_code: str, name: str) -> None:
+    async_db_session.add(
         StockBasic(
             stock_code=stock_code,
             name=name,
@@ -18,7 +21,7 @@ def _seed_stock_basic(db_session, stock_code: str, name: str) -> None:
             data_source="test",
         )
     )
-    db_session.commit()
+    await async_db_session.commit()
 
 
 def _create_session(client, auth_headers, stock_code: str) -> str:
@@ -35,9 +38,10 @@ def _create_session(client, auth_headers, stock_code: str) -> str:
     return response.json()["session_id"]
 
 
-def test_create_session_returns_source(client, auth_headers, db_session):
+@pytest.mark.asyncio
+async def test_create_session_returns_source(client, auth_headers, async_db_session):
     stock_code = "000063.SZ"
-    _seed_stock_basic(db_session, stock_code, "ZTE")
+    await _seed_stock_basic(async_db_session, stock_code, "ZTE")
 
     response = client.post(
         "/api/v1/sessions/",
@@ -63,14 +67,14 @@ def _build_run_payload(session_id: str, stock_code: str) -> dict:
     }
 
 
-def test_smoke_debate_run_flow(client, auth_headers, db_session, sqlite_session_factory):
+@pytest.mark.asyncio
+async def test_smoke_debate_run_flow(client, auth_headers, async_db_session, test_db):
     stock_code = "000001.SZ"
-    _seed_stock_basic(db_session, stock_code, "Ping An Bank")
+    await _seed_stock_basic(async_db_session, stock_code, "Ping An Bank")
     session_id = _create_session(client, auth_headers, stock_code)
 
-    async def _fake_run_analysis_task(task_id, stock_code, trading_frequency, trading_strategy, session_id=None):
-        db = sqlite_session_factory()
-        try:
+    async def _fake_run_analysis_task(task_id, stock_code, trading_frequency, trading_strategy, session_id=None, **_kwargs):
+        async with test_db() as db:
             db.add(
                 DebateMessage(
                     session_id=UUID(session_id),
@@ -82,11 +86,9 @@ def test_smoke_debate_run_flow(client, auth_headers, db_session, sqlite_session_
                     reasoning="Mocked portfolio manager conclusion",
                 )
             )
-            db.query(SessionModel).filter(SessionModel.session_id == UUID(session_id)).update({"status": "completed"})
-            db.query(AsyncTask).filter(AsyncTask.task_id == task_id).update({"status": "completed"})
-            db.commit()
-        finally:
-            db.close()
+            await db.execute(update(SessionModel).where(SessionModel.session_id == UUID(session_id)).values(status="completed"))
+            await db.execute(update(AsyncTask).where(AsyncTask.task_id == task_id).values(status="completed"))
+            await db.commit()
 
     with patch(
         "app.api.endpoints.debate.run_analysis_task",
@@ -113,9 +115,10 @@ def test_smoke_debate_run_flow(client, auth_headers, db_session, sqlite_session_
     assert history[0]["agent_role"] == AGENT_ROLE_PORTFOLIO_MANAGER
 
 
-def test_run_debate_reuses_existing_task_without_scheduling_duplicate_work(client, auth_headers, db_session):
+@pytest.mark.asyncio
+async def test_run_debate_reuses_existing_task_without_scheduling_duplicate_work(client, auth_headers, async_db_session):
     stock_code = "000002.SZ"
-    _seed_stock_basic(db_session, stock_code, "Vanke A")
+    await _seed_stock_basic(async_db_session, stock_code, "Vanke A")
     session_id = _create_session(client, auth_headers, stock_code)
     parameters = {
         "session_id": session_id,
@@ -130,8 +133,8 @@ def test_run_debate_reuses_existing_task_without_scheduling_duplicate_work(clien
         allow_concurrent=False,
         parameters=parameters,
     )
-    db_session.add(existing_task)
-    db_session.commit()
+    async_db_session.add(existing_task)
+    await async_db_session.commit()
 
     mock_run_analysis_task = AsyncMock(return_value=None)
     mock_send_status = AsyncMock(return_value=None)
@@ -154,12 +157,13 @@ def test_run_debate_reuses_existing_task_without_scheduling_duplicate_work(clien
     assert mock_send_status.await_count == 0
 
 
-def test_run_debate_blocks_same_stock_for_different_sessions(client, auth_headers, db_session):
+@pytest.mark.asyncio
+async def test_run_debate_blocks_same_stock_for_different_sessions(client, auth_headers, async_db_session):
     stock_code = "000333.SZ"
-    _seed_stock_basic(db_session, stock_code, "Midea Group")
+    await _seed_stock_basic(async_db_session, stock_code, "Midea Group")
     first_session_id = _create_session(client, auth_headers, stock_code)
     second_session_id = _create_session(client, auth_headers, stock_code)
-    db_session.add(
+    async_db_session.add(
         AsyncTask(
             task_name=f"AI Analysis - {stock_code}",
             task_type="ai_analysis",
@@ -173,7 +177,7 @@ def test_run_debate_blocks_same_stock_for_different_sessions(client, auth_header
             },
         )
     )
-    db_session.commit()
+    await async_db_session.commit()
 
     mock_run_analysis_task = AsyncMock(return_value=None)
     mock_send_status = AsyncMock(return_value=None)
@@ -189,14 +193,16 @@ def test_run_debate_blocks_same_stock_for_different_sessions(client, auth_header
 
     assert response.status_code == 400
     payload = response.json()
-    assert "already running" in payload["detail"]
+    assert stock_code in payload["detail"]
+    assert "运行" in payload["detail"]
     assert mock_run_analysis_task.await_count == 0
     assert mock_send_status.await_count == 0
 
 
-def test_get_history_empty(client, auth_headers, db_session):
+@pytest.mark.asyncio
+async def test_get_history_empty(client, auth_headers, async_db_session):
     stock_code = "600519.SH"
-    _seed_stock_basic(db_session, stock_code, "Kweichow Moutai")
+    await _seed_stock_basic(async_db_session, stock_code, "Kweichow Moutai")
     session_id = _create_session(client, auth_headers, stock_code)
 
     response = client.get(f"/api/v1/debate/history/{session_id}", headers=auth_headers)

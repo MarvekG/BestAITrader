@@ -1,12 +1,16 @@
 from uuid import uuid4
 
+import pytest
+from sqlalchemy import select
+
 from app.models.async_task import AsyncTask
 from app.models.session import Session
 from app.models.system_setting import SystemSetting
 from app.models.user import User
 
 
-def test_runtime_settings_default_and_update(client, auth_headers, db_session) -> None:
+@pytest.mark.asyncio
+async def test_runtime_settings_default_and_update(client, auth_headers, async_db_session) -> None:
     """运行参数默认值可读取，并可保存到 system_settings。"""
     response = client.get("/api/v1/general/runtime-settings", headers=auth_headers)
 
@@ -22,7 +26,9 @@ def test_runtime_settings_default_and_update(client, auth_headers, db_session) -
     assert update_response.status_code == 200
     assert update_response.json() == {"ai_debate_max_concurrent": 7}
 
-    row = db_session.query(SystemSetting).filter(SystemSetting.key == "ai_debate.max_concurrent").one()
+    row = (
+        await async_db_session.execute(select(SystemSetting).where(SystemSetting.key == "ai_debate.max_concurrent"))
+    ).scalar_one()
     assert row.user_id is None
     assert row.value == 7
 
@@ -38,7 +44,8 @@ def test_runtime_settings_reject_invalid_concurrency(client, auth_headers) -> No
     assert response.status_code == 422
 
 
-def test_debate_run_rejects_when_global_concurrency_limit_reached(client, auth_headers, db_session) -> None:
+@pytest.mark.asyncio
+async def test_debate_run_rejects_when_global_concurrency_limit_reached(client, auth_headers, async_db_session) -> None:
     """AI 投研辩论达到全局并发上限时拒绝新任务。"""
     client.put(
         "/api/v1/general/runtime-settings",
@@ -46,10 +53,10 @@ def test_debate_run_rejects_when_global_concurrency_limit_reached(client, auth_h
         json={"ai_debate_max_concurrent": 1},
     )
 
-    user = db_session.query(User).first()
+    user = (await async_db_session.execute(select(User))).scalars().first()
     existing_session_id = uuid4()
     new_session_id = uuid4()
-    db_session.add_all([
+    async_db_session.add_all([
         Session(
             session_id=existing_session_id,
             user_id=user.id,
@@ -75,7 +82,7 @@ def test_debate_run_rejects_when_global_concurrency_limit_reached(client, auth_h
             user_id=user.id,
         ),
     ])
-    db_session.commit()
+    await async_db_session.commit()
 
     response = client.post(
         "/api/v1/debate/run",

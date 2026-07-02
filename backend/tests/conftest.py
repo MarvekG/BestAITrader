@@ -7,8 +7,10 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 
 import psycopg2
 import pytest
+import pytest_asyncio
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, event
+from sqlalchemy import event
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -24,7 +26,7 @@ def _fail_on_postgres_host_connect(*args, **kwargs):
     dsn = str(args[0]) if args else str(kwargs.get("dsn", ""))
     host = str(kwargs.get("host", ""))
     if "host=postgres" in dsn or host == "postgres":
-        raise AssertionError("Tests must not connect to postgres host; use sqlite_test_engine instead")
+        raise AssertionError("Tests must not connect to postgres host; use sqlite_async_test_engine instead")
     return _ORIGINAL_PSYCOPG2_CONNECT(*args, **kwargs)
 
 
@@ -37,12 +39,15 @@ sys.modules.setdefault("tushare.pro.client", MagicMock())
 
 
 def _patch_app_startup_side_effects() -> None:
-    init_db_module = import_module("app.core.init_db")
+    startup_db_module = import_module("app.core.startup_db")
     refresh_scheduler_module = import_module("app.data.refresh_scheduler")
     async_scheduler_module = import_module("app.tasks.async_scheduler")
+    task_manager_module = import_module("app.tasks.task_manager")
     redis_module = import_module("app.core.redis_client")
 
-    init_db_module.init_db = lambda db: None
+    startup_db_module.initialize_database = AsyncMock(return_value=None)
+    startup_db_module.reset_active_analysis_sessions = AsyncMock(return_value=0)
+    task_manager_module.task_manager.cleanup_zombie_tasks = AsyncMock(return_value=0)
     refresh_scheduler_module.refresh_scheduler.start = Mock(return_value=None)
     refresh_scheduler_module.refresh_scheduler.stop = Mock(return_value=None)
     async_scheduler_module.async_task_scheduler.start = Mock(return_value=None)
@@ -88,7 +93,7 @@ def _patch_llm_for_tests() -> None:
             "raw_response": SimpleNamespace(),
         }
 
-    def _mock_record_llm_usage(*args, **kwargs):
+    async def _mock_record_llm_usage(*args, **kwargs):
         return None
 
     llm_endpoint_module._request_llm_completion = _mock_request_llm_completion
@@ -107,7 +112,7 @@ def _patch_llm_for_tests() -> None:
 
 class _TestDataIngestionService:
     def __init__(self):
-        self.write_dataframe = Mock(return_value=True)
+        self.write_dataframe = AsyncMock(return_value=True)
 
 
 def _patch_ingestor_import_side_effects() -> None:
@@ -134,6 +139,7 @@ def _sqlite_test_tables():
     from app.models.debate_message import DebateMessage
     from app.models.experience_review_event import ExperienceReviewEvent
     from app.models.experience_index import ExperienceIndex
+    from app.models.llm_usage_log import LLMUsageLog
     from app.models.market_watch import MarketWatchEvent
     from app.models.order import Order
     from app.models.pm_decision import PMDecisionRecord
@@ -161,6 +167,7 @@ def _sqlite_test_tables():
         DebateMessage.__table__,
         ExperienceReviewEvent.__table__,
         ExperienceIndex.__table__,
+        LLMUsageLog.__table__,
         StockBasic.__table__,
         KlineData.__table__,
         IndexDaily.__table__,
@@ -172,15 +179,64 @@ def _sqlite_test_tables():
     ]
 
 
-def _clear_sqlite_tables(session_factory) -> None:
+async def _clear_async_sqlite_tables(session_factory) -> None:
     tables = _sqlite_test_tables()
-    db = session_factory()
-    try:
+    async with session_factory() as db:
         for table in reversed(tables):
-            db.execute(table.delete())
-        db.commit()
-    finally:
-        db.close()
+            await db.execute(table.delete())
+        await db.commit()
+
+
+def _run_async(coro):
+    import asyncio
+
+    return asyncio.run(coro)
+
+
+async def create_test_user(db, *, username: str, email: str | None = None, password: str = "password123"):
+    from app.crud.user import get_password_hash
+    from app.models.user import User
+
+    user = User(
+        username=username,
+        email=email or f"{username}@example.com",
+        password_hash=get_password_hash(password),
+    )
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+
+async def ensure_test_account(db, user, initial_capital="1000000.00"):
+    from decimal import Decimal
+
+    from sqlalchemy import select
+
+    from app.models.account import Account
+
+    result = await db.execute(select(Account).where(Account.user_id == user.id))
+    account = result.scalars().first()
+    if account is not None:
+        return account
+
+    capital = Decimal(str(initial_capital))
+    account = Account(
+        user_id=user.id,
+        total_assets=capital,
+        initial_capital=capital,
+        available_cash=capital,
+        frozen_cash=Decimal("0.00"),
+        market_value=Decimal("0.00"),
+        total_profit_loss=Decimal("0.00"),
+        profit_loss_pct=Decimal("0.00"),
+        total_trades=0,
+        win_rate=Decimal("0.00"),
+    )
+    db.add(account)
+    await db.commit()
+    await db.refresh(account)
+    return account
 
 
 _patch_ingestor_import_side_effects()
@@ -189,114 +245,128 @@ _patch_llm_for_tests()
 
 
 @pytest.fixture(scope="session")
-def sqlite_test_engine():
-    engine = create_engine(
-        "sqlite://",
+def sqlite_test_paths(tmp_path_factory):
+    db_dir = tmp_path_factory.mktemp("sqlite-test-db")
+    return SimpleNamespace(
+        main=db_dir / "main.db",
+        data=db_dir / "data.db",
+        interactive=db_dir / "stock_picker_interactive.db",
+    )
+@pytest.fixture(scope="session")
+def sqlite_async_test_engine(sqlite_test_paths):
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{sqlite_test_paths.main}",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
 
-    @event.listens_for(engine, "connect")
+    @event.listens_for(engine.sync_engine, "connect")
     def _on_connect(dbapi_connection, _connection_record):
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         try:
-            cursor.execute("ATTACH DATABASE ':memory:' AS data")
+            cursor.execute(f"ATTACH DATABASE '{sqlite_test_paths.data}' AS data")
         except sqlite3.OperationalError as exc:
             if "already in use" not in str(exc):
                 raise
         try:
-            cursor.execute("ATTACH DATABASE ':memory:' AS stock_picker_interactive")
+            cursor.execute(f"ATTACH DATABASE '{sqlite_test_paths.interactive}' AS stock_picker_interactive")
         except sqlite3.OperationalError as exc:
             if "already in use" not in str(exc):
                 raise
         finally:
             cursor.close()
 
-    return engine
-
-
-@pytest.fixture(scope="session")
-def sqlite_session_factory(sqlite_test_engine):
-    return sessionmaker(autocommit=False, autoflush=False, bind=sqlite_test_engine)
-
-
+    yield engine
+    _run_async(engine.dispose())
 @pytest.fixture(scope="session", autouse=True)
-def sqlite_session_local(sqlite_session_factory):
-    import app.core.database as db_module
-
-    original_db_session_local = db_module.SessionLocal
-    db_module.SessionLocal = sqlite_session_factory
-    try:
-        yield
-    finally:
-        db_module.SessionLocal = original_db_session_local
-
-
+def sqlite_async_session_factory(sqlite_async_test_engine):
+    return sessionmaker(
+        sqlite_async_test_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+    )
 @pytest.fixture(scope="session", autouse=True)
-def sqlite_test_schema(sqlite_test_engine):
+def sqlite_test_schema(sqlite_async_test_engine):
     from app.core.database import Base
 
     tables = _sqlite_test_tables()
-    Base.metadata.create_all(bind=sqlite_test_engine, tables=tables)
+
+    async def _create_async_schema():
+        async with sqlite_async_test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all, tables=tables)
+
+    _run_async(_create_async_schema())
     yield
-    Base.metadata.drop_all(bind=sqlite_test_engine, tables=tables)
+
+    async def _drop_async_schema():
+        async with sqlite_async_test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all, tables=tables)
+
+    _run_async(_drop_async_schema())
 
 
 @pytest.fixture
-def test_db(sqlite_test_schema, sqlite_session_factory):
+def test_db(sqlite_test_schema, sqlite_async_session_factory):
     from app.core.config import settings
     import app.core.database as db_module
     from app.core.data_source_config_cache import invalidate_data_source_config_cache
-    from app.core.database import get_db
+    from app.core.database import get_async_db
 
     original_system_language = settings.SYSTEM_LANGUAGE
-    original_db_session_local = db_module.SessionLocal
-    db_module.SessionLocal = sqlite_session_factory
+    original_async_session_local = db_module.AsyncSessionLocal
 
     from app.main import app
-    import app.main as app_main_module
-    import app.ai.experience.service as experience_service_module
-    import app.tasks.async_task_runner as async_task_runner_module
+    import app.api.ownership as ownership_module
+    import app.trading.service as trading_service_module
 
-    original_main_session_local = app_main_module.SessionLocal
-    app_main_module.SessionLocal = sqlite_session_factory
-    original_async_task_runner_session_local = async_task_runner_module.SessionLocal
-    async_task_runner_module.SessionLocal = sqlite_session_factory
-    original_experience_session_local = experience_service_module.SessionLocal
-    experience_service_module.SessionLocal = sqlite_session_factory
+    original_ownership_async_session_factory = ownership_module.async_session_factory
+    original_trading_async_session_factory = trading_service_module.async_session_factory
 
-    def override_get_db():
-        db = sqlite_session_factory()
-        try:
+    async def override_get_async_db():
+        async with sqlite_async_session_factory() as db:
             yield db
-        finally:
-            db.close()
 
-    _clear_sqlite_tables(sqlite_session_factory)
+    db_module.AsyncSessionLocal = sqlite_async_session_factory
+    ownership_module.async_session_factory = sqlite_async_session_factory
+    trading_service_module.async_session_factory = sqlite_async_session_factory
+
+    _run_async(_clear_async_sqlite_tables(sqlite_async_session_factory))
     invalidate_data_source_config_cache()
-    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_async_db] = override_get_async_db
 
     try:
-        yield sqlite_session_factory
+        yield sqlite_async_session_factory
     finally:
-        app.dependency_overrides.pop(get_db, None)
-        experience_service_module.SessionLocal = original_experience_session_local
-        async_task_runner_module.SessionLocal = original_async_task_runner_session_local
-        app_main_module.SessionLocal = original_main_session_local
-        db_module.SessionLocal = original_db_session_local
+        app.dependency_overrides.pop(get_async_db, None)
+        db_module.AsyncSessionLocal = original_async_session_local
+        ownership_module.async_session_factory = original_ownership_async_session_factory
+        trading_service_module.async_session_factory = original_trading_async_session_factory
         settings.SYSTEM_LANGUAGE = original_system_language
-        _clear_sqlite_tables(sqlite_session_factory)
+        _run_async(_clear_async_sqlite_tables(sqlite_async_session_factory))
         invalidate_data_source_config_cache()
 
 
-@pytest.fixture
-def db_session(test_db):
-    db = test_db()
-    try:
+@pytest_asyncio.fixture
+async def async_db_session(test_db):
+    async with test_db() as db:
         yield db
-    finally:
-        db.close()
+
+
+@pytest.fixture
+def run_async():
+    return _run_async
+
+
+@pytest.fixture
+def async_create_user():
+    return create_test_user
+
+
+@pytest.fixture
+def async_ensure_account():
+    return ensure_test_account
 
 
 @pytest.fixture
@@ -308,23 +378,27 @@ def client(test_db):
 
 
 @pytest.fixture
-def auth_headers(client, db_session):
+def auth_headers(client, test_db):
     import uuid
 
-    from app.crud.user import create_user
-    from app.schemas.user import UserCreate
+    from app.crud.user import get_password_hash
+    from app.models.user import User
 
     username = f"test_{uuid.uuid4().hex[:8]}"
     password = "password123"
 
-    create_user(
-        db_session,
-        UserCreate(
-            username=username,
-            email=f"{username}@example.com",
-            password=password,
-        ),
-    )
+    async def _create_user():
+        async with test_db() as db:
+            db.add(
+                User(
+                    username=username,
+                    email=f"{username}@example.com",
+                    password_hash=get_password_hash(password),
+                )
+            )
+            await db.commit()
+
+    _run_async(_create_user())
     response = client.post(
         "/api/v1/auth/login",
         data={

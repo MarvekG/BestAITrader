@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, Mock, patch
 from datetime import datetime, timedelta
 
 import pytest
+from sqlalchemy import select
 
 from app.models.data_storage import StockBasic, StockRealtimeMarket
 from app.tasks.task_functions import (
@@ -109,13 +110,6 @@ async def test_sync_stock_data_func_does_not_sync_concept_boards():
         fetch_and_ingest_stock_fund_holding=AsyncMock(side_effect=_mark_side_effect("stock_fund_holding")),
     )
 
-    class DummySessionLocal:
-        def __enter__(self):
-            return object()
-
-        def __exit__(self, exc_type, exc_value, traceback):
-            return False
-
     def _date_range(task_type: str = "normal"):
         if task_type == "kline_base_info":
             return "2025-07-01", "2026-07-01"
@@ -125,8 +119,6 @@ async def test_sync_stock_data_func_does_not_sync_concept_boards():
 
     with patch("app.tasks.task_functions.get_sync_date_range", side_effect=_date_range), patch(
         "app.data.ingestors.manager.ingestor_manager", mock_ingestor
-    ), patch(
-        "app.core.database.SessionLocal", return_value=DummySessionLocal()
     ), patch(
         "app.tasks.task_functions.calculate_indicators_func",
         new=AsyncMock(side_effect=_mark_side_effect("technical_indicators")),
@@ -189,8 +181,8 @@ async def test_sync_stock_data_func_stores_only_step_statuses():
 @pytest.mark.asyncio
 async def test_sync_bulk_tables_kline_uses_qfq_adjustment():
     mock_ingestor = SimpleNamespace(
-        _get_all_stock_codes=Mock(return_value=["600519.SH"]),
-        _get_all_stock_codes_from_stock_basic=Mock(return_value=["600519.SH"]),
+        _get_all_stock_codes=AsyncMock(return_value=["600519.SH"]),
+        _get_all_stock_codes_from_stock_basic=AsyncMock(return_value=["600519.SH"]),
         fetch_and_ingest_stock_kline=AsyncMock(return_value=True),
         fetch_and_ingest_all_stock_basic=AsyncMock(),
         fetch_and_ingest_index_daily=AsyncMock(),
@@ -228,8 +220,7 @@ async def test_sync_bulk_tables_kline_uses_qfq_adjustment():
 @pytest.mark.asyncio
 async def test_cleanup_stock_realtime_market_history_keeps_recent_24h_records(test_db) -> None:
     latest_market_time = datetime.now() - timedelta(days=3)
-    db = test_db()
-    try:
+    async with test_db() as db:
         db.add(StockBasic(stock_code="600519.SH", name="贵州茅台"))
         db.add_all(
             [
@@ -250,29 +241,24 @@ async def test_cleanup_stock_realtime_market_history_keeps_recent_24h_records(te
                 ),
             ]
         )
-        db.commit()
-    finally:
-        db.close()
+        await db.commit()
 
-    with patch("app.tasks.task_functions.SessionLocal", test_db):
-        result = await cleanup_stock_realtime_market_history()
+    result = await cleanup_stock_realtime_market_history()
 
-    db = test_db()
-    try:
-        rows = db.query(StockRealtimeMarket).order_by(StockRealtimeMarket.current_price.asc()).all()
+    async with test_db() as db:
+        rows = (await db.execute(
+            select(StockRealtimeMarket).order_by(StockRealtimeMarket.current_price.asc())
+        )).scalars().all()
         assert result["status"] == "success"
         assert result["deleted_count"] == 1
         assert [row.current_price for row in rows] == [1, 2]
         assert result["retention_hours"] == 24
-    finally:
-        db.close()
 
 
 @pytest.mark.asyncio
 async def test_cleanup_stock_realtime_market_history_deletes_records_older_than_24h(test_db) -> None:
     latest_market_time = datetime.now() - timedelta(days=1)
-    db = test_db()
-    try:
+    async with test_db() as db:
         db.add(StockBasic(stock_code="600519.SH", name="贵州茅台"))
         db.add_all(
             [
@@ -288,14 +274,11 @@ async def test_cleanup_stock_realtime_market_history_deletes_records_older_than_
                 ),
             ]
         )
-        db.commit()
-    finally:
-        db.close()
+        await db.commit()
 
-    with patch("app.tasks.task_functions.SessionLocal", test_db):
-        result = await cleanup_stock_realtime_market_history(
-            task_name="[Auto] Stock Market Intraday Cache Cleanup 1h"
-        )
+    result = await cleanup_stock_realtime_market_history(
+        task_name="[Auto] Stock Market Intraday Cache Cleanup 1h"
+    )
 
     assert result["status"] == "success"
     assert result["deleted_count"] == 1

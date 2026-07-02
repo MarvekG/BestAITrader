@@ -8,7 +8,7 @@ Test enabled data sources for data ingestion
 import pytest
 import pandas as pd
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, Mock, PropertyMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from app.data.ingestors.plugins.akshare_ingestor import AkshareIngestor
 from app.data.ingestors.manager import ingestor_manager
 from app.data.ingestors.plugins.column_mapping import ColumnMapper
@@ -165,8 +165,10 @@ async def test_tushare_dragon_tiger_normalizes_amounts_to_cny():
     ingestor = TushareIngestor.__new__(TushareIngestor)
     ingestor.source = "tushare"
     ingestor.ingestion_service = Mock()
+    ingestor.ingestion_service.write_dataframe = AsyncMock(return_value=True)
     fake_pro = Mock()
     fake_pro.top_list = Mock()
+    ingestor.pro = fake_pro
     source_df = pd.DataFrame(
         [
             {
@@ -188,12 +190,11 @@ async def test_tushare_dragon_tiger_normalizes_amounts_to_cny():
             }
         ]
     )
-    ingestor._run_in_executor = AsyncMock(side_effect=[source_df, True])
+    ingestor._run_in_executor = AsyncMock(return_value=source_df)
 
-    with patch.object(TushareIngestor, "pro", new_callable=PropertyMock, return_value=fake_pro):
-        result = await ingestor.fetch_and_ingest_dragon_tiger("20260618")
+    result = await ingestor.fetch_and_ingest_dragon_tiger("20260618")
 
-    written_df = ingestor._run_in_executor.await_args_list[1].args[2]
+    written_df = ingestor.ingestion_service.write_dataframe.await_args.args[1]
     assert result is True
     assert written_df.iloc[0]["net_buy_amount"] == 6_000_000
     assert written_df.iloc[0]["buy_amount"] == 18_000_000
@@ -209,8 +210,10 @@ async def test_tushare_lockup_release_normalizes_shares():
     ingestor = TushareIngestor.__new__(TushareIngestor)
     ingestor.source = "tushare"
     ingestor.ingestion_service = Mock()
+    ingestor.ingestion_service.write_dataframe = AsyncMock(return_value=True)
     fake_pro = Mock()
     fake_pro.share_float = Mock()
+    ingestor.pro = fake_pro
     source_df = pd.DataFrame(
         [
             {
@@ -223,12 +226,11 @@ async def test_tushare_lockup_release_normalizes_shares():
             }
         ]
     )
-    ingestor._run_in_executor = AsyncMock(side_effect=[source_df, True])
+    ingestor._run_in_executor = AsyncMock(return_value=source_df)
 
-    with patch.object(TushareIngestor, "pro", new_callable=PropertyMock, return_value=fake_pro):
-        result = await ingestor.fetch_and_ingest_stock_lockup_release("000001.SZ")
+    result = await ingestor.fetch_and_ingest_stock_lockup_release("000001.SZ")
 
-    written_df = ingestor._run_in_executor.await_args_list[1].args[2]
+    written_df = ingestor.ingestion_service.write_dataframe.await_args.args[1]
     assert result["success"] is True
     assert written_df.iloc[0]["release_shares"] == pytest.approx(1_234_500)
 
@@ -239,8 +241,10 @@ async def test_tushare_limit_pool_normalizes_market_values_to_cny():
     ingestor = TushareIngestor.__new__(TushareIngestor)
     ingestor.source = "tushare"
     ingestor.ingestion_service = Mock()
+    ingestor.ingestion_service.write_dataframe = AsyncMock(return_value=True)
     fake_pro = Mock()
     fake_pro.limit_list_d = Mock()
+    ingestor.pro = fake_pro
     source_df = pd.DataFrame(
         [
             {
@@ -263,12 +267,11 @@ async def test_tushare_limit_pool_normalizes_market_values_to_cny():
             }
         ]
     )
-    ingestor._run_in_executor = AsyncMock(side_effect=[source_df, True])
+    ingestor._run_in_executor = AsyncMock(return_value=source_df)
 
-    with patch.object(TushareIngestor, "pro", new_callable=PropertyMock, return_value=fake_pro):
-        result = await ingestor.fetch_and_ingest_stock_limit_up_pool("20260618")
+    result = await ingestor.fetch_and_ingest_stock_limit_up_pool("20260618")
 
-    written_df = ingestor._run_in_executor.await_args_list[1].args[2]
+    written_df = ingestor.ingestion_service.write_dataframe.await_args.args[1]
     assert result["success"] is True
     assert written_df.iloc[0]["circ_mv"] == 10_000_000
     assert written_df.iloc[0]["total_mv"] == 20_000_000
@@ -280,7 +283,9 @@ async def test_tushare_sector_money_flow_normalizes_amounts_to_cny():
     ingestor = TushareIngestor.__new__(TushareIngestor)
     ingestor.source = "tushare"
     ingestor.ingestion_service = Mock()
+    ingestor.ingestion_service.write_dataframe = AsyncMock(return_value=True)
     fake_pro = Mock()
+    ingestor.pro = fake_pro
     source_df = pd.DataFrame(
         [
             {
@@ -302,12 +307,11 @@ async def test_tushare_sector_money_flow_normalizes_amounts_to_cny():
             }
         ]
     )
-    ingestor._run_in_executor = AsyncMock(side_effect=["银行", source_df, True])
+    ingestor._run_in_executor = AsyncMock(side_effect=["银行", source_df])
 
-    with patch.object(TushareIngestor, "pro", new_callable=PropertyMock, return_value=fake_pro):
-        result = await ingestor.fetch_and_ingest_sector_money_flow("000001.SZ")
+    result = await ingestor.fetch_and_ingest_sector_money_flow("000001.SZ")
 
-    written_df = ingestor._run_in_executor.await_args_list[2].args[2]
+    written_df = ingestor.ingestion_service.write_dataframe.await_args.args[1]
     assert result["success"] is True
     assert written_df.iloc[0]["net_inflow"] == 12_000_000
     assert written_df.iloc[0]["main_net_inflow"] == 12_000_000
@@ -352,6 +356,7 @@ async def test_akshare_realtime_market_keeps_volume_in_shares():
     ingestor = AkshareIngestor.__new__(AkshareIngestor)
     ingestor.source = "akshare"
     ingestor.ingestion_service = Mock()
+    ingestor.ingestion_service.write_dataframe = AsyncMock(return_value=True)
     source_df = pd.DataFrame(
         [
             {
@@ -371,11 +376,11 @@ async def test_akshare_realtime_market_keeps_volume_in_shares():
             }
         ]
     )
-    ingestor._run_in_executor = AsyncMock(side_effect=[source_df, True])
+    ingestor._run_in_executor = AsyncMock(return_value=source_df)
 
     result = await ingestor.fetch_and_ingest_realtime_market()
 
-    written_df = ingestor._run_in_executor.await_args_list[1].args[2]
+    written_df = ingestor.ingestion_service.write_dataframe.await_args.args[1]
     assert result["success"] is True
     assert written_df.iloc[0]["volume"] == 123456
 
@@ -386,6 +391,7 @@ async def test_akshare_block_trade_normalizes_source_units():
     ingestor = AkshareIngestor.__new__(AkshareIngestor)
     ingestor.source = "akshare"
     ingestor.ingestion_service = Mock()
+    ingestor.ingestion_service.write_dataframe = AsyncMock(return_value=True)
     source_df = pd.DataFrame(
         [
             {
@@ -400,7 +406,7 @@ async def test_akshare_block_trade_normalizes_source_units():
             }
         ]
     )
-    ingestor._run_in_executor = AsyncMock(side_effect=[source_df, True])
+    ingestor._run_in_executor = AsyncMock(return_value=source_df)
 
     result = await ingestor.fetch_and_ingest_stock_block_trade(
         stock_code="000001.SZ",
@@ -408,7 +414,7 @@ async def test_akshare_block_trade_normalizes_source_units():
         end_date="20260618",
     )
 
-    written_df = ingestor._run_in_executor.await_args_list[1].args[2]
+    written_df = ingestor.ingestion_service.write_dataframe.await_args.args[1]
     assert result["success"] is True
     assert written_df.iloc[0]["volume"] == pytest.approx(30.21)
     assert written_df.iloc[0]["amount"] == pytest.approx(128.39)
@@ -421,6 +427,7 @@ async def test_akshare_lockup_release_converts_ratio_to_percent():
     ingestor = AkshareIngestor.__new__(AkshareIngestor)
     ingestor.source = "akshare"
     ingestor.ingestion_service = Mock()
+    ingestor.ingestion_service.write_dataframe = AsyncMock(return_value=True)
     source_df = pd.DataFrame(
         [
             {
@@ -435,11 +442,11 @@ async def test_akshare_lockup_release_converts_ratio_to_percent():
             }
         ]
     )
-    ingestor._run_in_executor = AsyncMock(side_effect=[source_df, True])
+    ingestor._run_in_executor = AsyncMock(return_value=source_df)
 
     result = await ingestor.fetch_and_ingest_stock_lockup_release("000001.SZ")
 
-    written_df = ingestor._run_in_executor.await_args_list[1].args[2]
+    written_df = ingestor.ingestion_service.write_dataframe.await_args.args[1]
     assert result["success"] is True
     assert written_df.iloc[0]["release_shares"] == 1_500_000
     assert written_df.iloc[0]["release_market_value"] == 3000.0
@@ -484,6 +491,7 @@ class TestFailoverMechanism:
         start_date, end_date = test_date_range
 
         tushare_ingestor = ingestor_manager.get_ingestor('tushare')
+        akshare_ingestor = ingestor_manager.get_ingestor('akshare')
 
         with patch('app.data.ingestors.manager.settings.ENABLE_DATA_SOURCE_FAILOVER', True):
             with patch.object(ingestor_manager, 'default_source', 'tushare'):
@@ -492,14 +500,19 @@ class TestFailoverMechanism:
                     'fetch_and_ingest_stock_kline',
                     return_value=False
                 ):
-                    result = await ingestor_manager.fetch_and_ingest_stock_kline(
-                        stock_code=test_stock_code,
-                        start_date=start_date,
-                        end_date=end_date,
-                        adjust="qfq"
-                    )
+                    with patch.object(
+                        akshare_ingestor,
+                        'fetch_and_ingest_stock_kline',
+                        return_value=False
+                    ):
+                        result = await ingestor_manager.fetch_and_ingest_stock_kline(
+                            stock_code=test_stock_code,
+                            start_date=start_date,
+                            end_date=end_date,
+                            adjust="qfq"
+                        )
 
-                    assert result is False, "所有数据源失败应该返回 False"
+                        assert result is False, "所有数据源失败应该返回 False"
 
     @pytest.mark.asyncio
     async def test_failover_first_source_success(

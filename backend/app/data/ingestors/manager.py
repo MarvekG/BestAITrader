@@ -1,8 +1,10 @@
 import asyncio
 from typing import Dict, List, Optional
 
+from sqlalchemy import select
+
 from app.core.config import settings
-from app.core.database import SessionLocal
+from app.core import database as database_module
 from app.core.logger import get_logger
 from app.data.ingestors.base_ingestor import BaseIngestor
 from app.data.ingestors.plugin_loader import (
@@ -363,22 +365,25 @@ class IngestorManager(BaseIngestor):
 
     # --- High-Level Synchronization Methods (Sync All) ---
 
-    def _get_all_stock_codes(self) -> List[str]:
+    async def _get_all_stock_codes(self) -> List[str]:
         """获取股票仓库中所有活跃的股票代码"""
-        with SessionLocal() as db:
-            codes = db.query(StockWarehouse.stock_code)\
-                .filter(StockWarehouse.is_active.is_(True))\
-                .distinct().all()
-            return [c.stock_code for c in codes]
+        async with database_module.AsyncSessionLocal() as db:
+            codes = (await db.execute(
+                select(StockWarehouse.stock_code)
+                .where(StockWarehouse.is_active.is_(True))
+                .distinct()
+            )).scalars().all()
+            return list(codes)
 
-    def _get_all_stock_codes_from_stock_basic(self) -> List[str]:
+    async def _get_all_stock_codes_from_stock_basic(self) -> List[str]:
         """获取 stock_basic 中所有股票代码（全量，不过滤仓库）
         Get all stock codes from stock_basic (all stocks, not warehouse-filtered)
         """
-        with SessionLocal() as db:
-            codes = db.query(StockBasic.stock_code)\
-                .distinct().all()
-            return [c.stock_code for c in codes]
+        async with database_module.AsyncSessionLocal() as db:
+            codes = (await db.execute(
+                select(StockBasic.stock_code).distinct()
+            )).scalars().all()
+            return list(codes)
 
     async def sync_all_stock_basics(self) -> bool:
         """全量同步 A 股基础信息 (包括公司概况)"""
@@ -386,7 +391,7 @@ class IngestorManager(BaseIngestor):
         # 1. Basic info
         await self.fetch_and_ingest_all_stock_basic()
         # 2. Company profiles and expanded info (industry/market)
-        stock_codes = self._get_all_stock_codes()
+        stock_codes = await self._get_all_stock_codes()
         logger.info(f"Syncing info/profiles for {len(stock_codes)} warehouse stocks")
         for i, code in enumerate(stock_codes):
             # Fetch basic info (industry/market) if not fully populated by step 1
@@ -400,7 +405,7 @@ class IngestorManager(BaseIngestor):
     async def sync_all_realtime_market(self) -> bool:
         """全量同步股票实时行情"""
         logger.info("Starting Sync All: Real-time Market Data")
-        stock_codes = self._get_all_stock_codes()
+        stock_codes = await self._get_all_stock_codes()
         for code in stock_codes:
             await self.fetch_and_ingest_realtime_market(code)
         return True
@@ -408,7 +413,7 @@ class IngestorManager(BaseIngestor):
     async def sync_all_kline(self, period: str = "daily") -> bool:
         """全量同步所有股票的 K 线数据"""
         logger.info(f"Starting Sync All: K-line Data ({period})")
-        stock_codes = self._get_all_stock_codes()
+        stock_codes = await self._get_all_stock_codes()
 
         # Determine date range based on period
         from datetime import datetime, timedelta
@@ -434,7 +439,7 @@ class IngestorManager(BaseIngestor):
     async def sync_all_valuation(self) -> bool:
         """全量同步估值数据 (PE/PB等)"""
         logger.info("Starting Sync All: Valuation Data")
-        stock_codes = self._get_all_stock_codes()
+        stock_codes = await self._get_all_stock_codes()
         for i, code in enumerate(stock_codes):
             await self.fetch_and_ingest_stock_valuation(code)
             if (i + 1) % 100 == 0:
@@ -444,7 +449,7 @@ class IngestorManager(BaseIngestor):
     async def sync_all_trading_details(self) -> bool:
         """同步交易细节 (北向、融券、龙虎榜、盘口)"""
         logger.info("Starting Sync All: Trading Details")
-        stock_codes = self._get_all_stock_codes()
+        stock_codes = await self._get_all_stock_codes()
 
         # Bulk or latest data
         from datetime import datetime, timedelta
@@ -465,7 +470,7 @@ class IngestorManager(BaseIngestor):
     async def sync_all_corporate_events(self) -> bool:
         """同步公司重大事件 (股东、质押、内幕、解禁)"""
         logger.info("Starting Sync All: Corporate Events")
-        stock_codes = self._get_all_stock_codes()
+        stock_codes = await self._get_all_stock_codes()
         for i, code in enumerate(stock_codes):
             await self.fetch_and_ingest_stock_shareholder_count(code)
             await self.fetch_and_ingest_stock_pledge_risk(code)

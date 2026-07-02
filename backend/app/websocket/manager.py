@@ -225,8 +225,7 @@ class WebSocketManager:
                 # Update and push price for each stock
                 for stock_code in all_subscribed_stocks:
                     try:
-                        # Use DataStorageService (sync) to get realtime price from DB
-                        realtime_data = data_storage_service.get_stock_realtime_market(stock_code)
+                        realtime_data = await data_storage_service.get_stock_realtime_market(stock_code)
                         if realtime_data and realtime_data.get("latest_price"):
                             price_update = {
                                 "stock_code": stock_code,

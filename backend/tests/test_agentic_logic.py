@@ -109,7 +109,7 @@ async def test_base_agent_summarizes_long_news_tool_output_with_shared_helper():
     with _patch_base_agent_llm_provider(mock_raw_llm), \
          patch("app.ai.llm_engine.agents.base.get_all_tools", return_value=[_FakeTool()]), \
          patch("app.ai.llm_engine.agents.base.build_memory_tools", return_value=[]), \
-         patch("app.ai.llm_engine.agents.base.record_llm_usage"), \
+         patch("app.ai.llm_engine.agents.base.record_llm_usage", new_callable=AsyncMock), \
          patch.object(BaseAgent, "_get_min_iterations", return_value=1), \
          patch("app.ai.llm_engine.agents.base.summarize_tool_output", new=_fake_summarize_tool_output):
         agent = _DummyLLMEngineAgent(role_name="Dummy Analyst")
@@ -181,7 +181,7 @@ async def test_base_agent_skips_summary_after_compacted_news_output_is_small():
     with _patch_base_agent_llm_provider(mock_raw_llm), \
          patch("app.ai.llm_engine.agents.base.get_all_tools", return_value=[_FakeTool()]), \
          patch("app.ai.llm_engine.agents.base.build_memory_tools", return_value=[]), \
-         patch("app.ai.llm_engine.agents.base.record_llm_usage"), \
+         patch("app.ai.llm_engine.agents.base.record_llm_usage", new_callable=AsyncMock), \
          patch.object(BaseAgent, "_get_min_iterations", return_value=1), \
          patch("app.ai.llm_engine.agents.base.summarize_tool_output", new=summary):
         agent = _DummyLLMEngineAgent(role_name="Dummy Analyst")
@@ -253,7 +253,7 @@ async def test_base_agent_drops_invalid_tool_calls_from_replayed_history():
          patch("app.ai.llm_engine.agents.base.get_all_tools", return_value=[]), \
          patch("app.ai.llm_engine.agents.base.build_memory_tools", return_value=[]), \
          patch.object(BaseAgent, "_get_min_iterations", return_value=1), \
-         patch("app.ai.llm_engine.agents.base.record_llm_usage"):
+         patch("app.ai.llm_engine.agents.base.record_llm_usage", new_callable=AsyncMock):
         agent = _DummyLLMEngineAgent(role_name="Dummy Analyst")
         result = await agent.run({"stock_code": "000001.SZ"})
 
@@ -327,7 +327,7 @@ async def test_base_agent_forces_final_answer_after_iteration_limit():
     with _patch_base_agent_llm_provider(mock_raw_llm), \
          patch("app.ai.llm_engine.agents.base.get_all_tools", return_value=[tool]), \
          patch("app.ai.llm_engine.agents.base.build_memory_tools", return_value=[]), \
-         patch("app.ai.llm_engine.agents.base.record_llm_usage"):
+         patch("app.ai.llm_engine.agents.base.record_llm_usage", new_callable=AsyncMock):
         agent = _DummyLLMEngineAgent(role_name="Dummy Analyst")
         result = await agent.run({"stock_code": "000001.SZ"})
 
@@ -395,7 +395,7 @@ async def test_base_agent_accepts_pm_markdown_final_output_without_json_repair()
          patch("app.ai.llm_engine.agents.base.get_all_tools", return_value=[tool]), \
          patch("app.ai.llm_engine.agents.base.build_memory_tools", return_value=[]), \
          patch.object(BaseAgent, "_get_min_iterations", return_value=1), \
-         patch("app.ai.llm_engine.agents.base.record_llm_usage"):
+         patch("app.ai.llm_engine.agents.base.record_llm_usage", new_callable=AsyncMock):
         agent = _DummyStructuredLLMEngineAgent(role_name="Portfolio Manager")
         result = await agent.run({"stock_code": "601888.SH"})
 
@@ -421,14 +421,7 @@ async def test_sync_base_info_func_batch_logic():
     """
     # Mock ingestor_manager and task_manager
     with patch("app.data.ingestors.manager.ingestor_manager") as mock_ingestor, \
-         patch("app.tasks.task_manager.task_manager"), \
-         patch("app.core.database.SessionLocal") as mock_session:
-
-        # 模拟数据库查询返回 2 只股票 (Mock DB returns 2 stocks)
-        mock_db = MagicMock()
-        mock_session.return_value.__enter__.return_value = mock_db
-        mock_query = mock_db.query.return_value.filter.return_value.all
-        mock_query.return_value = [("600519.SH",), ("000001.SZ",)]
+         patch("app.tasks.task_manager.task_manager"):
 
         # 模拟 fetch_and_ingest_all_stock_basic 成功
         mock_ingestor.fetch_and_ingest_all_stock_basic.return_value = True
@@ -1043,8 +1036,8 @@ async def test_agentic_tools_new_entities():
     from app.ai.agentic.tooling.stock_tools import StockTools
 
     mock_data = [{"symbol": "AU2406", "close": 550.0}]
-    with patch.object(StockTools, "get_generic_db_data", return_value=mock_data):
-        res = query_market_data.invoke({
+    with patch.object(StockTools, "get_generic_db_data", new=AsyncMock(return_value=mock_data)):
+        res = await query_market_data.ainvoke({
             "queries": [{
                 "data_type": "futures",
                 "identifier": "AU2406",
@@ -1057,8 +1050,8 @@ async def test_agentic_tools_new_entities():
         assert res[0]["results"][0]["symbol"] == "AU2406"
 
     mock_index = [{"index_code": "000001.SH", "close": 3210.5}]
-    with patch.object(StockTools, "get_generic_db_data", return_value=mock_index):
-        res = query_market_data.invoke({
+    with patch.object(StockTools, "get_generic_db_data", new=AsyncMock(return_value=mock_index)):
+        res = await query_market_data.ainvoke({
             "queries": [{
                 "data_type": "index_daily",
                 "identifier": "000001.SH",
@@ -1078,7 +1071,7 @@ async def test_agentic_tools_analysis_suite():
 
     mock_insider = [{"stock_code": "600519", "direction": "buy"}]
     mock_pledge = [{"stock_code": "600519", "pledge_ratio": 12.5}]
-    with patch.object(StockTools, "get_generic_db_data", side_effect=[mock_insider, mock_pledge]) as mock_generic:
+    with patch.object(StockTools, "get_generic_db_data", new=AsyncMock(side_effect=[mock_insider, mock_pledge])) as mock_generic:
         res = await query_stock_data.ainvoke({
             "stock_code": "600519",
             "data_configs": {
@@ -1106,13 +1099,12 @@ async def test_agentic_tools_analysis_suite():
         )
 
 
-def test_get_generic_db_data_selects_requested_columns(db_session, test_db, monkeypatch):
-    from app.ai.agentic.tooling import stock_tools as stock_tools_module
+@pytest.mark.asyncio
+async def test_get_generic_db_data_selects_requested_columns(async_db_session):
     from app.ai.agentic.tooling.stock_tools import StockTools
     from app.models.data_storage import KlineData, StockBasic
 
-    monkeypatch.setattr(stock_tools_module, "SessionLocal", test_db)
-    db_session.add(
+    async_db_session.add(
         StockBasic(
             stock_code="000001.SZ",
             name="平安银行",
@@ -1120,8 +1112,8 @@ def test_get_generic_db_data_selects_requested_columns(db_session, test_db, monk
             market="SZ",
         )
     )
-    db_session.commit()
-    db_session.add(
+    await async_db_session.commit()
+    async_db_session.add(
         KlineData(
             stock_code="000001.SZ",
             date=date(2024, 1, 2),
@@ -1130,9 +1122,9 @@ def test_get_generic_db_data_selects_requested_columns(db_session, test_db, monk
             volume=1000000,
         )
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    rows = StockTools.get_generic_db_data(
+    rows = await StockTools.get_generic_db_data(
         "KlineData",
         "000001.SZ",
         limit=20,
@@ -1144,13 +1136,12 @@ def test_get_generic_db_data_selects_requested_columns(db_session, test_db, monk
     assert rows == [{"date": date(2024, 1, 2), "close": 10.5}]
 
 
-def test_get_stock_basic_info_returns_share_fields(db_session, test_db, monkeypatch):
-    from app.ai.agentic.tooling import stock_tools as stock_tools_module
+@pytest.mark.asyncio
+async def test_get_stock_basic_info_returns_share_fields(async_db_session):
     from app.ai.agentic.tooling.stock_tools import StockTools
     from app.models.data_storage import StockBasic, StockValuationHistory
 
-    monkeypatch.setattr(stock_tools_module, "SessionLocal", test_db)
-    db_session.add(
+    async_db_session.add(
         StockBasic(
             stock_code="000001.SZ",
             name="平安银行",
@@ -1158,7 +1149,7 @@ def test_get_stock_basic_info_returns_share_fields(db_session, test_db, monkeypa
             market="SZ",
         )
     )
-    db_session.add(
+    async_db_session.add(
         StockValuationHistory(
             stock_code="000001.SZ",
             data_date=date(2026, 6, 10),
@@ -1166,9 +1157,9 @@ def test_get_stock_basic_info_returns_share_fields(db_session, test_db, monkeypa
             float_share=4_500_000_000,
         )
     )
-    db_session.commit()
+    await async_db_session.commit()
 
-    result = StockTools.get_stock_basic_info("000001.SZ")
+    result = await StockTools.get_stock_basic_info("000001.SZ")
 
     assert result["total_share"] == 5_000_000_000
     assert result["float_share"] == 4_500_000_000
@@ -1183,7 +1174,7 @@ async def test_query_stock_data_passes_columns_to_generic_db_data():
 
     mock_kline = [{"date": "2024-01-02", "close": 10.5}]
 
-    with patch.object(StockTools, "get_generic_db_data", return_value=mock_kline) as mock_generic:
+    with patch.object(StockTools, "get_generic_db_data", new=AsyncMock(return_value=mock_kline)) as mock_generic:
         res = await query_stock_data.ainvoke({
             "stock_code": "000001.SZ",
             "data_configs": {
@@ -1206,11 +1197,12 @@ async def test_query_stock_data_passes_columns_to_generic_db_data():
     )
 
 
-def test_get_generic_db_data_rejects_unknown_columns():
+@pytest.mark.asyncio
+async def test_get_generic_db_data_rejects_unknown_columns():
     from app.ai.agentic.tooling.stock_tools import StockTools, UnsupportedColumnsError
 
     with pytest.raises(UnsupportedColumnsError) as exc_info:
-        StockTools.get_generic_db_data("KlineData", columns=["date", "missing_column"])
+        await StockTools.get_generic_db_data("KlineData", columns=["date", "missing_column"])
 
     error_payload = exc_info.value.to_dict()
     assert error_payload["error"] == "Unsupported columns"
@@ -1268,13 +1260,14 @@ async def test_query_stock_data_jsonb_report_rejects_nested_metric_columns():
     assert res["results"]["financial"]["error"] == "Unsupported data type: financial"
 
 
-def test_query_market_data_passes_columns_to_generic_db_data():
+@pytest.mark.asyncio
+async def test_query_market_data_passes_columns_to_generic_db_data():
     from app.ai.agentic.tools import query_market_data
     from app.ai.agentic.tooling.stock_tools import StockTools
 
     mock_index_data = [{"date": "2024-01-02", "close": 3210.0}]
-    with patch.object(StockTools, "get_generic_db_data", return_value=mock_index_data) as mock_generic:
-        res = query_market_data.invoke({
+    with patch.object(StockTools, "get_generic_db_data", new=AsyncMock(return_value=mock_index_data)) as mock_generic:
+        res = await query_market_data.ainvoke({
             "queries": [{
                 "data_type": "index_daily",
                 "identifier": "000001.SH",
@@ -1295,15 +1288,16 @@ def test_query_market_data_passes_columns_to_generic_db_data():
     )
 
 
-def test_query_market_data_passes_columns_to_custom_queries():
+@pytest.mark.asyncio
+async def test_query_market_data_passes_columns_to_custom_queries():
     from app.ai.agentic.tools import query_market_data
     from app.ai.agentic.tooling.stock_tools import StockTools
 
-    with patch.object(StockTools, "get_generic_db_data", side_effect=[
+    with patch.object(StockTools, "get_generic_db_data", new=AsyncMock(side_effect=[
         [{"trade_date": "2024-01-02", "stock_code": "000001.SZ"}],
         [{"datetime": "2024-01-02 09:00:00", "close": 550.0}],
-    ]) as mock_generic:
-        res = query_market_data.invoke({
+    ])) as mock_generic:
+        res = await query_market_data.ainvoke({
             "queries": [
                 {
                     "data_type": "limit_pool",
@@ -1365,7 +1359,7 @@ async def test_agentic_tools_completion_suite():
     """验证统一查询工具覆盖技术指标、大宗交易、板块资金流、市场情绪、基金持仓"""
     from app.ai.agentic.tools import query_stock_data, query_market_data
 
-    with patch("app.ai.agentic.tooling.stock_tools.StockTools.get_generic_db_data") as mock_generic:
+    with patch("app.ai.agentic.tooling.stock_tools.StockTools.get_generic_db_data", new_callable=AsyncMock) as mock_generic:
         mock_generic.return_value = [{"indicator": "MACD", "value": 0.5}]
         res = await query_stock_data.ainvoke({
             "stock_code": "000001.SZ",
@@ -1402,7 +1396,7 @@ async def test_agentic_tools_completion_suite():
         )
 
         mock_generic.return_value = [{"sector_name": "电力", "net_inflow": 5000}]
-        res = query_market_data.invoke({
+        res = await query_market_data.ainvoke({
             "queries": [{
                 "data_type": "sector_money_flow",
                 "identifier": "电力",
@@ -1441,7 +1435,7 @@ async def test_agentic_tools_final_push_suite():
     """验证统一查询工具覆盖融资融券、指数、舆情、解禁、回购"""
     from app.ai.agentic.tools import query_stock_data, query_market_data
 
-    with patch("app.ai.agentic.tooling.stock_tools.StockTools.get_generic_db_data") as mock_generic:
+    with patch("app.ai.agentic.tooling.stock_tools.StockTools.get_generic_db_data", new_callable=AsyncMock) as mock_generic:
         mock_generic.return_value = [{"margin_balance": 1000000}]
         res = await query_stock_data.ainvoke({
             "stock_code": "000001.SZ",
@@ -1460,7 +1454,7 @@ async def test_agentic_tools_final_push_suite():
         )
 
         mock_generic.return_value = [{"close": 3000}]
-        res = query_market_data.invoke({
+        res = await query_market_data.ainvoke({
             "queries": [{
                 "data_type": "index_daily",
                 "identifier": "000001.SH",
@@ -1518,12 +1512,12 @@ async def test_unified_agentic_tools():
     from app.ai.agentic.tools import query_stock_data, query_market_data, sync_market_data
     from app.ai.agentic.tooling.stock_tools import StockTools
 
-    with patch.object(StockTools, "check_data_status", return_value={"basic_info": "exists"}), \
+    with patch.object(StockTools, "check_data_status", new=AsyncMock(return_value={"basic_info": "exists"})), \
          patch.object(
              StockTools,
              "get_generic_db_data",
-             return_value=[{"roe": 12.5}],
-         ):
+              new=AsyncMock(return_value=[{"roe": 12.5}]),
+          ):
         result = await query_stock_data.ainvoke({
             "stock_code": "000001.SZ",
             "data_configs": {
@@ -1540,8 +1534,8 @@ async def test_unified_agentic_tools():
         assert result["results"]["status"]["basic_info"] == "exists"
         assert result["results"]["financial"]["error"] == "Unsupported data type: financial"
 
-    with patch.object(StockTools, "get_generic_db_data", return_value=[{"index_code": "000001.SH", "close": 3201.0}]):
-        result = query_market_data.invoke({
+    with patch.object(StockTools, "get_generic_db_data", new=AsyncMock(return_value=[{"index_code": "000001.SH", "close": 3201.0}])):
+        result = await query_market_data.ainvoke({
             "queries": [{
                 "data_type": "index_daily",
                 "identifier": "000001.SH",
@@ -1594,7 +1588,7 @@ async def test_llm_engine_agent_retries_when_final_text_is_too_short():
     mock_raw_llm.bind_tools.return_value = mock_llm_with_tools
     with _patch_base_agent_llm_provider(mock_raw_llm), \
          patch.object(BaseAgent, "_get_min_iterations", return_value=1), \
-         patch("app.ai.llm_engine.agents.base.record_llm_usage"):
+         patch("app.ai.llm_engine.agents.base.record_llm_usage", new_callable=AsyncMock):
         agent = _DummyLLMEngineAgent(role_name="Dummy Analyst")
         result = await agent.run({"stock_code": "000001.SZ"})
 

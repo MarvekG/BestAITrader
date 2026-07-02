@@ -4,6 +4,7 @@ import json
 from datetime import datetime, timedelta
 
 import pytest
+from sqlalchemy import select
 from starlette.websockets import WebSocketDisconnect
 
 from app.models.market_watch import MarketWatchEvent
@@ -125,7 +126,7 @@ def test_market_watch_websocket_ticket_requires_auth(client) -> None:
 
 
 @pytest.mark.asyncio
-async def test_market_watch_audit_cleanup_once_deletes_old_events(client, auth_headers, db_session) -> None:
+async def test_market_watch_audit_cleanup_once_deletes_old_events(client, auth_headers, async_db_session) -> None:
     from app.tasks.market_watch_scheduler import run_audit_cleanup
 
     settings_response = client.get("/api/v1/market-watch/settings", headers=auth_headers)
@@ -142,11 +143,12 @@ async def test_market_watch_audit_cleanup_once_deletes_old_events(client, auth_h
         status="success",
         created_at=datetime.now(),
     )
-    db_session.add_all([old_event, recent_event])
-    db_session.commit()
+    async_db_session.add_all([old_event, recent_event])
+    await async_db_session.commit()
+    recent_event_id = recent_event.event_id
 
     cleanup_result = await run_audit_cleanup()
 
     assert cleanup_result == {"deleted": 1, "retention_days": 30}
-    event_ids = {event.event_id for event in db_session.query(MarketWatchEvent).all()}
-    assert event_ids == {recent_event.event_id}
+    event_ids = {event.event_id for event in (await async_db_session.execute(select(MarketWatchEvent))).scalars().all()}
+    assert event_ids == {recent_event_id}

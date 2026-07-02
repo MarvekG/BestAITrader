@@ -1,24 +1,27 @@
 from datetime import datetime, timedelta
 import uuid
 
+import pytest
+from sqlalchemy import select
+
 from app.ai.market_watch.schemas import DEFAULT_MARKET_WATCH_SCAN_INTERVAL_SECONDS, MarketWatchMarkdownDocument
-from app.crud.user import create_user
+from app.crud.user import get_password_hash
 from app.models.market_watch import MarketWatchEvent
 from app.models.system_setting import SystemSetting
-from app.schemas.user import UserCreate
+from app.models.user import User
 
 
-def _create_authenticated_user(client, db_session):
+async def _create_authenticated_user(client, async_db_session):
     username = f"market_watch_{uuid.uuid4().hex[:8]}"
     password = "password123"
-    user = create_user(
-        db_session,
-        UserCreate(
-            username=username,
-            email=f"{username}@example.com",
-            password=password,
-        ),
+    user = User(
+        username=username,
+        email=f"{username}@example.com",
+        password_hash=get_password_hash(password),
     )
+    async_db_session.add(user)
+    await async_db_session.commit()
+    await async_db_session.refresh(user)
     response = client.post(
         "/api/v1/auth/login",
         data={"username": username, "password": password},
@@ -43,7 +46,8 @@ def test_market_watch_settings_returns_defaults(client, auth_headers) -> None:
     assert "trading_strategy" not in payload
 
 
-def test_market_watch_settings_update_persists_runtime_values(client, auth_headers, db_session) -> None:
+@pytest.mark.asyncio
+async def test_market_watch_settings_update_persists_runtime_values(client, auth_headers, async_db_session) -> None:
     from app.api.endpoints import market_watch
 
     refresh_calls = []
@@ -80,11 +84,13 @@ def test_market_watch_settings_update_persists_runtime_values(client, auth_heade
     assert payload["recent_debate_lookback_hours"] == 36
     assert "trading_frequency" not in payload
     assert "trading_strategy" not in payload
-    setting = (
-        db_session.query(SystemSetting)
-        .filter(SystemSetting.key == "market_watch.settings", SystemSetting.user_id == payload["user_id"])
-        .one()
+    setting = await async_db_session.scalar(
+        select(SystemSetting).where(
+            SystemSetting.key == "market_watch.settings",
+            SystemSetting.user_id == payload["user_id"],
+        )
     )
+    assert setting is not None
     assert setting.value["scan_interval_seconds"] == 45
     assert setting.value["news_sources"] == [
         {"url": "https://news.example.com/latest", "content_selectors": [], "cleanup_patterns": []}
@@ -94,9 +100,10 @@ def test_market_watch_settings_update_persists_runtime_values(client, auth_heade
     assert refresh_calls == ["refresh"]
 
 
-def test_market_watch_settings_are_isolated_by_user(client, db_session) -> None:
-    owner, owner_headers = _create_authenticated_user(client, db_session)
-    other, other_headers = _create_authenticated_user(client, db_session)
+@pytest.mark.asyncio
+async def test_market_watch_settings_are_isolated_by_user(client, async_db_session) -> None:
+    owner, owner_headers = await _create_authenticated_user(client, async_db_session)
+    other, other_headers = await _create_authenticated_user(client, async_db_session)
 
     update_response = client.put(
         "/api/v1/market-watch/settings",
@@ -176,7 +183,8 @@ def test_market_watch_source_preview_reuses_source_fetcher(client, auth_headers,
     assert response.json()["markdown"] == "matched data"
 
 
-def test_market_watch_events_returns_current_user_events(client, auth_headers, db_session) -> None:
+@pytest.mark.asyncio
+async def test_market_watch_events_returns_current_user_events(client, auth_headers, async_db_session) -> None:
     settings_response = client.get("/api/v1/market-watch/settings", headers=auth_headers)
     user_id = settings_response.json()["user_id"]
     event = MarketWatchEvent(
@@ -186,8 +194,8 @@ def test_market_watch_events_returns_current_user_events(client, auth_headers, d
         reason="cooldown",
         created_at=datetime.now(),
     )
-    db_session.add(event)
-    db_session.commit()
+    async_db_session.add(event)
+    await async_db_session.commit()
 
     response = client.get("/api/v1/market-watch/events", headers=auth_headers)
 
@@ -201,11 +209,12 @@ def test_market_watch_events_returns_current_user_events(client, auth_headers, d
     assert "summary" not in payload[0]
 
 
-def test_market_watch_decisions_returns_paginated_current_user_rounds(client, auth_headers, db_session) -> None:
+@pytest.mark.asyncio
+async def test_market_watch_decisions_returns_paginated_current_user_rounds(client, auth_headers, async_db_session) -> None:
     settings_response = client.get("/api/v1/market-watch/settings", headers=auth_headers)
     user_id = settings_response.json()["user_id"]
     for index in range(3):
-        db_session.add(
+        async_db_session.add(
             MarketWatchEvent(
                 user_id=user_id,
                 event_type="ai_decision",
@@ -214,7 +223,7 @@ def test_market_watch_decisions_returns_paginated_current_user_rounds(client, au
                 created_at=datetime.now() + timedelta(seconds=index),
             )
         )
-    db_session.add(
+    async_db_session.add(
         MarketWatchEvent(
             user_id=user_id,
             event_type="scan",
@@ -222,7 +231,7 @@ def test_market_watch_decisions_returns_paginated_current_user_rounds(client, au
             created_at=datetime.now() + timedelta(seconds=4),
         )
     )
-    db_session.commit()
+    await async_db_session.commit()
 
     response = client.get(
         "/api/v1/market-watch/decisions?page=2&page_size=2",

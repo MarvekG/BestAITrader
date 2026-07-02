@@ -1,4 +1,3 @@
-import asyncio
 import pandas as pd
 from unittest.mock import Mock, AsyncMock
 from app.data.ingestors.plugins.tushare_ingestor import TushareIngestor
@@ -74,6 +73,3 @@ async def test_shareholder_complement():
     expected_avg_shares = (125619.78 * 10000) / 110000
     assert pytest.approx(float(row_0630['avg_hold_shares']), 0.1) == expected_avg_shares
     print("Verification Successful!")
-
-if __name__ == "__main__":
-    asyncio.run(test_shareholder_complement())

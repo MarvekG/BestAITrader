@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.llm_engine.context.capital_flow import CapitalFlowSource
 from app.ai.llm_engine.context.financial import FinancialSource
@@ -53,120 +53,120 @@ class _WrapSnapshotMixin:
 class FundamentalReader(_WrapDictMixin):
     source: FundamentalSource = field(default_factory=FundamentalSource)
 
-    def basic_info(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_basic_info(db, stock_code)
+    async def basic_info(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_basic_info(db, stock_code)
 
-    def industry_rank(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_industry_rank(db, stock_code)
+    async def industry_rank(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_industry_rank(db, stock_code)
 
-    def valuation(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_valuation(db, stock_code)
+    async def valuation(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_valuation(db, stock_code)
 
-    def northbound_flow(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_northbound_flow(db, stock_code)
+    async def northbound_flow(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_northbound_flow(db, stock_code)
 
-    def top_holders(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_top_holders(db, stock_code)
+    async def top_holders(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_top_holders(db, stock_code)
 
     def normalize_holder_change_label(self, change_value: Any) -> str:
         return self.source._normalize_holder_change_label(change_value)
 
-    def fund_holding(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_fund_holding(db, stock_code)
+    async def fund_holding(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_fund_holding(db, stock_code)
 
-    def insider_activity(self, db: Session, stock_code: str, *, months: int = 6) -> dict[str, Any]:
-        return self.source._get_insider_activity(db, stock_code, months=months)
+    async def insider_activity(self, db: AsyncSession, stock_code: str, *, months: int = 6) -> dict[str, Any]:
+        return await self.source._get_insider_activity(db, stock_code, months=months)
 
-    def seo_history(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_seo_history(db, stock_code)
+    async def seo_history(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_seo_history(db, stock_code)
 
-    def lockup_release(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_lockup_release(db, stock_code)
+    async def lockup_release(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_lockup_release(db, stock_code)
 
-    def margin_analysis(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_margin_analysis(db, stock_code)
+    async def margin_analysis(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_margin_analysis(db, stock_code)
 
-    def dragon_tiger_activity(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_market_wide_dragon_tiger_activity(db, stock_code)
+    async def dragon_tiger_activity(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_market_wide_dragon_tiger_activity(db, stock_code)
 
 
 @dataclass(slots=True)
 class TechnicalReader(_WrapDictMixin):
     source: TechnicalSource = field(default_factory=TechnicalSource)
 
-    def realtime_market(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_realtime_market(db, stock_code)
+    async def realtime_market(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_realtime_market(db, stock_code)
 
-    def latest_indicators(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_latest_indicators(db, stock_code)
+    async def latest_indicators(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_latest_indicators(db, stock_code)
 
-    def index_context(self, db: Session) -> dict[str, Any]:
-        return self.source._get_index_context(db)
+    async def index_context(self, db: AsyncSession) -> dict[str, Any]:
+        return await self.source._get_index_context(db)
 
-    def recent_klines(self, db: Session, stock_code: str, *, days: int) -> list[dict[str, Any]]:
-        return self.source._get_recent_klines(db, stock_code, days=days)
+    async def recent_klines(self, db: AsyncSession, stock_code: str, *, days: int) -> list[dict[str, Any]]:
+        return await self.source._get_recent_klines(db, stock_code, days=days)
 
 
 @dataclass(slots=True)
 class CapitalFlowReader:
     source: CapitalFlowSource = field(default_factory=CapitalFlowSource)
 
-    def money_flow(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_money_flow(db, stock_code)
+    async def money_flow(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_money_flow(db, stock_code)
 
-    def shareholder(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_shareholder(db, stock_code)
+    async def shareholder(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_shareholder(db, stock_code)
 
-    def northbound(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_northbound(db, stock_code)
+    async def northbound(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_northbound(db, stock_code)
 
-    def dragon_tiger(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_dragon_tiger(db, stock_code)
+    async def dragon_tiger(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_dragon_tiger(db, stock_code)
 
-    def margin(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_margin(db, stock_code)
+    async def margin(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_margin(db, stock_code)
 
-    def money_flow_trend(self, db: Session, stock_code: str) -> list[dict[str, Any]]:
-        return self.source._get_money_flow_trend(db, stock_code)
+    async def money_flow_trend(self, db: AsyncSession, stock_code: str) -> list[dict[str, Any]]:
+        return await self.source._get_money_flow_trend(db, stock_code)
 
-    def northbound_trend(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_northbound_trend(db, stock_code)
+    async def northbound_trend(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_northbound_trend(db, stock_code)
 
-    def dragon_tiger_effect(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._analyze_dragon_tiger_effect(db, stock_code)
+    async def dragon_tiger_effect(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._analyze_dragon_tiger_effect(db, stock_code)
 
-    def sector_flow(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_sector_flow(db, stock_code)
+    async def sector_flow(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_sector_flow(db, stock_code)
 
-    def block_trade(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_block_trade(db, stock_code)
+    async def block_trade(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_block_trade(db, stock_code)
 
 
 @dataclass(slots=True)
 class SentimentReader(_WrapDictMixin, _WrapListMixin):
     source: SentimentSource = field(default_factory=SentimentSource)
 
-    def hot_rank(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_hot_rank(db, stock_code)
+    async def hot_rank(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_hot_rank(db, stock_code)
 
 @dataclass(slots=True)
 class RiskReader(_WrapDictMixin, _WrapListMixin):
     source: RiskSource = field(default_factory=RiskSource)
 
-    def pledge(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_pledge(db, stock_code)
+    async def pledge(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_pledge(db, stock_code)
 
-    def insider(self, db: Session, stock_code: str) -> list[dict[str, Any]]:
-        return self.source._get_insider(db, stock_code)
+    async def insider(self, db: AsyncSession, stock_code: str) -> list[dict[str, Any]]:
+        return await self.source._get_insider(db, stock_code)
 
-    def lockup(self, db: Session, stock_code: str) -> list[dict[str, Any]]:
-        return self.source._get_lockup(db, stock_code)
+    async def lockup(self, db: AsyncSession, stock_code: str) -> list[dict[str, Any]]:
+        return await self.source._get_lockup(db, stock_code)
 
-    def shareholder(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_shareholder(db, stock_code)
+    async def shareholder(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_shareholder(db, stock_code)
 
-    def shareholder_trend(self, db: Session, stock_code: str) -> dict[str, Any]:
-        return self.source._get_shareholder_trend(db, stock_code)
+    async def shareholder_trend(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_shareholder_trend(db, stock_code)
 
 
 @dataclass(slots=True)
@@ -176,7 +176,7 @@ class FinancialReader(_WrapSnapshotMixin):
     def localize_raw_data(self, raw_data: dict[str, Any] | None, table: str) -> dict[str, Any] | None:
         return self.source._localize_raw_data(raw_data, table)
 
-    async def financial_records(self, db: Session, stock_code: str) -> list[dict[str, Any]]:
+    async def financial_records(self, db: AsyncSession, stock_code: str) -> list[dict[str, Any]]:
         """读取最近多期财务指标。
 
         Args:
@@ -193,7 +193,7 @@ class FinancialReader(_WrapSnapshotMixin):
             table="data.financial_indicator",
         )
 
-    async def income_statement_records(self, db: Session, stock_code: str) -> list[dict[str, Any]]:
+    async def income_statement_records(self, db: AsyncSession, stock_code: str) -> list[dict[str, Any]]:
         """读取最近多期利润表。
 
         Args:
@@ -210,7 +210,7 @@ class FinancialReader(_WrapSnapshotMixin):
             table="data.stock_income_statement",
         )
 
-    async def balance_sheet_records(self, db: Session, stock_code: str) -> list[dict[str, Any]]:
+    async def balance_sheet_records(self, db: AsyncSession, stock_code: str) -> list[dict[str, Any]]:
         """读取最近多期资产负债表。
 
         Args:
@@ -229,7 +229,7 @@ class FinancialReader(_WrapSnapshotMixin):
 
     async def cashflow_statement_records(
         self,
-        db: Session,
+        db: AsyncSession,
         stock_code: str,
         *,
         format_for_context: bool = True,
@@ -254,7 +254,7 @@ class FinancialReader(_WrapSnapshotMixin):
 
     async def latest_income_statement(
         self,
-        db: Session,
+        db: AsyncSession,
         stock_code: str,
         *,
         format_for_context: bool = True,
@@ -277,7 +277,7 @@ class FinancialReader(_WrapSnapshotMixin):
 
     async def latest_balance_sheet(
         self,
-        db: Session,
+        db: AsyncSession,
         stock_code: str,
         *,
         format_for_context: bool = True,
@@ -300,7 +300,7 @@ class FinancialReader(_WrapSnapshotMixin):
 
     async def latest_cashflow_statement(
         self,
-        db: Session,
+        db: AsyncSession,
         stock_code: str,
         *,
         format_for_context: bool = True,

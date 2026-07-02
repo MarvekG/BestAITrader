@@ -40,10 +40,10 @@ def _build_candidate_ranges(as_of: Optional[date] = None) -> List[tuple[str, str
     return ranges
 
 
-def _get_tushare_pro_client():
+async def _get_tushare_pro_client():
     """Create a Tushare pro client using current runtime settings."""
-    token = get_data_source_config_value(TUSHARE_TOKEN_SETTING_KEY)
-    api_url = get_data_source_config_value(TUSHARE_API_SETTING_KEY)
+    token = await get_data_source_config_value(TUSHARE_TOKEN_SETTING_KEY)
+    api_url = await get_data_source_config_value(TUSHARE_API_SETTING_KEY)
     if not token:
         raise RuntimeError("Tushare token is required for core index constituent queries")
 
@@ -55,7 +55,7 @@ def _get_tushare_pro_client():
     return ts.pro_api(token)
 
 
-def get_core_index_constituent_codes(
+async def get_core_index_constituent_codes(
     index_codes: Optional[Iterable[str]] = None,
     *,
     as_of: Optional[date] = None,
@@ -75,7 +75,7 @@ def get_core_index_constituent_codes(
         Sorted standardized stock codes.
     """
     resolved_index_codes = list(index_codes or settings.CORE_INDICES)
-    pro = _get_tushare_pro_client()
+    pro = await _get_tushare_pro_client()
     ranges = _build_candidate_ranges(as_of=as_of)
     resolved_codes = set()
 
