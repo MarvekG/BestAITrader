@@ -534,18 +534,15 @@ class ExperienceService:
         review_run_id = str(uuid.uuid4())
         selected_review_horizon: ReviewHorizon | None = None
         market_day_count = 0
-        async with database_module.AsyncSessionLocal() as db:
-            return await self._analyze(
-                db,
-                user_id=user_id,
-                session_id=session_id,
-                review_horizon=review_horizon,
-                review_run_id=review_run_id,
-            )
+        return await self._analyze(
+            user_id=user_id,
+            session_id=session_id,
+            review_horizon=review_horizon,
+            review_run_id=review_run_id,
+        )
 
     async def _analyze(
         self,
-        db: AsyncSession,
         *,
         user_id: int,
         session_id: UUID,
@@ -555,87 +552,104 @@ class ExperienceService:
         selected_review_horizon: ReviewHorizon | None = None
         market_day_count = 0
         try:
-            session_obj = (
-                await db.execute(
-                    select(DebateSession).where(
-                        DebateSession.session_id == session_id,
-                        DebateSession.user_id == user_id,
+            async with database_module.AsyncSessionLocal() as db:
+                session_obj = (
+                    await db.execute(
+                        select(DebateSession).where(
+                            DebateSession.session_id == session_id,
+                            DebateSession.user_id == user_id,
+                        )
                     )
-                )
-            ).scalars().first()
-            if not session_obj:
-                raise ValueError(f"Session {session_id} not found")
+                ).scalars().first()
+                if not session_obj:
+                    raise ValueError(f"Session {session_id} not found")
 
-            active_review_run_id = await self._get_active_review_run_id(
-                db,
-                user_id=user_id,
-                session_id=session_id,
-            )
-            if active_review_run_id:
-                raise ValueError(
-                    f"Experience review is already running for session {session_id} (run {active_review_run_id})"
+                active_review_run_id = await self._get_active_review_run_id(
+                    db,
+                    user_id=user_id,
+                    session_id=session_id,
                 )
+                if active_review_run_id:
+                    raise ValueError(
+                        f"Experience review is already running for session {session_id} (run {active_review_run_id})"
+                    )
 
-            stock = (
-                await db.execute(select(StockBasic).where(StockBasic.stock_code == session_obj.stock_code))
-            ).scalars().first()
-            stock_name = stock.name if stock else session_obj.stock_code
-            industry = stock.industry if stock else None
-            style_bucket = _style_bucket_from_frequency(session_obj.trading_frequency)
-            if style_bucket not in VALID_STYLE_BUCKETS:
-                raise ValueError(
-                    f"Unsupported style bucket derived from trading_frequency: {session_obj.trading_frequency}"
+                stock = (
+                    await db.execute(select(StockBasic).where(StockBasic.stock_code == session_obj.stock_code))
+                ).scalars().first()
+                stock_name = stock.name if stock else session_obj.stock_code
+                industry = stock.industry if stock else None
+                style_bucket = _style_bucket_from_frequency(session_obj.trading_frequency)
+                if style_bucket not in VALID_STYLE_BUCKETS:
+                    raise ValueError(
+                        f"Unsupported style bucket derived from trading_frequency: {session_obj.trading_frequency}"
+                    )
+
+                debate_messages = (
+                    await db.execute(
+                        select(DebateMessage)
+                        .where(DebateMessage.session_id == session_id)
+                        .order_by(DebateMessage.created_at.asc())
+                    )
+                ).scalars().all()
+                if not debate_messages:
+                    raise ValueError(f"Session {session_id} has no debate messages")
+
+                pm_message = self._get_latest_pm_message(debate_messages)
+                if not pm_message:
+                    raise ValueError(f"Session {session_id} has no PM decision")
+
+                market_day_count = await self._get_market_day_count(
+                    db,
+                    stock_code=session_obj.stock_code,
+                    decision_time=pm_message.created_at,
                 )
+                available_horizons = eligible_horizons(market_day_count)
+                selected_review_horizon = normalize_review_horizon(review_horizon)
+                if selected_review_horizon is None:
+                    selected_review_horizon = self._default_review_horizon(available_horizons)
+                if selected_review_horizon is None:
+                    raise ValueError(
+                        "Market outcome summary is unavailable for this session; "
+                        "experience analysis requires post-decision market data."
+                    )
+                required_days = HORIZON_REQUIRED_MARKET_DAYS[selected_review_horizon]
+                if market_day_count < required_days:
+                    raise ValueError(
+                        f"Review horizon {selected_review_horizon} requires {required_days} market days; "
+                        f"only {market_day_count} are available."
+                    )
 
-            debate_messages = (
-                await db.execute(
-                    select(DebateMessage)
-                    .where(DebateMessage.session_id == session_id)
-                    .order_by(DebateMessage.created_at.asc())
+                debate_review_context = await self._build_debate_review_context(
+                    db=db,
+                    session_obj=session_obj,
+                    stock_name=stock_name,
+                    industry=industry,
+                    debate_messages=debate_messages,
+                    pm_message=pm_message,
+                    review_horizon=selected_review_horizon,
+                    market_day_count=market_day_count,
                 )
-            ).scalars().all()
-            if not debate_messages:
-                raise ValueError(f"Session {session_id} has no debate messages")
+                if not (debate_review_context.get("market_outcome_summary") or {}):
+                    raise ValueError(
+                        "Market outcome summary is unavailable for this session; "
+                        "experience analysis requires post-decision market data."
+                    )
 
-            pm_message = self._get_latest_pm_message(debate_messages)
-            if not pm_message:
-                raise ValueError(f"Session {session_id} has no PM decision")
-
-            market_day_count = await self._get_market_day_count(
-                db,
-                stock_code=session_obj.stock_code,
-                decision_time=pm_message.created_at,
-            )
-            available_horizons = eligible_horizons(market_day_count)
-            selected_review_horizon = normalize_review_horizon(review_horizon)
-            if selected_review_horizon is None:
-                selected_review_horizon = self._default_review_horizon(available_horizons)
-            if selected_review_horizon is None:
-                raise ValueError(
-                    "Market outcome summary is unavailable for this session; "
-                    "experience analysis requires post-decision market data."
-                )
-            required_days = HORIZON_REQUIRED_MARKET_DAYS[selected_review_horizon]
-            if market_day_count < required_days:
-                raise ValueError(
-                    f"Review horizon {selected_review_horizon} requires {required_days} market days; "
-                    f"only {market_day_count} are available."
-                )
-
-            debate_review_context = await self._build_debate_review_context(
-                db=db,
-                session_obj=session_obj,
-                stock_name=stock_name,
-                industry=industry,
-                debate_messages=debate_messages,
-                pm_message=pm_message,
-                review_horizon=selected_review_horizon,
-                market_day_count=market_day_count,
-            )
-            if not (debate_review_context.get("market_outcome_summary") or {}):
-                raise ValueError(
-                    "Market outcome summary is unavailable for this session; "
-                    "experience analysis requires post-decision market data."
+                await self._persist_review_event(
+                    db,
+                    review_run_id=review_run_id,
+                    session_id=session_obj.session_id,
+                    user_id=user_id,
+                    stage="experience_review",
+                    status="started",
+                    message_key="experience.live_messages.started",
+                    payload={
+                        "stock_code": session_obj.stock_code,
+                        "stock_name": stock_name,
+                        "review_horizon": selected_review_horizon,
+                        "market_day_count": market_day_count,
+                    },
                 )
 
             async def persist_live_event(
@@ -646,17 +660,18 @@ class ExperienceService:
                 message_params: Dict[str, Any] | None = None,
                 payload: Dict[str, Any] | None = None,
             ) -> None:
-                await self._persist_review_event(
-                    db,
-                    review_run_id=review_run_id,
-                    session_id=session_obj.session_id,
-                    user_id=user_id,
-                    stage=stage,
-                    status=status,
-                    message_key=message_key,
-                    message_params=message_params,
-                    payload=payload,
-                )
+                async with database_module.AsyncSessionLocal() as event_db:
+                    await self._persist_review_event(
+                        event_db,
+                        review_run_id=review_run_id,
+                        session_id=session_obj.session_id,
+                        user_id=user_id,
+                        stage=stage,
+                        status=status,
+                        message_key=message_key,
+                        message_params=message_params,
+                        payload=payload,
+                    )
 
             await self._push_review_update(
                 debate_session_id=str(session_obj.session_id),
@@ -671,22 +686,6 @@ class ExperienceService:
                     "market_day_count": market_day_count,
                 },
             )
-            await self._persist_review_event(
-                db,
-                review_run_id=review_run_id,
-                session_id=session_obj.session_id,
-                user_id=user_id,
-                stage="experience_review",
-                status="started",
-                message_key="experience.live_messages.started",
-                payload={
-                    "stock_code": session_obj.stock_code,
-                    "stock_name": stock_name,
-                    "review_horizon": selected_review_horizon,
-                    "market_day_count": market_day_count,
-                },
-            )
-
             workflow = create_experience_workflow()
             result_state = await workflow.ainvoke(
                 {
@@ -751,22 +750,24 @@ class ExperienceService:
                     debate_correctness=normalized_payload.get("debate_correctness"),
                 ),
             )
-            await self._persist_review_event(
-                db,
-                review_run_id=review_run_id,
-                session_id=session_obj.session_id,
-                user_id=user_id,
-                stage="experience_review",
-                status="completed",
-                message_key="experience.live_messages.completed",
-                payload=self._build_completed_event_payload(
-                    result=result,
-                    recommended_action=normalized_payload.get("recommended_action"),
-                    debate_correctness=normalized_payload.get("debate_correctness"),
-                ),
-            )
+            async with database_module.AsyncSessionLocal() as db:
+                await self._persist_review_event(
+                    db,
+                    review_run_id=review_run_id,
+                    session_id=session_obj.session_id,
+                    user_id=user_id,
+                    stage="experience_review",
+                    status="completed",
+                    message_key="experience.live_messages.completed",
+                    payload=self._build_completed_event_payload(
+                        result=result,
+                        recommended_action=normalized_payload.get("recommended_action"),
+                        debate_correctness=normalized_payload.get("debate_correctness"),
+                    ),
+                )
             try:
-                await experience_index_service.sync_from_review_result(db, user_id=user_id, result=result)
+                async with database_module.AsyncSessionLocal() as db:
+                    await experience_index_service.sync_from_review_result(db, user_id=user_id, result=result)
             except Exception as index_exc:
                 logger.warning(
                     "experience index sync failed",
@@ -792,21 +793,22 @@ class ExperienceService:
                     "market_day_count": market_day_count,
                 },
             )
-            await self._persist_review_event(
-                db,
-                review_run_id=review_run_id,
-                session_id=session_id,
-                user_id=user_id,
-                stage="experience_review",
-                status="failed",
-                message_key="experience.live_messages.failed",
-                message_params={"error": str(exc)},
-                payload={
-                    "error": str(exc),
-                    "review_horizon": selected_review_horizon,
-                    "market_day_count": market_day_count,
-                },
-            )
+            async with database_module.AsyncSessionLocal() as db:
+                await self._persist_review_event(
+                    db,
+                    review_run_id=review_run_id,
+                    session_id=session_id,
+                    user_id=user_id,
+                    stage="experience_review",
+                    status="failed",
+                    message_key="experience.live_messages.failed",
+                    message_params={"error": str(exc)},
+                    payload={
+                        "error": str(exc),
+                        "review_horizon": selected_review_horizon,
+                        "market_day_count": market_day_count,
+                    },
+                )
             raise
 
     async def list_debate_sessions(self, *, user_id: int, limit: int = 100) -> List[Dict[str, Any]]:

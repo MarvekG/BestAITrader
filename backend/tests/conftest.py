@@ -10,8 +10,7 @@ import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 # 必须在导入 app 任何模块之前设置，避免 Settings 校验失败。
@@ -281,9 +280,8 @@ def sqlite_async_test_engine(sqlite_test_paths):
     _run_async(engine.dispose())
 @pytest.fixture(scope="session", autouse=True)
 def sqlite_async_session_factory(sqlite_async_test_engine):
-    return sessionmaker(
+    return async_sessionmaker(
         sqlite_async_test_engine,
-        class_=AsyncSession,
         expire_on_commit=False,
         autoflush=False,
     )
@@ -318,19 +316,11 @@ def test_db(sqlite_test_schema, sqlite_async_session_factory):
     original_async_session_local = db_module.AsyncSessionLocal
 
     from app.main import app
-    import app.api.ownership as ownership_module
-    import app.trading.service as trading_service_module
-
-    original_ownership_async_session_factory = ownership_module.async_session_factory
-    original_trading_async_session_factory = trading_service_module.async_session_factory
-
     async def override_get_async_db():
         async with sqlite_async_session_factory() as db:
             yield db
 
     db_module.AsyncSessionLocal = sqlite_async_session_factory
-    ownership_module.async_session_factory = sqlite_async_session_factory
-    trading_service_module.async_session_factory = sqlite_async_session_factory
 
     _run_async(_clear_async_sqlite_tables(sqlite_async_session_factory))
     invalidate_data_source_config_cache()
@@ -341,8 +331,6 @@ def test_db(sqlite_test_schema, sqlite_async_session_factory):
     finally:
         app.dependency_overrides.pop(get_async_db, None)
         db_module.AsyncSessionLocal = original_async_session_local
-        ownership_module.async_session_factory = original_ownership_async_session_factory
-        trading_service_module.async_session_factory = original_trading_async_session_factory
         settings.SYSTEM_LANGUAGE = original_system_language
         _run_async(_clear_async_sqlite_tables(sqlite_async_session_factory))
         invalidate_data_source_config_cache()

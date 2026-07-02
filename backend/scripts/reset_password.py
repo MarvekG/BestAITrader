@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core import database as database_module
 from app.crud.user import get_user_by_username, update_user
 from app.schemas.user import UserUpdate
 
@@ -25,7 +25,7 @@ from app.schemas.user import UserUpdate
 async def reset_password(username: str, new_password: str) -> bool:
     """重置指定用户密码。"""
     print(f"[*] Preparing to reset password for user '{username}'...")
-    async with AsyncSessionLocal() as db:
+    async with database_module.AsyncSessionLocal() as db:
         user = await get_user_by_username(db, username=username)
         if not user:
             print(f"[!] Error: User '{username}' not found.")

@@ -5,8 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 import app.core.database as database_module
@@ -25,7 +24,7 @@ async def llm_usage_db():
     )
     async with engine.begin() as conn:
         await conn.run_sync(LLMUsageLog.__table__.create)
-    session_factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
     original_async_session_local = database_module.AsyncSessionLocal
     database_module.AsyncSessionLocal = session_factory
     try:

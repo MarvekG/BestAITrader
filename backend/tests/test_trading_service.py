@@ -6,7 +6,6 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import func, select
 
-from app.core import database as database_module
 from app.models.account import Account
 from app.models.order import Order
 from app.models.position import Position
@@ -47,7 +46,6 @@ async def _seed_account(db, *, user_id: int = 42, cash: str = "100000") -> Accou
 @pytest.fixture(autouse=True)
 def patch_service_async_session(monkeypatch, test_db):
     del test_db
-    monkeypatch.setattr("app.trading.service.async_session_factory", database_module.AsyncSessionLocal)
     monkeypatch.setattr("app.trading.service.is_trading_time", lambda: True)
 
 

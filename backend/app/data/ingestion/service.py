@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import Optional, List, Dict
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from app.core.database import AsyncSessionLocal
+from app.core import database as database_module
 from app.core.utils.formatters import StockCodeStandardizer
 from app.models.data_storage import (
     Base, CommonData, KlineData, StockBasic, NorthboundData, DragonTigerData, StockValuationHistory,
@@ -115,7 +115,7 @@ class DataIngestionService:
         if 'stock_code' in df.columns and target_model not in [StockBasic, SectorMoneyFlow, IndustryData]:
             try:
                 logger.info(f"Filtering stock_code for {api_name} against stock_basic...")
-                async with AsyncSessionLocal() as session:
+                async with database_module.AsyncSessionLocal() as session:
                     result = await session.execute(select(StockBasic.stock_code))
                     valid_stock_codes = {str(code) for code in result.scalars().all()}
 
@@ -396,7 +396,7 @@ class DataIngestionService:
             else:
                 stmt = stmt.on_conflict_do_nothing(index_elements=conflict_target)
 
-        async with AsyncSessionLocal() as session:
+        async with database_module.AsyncSessionLocal() as session:
             async with session.begin():
                 await session.execute(stmt)
         

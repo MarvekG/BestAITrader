@@ -1,6 +1,7 @@
 from typing import Any
 from datetime import datetime
 from decimal import Decimal
+from uuid import UUID
 
 from sqlalchemy import func
 from sqlalchemy import select
@@ -77,10 +78,13 @@ async def _validate_sell_limit_reservation(db, *, order: Order, position: Positi
     return {"success": True, "available_shares": executable_shares, "reserved_shares": reserved_shares}
 
 
-async def _match_pending_order(db, order: Order) -> dict[str, Any]:
+async def _match_pending_order(db, order_id: UUID) -> dict[str, Any]:
     """异步撮合单笔待成交限价单。"""
     locked_order_result = await db.execute(
-        select(Order).where(Order.order_id == order.order_id).with_for_update()
+        select(Order)
+        .where(Order.order_id == order_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
     )
     locked_order = locked_order_result.scalar_one_or_none()
     if not locked_order:
@@ -297,7 +301,7 @@ async def run_pending_order_match_scan() -> dict[str, Any]:
 
         async with database_module.AsyncSessionLocal() as db:
             pending_orders_result = await db.execute(
-                select(Order)
+                select(Order.order_id)
                 .where(
                     Order.status == "pending",
                     Order.order_type == "limit",
@@ -305,12 +309,13 @@ async def run_pending_order_match_scan() -> dict[str, Any]:
                 .order_by(Order.created_at.asc())
                 .limit(PENDING_ORDER_MATCH_LIMIT)
             )
-            pending_orders = pending_orders_result.scalars().all()
+            pending_order_ids = list(pending_orders_result.scalars().all())
 
-            matched = 0
-            failed = 0
-            for order in pending_orders:
-                result = await _match_pending_order(db, order)
+        matched = 0
+        failed = 0
+        for order_id in pending_order_ids:
+            async with database_module.AsyncSessionLocal() as db:
+                result = await _match_pending_order(db, order_id)
                 if result.get("matched"):
                     matched += 1
                 elif result.get("success") is False and result.get("reason") != "market_price_unavailable":
@@ -319,7 +324,7 @@ async def run_pending_order_match_scan() -> dict[str, Any]:
         result = {
             "success": True,
             "skipped": False,
-            "scanned": len(pending_orders),
+            "scanned": len(pending_order_ids),
             "matched": matched,
             "failed": failed,
         }

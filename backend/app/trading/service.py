@@ -6,7 +6,6 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core import database as database_module
-from app.core.database import AsyncSessionLocal as async_session_factory
 from app.core.logger import get_logger
 from app.trading.trading_engine import TradingEngine
 from app.models.account import Account
@@ -415,7 +414,7 @@ class TradingService:
         Returns:
             撤单结果。
         """
-        async with async_session_factory() as db:
+        async with database_module.AsyncSessionLocal() as db:
             order_stmt = select(Order).where(Order.order_id == order_id).with_for_update()
             if user_id is not None:
                 order_stmt = order_stmt.join(Account, Order.account_id == Account.account_id).where(Account.user_id == user_id)
@@ -463,7 +462,7 @@ class TradingService:
         Raises:
             ValueError: 订单不存在时抛出。
         """
-        async with async_session_factory() as db:
+        async with database_module.AsyncSessionLocal() as db:
             result = await db.execute(select(Order).where(Order.order_id == order_id).with_for_update())
             order = result.scalar_one_or_none()
             if order is None:
@@ -485,7 +484,7 @@ class TradingService:
         Returns:
             撮合结果；价格未触发时返回 `matched=False`。
         """
-        async with async_session_factory() as db:
+        async with database_module.AsyncSessionLocal() as db:
             order_result = await db.execute(select(Order).where(Order.order_id == order.order_id))
             current_order = order_result.scalar_one_or_none()
             if not current_order:
@@ -540,7 +539,7 @@ class TradingService:
         if not is_trading_time():
             return {"success": True, "skipped": True, "reason": "not_trading_time", "scanned": 0, "matched": 0}
 
-        async with async_session_factory() as db:
+        async with database_module.AsyncSessionLocal() as db:
             pending_orders_result = await db.execute(
                 select(Order)
                 .where(Order.status == "pending", Order.order_type == "limit")
@@ -602,7 +601,7 @@ class TradingService:
         Raises:
             ValueError: 加锁后无法找到目标账户时抛出。
         """
-        async with async_session_factory() as db:
+        async with database_module.AsyncSessionLocal() as db:
             should_notify = existing_order is None
             if existing_order is not None:
                 locked_order_result = await db.execute(

@@ -19,6 +19,16 @@ TEXT_PATTERNS = [
         "from sqlalchemy.orm import Session",
         re.compile(r"^\s*from\s+sqlalchemy\.orm\s+import\s+.*\bSession\b", re.MULTILINE),
     ),
+    (
+        "from sqlalchemy.orm import sessionmaker",
+        re.compile(r"^\s*from\s+sqlalchemy\.orm\s+import\s+.*\bsessionmaker\b", re.MULTILINE),
+    ),
+    ("sqlalchemy.orm.sessionmaker", re.compile(r"\bsqlalchemy\.orm\.sessionmaker\b")),
+    ("sessionmaker", re.compile(r"\bsessionmaker\s*\(")),
+    (
+        "direct AsyncSessionLocal import",
+        re.compile(r"^\s*from\s+app\.core\.database\s+import\s+.*\bAsyncSessionLocal\b", re.MULTILINE),
+    ),
 ]
 DB_QUERY_RECEIVER_NAMES = {"db", "db_session", "session"}
 

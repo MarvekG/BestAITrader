@@ -1,5 +1,5 @@
 import uuid
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import select
@@ -96,7 +96,7 @@ async def test_task_status_hides_tasks_owned_by_other_users(client, test_db):
 async def test_submitted_api_task_records_current_user(client, test_db):
     owner_id, owner_headers = await _create_authenticated_user(client, test_db)
 
-    with patch("app.tasks.async_task_runner.async_task_runner.submit_task", return_value=True):
+    with patch("app.tasks.async_task_runner.async_task_runner.submit_task", return_value=True) as submit_mock:
         response = client.post("/api/v1/data/db/sync/stock-basic", headers=owner_headers)
 
     assert response.status_code == 200
@@ -105,6 +105,14 @@ async def test_submitted_api_task_records_current_user(client, test_db):
             await db.execute(select(AsyncTask).where(AsyncTask.task_id == response.json()["task_id"]))
         ).scalar_one()
     assert task.user_id == owner_id
+
+    submitted = submit_mock.call_args.kwargs
+    with patch(
+        "app.data.ingestors.manager.ingestor_manager.fetch_and_ingest_all_stock_basic",
+        AsyncMock(return_value=True),
+    ):
+        result = await submitted["task_func"](**submitted["task_kwargs"])
+    assert result["status"] == "success"
 
 
 @pytest.mark.asyncio

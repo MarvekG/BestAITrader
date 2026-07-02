@@ -410,6 +410,7 @@ async def sync_bulk_tables_func(
 
 async def sync_all_stock_basic_func(
     stock_code: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Stock Basic Info Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -445,6 +446,7 @@ async def sync_valuation_data_func(
     stock_code: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Valuation Data Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -490,6 +492,7 @@ async def sync_valuation_data_func(
 async def sync_dragon_tiger_data_func(
     date: str,
     end_date: str = None,
+    task_id: Optional[str] = None,
     task_name: str = "Dragon Tiger Sync Task",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -501,8 +504,8 @@ async def sync_dragon_tiger_data_func(
     :param allow_concurrent: 是否允许并发
     """
 
-    task_id = str(uuid.uuid4())
-    logger.info(f"Task {task_id}: Starting {task_name} for date(s) {date} to {end_date or date}")
+    current_task_id = task_id or str(uuid.uuid4())
+    logger.info(f"Task {current_task_id}: Starting {task_name} for date(s) {date} to {end_date or date}")
 
     try:
         from app.data.ingestors.manager import ingestor_manager
@@ -511,24 +514,24 @@ async def sync_dragon_tiger_data_func(
         success = await ingestor_manager.fetch_and_ingest_dragon_tiger(date, end_date)
 
         if success:
-            logger.info(f"Task {task_id}: Completed successfully.")
+            logger.info(f"Task {current_task_id}: Completed successfully.")
             return {
-                "task_id": task_id,
+                "task_id": current_task_id,
                 "status": "completed",
                 "message": f"Successfully synced dragon tiger data for {date}-{end_date or date}.",
             }
         else:
-            logger.warning(f"Task {task_id}: Failed or no data found.")
+            logger.warning(f"Task {current_task_id}: Failed or no data found.")
             return {
-                "task_id": task_id,
+                "task_id": current_task_id,
                 "status": "warning",
                 "message": f"No data found or sync failed for {date}",
             }
 
     except Exception as e:
-        logger.error(f"Task {task_id}: Failed. Error: {e}", exc_info=True)
+        logger.error(f"Task {current_task_id}: Failed. Error: {e}", exc_info=True)
         return {
-            "task_id": task_id,
+            "task_id": current_task_id,
             "status": "failed",
             "error_message": str(e)
         }
@@ -536,6 +539,7 @@ async def sync_dragon_tiger_data_func(
 
 async def sync_limit_up_pool_func(
     date: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Limit Up Pool Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -561,6 +565,7 @@ async def sync_limit_up_pool_func(
 
 async def sync_limit_down_pool_func(
     date: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Limit Down Pool Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -586,6 +591,7 @@ async def sync_limit_down_pool_func(
 
 async def sync_zhaban_pool_func(
     date: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Zhaban Pool Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -612,6 +618,7 @@ async def sync_zhaban_pool_func(
 async def sync_pledge_summary_func(
     task_name: str = "Pledge Summary Sync",
     stock_code: Optional[str] = None,
+    task_id: Optional[str] = None,
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
     """
@@ -647,6 +654,7 @@ async def sync_granular_data_func(
     data_type: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Granular Data Sync",
     allow_concurrent: bool = True
 ) -> Dict[str, Any]:
@@ -710,6 +718,7 @@ async def sync_stock_daily_func(
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     adjust: str = "qfq",
+    task_id: Optional[str] = None,
     task_name: str = "Daily Data Sync",
     allow_concurrent: bool = True
 ) -> Dict[str, Any]:
@@ -745,6 +754,7 @@ async def sync_stock_daily_func(
 
 async def sync_realtime_market_func(
     stock_code: str,
+    task_id: Optional[str] = None,
     task_name: str = "Realtime Market Data Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -772,6 +782,7 @@ async def sync_realtime_market_func(
 
 
 async def sync_industry_data_func(
+    task_id: Optional[str] = None,
     task_name: str = "Industry Data Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -799,6 +810,7 @@ async def sync_industry_data_func(
 
 async def sync_sector_money_flow_func(
     stock_code: str,
+    task_id: Optional[str] = None,
     task_name: str = "Sector Money Flow Sync",
     allow_concurrent: bool = True
 ) -> Dict[str, Any]:
@@ -838,6 +850,7 @@ async def sync_index_daily_func(
     index_code: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Index Daily Sync",
     allow_concurrent: bool = True
 ) -> Dict[str, Any]:
@@ -872,6 +885,7 @@ async def sync_index_daily_func(
 
 async def sync_northbound_data_func(
     stock_code: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Northbound Data Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -914,6 +928,7 @@ async def sync_northbound_data_func(
 
 async def calculate_indicators_func(
     stock_code: Optional[str] = None,
+    task_id: Optional[str] = None,
     task_name: str = "Calculate Indicators",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:
@@ -959,6 +974,7 @@ async def calculate_indicators_func(
 
 async def sync_top_holders_func(
     stock_code: str,
+    task_id: Optional[str] = None,
     task_name: str = "Top Holders Sync",
     allow_concurrent: bool = False
 ) -> Dict[str, Any]:

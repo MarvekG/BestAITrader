@@ -42,7 +42,7 @@ async def test_match_pending_order_awaits_market_price(monkeypatch):
 
     monkeypatch.setattr(scheduler, "_resolve_order_price", _resolve_price)
 
-    result = await scheduler._match_pending_order(_PendingOrderDB(order), order)
+    result = await scheduler._match_pending_order(_PendingOrderDB(order), order.order_id)
 
     assert result["success"] is True
     assert result["matched"] is False

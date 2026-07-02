@@ -5,7 +5,6 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.core import database as database_module
-from app.core.database import AsyncSessionLocal as async_session_factory
 from app.crud.account import DEFAULT_ACCOUNT_CAPITAL, ensure_user_account
 from app.models.account import Account
 from app.models.order import Order
@@ -18,7 +17,7 @@ from app.models.data_storage import StockBasic
 
 async def get_current_user_account(current_user: User) -> Account:
     """返回当前用户交易账户；不存在时创建默认模拟账户。"""
-    async with async_session_factory() as db:
+    async with database_module.AsyncSessionLocal() as db:
         return await ensure_user_account(db, current_user)
 
 
@@ -34,7 +33,7 @@ async def ensure_user_account_by_user_id(
 
 async def get_owned_session(session_id: UUID, current_user: User) -> AnalysisSession:
     """返回当前用户拥有的投研会话；不存在时抛出 404。"""
-    async with async_session_factory() as db:
+    async with database_module.AsyncSessionLocal() as db:
         result = await db.execute(
             select(AnalysisSession).where(
                 AnalysisSession.session_id == session_id,
@@ -49,7 +48,7 @@ async def get_owned_session(session_id: UUID, current_user: User) -> AnalysisSes
 
 async def get_owned_order(order_id: UUID, current_user: User) -> Order:
     """返回当前用户拥有的订单；不存在时抛出 404。"""
-    async with async_session_factory() as db:
+    async with database_module.AsyncSessionLocal() as db:
         account_result = await db.execute(select(Account).where(Account.user_id == current_user.id))
         account = account_result.scalar_one_or_none()
         if not account:
@@ -68,7 +67,7 @@ async def get_owned_order(order_id: UUID, current_user: User) -> Order:
 
 async def get_owned_position(position_id: UUID, current_user: User) -> Position:
     """返回当前用户拥有的持仓；不存在时抛出 404。"""
-    async with async_session_factory() as db:
+    async with database_module.AsyncSessionLocal() as db:
         account_result = await db.execute(select(Account).where(Account.user_id == current_user.id))
         account = account_result.scalar_one_or_none()
         if not account:
@@ -87,7 +86,7 @@ async def get_owned_position(position_id: UUID, current_user: User) -> Position:
 
 async def get_owned_trade_record(trade_id: UUID, current_user: User) -> TradeRecord:
     """返回当前用户拥有的交易记录；不存在时抛出 404。"""
-    async with async_session_factory() as db:
+    async with database_module.AsyncSessionLocal() as db:
         account_result = await db.execute(select(Account).where(Account.user_id == current_user.id))
         account = account_result.scalar_one_or_none()
         if not account:
@@ -106,7 +105,7 @@ async def get_owned_trade_record(trade_id: UUID, current_user: User) -> TradeRec
 
 async def get_stock_name(stock_code: str) -> str:
     """返回股票名称，缺失时返回 Unknown。"""
-    async with async_session_factory() as db:
+    async with database_module.AsyncSessionLocal() as db:
         result = await db.execute(select(StockBasic.name).where(StockBasic.stock_code == stock_code))
         return result.scalar_one_or_none() or "Unknown"
 
@@ -120,7 +119,7 @@ async def list_owned_session_orders(
     status: str | None = None,
 ) -> list[tuple[Order, str | None]]:
     """返回指定会话和账户下的订单及股票名称。"""
-    async with async_session_factory() as db:
+    async with database_module.AsyncSessionLocal() as db:
         stmt = (
             select(Order, StockBasic.name)
             .outerjoin(StockBasic, Order.stock_code == StockBasic.stock_code)
@@ -139,7 +138,7 @@ async def list_owned_session_trades(
     limit: int,
 ) -> list[tuple[TradeRecord, str | None]]:
     """返回指定会话和账户下的交易记录及股票名称。"""
-    async with async_session_factory() as db:
+    async with database_module.AsyncSessionLocal() as db:
         results = await db.execute(
             select(TradeRecord, StockBasic.name)
             .outerjoin(StockBasic, TradeRecord.stock_code == StockBasic.stock_code)
@@ -160,7 +159,7 @@ async def list_owned_orders(
     stock_code: str | None = None,
 ) -> list[tuple[Order, str | None]]:
     """返回账户全局订单及股票名称。"""
-    async with async_session_factory() as db:
+    async with database_module.AsyncSessionLocal() as db:
         stmt = (
             select(Order, StockBasic.name)
             .outerjoin(StockBasic, Order.stock_code == StockBasic.stock_code)
@@ -181,7 +180,7 @@ async def list_owned_trades(
     stock_code: str | None = None,
 ) -> list[tuple[TradeRecord, str | None]]:
     """返回账户全局交易记录及股票名称。"""
-    async with async_session_factory() as db:
+    async with database_module.AsyncSessionLocal() as db:
         stmt = (
             select(TradeRecord, StockBasic.name)
             .outerjoin(StockBasic, TradeRecord.stock_code == StockBasic.stock_code)
