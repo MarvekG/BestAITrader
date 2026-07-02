@@ -412,7 +412,16 @@ class DataIngestionService:
             return
 
         max_parameters = 30000
-        keys_per_record = max(len(records[0]), 1)
+        table = model.__table__
+        client_default_columns = {
+            column.name
+            for column in table.columns
+            if column.default is not None and column.server_default is None
+        }
+        keys_per_record = max(
+            len(set(record.keys()) | client_default_columns)
+            for record in records
+        )
         chunk_size = max(max_parameters // keys_per_record, 1)
         for start in range(0, len(records), chunk_size):
             await self._bulk_upsert_chunk(model, records[start:start + chunk_size])

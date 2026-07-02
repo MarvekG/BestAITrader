@@ -17,7 +17,7 @@ from app.data.ingestors.manager import ingestor_manager
 from app.data.ingestors.plugins.column_mapping import ColumnMapper
 from app.data.ingestors.plugins.tushare_ingestor import TushareIngestor
 from app.core.utils.date_utils import normalize_compact_date
-from app.models.data_storage import IndexDaily, StockLimitUpPool, StockRealtimeMarket, StockTopHolders
+from app.models.data_storage import IndexDaily, NorthboundData, StockLimitUpPool, StockRealtimeMarket, StockTopHolders
 
 
 @pytest.fixture
@@ -291,12 +291,29 @@ async def test_bulk_upsert_splits_large_batches_before_asyncpg_parameter_limit(m
         chunk_sizes.append(len(records))
 
     monkeypatch.setattr(service, "_bulk_upsert_chunk", fake_bulk_upsert_chunk)
-    records = [{"stock_code": "000001.SZ", "trade_date": date(2024, 1, 1), **{f"v{i}": i for i in range(13)}} for _ in range(2500)]
+    records = [
+        {
+            "id": uuid.uuid4(),
+            "stock_code": "000001.SZ",
+            "date": date(2024, 1, 1),
+            "hold_shares": 1.0,
+            "hold_value": 2.0,
+            "hold_ratio": 3.0,
+            "close_price": 4.0,
+            "change_percent": 5.0,
+            "net_buy_volume": 6.0,
+            "net_buy_amount": 7.0,
+            "hold_value_change": 8.0,
+            "data_source": "tushare",
+        }
+        for _ in range(2500)
+    ]
 
-    await service._bulk_upsert(StockRealtimeMarket, records)
+    await service._bulk_upsert(NorthboundData, records)
 
     assert len(chunk_sizes) == 2
-    assert max(chunk_sizes) * len(records[0]) <= 30000
+    # created_at/updated_at have Python-side defaults and are also bound by SQLAlchemy.
+    assert max(chunk_sizes) * 14 <= 30000
     assert sum(chunk_sizes) == len(records)
 
 
