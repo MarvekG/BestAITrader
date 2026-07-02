@@ -7,6 +7,8 @@ Test enabled data sources for data ingestion
 
 import pytest
 import pandas as pd
+import numpy as np
+import uuid
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, Mock, patch
 from app.data.ingestion.service import DataIngestionService
@@ -219,14 +221,16 @@ async def test_tushare_realtime_market_normalizes_numeric_strings():
     assert isinstance(result["data"][0]["timestamp"], pd.Timestamp)
 
 
-def test_data_ingestion_preserves_datetime_for_dedicated_tables():
-    """专用表写入应保留 datetime 类型，避免 asyncpg TIMESTAMP bind 失败。"""
+def test_data_ingestion_normalizes_dedicated_table_bind_values():
+    """专用表写入应使用 asyncpg 可绑定的 Python 原生标量类型。"""
     timestamp = pd.Timestamp("2026-07-02T10:20:39.379941")
     df = pd.DataFrame(
         [
             {
                 "stock_code": "000001.SZ",
-                "current_price": 12.34,
+                "current_price": np.float64(12.34),
+                "main_net_inflow_rank_today": np.int64(7),
+                "change_percent": np.nan,
                 "timestamp": timestamp,
             }
         ]
@@ -239,7 +243,11 @@ def test_data_ingestion_preserves_datetime_for_dedicated_tables():
         source="tushare",
     )
 
+    assert isinstance(records[0]["id"], uuid.UUID)
     assert records[0]["timestamp"] == timestamp.to_pydatetime()
+    assert isinstance(records[0]["current_price"], float)
+    assert isinstance(records[0]["main_net_inflow_rank_today"], int)
+    assert records[0]["change_percent"] is None
 
 
 @pytest.mark.asyncio

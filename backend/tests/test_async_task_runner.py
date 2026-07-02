@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from datetime import datetime, timedelta
 from functools import partial
 
 import pytest
+from sqlalchemy import select
 
 from app.core.request_context import get_request_id
+from app.models.async_task import AsyncTask
 from app.tasks.async_task_runner import AsyncTaskRunner
+from app.tasks.task_manager import TaskManager
 
 
 @pytest.mark.asyncio
@@ -188,3 +192,46 @@ async def test_async_task_runner_stop_all_waits_for_sync_task_thread(monkeypatch
 
     assert completed == [True]
     assert runner.get_active_task_count() == 0
+
+
+@pytest.mark.asyncio
+async def test_cleanup_zombie_tasks_marks_pending_and_running_failed(async_db_session) -> None:
+    manager = TaskManager()
+    now = datetime.now()
+    async_db_session.add_all(
+        [
+            AsyncTask(
+                task_id="pending-task",
+                task_name="Pending Task",
+                task_type="stock_analysis",
+                status="pending",
+                allow_concurrent=False,
+                parameters={"symbol": "000001.SZ"},
+                created_at=now,
+            ),
+            AsyncTask(
+                task_id="running-task",
+                task_name="Running Task",
+                task_type="stock_analysis",
+                status="running",
+                allow_concurrent=False,
+                parameters={"symbol": "000002.SZ"},
+                started_at=now,
+                created_at=now,
+            ),
+        ]
+    )
+    await async_db_session.commit()
+
+    cleaned_count = await manager.cleanup_zombie_tasks()
+
+    tasks = (
+        await async_db_session.execute(select(AsyncTask).order_by(AsyncTask.task_id.asc()))
+    ).scalars().all()
+    assert cleaned_count == 2
+    assert {task.task_id: task.status for task in tasks} == {
+        "pending-task": "failed",
+        "running-task": "failed",
+    }
+    assert all(task.error_message == "Task interrupted by server restart" for task in tasks)
+    assert all(task.completed_at is not None for task in tasks)

@@ -1,5 +1,7 @@
 import pytest
 
+import app.core.database as database_module
+from app.ai.agentic import tools as tools_module
 from app.ai.agentic.tools import get_database_schema, query_and_calculate
 
 
@@ -60,6 +62,46 @@ async def test_query_and_calculate_rejects_unknown_table_without_db_access():
     )
 
     assert result == {"error": "Table 'MissingTable' not found."}
+
+
+@pytest.mark.asyncio
+async def test_query_and_calculate_closes_db_session_before_sandbox(test_db, monkeypatch):
+    """沙箱执行前应关闭数据库查询会话。"""
+    state = {"active": 0, "exited": 0}
+
+    class TrackingSessionContext:
+        def __init__(self):
+            self._session_context = test_db()
+
+        async def __aenter__(self):
+            state["active"] += 1
+            return await self._session_context.__aenter__()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            try:
+                return await self._session_context.__aexit__(exc_type, exc, tb)
+            finally:
+                state["active"] -= 1
+                state["exited"] += 1
+
+    async def fake_sandbox(_code):
+        assert state["active"] == 0
+        assert state["exited"] == 1
+        return {"success": True, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(database_module, "AsyncSessionLocal", TrackingSessionContext)
+    monkeypatch.setattr(tools_module, "execute_python_in_sandbox", fake_sandbox)
+
+    result = await query_and_calculate.ainvoke(
+        {
+            "table_name": "StockBasic",
+            "filters": [],
+            "compute_code": "result = {'row_count': len(data)}",
+            "limit": 1,
+        }
+    )
+
+    assert result["success"] is True
 
 
 @pytest.mark.asyncio

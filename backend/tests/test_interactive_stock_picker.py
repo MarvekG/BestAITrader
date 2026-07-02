@@ -8,6 +8,11 @@ from app.ai.stock_picker.interactive_research import service as service_module
 from app.ai.stock_picker.interactive_research import research_agent as research_agent_module
 from app.ai.stock_picker.interactive_research.flow_control import FLOW_CONTROL_TOOL_NAME, control_research_flow
 from app.ai.stock_picker.interactive_research.models import InteractiveResearchMessage, InteractiveResearchRun
+from app.ai.stock_picker.interactive_research.persistence import (
+    append_tool_start_record,
+    fail_run_record,
+    synthesize_final_message_record,
+)
 from app.ai.stock_picker.interactive_research.service import InteractiveResearchService
 from app.crud.user import get_password_hash
 from app.models.user import User
@@ -497,6 +502,84 @@ async def test_plan_agent_runs_in_background_after_create_and_user_input(async_d
     plan_cards = [item for item in messages if item.message_type == "plan_card"]
     assert len(plan_cards) == 2
     assert fake_llm.plan_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_late_plan_background_task_does_not_overwrite_cancelled_run(async_db_session):
+    """取消后的计划后台任务不能再写 plan_card 或改写终态。"""
+    user_id = await _create_user_id(async_db_session)
+    service, fake_llm, _ = _service_with_fake_runner()
+    background_tasks = FakeBackgroundTasks()
+
+    run = await service.create_run(user_id, _request_data(), background_tasks)
+    cancelled = await service.process_action(
+        run.run_id,
+        user_id,
+        "cancel",
+        content="User stopped before plan finished",
+        background_tasks=FakeBackgroundTasks(),
+    )
+    await background_tasks.run_all()
+    refreshed = await service.get_run(run.run_id, user_id)
+    messages = await service.get_messages(run.run_id, user_id)
+
+    assert cancelled.status == "cancelled"
+    assert refreshed.status == "cancelled"
+    assert fake_llm.plan_calls == 0
+    assert [message.message_type for message in messages] == ["user_input", "system_status"]
+
+
+@pytest.mark.asyncio
+async def test_late_research_writes_do_not_overwrite_cancelled_run(async_db_session):
+    """取消后的研究后台写入不能追加消息或覆盖 cancelled。"""
+    user_id = await _create_user_id(async_db_session)
+    service, _, _ = _service_with_fake_runner()
+    run = await _create_run_with_plan(service, user_id, _request_data())
+    await service.process_action(run.run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
+    cancelled = await service.process_action(
+        run.run_id,
+        user_id,
+        "cancel",
+        content="User stopped during research",
+        background_tasks=FakeBackgroundTasks(),
+    )
+    before_messages = await service.get_messages(run.run_id, user_id)
+
+    start_result = await append_tool_start_record(run.run_id, "search_news", {}, "late-tool-call")
+    final_payloads = await synthesize_final_message_record(
+        run.run_id,
+        tool_trace=[],
+        final_content="Late final answer",
+        stopped_by_iteration_limit=False,
+        iteration_budget=10,
+    )
+    refreshed = await service.get_run(run.run_id, user_id)
+    after_messages = await service.get_messages(run.run_id, user_id)
+
+    assert cancelled.status == "cancelled"
+    assert refreshed.status == "cancelled"
+    assert start_result == {"message_id": "", "notification": None}
+    assert final_payloads == []
+    assert [message.message_id for message in after_messages] == [message.message_id for message in before_messages]
+
+
+@pytest.mark.asyncio
+async def test_late_fail_does_not_overwrite_completed_run(async_db_session, monkeypatch):
+    """已完成 run 收到后台异常回调时不能被改写为 failed。"""
+    user_id = await _create_user_id(async_db_session)
+    service, _, _ = _service_with_fake_runner()
+    run = await _create_run_with_plan(service, user_id, _request_data())
+    run_id = run.run_id
+
+    await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
+    await _execute_background(monkeypatch, service, async_db_session, run_id)
+    completed = await service.get_run(run_id, user_id)
+    await fail_run_record(run_id, "Late failure", "RuntimeError", "late")
+    refreshed = await service.get_run(run_id, user_id)
+
+    assert completed.status == "completed"
+    assert refreshed.status == "completed"
+    assert refreshed.error_message is None
 
 
 @pytest.mark.asyncio

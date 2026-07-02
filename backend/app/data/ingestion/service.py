@@ -1,4 +1,5 @@
 import pandas as pd
+import uuid
 from datetime import datetime
 from typing import Optional, List, Dict
 from sqlalchemy import select
@@ -204,7 +205,19 @@ class DataIngestionService:
         if isinstance(obj, dict):
              return {k: DataIngestionService._json_serializable(v) for k, v in obj.items()}
         if isinstance(obj, list):
-             return [DataIngestionService._json_serializable(v) for v in obj]
+            return [DataIngestionService._json_serializable(v) for v in obj]
+        return obj
+
+    @staticmethod
+    def _db_bind_value(obj):
+        """Convert dedicated-table scalar values to asyncpg-friendly Python types."""
+        if isinstance(obj, pd.Timestamp):
+            return obj.to_pydatetime()
+        if hasattr(obj, 'item') and callable(getattr(obj, 'item')):
+            try:
+                return obj.item()
+            except (ValueError, TypeError):
+                return obj
         return obj
 
     def _prepare_records(self, df: pd.DataFrame, target_model, api_name: str, source: str) -> List[Dict]:
@@ -235,10 +248,8 @@ class DataIngestionService:
                 elif target_model == CommonData:
                     # CommonData 的 data_payload 是 JSON，需要把日期递归转成可序列化值。
                     clean_row[k] = self._json_serializable(v)
-                elif isinstance(v, pd.Timestamp):
-                    clean_row[k] = v.to_pydatetime()
                 else:
-                    clean_row[k] = v
+                    clean_row[k] = self._db_bind_value(v)
 
             if target_model == CommonData:
                 # CommonData 逻辑
@@ -255,8 +266,7 @@ class DataIngestionService:
                 
                 # 3. 确保 ID 存在 (对于 bulk_insert，如果数据库不自动生成或者显式传 None 会报错)
                 if 'id' in model_columns and not final_record.get('id'):
-                    import uuid
-                    final_record['id'] = str(uuid.uuid4())
+                    final_record['id'] = uuid.uuid4()
                 
                 records.append(final_record)
         

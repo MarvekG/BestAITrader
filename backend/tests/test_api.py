@@ -713,15 +713,30 @@ class TestAccountAPI:
             async with test_db() as db:
                 result = await db.execute(select(User).where(User.username.like("test_%")))
                 user = result.scalars().first()
+                account = Account(
+                    user_id=user.id,
+                    total_assets=Decimal("100000.0000"),
+                    available_cash=Decimal("85000.0000"),
+                    frozen_cash=Decimal("5000.0000"),
+                    market_value=Decimal("10000.0000"),
+                    initial_capital=Decimal("100000.0000"),
+                    total_profit_loss=Decimal("0.0000"),
+                )
+                db.add(account)
+                await db.flush()
                 db.add(
-                    Account(
-                        user_id=user.id,
-                        total_assets=Decimal("100000.0000"),
-                        available_cash=Decimal("85000.0000"),
-                        frozen_cash=Decimal("5000.0000"),
+                    Position(
+                        account_id=account.account_id,
+                        stock_code="000001.SZ",
+                        total_shares=1000,
+                        available_shares=1000,
+                        frozen_shares=0,
+                        avg_cost=Decimal("10.0000"),
+                        current_price=Decimal("10.0000"),
                         market_value=Decimal("10000.0000"),
-                        initial_capital=Decimal("100000.0000"),
-                        total_profit_loss=Decimal("0.0000"),
+                        profit_loss=Decimal("0.0000"),
+                        profit_loss_pct=Decimal("0.0000"),
+                        purchase_details={"ledger": []},
                     )
                 )
                 await db.commit()
@@ -751,15 +766,30 @@ class TestAccountAPI:
             async with test_db() as db:
                 result = await db.execute(select(User).where(User.username.like("test_%")))
                 user = result.scalars().first()
+                account = Account(
+                    user_id=user.id,
+                    total_assets=Decimal("100000.0000"),
+                    available_cash=Decimal("85000.0000"),
+                    frozen_cash=Decimal("5000.0000"),
+                    market_value=Decimal("10000.0000"),
+                    initial_capital=Decimal("100000.0000"),
+                    total_profit_loss=Decimal("0.0000"),
+                )
+                db.add(account)
+                await db.flush()
                 db.add(
-                    Account(
-                        user_id=user.id,
-                        total_assets=Decimal("100000.0000"),
-                        available_cash=Decimal("85000.0000"),
-                        frozen_cash=Decimal("5000.0000"),
+                    Position(
+                        account_id=account.account_id,
+                        stock_code="000001.SZ",
+                        total_shares=1000,
+                        available_shares=1000,
+                        frozen_shares=0,
+                        avg_cost=Decimal("10.0000"),
+                        current_price=Decimal("10.0000"),
                         market_value=Decimal("10000.0000"),
-                        initial_capital=Decimal("100000.0000"),
-                        total_profit_loss=Decimal("0.0000"),
+                        profit_loss=Decimal("0.0000"),
+                        profit_loss_pct=Decimal("0.0000"),
+                        purchase_details={"ledger": []},
                     )
                 )
                 await db.commit()
@@ -830,6 +860,70 @@ class TestAccountAPI:
         payload = response.json()
         assert float(payload["market_value"]) == 120000.0
         assert float(payload["total_funds"]) == 430000.0
+
+    def test_set_my_total_funds_uses_dynamic_portfolio_valuation(self, client, auth_headers, test_db, run_async):
+        async def _seed_account_data():
+            async with test_db() as db:
+                result = await db.execute(select(User).where(User.username.like("test_%")))
+                user = result.scalars().first()
+                account = Account(
+                    user_id=user.id,
+                    total_assets=Decimal("410000.0000"),
+                    available_cash=Decimal("300000.0000"),
+                    frozen_cash=Decimal("10000.0000"),
+                    market_value=Decimal("100000.0000"),
+                    initial_capital=Decimal("410000.0000"),
+                    total_profit_loss=Decimal("0.0000"),
+                )
+                db.add(account)
+                await db.flush()
+                db.add(
+                    StockBasic(
+                        stock_code="000001.SZ",
+                        name="Ping An Bank",
+                        industry="Banking",
+                        market="SZSE",
+                        data_source="test",
+                    )
+                )
+                db.add_all([
+                    StockRealtimeMarket(
+                        stock_code="000001.SZ",
+                        current_price=Decimal("12.0000"),
+                        timestamp=datetime(2026, 6, 2, 10, 0, 0),
+                    ),
+                    Position(
+                        account_id=account.account_id,
+                        stock_code="000001.SZ",
+                        total_shares=10000,
+                        available_shares=10000,
+                        frozen_shares=0,
+                        avg_cost=Decimal("10.0000"),
+                        current_price=Decimal("10.0000"),
+                        market_value=Decimal("100000.0000"),
+                        profit_loss=Decimal("0.0000"),
+                        profit_loss_pct=Decimal("0.0000"),
+                        purchase_details={"ledger": []},
+                    ),
+                ])
+                await db.commit()
+
+        run_async(_seed_account_data())
+
+        put_response = client.put(
+            "/api/v1/accounts/my-total-funds",
+            json={"total_funds": 500000.0},
+            headers=auth_headers,
+        )
+        get_response = client.get("/api/v1/accounts/my-total-funds", headers=auth_headers)
+
+        assert put_response.status_code == 200
+        assert get_response.status_code == 200
+        put_payload = put_response.json()
+        get_payload = get_response.json()
+        assert float(put_payload["market_value"]) == 120000.0
+        assert float(put_payload["cash_balance"]) == 370000.0
+        assert float(get_payload["total_funds"]) == 500000.0
 
     def test_my_positions_ignore_latest_zero_realtime_price(self, client, auth_headers, test_db, run_async):
         """

@@ -1306,17 +1306,13 @@ async def query_and_calculate(
                 for r in records
             ]
 
-            # 准备注入沙箱的代码
-            # 将 data 以 JSON 字符串形式定义在代码头部
-            data_json = json.dumps(make_json_serializable(data_for_calc), ensure_ascii=False)
-            # Use Python repr for the JSON payload so backslashes/quotes survive code injection intact.
-            full_code = f"import json\ndata = json.loads({data_json!r})\n{compute_code}"
+        # 准备注入沙箱的代码。关闭数据库会话后再执行沙箱，避免长任务占用连接。
+        data_json = json.dumps(make_json_serializable(data_for_calc), ensure_ascii=False)
+        # Use Python repr for the JSON payload so backslashes/quotes survive code injection intact.
+        full_code = f"import json\ndata = json.loads({data_json!r})\n{compute_code}"
 
-            # 执行计算
-            raw_calc_res = await execute_python_in_sandbox(full_code)
-
-            # 直接返回完整的执行报告，包含 success, stdout, stderr 等
-            return raw_calc_res
+        # 直接返回完整的执行报告，包含 success, stdout, stderr 等
+        return await execute_python_in_sandbox(full_code)
 
     except Exception as exc:
         logger.exception("query_and_calculate failed: %s", exc)
@@ -1445,109 +1441,124 @@ async def execute_trading_order(
                         "error": f"Order {order_id} not found or ambiguous.",
                         "reason": "order_not_found_or_ambiguous",
                     })
-                cancel_result = await trading_service.cancel_order(order.order_id, user_id=user.id)
-                return _format_trade_execution_result(cancel_result)
+                cancel_order_id = order.order_id
+                cancel_user_id = user.id
 
-            total_assets = float(account.total_assets or 0)
+            if normalized_operation != "cancel":
+                total_assets = float(account.total_assets or 0)
 
-            # 2. 获取最新价格
-            price = 0.0
-            latest_market = (await db.execute(
-                select(StockRealtimeMarket)
-                .where(StockRealtimeMarket.stock_code == stock_code)
-                .order_by(desc(StockRealtimeMarket.timestamp))
-                .limit(1)
-            )).scalar_one_or_none()
-
-            if latest_market:
-                price = float(latest_market.current_price)
-
-            if price <= 0:
-                # 尝试从 Kline 补全
-                from app.models.data_storage import KlineData
-                latest_kline = (await db.execute(
-                    select(KlineData)
-                    .where(KlineData.stock_code == stock_code)
-                    .order_by(desc(KlineData.date))
+                # 2. 获取最新价格
+                price = 0.0
+                latest_market = (await db.execute(
+                    select(StockRealtimeMarket)
+                    .where(StockRealtimeMarket.stock_code == stock_code)
+                    .order_by(desc(StockRealtimeMarket.timestamp))
                     .limit(1)
                 )).scalar_one_or_none()
-                if latest_kline:
-                    price = float(latest_kline.close)
 
-            if price <= 0:
-                return _format_trade_execution_result(
-                    {"error": f"Could not determine a valid price for {stock_code}. Trade aborted."}
+                if latest_market:
+                    price = float(latest_market.current_price)
+
+                if price <= 0:
+                    # 尝试从 Kline 补全
+                    from app.models.data_storage import KlineData
+                    latest_kline = (await db.execute(
+                        select(KlineData)
+                        .where(KlineData.stock_code == stock_code)
+                        .order_by(desc(KlineData.date))
+                        .limit(1)
+                    )).scalar_one_or_none()
+                    if latest_kline:
+                        price = float(latest_kline.close)
+
+                if price <= 0:
+                    return _format_trade_execution_result(
+                        {"error": f"Could not determine a valid price for {stock_code}. Trade aborted."}
+                    )
+
+                order_price = float(limit_price) if normalized_order_type == "limit" else price
+
+                # 3. 计算目标总股数
+                target_total_shares = (total_assets * target_position) / order_price
+
+                # 4. 获取当前持仓
+                pos = (await db.execute(
+                    select(Position).where(
+                        Position.account_id == account.account_id,
+                        Position.stock_code == stock_code,
+                    )
+                )).scalar_one_or_none()
+                current_total_shares = pos.total_shares if pos else 0
+                current_available_shares = (
+                    trading_engine.build_position_snapshot(pos)["available_shares"]
+                    if pos else 0
                 )
 
-            order_price = float(limit_price) if normalized_order_type == "limit" else price
-
-            # 3. 计算目标总股数
-            target_total_shares = (total_assets * target_position) / order_price
-
-            # 4. 获取当前持仓
-            pos = (await db.execute(
-                select(Position).where(
-                    Position.account_id == account.account_id,
-                    Position.stock_code == stock_code,
+                current_position = (
+                    (current_total_shares * price) / total_assets if total_assets > 0 else 0.0
                 )
-            )).scalar_one_or_none()
-            current_total_shares = pos.total_shares if pos else 0
-            current_available_shares = (
-                trading_engine.build_position_snapshot(pos)["available_shares"]
-                if pos else 0
-            )
+                gate_result = _evaluate_pm_trade_gate(
+                    action=action,
+                    target_position=target_position,
+                    current_position=current_position,
+                    price=order_price,
+                    stop_loss=stop_loss,
+                    take_profit=take_profit,
+                    current_total_shares=current_total_shares,
+                    current_available_shares=current_available_shares,
+                )
+                if gate_result is not None:
+                    return gate_result
 
-            current_position = (
-                (current_total_shares * price) / total_assets if total_assets > 0 else 0.0
-            )
-            gate_result = _evaluate_pm_trade_gate(
-                action=action,
-                target_position=target_position,
-                current_position=current_position,
-                price=order_price,
-                stop_loss=stop_loss,
-                take_profit=take_profit,
-                current_total_shares=current_total_shares,
-                current_available_shares=current_available_shares,
-            )
-            if gate_result is not None:
-                return gate_result
+                # 5. 计算差额
+                diff_shares = target_total_shares - current_total_shares
+                suggested_shares = 0
 
-            # 5. 计算差额
-            diff_shares = target_total_shares - current_total_shares
-            suggested_shares = 0
+                # 6. 执行 A 股规则
+                act = action.lower()
+                if act == "buy" and diff_shares > 0:
+                    # 买入：向下取整到 100 的倍数
+                    suggested_shares = (int(diff_shares) // 100) * 100
+                elif act == "sell" and diff_shares < 0:
+                    if target_position == 0:
+                        # 清仓：卖出所有可用
+                        suggested_shares = (int(current_available_shares) // 100) * 100
+                    else:
+                        # 减仓：尽量取 100 倍数，不超可用
+                        abs_diff = abs(diff_shares)
+                        suggested_shares = min((int(abs_diff) // 100) * 100, current_available_shares)
 
-            # 6. 执行 A 股规则
-            act = action.lower()
-            if act == "buy" and diff_shares > 0:
-                # 买入：向下取整到 100 的倍数
-                suggested_shares = (int(diff_shares) // 100) * 100
-            elif act == "sell" and diff_shares < 0:
-                if target_position == 0:
-                    # 清仓：卖出所有可用
-                    suggested_shares = (int(current_available_shares) // 100) * 100
-                else:
-                    # 减仓：尽量取 100 倍数，不超可用
-                    abs_diff = abs(diff_shares)
-                    suggested_shares = min((int(abs_diff) // 100) * 100, current_available_shares)
+                can_sell_remaining_shares = (
+                    act == "sell" and target_position == 0 and current_available_shares > 0
+                )
+                if suggested_shares <= 0 and not can_sell_remaining_shares:
+                    # 构建更详细的拒绝理由
+                    reason = "Rounding (less than 100 shares)" if abs(diff_shares) > 0 else "Target position already met"
+                    if act == "sell" and current_available_shares == 0 and current_total_shares > 0:
+                        reason = "No available shares (T+1 lock)"
 
-            can_sell_remaining_shares = (
-                act == "sell" and target_position == 0 and current_available_shares > 0
-            )
-            if suggested_shares <= 0 and not can_sell_remaining_shares:
-                # 构建更详细的拒绝理由
-                reason = "Rounding (less than 100 shares)" if abs(diff_shares) > 0 else "Target position already met"
-                if act == "sell" and current_available_shares == 0 and current_total_shares > 0:
-                    reason = "No available shares (T+1 lock)"
-
-                return {
-                    **_format_trade_execution_result({
-                        "success": False,
-                        "message": f"Trade skipped: {reason}. Suggested shares is 0.",
+                    return {
+                        **_format_trade_execution_result({
+                            "success": False,
+                            "message": f"Trade skipped: {reason}. Suggested shares is 0.",
+                            "details": {
+                                "action": act,
+                                "stock_code": stock_code,
+                                "price": order_price,
+                                "target_position": target_position,
+                                "stop_loss": stop_loss,
+                                "current_total_shares": current_total_shares,
+                                "current_available_shares": current_available_shares,
+                                "available_cash": float(account.available_cash or 0),
+                                "diff_shares_raw": float(diff_shares),
+                                "suggested_shares": suggested_shares,
+                                "total_assets": total_assets
+                            }
+                        }),
                         "details": {
                             "action": act,
                             "stock_code": stock_code,
-                            "price": order_price,
+                            "price": price,
                             "target_position": target_position,
                             "stop_loss": stop_loss,
                             "current_total_shares": current_total_shares,
@@ -1557,35 +1568,27 @@ async def execute_trading_order(
                             "suggested_shares": suggested_shares,
                             "total_assets": total_assets
                         }
-                    }),
-                    "details": {
-                        "action": act,
-                        "stock_code": stock_code,
-                        "price": price,
-                        "target_position": target_position,
-                        "stop_loss": stop_loss,
-                        "current_total_shares": current_total_shares,
-                        "current_available_shares": current_available_shares,
-                        "available_cash": float(account.available_cash or 0),
-                        "diff_shares_raw": float(diff_shares),
-                        "suggested_shares": suggested_shares,
-                        "total_assets": total_assets
                     }
-                }
 
-            # 7. 调用交易服务
-            trade_result = await trading_service.execute_order_and_update_db(
-                session_id=session_uuid,
-                account_id=account.account_id,
-                stock_code=stock_code,
-                action=act,
-                shares=suggested_shares,
-                price=order_price,
-                order_type=normalized_order_type,
-                stop_loss=stop_loss,
-            )
+                service_account_id = account.account_id
 
-            return _format_trade_execution_result(trade_result)
+        if normalized_operation == "cancel":
+            cancel_result = await trading_service.cancel_order(cancel_order_id, user_id=cancel_user_id)
+            return _format_trade_execution_result(cancel_result)
+
+        # 7. 调用交易服务。此处不得持有上方查询会话，交易服务会自行管理写库会话。
+        trade_result = await trading_service.execute_order_and_update_db(
+            session_id=session_uuid,
+            account_id=service_account_id,
+            stock_code=stock_code,
+            action=act,
+            shares=suggested_shares,
+            price=order_price,
+            order_type=normalized_order_type,
+            stop_loss=stop_loss,
+        )
+
+        return _format_trade_execution_result(trade_result)
 
     except Exception as exc:
         logger.exception("execute_trading_order failed: %s", exc)

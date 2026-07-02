@@ -490,8 +490,10 @@ class ExperienceService:
         *,
         user_id: int,
         session_id: UUID,
+        cleanup_stale: bool = True,
     ) -> str | None:
-        await self._cleanup_stale_review_runs(db, user_id=user_id, session_id=session_id)
+        if cleanup_stale:
+            await self._cleanup_stale_review_runs(db, user_id=user_id, session_id=session_id)
         rows = (
             await db.execute(
                 select(ExperienceReviewEvent.review_run_id, ExperienceReviewEvent.status)
@@ -564,10 +566,12 @@ class ExperienceService:
                 if not session_obj:
                     raise ValueError(f"Session {session_id} not found")
 
+                await self._cleanup_stale_review_runs(db, user_id=user_id, session_id=session_id)
                 active_review_run_id = await self._get_active_review_run_id(
                     db,
                     user_id=user_id,
                     session_id=session_id,
+                    cleanup_stale=False,
                 )
                 if active_review_run_id:
                     raise ValueError(

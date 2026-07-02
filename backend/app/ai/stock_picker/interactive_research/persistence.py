@@ -145,7 +145,7 @@ async def delete_run_record(run_id: UUID, user_id: int) -> bool:
         删除成功返回 True，否则返回 False。
     """
     async with database_module.AsyncSessionLocal() as db:
-        run = await _get_user_run(db, run_id, user_id)
+        run = await _get_user_run(db, run_id, user_id, for_update=True)
         if run is None:
             return False
         await db.execute(delete(InteractiveResearchMessage).where(InteractiveResearchMessage.run_id == run_id))
@@ -239,7 +239,7 @@ async def approve_plan_record(run_id: UUID, user_id: int) -> Dict[str, Any]:
         ValueError: run 状态不允许确认时抛出。
     """
     async with database_module.AsyncSessionLocal() as db:
-        run = await _get_user_run(db, run_id, user_id)
+        run = await _get_user_run(db, run_id, user_id, for_update=True)
         if run is None:
             raise LookupError(_t("errors.run_not_found"))
         if run.status != "awaiting_plan_approval":
@@ -273,7 +273,7 @@ async def cancel_run_record(run_id: UUID, user_id: int, reason: Optional[str] = 
         ValueError: 终态 run 不能重复取消时抛出。
     """
     async with database_module.AsyncSessionLocal() as db:
-        run = await _get_user_run(db, run_id, user_id)
+        run = await _get_user_run(db, run_id, user_id, for_update=True)
         if run is None:
             raise LookupError(_t("errors.run_not_found"))
         if run.status in TERMINAL_RESEARCH_STATUSES:
@@ -324,8 +324,10 @@ async def fail_run_record(run_id: UUID, error_text: str, exception_type: str, ex
         exception_message: 异常消息。
     """
     async with database_module.AsyncSessionLocal() as db:
-        run = await _get_run(db, run_id)
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
+            return
+        if run.status in TERMINAL_RESEARCH_STATUSES:
             return
         await transition_run(
             db,
@@ -375,12 +377,11 @@ async def persist_plan_card_record(
         plan_message: 计划 Agent Markdown 输出。
         reason: checkpoint 原因。
         bump_version: 是否递增 run 版本。
-
     Returns:
         写入结果和可推送通知 payload。
     """
     async with database_module.AsyncSessionLocal() as db:
-        run = await _get_run(db, run_id)
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
             raise LookupError(_t("errors.run_not_found"))
         if run.status != "awaiting_plan_approval":
@@ -404,8 +405,10 @@ async def start_research_run_record(run_id: UUID) -> Optional[Dict[str, Any]]:
         run 存在时返回快照和通知 payload；否则返回 None。
     """
     async with database_module.AsyncSessionLocal() as db:
-        run = await _get_run(db, run_id)
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
+            return None
+        if run.status in TERMINAL_RESEARCH_STATUSES:
             return None
         queued_messages = await _process_queued_user_inputs(db, run)
         run.status = "researching"
@@ -461,8 +464,10 @@ async def append_tool_start_record(
         新消息 ID 和通知 payload；run 不存在时消息 ID 为空。
     """
     async with database_module.AsyncSessionLocal() as db:
-        run = await _get_run(db, run_id)
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
+            return {"message_id": "", "notification": None}
+        if run.status in TERMINAL_RESEARCH_STATUSES:
             return {"message_id": "", "notification": None}
         message = await append_message(
             db,
@@ -505,8 +510,10 @@ async def append_tool_result_and_progress_record(
         需要推送的通知 payload 列表。
     """
     async with database_module.AsyncSessionLocal() as db:
-        run = await _get_run(db, run_id)
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
+            return []
+        if run.status in TERMINAL_RESEARCH_STATUSES:
             return []
         result_message = await append_message(
             db,
@@ -575,8 +582,10 @@ async def synthesize_final_message_record(
         需要推送的通知 payload 列表。
     """
     async with database_module.AsyncSessionLocal() as db:
-        run = await _get_run(db, run_id)
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
+            return []
+        if run.status in TERMINAL_RESEARCH_STATUSES:
             return []
         run.status = "synthesizing"
         run.current_stage = "synthesizing"
@@ -632,8 +641,10 @@ async def pause_for_user_question_record(run_id: UUID, question_content: str) ->
         通知 payload；run 不存在时返回 None。
     """
     async with database_module.AsyncSessionLocal() as db:
-        run = await _get_run(db, run_id)
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
+            return None
+        if run.status in TERMINAL_RESEARCH_STATUSES:
             return None
         run.status = "awaiting_user_input"
         run.current_stage = "awaiting_user_input"
@@ -664,8 +675,10 @@ async def append_assistant_text_record(run_id: UUID, content: str) -> Optional[D
         通知 payload；run 不存在时返回 None。
     """
     async with database_module.AsyncSessionLocal() as db:
-        run = await _get_run(db, run_id)
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
+            return None
+        if run.status in TERMINAL_RESEARCH_STATUSES:
             return None
         message = await append_message(
             db,
@@ -691,8 +704,10 @@ async def process_queued_user_inputs_record(run_id: UUID) -> List[Dict[str, str]
         已处理的排队消息快照。
     """
     async with database_module.AsyncSessionLocal() as db:
-        run = await _get_run(db, run_id)
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
+            return []
+        if run.status in TERMINAL_RESEARCH_STATUSES:
             return []
         queued_messages = await _process_queued_user_inputs(db, run)
         await db.commit()
@@ -710,8 +725,10 @@ async def append_queued_input_status_record(run_id: UUID, queued_messages: List[
         通知 payload；run 不存在时返回 None。
     """
     async with database_module.AsyncSessionLocal() as db:
-        run = await _get_run(db, run_id)
+        run = await _get_run(db, run_id, for_update=True)
         if run is None:
+            return None
+        if run.status in TERMINAL_RESEARCH_STATUSES:
             return None
         message = await append_message(
             db,
@@ -949,7 +966,6 @@ async def append_message(
     Returns:
         已写入数据库的消息对象。
     """
-    await _lock_run_for_message_sequence(db, run.run_id)
     message = InteractiveResearchMessage(
         run_id=run.run_id,
         role=role,
@@ -1126,12 +1142,3 @@ async def next_message_sequence(db: AsyncSession, run_id: UUID) -> int:
         select(func.max(InteractiveResearchMessage.sequence_no)).where(InteractiveResearchMessage.run_id == run_id)
     )).scalar_one_or_none()
     return int(current or 0) + 1
-
-
-async def _lock_run_for_message_sequence(db: AsyncSession, run_id: UUID) -> None:
-    """锁定父 run 行，序列化同一 run 内消息序号分配。"""
-    await db.execute(
-        select(InteractiveResearchRun.run_id)
-        .where(InteractiveResearchRun.run_id == run_id)
-        .with_for_update()
-    )

@@ -205,7 +205,13 @@ class InteractiveResearchService:
                 "interactive research schedules plan revision",
                 extra={"run_id": str(run_id), "user_id": user_id, "message_id": str(message.message_id)},
             )
-            background_tasks.add_task(self.execute_plan_agent_background, run_id, content, content, False)
+            background_tasks.add_task(
+                self.execute_plan_agent_background,
+                run_id,
+                content,
+                content,
+                False,
+            )
         return message
 
     async def process_action(

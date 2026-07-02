@@ -167,14 +167,43 @@ async def _wrapped_pm_tool(session_id):
     return next(t for t in agent.tools if t.name == "execute_trading_order")
 
 
+def _track_tool_db_sessions(monkeypatch, session_factory):
+    state = {"active": 0, "exited": 0}
+
+    class TrackingSessionContext:
+        def __init__(self):
+            self._session_context = session_factory()
+
+        async def __aenter__(self):
+            state["active"] += 1
+            return await self._session_context.__aenter__()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            try:
+                return await self._session_context.__aexit__(exc_type, exc, tb)
+            finally:
+                state["active"] -= 1
+                state["exited"] += 1
+
+    monkeypatch.setattr(database_module, "AsyncSessionLocal", TrackingSessionContext)
+    return state
+
+
 @pytest.mark.asyncio
-async def test_execute_trading_order_buy_logic(test_db):
+async def test_execute_trading_order_buy_logic(test_db, monkeypatch):
     session_id, _, _ = await _seed_trade_context(test_db)
     wrapped_tool = await _wrapped_pm_tool(session_id)
+    session_state = _track_tool_db_sessions(monkeypatch, test_db)
+
+    async def fake_execute_order_and_update_db(**_kwargs):
+        assert session_state["active"] == 0
+        assert session_state["exited"] == 1
+        return {"success": True, "message": "ok"}
+
     with patch("app.core.config.settings.ENABLE_AUTO_TRADE", True), patch(
         "app.trading.service.trading_service.execute_order_and_update_db", new_callable=AsyncMock
     ) as mock_execute:
-        mock_execute.return_value = {"success": True, "message": "ok"}
+        mock_execute.side_effect = fake_execute_order_and_update_db
 
         await wrapped_tool.ainvoke({
             "stock_code": "600519.SH",
@@ -324,7 +353,7 @@ async def test_execute_trading_order_rejects_limit_buy_stop_loss_above_limit_pri
 
 
 @pytest.mark.asyncio
-async def test_execute_trading_order_cancels_pending_order(test_db):
+async def test_execute_trading_order_cancels_pending_order(test_db, monkeypatch):
     order_uuid = uuid4()
     session_id, _, _ = await _seed_trade_context(
         test_db,
@@ -340,10 +369,17 @@ async def test_execute_trading_order_cancels_pending_order(test_db):
         ),
     )
     wrapped_tool = await _wrapped_pm_tool(session_id)
+    session_state = _track_tool_db_sessions(monkeypatch, test_db)
+
+    async def fake_cancel_order(*_args, **_kwargs):
+        assert session_state["active"] == 0
+        assert session_state["exited"] == 1
+        return {"success": True, "message": "cancelled", "order": SimpleNamespace(status="cancelled")}
+
     with patch("app.core.config.settings.ENABLE_AUTO_TRADE", True), patch(
         "app.trading.service.trading_service.cancel_order", new_callable=AsyncMock
     ) as mock_cancel:
-        mock_cancel.return_value = {"success": True, "message": "cancelled", "order": SimpleNamespace(status="cancelled")}
+        mock_cancel.side_effect = fake_cancel_order
 
         result = await wrapped_tool.ainvoke({
             "operation": "cancel",

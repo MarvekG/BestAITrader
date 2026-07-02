@@ -299,16 +299,23 @@ class TaskManager:
             return True
 
     async def cleanup_zombie_tasks(self) -> int:
-        """异步清理服务重启前仍在运行的僵尸任务。"""
+        """异步清理服务重启前遗留的运行中任务和陈旧待运行任务。
+
+        Returns:
+            被标记为失败的任务数量。
+        """
+        now = datetime.now()
         async with database_module.AsyncSessionLocal() as db:
             result = await db.execute(
-                select(AsyncTask).where(AsyncTask.status == "running")
+                select(AsyncTask).where(
+                    AsyncTask.status.in_(["pending", "running"])
+                )
             )
             zombie_tasks = result.scalars().all()
             for task in zombie_tasks:
                 task.status = "failed"
                 task.error_message = "Task interrupted by server restart"
-                task.completed_at = datetime.now()
+                task.completed_at = now
             if zombie_tasks:
                 await db.commit()
             return len(zombie_tasks)

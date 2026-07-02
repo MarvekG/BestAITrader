@@ -429,7 +429,7 @@ class _PersistDb:
         self.added = []
 
     def query(self, *_args, **_kwargs):
-        return _PersistQuery(self.session_obj)
+        raise AssertionError("Legacy sync .query() must not be used by async persistence tests")
 
     def add(self, obj):
         self.added.append(obj)

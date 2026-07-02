@@ -224,7 +224,8 @@ async def set_my_total_funds(
     try:
         account = await ensure_user_account(db, current_user)
         total_funds_decimal = Decimal(str(total_funds))
-        market_value = account.market_value or Decimal("0.00")
+        valuation = await _build_portfolio_valuation(db, account)
+        market_value = valuation["summary"]["market_value_decimal"]
         frozen_cash = account.frozen_cash or Decimal("0.00")
         available_cash = total_funds_decimal - market_value - frozen_cash
         if available_cash < 0:
@@ -240,6 +241,7 @@ async def set_my_total_funds(
         account.total_assets = total_funds_decimal
         account.initial_capital = account.total_assets
         account.available_cash = available_cash
+        account.market_value = market_value
 
         await db.commit()
         await db.refresh(account)
@@ -249,7 +251,7 @@ async def set_my_total_funds(
             "total_funds": account.total_assets,
             "cash_balance": account.available_cash,
             "frozen_cash": account.frozen_cash,
-            "market_value": account.market_value,
+            "market_value": market_value,
             "funds_change": funds_change
         }
     except HTTPException:

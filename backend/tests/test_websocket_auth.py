@@ -169,3 +169,40 @@ def test_global_websocket_rejects_token_query(client, auth_headers):
             pass
 
     assert exc_info.value.code == 1008
+
+
+def test_global_websocket_ticket_rejects_cross_user_session(client, test_db, run_async):
+    owner = run_async(_create_user(test_db, f"ws_owner_{uuid.uuid4().hex[:8]}"))
+    other = run_async(_create_user(test_db, f"ws_other_{uuid.uuid4().hex[:8]}"))
+    session = run_async(_create_debate_session(test_db, owner.id))
+    headers = _login(client, other.username)
+
+    response = client.post(f"/ws-ticket/{session.session_id}", headers=headers)
+
+    assert other.id != owner.id
+    assert response.status_code == 404
+
+
+def test_global_websocket_rejects_cross_user_ticket(client, test_db, run_async):
+    owner = run_async(_create_user(test_db, f"ws_owner_{uuid.uuid4().hex[:8]}"))
+    other = run_async(_create_user(test_db, f"ws_other_{uuid.uuid4().hex[:8]}"))
+    session = run_async(_create_debate_session(test_db, owner.id))
+    ticket = create_websocket_ticket(other.id, "global", str(session.session_id))
+
+    with pytest.raises(WebSocketDisconnect) as exc_info:
+        with client.websocket_connect(f"/ws/{session.session_id}?ticket={ticket}"):
+            pass
+
+    assert exc_info.value.code == 1008
+
+
+def test_global_websocket_status_rejects_cross_user_session(client, test_db, run_async):
+    owner = run_async(_create_user(test_db, f"ws_owner_{uuid.uuid4().hex[:8]}"))
+    other = run_async(_create_user(test_db, f"ws_other_{uuid.uuid4().hex[:8]}"))
+    session = run_async(_create_debate_session(test_db, owner.id))
+    headers = _login(client, other.username)
+
+    response = client.get(f"/ws/status/{session.session_id}", headers=headers)
+
+    assert other.id != owner.id
+    assert response.status_code == 404
