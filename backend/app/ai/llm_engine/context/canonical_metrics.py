@@ -118,7 +118,7 @@ def _render_table(metrics: list[CanonicalMetric], valuation_date: str | None) ->
 
 
 async def build_canonical_metrics(db: Any, stock_code: str) -> AIContextPayload:
-    """从原始财务字段确定性计算高频派生指标。
+    """从估值历史确定性计算估值与行情派生指标。
 
     Args:
         db: 数据库会话。
