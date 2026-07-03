@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 
 from sqlalchemy import desc, select
 
@@ -49,7 +49,6 @@ def _build_metrics(
     pb: float | None,
     dividend_yield: float | None,
     valuation_date: str | None,
-    balance_date: str | None,
 ) -> list[CanonicalMetric]:
     metrics: list[CanonicalMetric] = []
 
@@ -100,14 +99,14 @@ def _build_metrics(
     return metrics
 
 
-def _render_table(metrics: list[CanonicalMetric], valuation_date: str | None, balance_date: str | None) -> str:
+def _render_table(metrics: list[CanonicalMetric], valuation_date: str | None) -> str:
     formatted_values = format_payload_values(
         "canonical_metrics",
         {metric.key: metric.value for metric in metrics},
     )
     lines = [
-        "Canonical derived metrics computed deterministically from raw financial fields.",
-        f"Valuation date: {valuation_date or 'missing'}; balance-sheet report date: {balance_date or 'missing'}.",
+        "Canonical valuation metrics computed deterministically from valuation history.",
+        f"Valuation date: {valuation_date or 'missing'}.",
         "",
         "| Metric | Value | Formula/source |",
         "| --- | --- | --- |",
@@ -138,7 +137,6 @@ async def build_canonical_metrics(db: Any, stock_code: str) -> AIContextPayload:
         return {"status": "missing"}
 
     valuation_date = str(valuation.data_date) if valuation is not None else None
-    balance_date = None
 
     metrics = _build_metrics(
         close_price=_to_float(valuation.close_price) if valuation else None,
@@ -148,14 +146,12 @@ async def build_canonical_metrics(db: Any, stock_code: str) -> AIContextPayload:
         pb=_to_float(valuation.pb) if valuation else None,
         dividend_yield=_to_float(valuation.dividend_yield) if valuation else None,
         valuation_date=valuation_date,
-        balance_date=balance_date,
     )
 
     return {
         "status": "available",
         "valuation_date": valuation_date,
-        "balance_report_date": balance_date,
-        "table_markdown": _render_table(metrics, valuation_date, balance_date),
+        "table_markdown": _render_table(metrics, valuation_date),
         "metrics": {
             metric.key: metric.as_dict()
             for metric in metrics
