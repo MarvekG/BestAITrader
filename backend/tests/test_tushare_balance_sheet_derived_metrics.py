@@ -55,5 +55,7 @@ def test_balance_sheet_derived_metrics_have_localized_labels(monkeypatch):
 
     assert localized["data"]["净现金"] == "562.89亿元"
     assert localized["data"]["每股净现金"] == "10.05元/股"
+    assert localized["data"]["实收资本/股本金额(非总股数)"] == "56.01亿元"
     assert "net_cash" not in localized["data"]
     assert "per_share_net_cash" not in localized["data"]
+    assert "total_share" not in localized["data"]
