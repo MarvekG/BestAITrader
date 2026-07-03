@@ -8,6 +8,7 @@ Test enabled data sources for data ingestion
 import pytest
 import pandas as pd
 import numpy as np
+import tushare as ts
 import uuid
 from datetime import date, datetime, timedelta
 from unittest.mock import AsyncMock, Mock, patch
@@ -161,6 +162,31 @@ class TestTushareIngestor:
         Tushare 采集器不再提供概念板块行情同步入口。
         """
         assert not hasattr(TushareIngestor, "fetch_and_ingest_board_concept")
+
+    @pytest.mark.asyncio
+    async def test_tushare_kline_uses_pro_bar_with_adjustment(self, mock_tushare_data):
+        """Tushare K 线应通过 pro_bar 获取复权行情。"""
+        ingestor = TushareIngestor.__new__(TushareIngestor)
+        ingestor.source = "tushare"
+        ingestor.pro = Mock()
+        ingestor.ensure_pro = AsyncMock(return_value=ingestor.pro)
+        ingestor.ingestion_service = Mock()
+        ingestor.ingestion_service.write_dataframe = AsyncMock(return_value=True)
+        ingestor._run_in_executor = AsyncMock(return_value=mock_tushare_data)
+
+        result = await ingestor.fetch_and_ingest_stock_kline(
+            "000001.SZ",
+            start_date="2026-01-15",
+            end_date="2026-01-25",
+            adjust="qfq",
+        )
+
+        assert result["success"] is True
+        called_func = ingestor._run_in_executor.await_args.args[0]
+        assert called_func is ts.pro_bar
+        assert ingestor._run_in_executor.await_args.kwargs["api"] is ingestor.pro
+        assert ingestor._run_in_executor.await_args.kwargs["freq"] == "D"
+        assert ingestor._run_in_executor.await_args.kwargs["adj"] == "qfq"
 
 
 @pytest.mark.asyncio

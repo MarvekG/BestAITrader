@@ -167,16 +167,14 @@ class TushareIngestor(BaseIngestor):
         采集单只股票 K 线行情并写入标准行情表。
 
         官方文档:
-            - daily: https://tushare.pro/document/2?doc_id=27
-            - weekly: https://tushare.pro/document/2?doc_id=144
-            - monthly: https://tushare.pro/document/2?doc_id=145
+            - pro_bar: https://tushare.pro/document/2?doc_id=109
 
         Args:
             stock_code: 股票代码。
             start_date: 开始日期，支持 YYYY-MM-DD 或 YYYYMMDD。
             end_date: 结束日期，支持 YYYY-MM-DD 或 YYYYMMDD。
             period: 行情周期，支持 daily、weekly、monthly。
-            adjust: 复权参数，当前实现不传递给 Tushare Pro 接口。
+            adjust: 复权参数，支持 qfq(前复权)、hfq(后复权)、空值(不复权)。
 
         Returns:
             采集并写入成功返回 True；无数据、配置缺失或异常返回 False。
@@ -184,27 +182,29 @@ class TushareIngestor(BaseIngestor):
         try:
             await self.ensure_pro()
 
-            # Map period to Tushare API and frequency
+            # Map period to Tushare pro_bar frequency and ingestion source name
             period_map = {
-                "daily": (self.pro.daily, "D", "daily"),
-                "weekly": (self.pro.weekly, "W", "weekly"),
-                "monthly": (self.pro.monthly, "M", "monthly")
+                "daily": ("D", "daily"),
+                "weekly": ("W", "weekly"),
+                "monthly": ("M", "monthly")
             }
             if period not in period_map:
                 logger.warning(f"Unsupported period {period} for Tushare kline. Using daily.")
                 period = "daily"
 
-            api_func, freq, api_name = period_map[period]
+            freq, api_name = period_map[period]
 
             # Ensure stock code has suffix (e.g. 000001.SZ) for Tushare API
             ts_code = StockCodeStandardizer.standardize(stock_code)
-            params = {'ts_code': ts_code}
+            params = {'ts_code': ts_code, 'api': self.pro, 'freq': freq}
             if start_date:
                 params['start_date'] = start_date.replace('-', '')
             if end_date:
                 params['end_date'] = end_date.replace('-', '')
+            if adjust:
+                params['adj'] = adjust
 
-            df = await self._run_in_executor(api_func, **params)
+            df = await self._run_in_executor(ts.pro_bar, **params)
             if df is None or df.empty:
                 return {"success": False, "data": [], "count": 0}
 
