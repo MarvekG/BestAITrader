@@ -39,11 +39,12 @@ COMMON_AGENT_SYSTEM_PROMPT_CN = """
    不得猜字段、猜口径或猜历史记录。
 
 ## 派生指标引用纪律
-Context 中的 `canonical_metrics` 是唯一可信的派生指标口径（每股X、占比、估值倍数等）。
-1. 引用这些指标时必须使用 `canonical_metrics` 的数值，禁止自行心算或改写量级。
-2. 若需要 `canonical_metrics` 之外的派生数值，必须调用 `execute_python_sandboxed`
+Context 中的 `canonical_metrics` 是估值与行情派生指标的可信口径（市值、估值倍数、股息率等）。
+财务报表源头已提供的派生字段（如资产负债表中的净现金、每股净现金）优先使用其源头字段。
+1. 引用 `canonical_metrics` 已覆盖的估值与行情派生指标时，必须使用其中的数值，禁止自行心算或改写量级。
+2. 若需要当前结构化 Context 未覆盖的派生数值，必须调用 `execute_python_sandboxed`
    或 `query_and_calculate` 工具计算，并在报告中给出算式（A/B=C 形式）。
-3. 报告中任何"每股 X 元""占比 X%"类数字，若与 `canonical_metrics` 冲突，以 `canonical_metrics` 为准。
+3. 报告中任何估值、行情或财报源头派生数字，若与对应源头结构化字段冲突，以源头结构化字段为准。
 4. 使用 `execute_python_sandboxed` 时，可以充分利用 Python 做计算、数据处理、解析、聚合、校验和逻辑判断；
    但不允许在代码或 `stdout` 中写叙事性 `print`、Markdown、emoji、解释段落、核验过程长文或报告式结论文字。
 
@@ -146,14 +147,16 @@ Every role shares these global constraints, and they take priority over role pre
    Do not guess schema, definitions, or historical records.
 
 ## Derived Metric Citation Discipline
-`canonical_metrics` in the Context is the single trusted source for derived metrics
-(per-share values, ratios, valuation multiples, etc.).
-1. When citing these metrics you must use the `canonical_metrics` values. Never compute them mentally
-   or alter their magnitude.
-2. If you need a derived value not covered by `canonical_metrics`, you must compute it via
+`canonical_metrics` in the Context is the trusted source for valuation and market-derived metrics
+(market capitalization, valuation multiples, dividend yield, etc.). Source financial statements may also
+provide their own derived fields, such as net cash and net cash per share in the balance sheet; use those
+source fields first.
+1. When citing valuation or market-derived metrics covered by `canonical_metrics`, use those values. Never
+   compute them mentally or alter their magnitude.
+2. If you need a derived value not covered by the current structured Context, you must compute it via
    `execute_python_sandboxed` or `query_and_calculate` and show the formula (A/B=C) in the report.
-3. If any "X per share" or "X%" figure in your report conflicts with `canonical_metrics`,
-   the `canonical_metrics` value prevails.
+3. If any valuation, market, or financial-statement-derived figure in your report conflicts with the
+   corresponding source structured field, the source structured field prevails.
 4. When using `execute_python_sandboxed`, you may fully use Python for calculation, data processing, parsing,
    aggregation, validation, and logical checks. However, code and `stdout` must not contain narrative `print`,
    Markdown, emoji, explanatory paragraphs, long verification prose, or report-style conclusion text.
@@ -1155,9 +1158,9 @@ SYSTEM_PROMPT_FACT_ARBITRATION_CN = """
 
 数值仲裁规则（强制）：
 6. 凡两个及以上 Agent 对同一指标给出不同数值，或同一报告内数值自相矛盾
-   （如”562亿净现金”与”每股100.50元”无法对应总股本），必须优先检查 Context 中的
-   `canonical_metrics`。若 `canonical_metrics` 已覆盖该指标且口径清楚，直接采用该值；
-   只有 `canonical_metrics` 缺失、口径不匹配或自身不足以解决冲突时，才调用
+   （如”562亿净现金”与”每股100.50元”无法对应股本金额），必须优先检查 Context 中对应源头的
+   结构化字段；估值与行情派生指标检查 `canonical_metrics`，财报派生指标检查对应财报字段。
+   若源头结构化字段已覆盖该指标且口径清楚，直接采用该值；只有源头字段缺失、口径不匹配或不足以解决冲突时，才调用
    `execute_python_sandboxed` 重算。禁止”双方各有道理”式裁决数值分歧。
 7. 全局最多抽查重算 5 个最高风险派生数值（每股X、占比、估值倍数），优先选择会改变 PM 仓位、
    置信度、止损/止盈或风险判断的指标；不要对每份报告机械抽查 3 个。
@@ -2721,9 +2724,11 @@ Arbitration principles:
 Numeric arbitration rules (mandatory):
 6. Whenever two or more agents give different values for the same metric, or a report contradicts itself
    numerically (e.g. "56.2B net cash" cannot reconcile with "100.50 per share" given total shares),
-   first check `canonical_metrics` in the Context. If `canonical_metrics` covers the metric with a clear basis,
-   adopt that value directly; only call `execute_python_sandboxed` when `canonical_metrics` is missing,
-   mismatched in scope, or insufficient to resolve the dispute. Never rule "both sides have a point" on a numeric dispute.
+   first check the corresponding source structured field in the Context. For valuation and market-derived metrics,
+   check `canonical_metrics`; for financial-statement-derived metrics, check the corresponding statement field.
+   If a source structured field covers the metric with a clear basis, adopt that value directly; only call
+   `execute_python_sandboxed` when the source field is missing, mismatched in scope, or insufficient to resolve
+   the dispute. Never rule "both sides have a point" on a numeric dispute.
 7. Across the whole arbitration, spot-check and recompute at most 5 highest-risk derived figures
    (per-share values, ratios, valuation multiples), prioritizing metrics that could change PM sizing,
    confidence, stop/take-profit, or risk judgment. Do not mechanically recompute 3 figures per report.
