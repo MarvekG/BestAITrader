@@ -345,7 +345,7 @@ async def test_bulk_upsert_splits_large_batches_before_asyncpg_parameter_limit(m
 
 @pytest.mark.asyncio
 async def test_tushare_dragon_tiger_normalizes_amounts_to_cny():
-    """Tushare 龙虎榜万元字段应按库表约定换算为元。"""
+    """Tushare 龙虎榜金额字段官方单位为元，应原样写入元。"""
     ingestor = TushareIngestor.__new__(TushareIngestor)
     ingestor.source = "tushare"
     ingestor.ingestion_service = Mock()
@@ -380,17 +380,17 @@ async def test_tushare_dragon_tiger_normalizes_amounts_to_cny():
 
     written_df = ingestor.ingestion_service.write_dataframe.await_args.args[1]
     assert result is True
-    assert written_df.iloc[0]["net_buy_amount"] == 6_000_000
-    assert written_df.iloc[0]["buy_amount"] == 18_000_000
-    assert written_df.iloc[0]["sell_amount"] == 12_000_000
-    assert written_df.iloc[0]["total_trade_amount"] == 30_000_000
-    assert written_df.iloc[0]["market_total_trade_amount"] == 500_000_000
-    assert written_df.iloc[0]["floating_market_capitalization"] == 1_234_560_000
+    assert written_df.iloc[0]["net_buy_amount"] == 600
+    assert written_df.iloc[0]["buy_amount"] == 1800
+    assert written_df.iloc[0]["sell_amount"] == 1200
+    assert written_df.iloc[0]["total_trade_amount"] == 3000
+    assert written_df.iloc[0]["market_total_trade_amount"] == 50000
+    assert written_df.iloc[0]["floating_market_capitalization"] == 123456
 
 
 @pytest.mark.asyncio
 async def test_tushare_lockup_release_normalizes_shares():
-    """Tushare 限售解禁万股字段应按库表约定换算为股。"""
+    """Tushare 限售解禁股份字段官方单位为股，应原样写入股。"""
     ingestor = TushareIngestor.__new__(TushareIngestor)
     ingestor.source = "tushare"
     ingestor.ingestion_service = Mock()
@@ -403,7 +403,7 @@ async def test_tushare_lockup_release_normalizes_shares():
             {
                 "ts_code": "000001.SZ",
                 "float_date": "20260618",
-                "float_share": 123.45,
+                "float_share": 123456.0,
                 "float_ratio": 1.2,
                 "share_type": "首发原股东限售股份",
                 "holder_name": "股东A",
@@ -416,12 +416,12 @@ async def test_tushare_lockup_release_normalizes_shares():
 
     written_df = ingestor.ingestion_service.write_dataframe.await_args.args[1]
     assert result["success"] is True
-    assert written_df.iloc[0]["release_shares"] == pytest.approx(1_234_500)
+    assert written_df.iloc[0]["release_shares"] == pytest.approx(123456.0)
 
 
 @pytest.mark.asyncio
 async def test_tushare_limit_pool_normalizes_market_values_to_cny():
-    """Tushare 涨停池市值万元字段应按库表约定换算为元。"""
+    """Tushare 涨停池市值字段官方返回元，应原样写入元。"""
     ingestor = TushareIngestor.__new__(TushareIngestor)
     ingestor.source = "tushare"
     ingestor.ingestion_service = Mock()
@@ -457,13 +457,13 @@ async def test_tushare_limit_pool_normalizes_market_values_to_cny():
 
     written_df = ingestor.ingestion_service.write_dataframe.await_args.args[1]
     assert result["success"] is True
-    assert written_df.iloc[0]["circ_mv"] == 10_000_000
-    assert written_df.iloc[0]["total_mv"] == 20_000_000
+    assert written_df.iloc[0]["circ_mv"] == 1000
+    assert written_df.iloc[0]["total_mv"] == 2000
 
 
 @pytest.mark.asyncio
-async def test_tushare_sector_money_flow_normalizes_amounts_to_cny():
-    """Tushare 行业资金流万元字段应按库表约定换算为元。"""
+async def test_tushare_sector_money_flow_keeps_official_cny_amounts():
+    """Tushare 东财行业资金流金额字段官方单位为元，应原样写入元。"""
     ingestor = TushareIngestor.__new__(TushareIngestor)
     ingestor.source = "tushare"
     ingestor.ingestion_service = Mock()
@@ -497,12 +497,12 @@ async def test_tushare_sector_money_flow_normalizes_amounts_to_cny():
 
     written_df = ingestor.ingestion_service.write_dataframe.await_args.args[1]
     assert result["success"] is True
-    assert written_df.iloc[0]["net_inflow"] == 12_000_000
-    assert written_df.iloc[0]["main_net_inflow"] == 12_000_000
-    assert written_df.iloc[0]["huge_net_inflow"] == 5_000_000
-    assert written_df.iloc[0]["large_net_inflow"] == 3_000_000
-    assert written_df.iloc[0]["medium_net_inflow"] == 2_000_000
-    assert written_df.iloc[0]["small_net_inflow"] == 1_000_000
+    assert written_df.iloc[0]["net_inflow"] == 1200
+    assert written_df.iloc[0]["main_net_inflow"] == 1200
+    assert written_df.iloc[0]["huge_net_inflow"] == 500
+    assert written_df.iloc[0]["large_net_inflow"] == 300
+    assert written_df.iloc[0]["medium_net_inflow"] == 200
+    assert written_df.iloc[0]["small_net_inflow"] == 100
 
 
 def test_tushare_pledge_detail_maps_holder_ratio_to_model_field():
