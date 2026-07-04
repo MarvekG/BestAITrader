@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 
 import pytest
@@ -159,6 +160,31 @@ def test_global_websocket_ticket_requires_auth(client):
     response = client.post("/ws-ticket/session-1")
 
     assert response.status_code == 401
+
+
+def test_global_websocket_accepts_authenticated_dashboard_session(client, auth_headers, monkeypatch):
+    async def _idle_task_notifications():
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        "app.websocket.manager.ws_manager._run_task_notifications",
+        _idle_task_notifications,
+    )
+    session_id = f"dashboard-{uuid.uuid4().hex[:8]}"
+
+    ticket_response = client.post(f"/ws-ticket/{session_id}", headers=auth_headers)
+    assert ticket_response.status_code == 200
+    ticket = ticket_response.json()["ticket"]
+
+    with client.websocket_connect(f"/ws/{session_id}?ticket={ticket}") as websocket:
+        websocket.send_json({"type": "ping", "timestamp": "test"})
+        for _ in range(3):
+            response = websocket.receive_json()
+            if response["type"] == "pong":
+                break
+
+    assert response["type"] == "pong"
+    assert response["timestamp"] == "test"
 
 
 def test_global_websocket_rejects_token_query(client, auth_headers):
