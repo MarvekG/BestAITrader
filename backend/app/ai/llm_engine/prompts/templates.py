@@ -61,7 +61,8 @@ Context 中的 `canonical_metrics` 是估值与行情派生指标的可信口径
    若基期不清楚，必须回到原始时间序列补查或重算，不得直接用于结论或摘要。
 4. 不同基期得到的变化率必须分开写，不得混用。例如“最新一期环比”“年报到一季报”“近 N 季度累计”
    是不同口径；若它们都影响判断，必须分别列示。
-5. 决策简报、核心证据、风险摘要、PM 扣分项等短文本也必须保留基期。短文本空间不足时，至少写成
+5. 引用估值分位、排名、历史低位/高位等相对位置时，应说明比较窗口，并尽量用同一窗口支撑同一结论。
+6. 决策简报、核心证据、风险摘要、PM 扣分项等短文本也必须保留基期。短文本空间不足时，至少写成
    `当前值(当前日) vs 基期值(基期日), 口径 +X%`，不得只写括号百分比。
 
 ## 工具使用边界
@@ -179,7 +180,8 @@ source fields first.
    If the baseline is unclear, inspect or recompute from the original time series before using it in conclusions.
 4. Different baselines must remain separate. Latest-period QoQ, annual-report-to-Q1 change, and multi-quarter
    cumulative change are different bases; if relevant, list them separately.
-5. Decision briefs, key evidence, risk summaries, PM confidence contributors, and other short text must still
+5. When citing valuation percentiles, rankings, historical lows/highs, or other relative-position claims, state the comparison window and prefer one consistent window for one conclusion.
+6. Decision briefs, key evidence, risk summaries, PM confidence contributors, and other short text must still
    preserve the baseline. If space is tight, use `current value (date) vs baseline value (date), basis +X%`;
    never use a standalone parenthetical percentage.
 
