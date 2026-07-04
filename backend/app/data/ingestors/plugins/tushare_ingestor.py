@@ -974,7 +974,7 @@ class TushareIngestor(BaseIngestor):
                         # Standardize stock code
                         df['stock_code'] = df['stock_code'].apply(StockCodeStandardizer.standardize)
 
-                        # Tushare top_list amount and market-cap fields use 万元; model stores CNY.
+                        # Tushare top_list amount and market-cap fields are already CNY.
                         amount_cols = [
                             'net_buy_amount',
                             'buy_amount',
@@ -985,7 +985,7 @@ class TushareIngestor(BaseIngestor):
                         ]
                         for col in amount_cols:
                             if col in df.columns:
-                                df[col] = pd.to_numeric(df[col], errors='coerce') * 10000
+                                df[col] = pd.to_numeric(df[col], errors='coerce')
 
                         # Set data source
                         df['data_source'] = self.source
@@ -1552,8 +1552,8 @@ class TushareIngestor(BaseIngestor):
                 if 'release_date' in df.columns:
                     df['release_date'] = pd.to_datetime(df['release_date'], errors='coerce')
                 if 'release_shares' in df.columns:
-                    # Tushare share_float.float_share uses 万股; model stores raw shares.
-                    df['release_shares'] = pd.to_numeric(df['release_shares'], errors='coerce') * 10000
+                    # Tushare share_float.float_share is already raw shares.
+                    df['release_shares'] = pd.to_numeric(df['release_shares'], errors='coerce')
 
                 await self.ingestion_service.write_dataframe(
                     'share_float', df, source=self.source, target_table='stock_lockup_release'
@@ -1695,7 +1695,7 @@ class TushareIngestor(BaseIngestor):
                         df[col] = pd.to_numeric(df[col], errors='coerce')
                 for col in ['circ_mv', 'total_mv']:
                     if col in df.columns:
-                        df[col] = pd.to_numeric(df[col], errors='coerce') * 10000
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
 
                 await self.ingestion_service.write_dataframe(
                     'limit_list_d', df, source=self.source, target_table='stock_limit_up_pool'
@@ -1787,7 +1787,7 @@ class TushareIngestor(BaseIngestor):
                         df[col] = pd.to_numeric(df[col], errors='coerce')
                 for col in ['circ_mv', 'total_mv']:
                     if col in df.columns:
-                        df[col] = pd.to_numeric(df[col], errors='coerce') * 10000
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
 
                 await self.ingestion_service.write_dataframe(
                     'limit_list_d', df, source=self.source, target_table='stock_limit_down_pool'
@@ -1879,7 +1879,7 @@ class TushareIngestor(BaseIngestor):
                         df[col] = pd.to_numeric(df[col], errors='coerce')
                 for col in ['circ_mv', 'total_mv']:
                     if col in df.columns:
-                        df[col] = pd.to_numeric(df[col], errors='coerce') * 10000
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
 
                 await self.ingestion_service.write_dataframe(
                     'limit_list_d', df, source=self.source, target_table='stock_zhaban_pool'
@@ -2151,7 +2151,7 @@ class TushareIngestor(BaseIngestor):
             ]
             for col in amount_cols:
                 if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce') * 10000
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
 
             if 'trade_date' in df.columns:
                 df['trade_date'] = pd.to_datetime(df['trade_date']).dt.date

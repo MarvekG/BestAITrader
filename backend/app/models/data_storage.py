@@ -709,7 +709,7 @@ class SectorMoneyFlow(Base):
     sector_name = Column(String(100), nullable=False, index=True)
     trade_date = Column(Date, nullable=False, index=True)
     
-    net_inflow = Column(Float, info={"name": "sector_money_flow.net_inflow", "unit": "units.cny"})  # 净流入(万元/亿元)
+    net_inflow = Column(Float, info={"name": "sector_money_flow.net_inflow", "unit": "units.cny"})  # 净流入(元)
     net_inflow_rate = Column(Float, info={"name": "sector_money_flow.net_inflow_rate", "unit": "units.percent"})  # 净流入率
     
     # 扩展字段 (主力=超大+大)
