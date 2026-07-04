@@ -32,7 +32,10 @@ async def create_global_websocket_ticket(
     """Create a short-lived ticket for the global WebSocket endpoint."""
     session_uuid = _parse_session_uuid(session_id)
     if session_uuid is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        return {
+            "ticket": create_websocket_ticket(current_user.id, "global", session_id),
+            "expires_in": WEBSOCKET_TICKET_TTL_SECONDS,
+        }
 
     if not await _user_owns_session(db, session_id=session_uuid, user_id=current_user.id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
@@ -66,15 +69,15 @@ async def _authenticate_websocket(
     scope: str,
     resource_id: str | None,
 ) -> User | None:
+    session_uuid = None
     if scope == "global":
         session_uuid = _parse_session_uuid(resource_id or "")
-        if session_uuid is None:
-            return None
-        resource_id = str(session_uuid)
+        if session_uuid is not None:
+            resource_id = str(session_uuid)
 
     ticket_user_id = consume_websocket_ticket(ticket, scope, resource_id)
     if ticket_user_id is not None:
-        if scope == "global" and not await _user_owns_session(
+        if scope == "global" and session_uuid is not None and not await _user_owns_session(
             db,
             session_id=UUID(resource_id),
             user_id=ticket_user_id,
