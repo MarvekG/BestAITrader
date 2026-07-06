@@ -202,7 +202,7 @@ async def evaluate_position_disciplines(*, user_id: int) -> list[dict[str, Any]]
             if position.stop_loss is None and position.take_profit is None and position.horizon_deadline is None:
                 continue
 
-            price_info = _resolve_latest_stock_price(position.stock_code)
+            price_info = await _resolve_latest_stock_price(position.stock_code)
             latest_price = _to_decimal(price_info.get("latest_price")) if price_info.get("success") else None
 
             trigger = None

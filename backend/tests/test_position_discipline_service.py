@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -124,7 +125,7 @@ async def test_discipline_scan_skips_duplicate_latest_stock_trigger(
     await _add_stock_warehouse(async_db_session, user.id)
     monkeypatch.setattr(
         "app.ai.agentic.tools._resolve_latest_stock_price",
-        lambda stock_code: {"success": True, "latest_price": "9.40"},
+        AsyncMock(return_value={"success": True, "latest_price": "9.40"}),
     )
 
     launcher_calls = []
@@ -192,7 +193,7 @@ async def test_discipline_scan_marks_created_records_failed_when_scheduler_fails
     await _add_stock_warehouse(async_db_session, user.id)
     monkeypatch.setattr(
         "app.ai.agentic.tools._resolve_latest_stock_price",
-        lambda stock_code: {"success": True, "latest_price": "9.40"},
+        AsyncMock(return_value={"success": True, "latest_price": "9.40"}),
     )
 
     def failing_launcher(**_kwargs):

@@ -98,6 +98,24 @@ async def test_search_tries_next_key_when_response_is_not_200(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_search_expands_same_day_date_range(monkeypatch):
+    monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.tavily.get_data_source_config_list", AsyncMock(return_value=["test-key"]))
+    payloads = []
+
+    class _CapturePayloadClient(_FakeAsyncClient):
+        async def post(self, url, json):
+            payloads.append(json)
+            return _FakeResponse({"results": []})
+
+    with patch("app.ai.agentic.tooling.news_plugins.tavily.httpx.AsyncClient", _CapturePayloadClient):
+        results = await tavily.search("AI", limit=1, from_date="2026-07-06", to_date="2026-07-06")
+
+    assert results == []
+    assert payloads[0]["start_date"] == "2026-07-05"
+    assert payloads[0]["end_date"] == "2026-07-06"
+
+
+@pytest.mark.asyncio
 async def test_search_returns_empty_when_api_key_missing(monkeypatch):
     monkeypatch.setattr("app.ai.agentic.tooling.news_plugins.tavily.get_data_source_config_list", AsyncMock(return_value=[]))
 

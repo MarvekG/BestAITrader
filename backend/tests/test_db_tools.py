@@ -177,6 +177,74 @@ async def test_query_and_calculate_coerces_date_filter_values(test_db, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_query_and_calculate_projects_requested_columns(async_db_session, monkeypatch):
+    """columns 应只把计算所需字段注入沙箱，避免大表全字段膨胀。"""
+    from app.models.data_storage import StockBasic, StockValuationHistory
+
+    async_db_session.add(StockBasic(stock_code="000001.SZ", name="平安银行", market="SZ"))
+    async_db_session.add(
+        StockValuationHistory(
+            stock_code="000001.SZ",
+            data_date=date(2026, 7, 1),
+            close_price=10.5,
+            pe_ttm=8.8,
+            pb=0.9,
+            total_market_value=1000000000,
+        )
+    )
+    await async_db_session.commit()
+    captured = {}
+
+    async def fake_sandbox(code):
+        captured["code"] = code
+        return {"success": True, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(tools_module, "execute_python_in_sandbox", fake_sandbox)
+
+    result = await query_and_calculate.ainvoke(
+        {
+            "table_name": "StockValuationHistory",
+            "filters": [{"column": "stock_code", "op": "==", "value": "000001.SZ"}],
+            "columns": ["data_date", "pe_ttm"],
+            "compute_code": "result = {'row_count': len(data), 'pe': data[0]['pe_ttm'] if data else None}",
+            "limit": 1,
+        }
+    )
+
+    assert result["success"] is True
+    assert '"pe_ttm"' in captured["code"]
+    assert '"data_date"' in captured["code"]
+    assert '"total_market_value"' not in captured["code"]
+    assert '"close_price"' not in captured["code"]
+
+
+@pytest.mark.asyncio
+async def test_query_and_calculate_reports_oversized_sandbox_payload(test_db, monkeypatch):
+    """沙箱请求过大时应在后端拦截并给出列裁剪提示。"""
+    monkeypatch.setattr(tools_module, "PY_SANDBOX_CODE_MAX_CHARS", 20)
+
+    async def fail_sandbox(_code):
+        raise AssertionError("sandbox should not be called")
+
+    monkeypatch.setattr(tools_module, "execute_python_in_sandbox", fail_sandbox)
+
+    result = await query_and_calculate.ainvoke(
+        {
+            "table_name": "StockBasic",
+            "filters": [],
+            "columns": ["stock_code"],
+            "compute_code": "result = {'row_count': len(data)}",
+            "limit": 0,
+        }
+    )
+
+    assert result["success"] is False
+    assert result["metadata"]["error_type"] == "sandbox_request_too_large"
+    assert result["metadata"]["columns"] == ["stock_code"]
+    assert "pass columns" in result["hint"]
+
+
+@pytest.mark.asyncio
 async def test_get_database_schema_translates_column_info():
     """数据库结构工具应翻译 SQLAlchemy Column.info 中的名称和单位 key。"""
     result = await get_database_schema.ainvoke({})

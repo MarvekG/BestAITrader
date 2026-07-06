@@ -9,6 +9,7 @@ from app.core.logger import get_logger
 
 
 logger = get_logger(__name__)
+PY_SANDBOX_CODE_MAX_CHARS = 500_000
 
 BLOCKED_IMPORTS = {
     "os",
@@ -297,6 +298,12 @@ async def execute_python_in_sandbox(code: str, execution_mode: str | None = None
         标准沙箱执行响应。
     """
     started_at = time.monotonic()
+    if len(code) > PY_SANDBOX_CODE_MAX_CHARS:
+        return _build_error_response(
+            started_at,
+            f"Python sandbox code is too large: {len(code)} characters exceeds max {PY_SANDBOX_CODE_MAX_CHARS}.",
+            "request_too_large",
+        )
     if not settings.PY_SANDBOX_ENABLED:
         return _build_error_response(started_at, "Python sandbox is unavailable", "sandbox_disabled")
 

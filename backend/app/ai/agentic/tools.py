@@ -10,7 +10,7 @@ from app.ai.agentic.tooling.browser_tool import browse_web_page_html
 from app.ai.agentic.tooling.db_utils import coerce_filter_value_for_column
 from app.ai.agentic.tooling.news_tool import search_news
 from app.ai.agentic.tooling.pdf_tool import parse_pdf_to_markdown
-from app.ai.agentic.tooling.python_sandbox import execute_python_in_sandbox
+from app.ai.agentic.tooling.python_sandbox import PY_SANDBOX_CODE_MAX_CHARS, execute_python_in_sandbox
 from app.ai.agentic.tooling.stock_tools import StockTools, UnsupportedColumnsError
 from app.core.i18n import i18n_service
 from app.core.logger import get_logger
@@ -665,7 +665,7 @@ async def query_stock_data(
                 "northbound": "NorthboundData",
                 "dragon_tiger": "DragonTigerData",
                 "hot_rank": "StockHotRank",
-                "insider": "StockInsiderTrading",
+                "insider": "StockInsider",
                 "pledge": "StockPledge",
                 "shareholder": "StockShareholder",
                 "technical": "StockIndicators",
@@ -1207,7 +1207,8 @@ async def query_and_calculate(
     table_name: str,
     filters: List[Dict[str, Any]],
     compute_code: str,
-    limit: int = 100
+    limit: int = 100,
+    columns: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     通用数据库查询与动态计算工具 (Generic DB Query and Dynamic Calculation Tool).
@@ -1237,6 +1238,7 @@ async def query_and_calculate(
       - `data` 是通过 `json.loads()` 解析自数据库查询结果的列表 (List[Dict])。
       - 常用库（numpy, pandas, math, datetime, json）已在沙箱中可用。
     - limit: 整数。为了防止内存溢出，数据库查询的最大行数限制。默认 100。
+    - columns: 可选列表。只返回计算所需列；大表或长周期查询必须传 columns，避免超过沙箱请求大小上限。
 
     计算示例 (compute_code):
     ```python
@@ -1272,7 +1274,8 @@ async def query_and_calculate(
     1. 你可以使用 numpy (np), pandas (pd), math, datetime 等常用库。
     2. 系统会自动定义 `data` 变量，其内容为数据库查询出的原始行（已转为字典列表）。
     3. 工具将返回完整的计算执行报告（包含 success、stdout、stderr、error、metadata 等状态）。
-    4. 注意：数据库中的某些数值可能为 null，请务必在代码中处理空值，确保健壮性。
+    4. 大表/长周期计算必须传 `columns`，例如估值百分位只传 `["data_date", "pe_ttm", "pb"]`。
+    5. 注意：数据库中的某些数值可能为 null，请务必在代码中处理空值，确保健壮性。
     """
     import app.core.database as database_module
     from sqlalchemy import and_, select
@@ -1282,8 +1285,13 @@ async def query_and_calculate(
         return {"error": f"Table '{table_name}' not found."}
 
     try:
+        selected_columns = StockTools._normalize_selected_columns(model, _normalize_list_arg(columns))
+    except UnsupportedColumnsError as exc:
+        return exc.to_dict()
+
+    try:
         async with database_module.AsyncSessionLocal() as db:
-            query = select(model)
+            query = StockTools._build_model_query(model, selected_columns)
 
             # 构建过滤条件
             ops = {
@@ -1320,17 +1328,38 @@ async def query_and_calculate(
                 query = query.where(and_(*filter_clauses))
 
             # 执行查询
-            records = (await db.execute(query.limit(limit))).scalars().all()
+            records = StockTools._query_result_records(await db.execute(query.limit(limit)), selected_columns)
             # 序列化结果供计算使用
-            data_for_calc = [
-                {k: v for k, v in r.__dict__.items() if not k.startswith('_')}
-                for r in records
-            ]
+            data_for_calc = StockTools._serialize_query_results(records, selected_columns)
 
         # 准备注入沙箱的代码。关闭数据库会话后再执行沙箱，避免长任务占用连接。
         data_json = json.dumps(make_json_serializable(data_for_calc), ensure_ascii=False)
         # Use Python repr for the JSON payload so backslashes/quotes survive code injection intact.
         full_code = f"import json\ndata = json.loads({data_json!r})\n{compute_code}"
+
+        if len(full_code) > PY_SANDBOX_CODE_MAX_CHARS:
+            return {
+                "success": False,
+                "stdout": "",
+                "stderr": "",
+                "error": (
+                    "Query result too large for Python sandbox: generated code length "
+                    f"{len(full_code)} exceeds max {PY_SANDBOX_CODE_MAX_CHARS}."
+                ),
+                "execution_time_ms": 0,
+                "timed_out": False,
+                "truncated": False,
+                "metadata": {
+                    "error_type": "sandbox_request_too_large",
+                    "table_name": table_name,
+                    "row_count": len(data_for_calc),
+                    "limit": limit,
+                    "columns": selected_columns,
+                    "code_chars": len(full_code),
+                    "max_code_chars": PY_SANDBOX_CODE_MAX_CHARS,
+                },
+                "hint": "Reduce limit/date range or pass columns with only the fields needed for compute_code.",
+            }
 
         # 直接返回完整的执行报告，包含 success, stdout, stderr 等
         return await execute_python_in_sandbox(full_code)

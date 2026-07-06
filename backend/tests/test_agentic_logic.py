@@ -1088,7 +1088,7 @@ async def test_agentic_tools_analysis_suite():
         assert res["results"]["insider"][0]["direction"] == "buy"
         assert res["results"]["pledge"][0]["pledge_ratio"] == 12.5
         mock_generic.assert_any_call(
-            "StockInsiderTrading", "600519", 20,
+            "StockInsider", "600519", 20,
             start_time="2024-01-01 00:00:00",
             end_time="2024-12-31 23:59:59",
         )

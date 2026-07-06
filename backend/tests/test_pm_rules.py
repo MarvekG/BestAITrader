@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -108,7 +109,7 @@ async def test_evaluate_position_disciplines_detects_stop_loss(
     await async_db_session.commit()
     monkeypatch.setattr(
         "app.ai.agentic.tools._resolve_latest_stock_price",
-        lambda stock_code: {"success": True, "latest_price": "9.40"},
+        AsyncMock(return_value={"success": True, "latest_price": "9.40"}),
     )
 
     triggered = await evaluate_position_disciplines(user_id=user.id)
@@ -130,7 +131,7 @@ async def test_evaluate_position_disciplines_detects_take_profit(
     await async_db_session.commit()
     monkeypatch.setattr(
         "app.ai.agentic.tools._resolve_latest_stock_price",
-        lambda stock_code: {"success": True, "latest_price": "11.10"},
+        AsyncMock(return_value={"success": True, "latest_price": "11.10"}),
     )
 
     triggered = await evaluate_position_disciplines(user_id=user.id)
@@ -151,7 +152,7 @@ async def test_evaluate_position_disciplines_detects_horizon_expired(
     await async_db_session.commit()
     monkeypatch.setattr(
         "app.ai.agentic.tools._resolve_latest_stock_price",
-        lambda stock_code: {"success": False},
+        AsyncMock(return_value={"success": False}),
     )
 
     triggered = await evaluate_position_disciplines(user_id=user.id)
