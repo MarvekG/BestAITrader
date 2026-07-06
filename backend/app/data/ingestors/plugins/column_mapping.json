@@ -229,6 +229,7 @@
         "date": "date",
         "time": "time",
         "code": "stock_code",
+        "timestamp": "timestamp",
         "change_percent": "change_percent",
         "change_amount": "change_amount"
       }

@@ -50,7 +50,7 @@ async def run_debate(
         simplified = request.get("simplified", False)
         trading_frequency = request.get("trading_frequency")
         trading_strategy = request.get("trading_strategy")
-        sync_before_analysis = bool(request.get("sync_before_analysis", False))
+        sync_before_analysis = bool(request.get("sync_before_analysis", True))
 
         if not session_id_str:
             raise HTTPException(status_code=400, detail="session_id is required")
@@ -135,8 +135,7 @@ async def run_debate(
             "trading_frequency": trading_frequency,
             "trading_strategy": trading_strategy,
         }
-        if sync_before_analysis:
-            task_parameters["sync_before_analysis"] = True
+        task_parameters["sync_before_analysis"] = sync_before_analysis
 
         try:
             await ensure_debate_launch_available(stock_code)
@@ -154,7 +153,7 @@ async def run_debate(
                     "stock_code": stock_code,
                     "trading_frequency": trading_frequency,
                     "trading_strategy": trading_strategy,
-                    **({"sync_before_analysis": True} if sync_before_analysis else {}),
+                    "sync_before_analysis": sync_before_analysis,
                 },
                 # 其实可以并行,但前端可能乱。这里暂设为False，或者True?
                 # 这里的allow_concurrent是针对task_type + parameters.
