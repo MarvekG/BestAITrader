@@ -290,6 +290,7 @@ async def _create_and_schedule_position_discipline_debate(
         "trading_frequency": trading_frequency,
         "trading_strategy": trading_strategy,
         "discipline_trigger": discipline_trigger,
+        "sync_before_analysis": True,
     }
     launch_kwargs = {
         "session_id": session_id,
@@ -299,6 +300,7 @@ async def _create_and_schedule_position_discipline_debate(
         "trigger_reason": decision.trigger_reason,
         "evidence_summary": decision.evidence_summary,
         "discipline_trigger": discipline_trigger,
+        "sync_before_analysis": True,
     }
     task_info = await task_manager.submit_task(
         task_name=format_ai_analysis_task_name(stock_code),

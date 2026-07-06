@@ -1022,6 +1022,8 @@ async def test_scan_breaks_cooldown_for_high_confidence_decision_with_news_evide
     )
     assert task is not None
     assert task.user_id == user.id
+    assert task.parameters["sync_before_analysis"] is True
+    assert launcher_calls[0]["sync_before_analysis"] is True
 
 
 @pytest.mark.asyncio

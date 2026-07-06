@@ -99,7 +99,11 @@ async def _get_latest_position_price(db: Any, stock_code: str, fallback_price: f
     latest_market_result = await db.execute(
         select(StockRealtimeMarket)
         .where(StockRealtimeMarket.stock_code == stock_code)
-        .order_by(desc(StockRealtimeMarket.timestamp))
+        .order_by(
+            desc(StockRealtimeMarket.timestamp),
+            desc(StockRealtimeMarket.updated_at),
+            desc(StockRealtimeMarket.created_at),
+        )
     )
     latest_market = latest_market_result.scalars().first()
 

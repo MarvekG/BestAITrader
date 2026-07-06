@@ -90,7 +90,11 @@ class TechnicalSource:
         result = await db.execute(
             select(StockRealtimeMarket)
             .where(StockRealtimeMarket.stock_code == stock_code)
-            .order_by(desc(StockRealtimeMarket.timestamp))
+            .order_by(
+                desc(StockRealtimeMarket.timestamp),
+                desc(StockRealtimeMarket.updated_at),
+                desc(StockRealtimeMarket.created_at),
+            )
         )
         realtime = result.scalars().first()
 
@@ -110,6 +114,7 @@ class TechnicalSource:
             "turnover": realtime.turnover,
             "total_market_cap": realtime.total_market_cap,
             "circulating_market_cap": realtime.circulating_market_cap,
+            "timestamp": realtime.timestamp.isoformat() if realtime.timestamp else None,
         }
         return format_payload_values("technical.realtime_market", payload)
 

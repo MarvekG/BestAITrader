@@ -500,7 +500,10 @@ class AkshareIngestor(BaseIngestor):
 
             # 补充字段
             df['data_source'] = self.source
-            df['timestamp'] = pd.Timestamp.now()
+            if '时间戳' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['时间戳'], errors='coerce')
+            else:
+                df['timestamp'] = pd.NaT
 
             # 数值转换
             numeric_cols = [

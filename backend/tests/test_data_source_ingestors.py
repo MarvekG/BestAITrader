@@ -244,7 +244,8 @@ async def test_tushare_realtime_market_normalizes_numeric_strings():
     for column in ["current_price", "prev_close", "volume", "turnover", "high", "low", "open"]:
         assert pd.api.types.is_numeric_dtype(written_df[column])
     assert written_df.iloc[0]["volume"] == 13_236_539
-    assert isinstance(result["data"][0]["timestamp"], pd.Timestamp)
+    assert written_df.iloc[0]["timestamp"] == pd.Timestamp("2026-07-02 10:12:23")
+    assert result["data"][0]["timestamp"] == pd.Timestamp("2026-07-02 10:12:23")
 
 
 def test_data_ingestion_normalizes_dedicated_table_bind_values():

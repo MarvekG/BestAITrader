@@ -220,7 +220,7 @@ class  StockRealtimeMarket(Base):
   small_inflow_10d = Column(Float, info={"name": "stock_realtime_market.small_inflow_10d", "unit": "units.cny"})  # f467
   main_net_inflow_rank_10d = Column(Integer, info={"name": "stock_realtime_market.main_net_inflow_rank_10d", "unit": "units.rank"})  # f471
 
-  timestamp  =  Column(DateTime,  default=datetime.now)
+  timestamp  =  Column(DateTime)  # 数据源返回的行情时间
   data_source  =  Column(String(20),  nullable=False,  default='tushare')
   created_at  =  Column(DateTime,  default=datetime.now)
   updated_at  =  Column(DateTime,  default=datetime.now,  onupdate=datetime.now)

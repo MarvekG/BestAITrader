@@ -162,9 +162,11 @@ async def test_discipline_scan_skips_duplicate_latest_stock_trigger(
         "source": "position_discipline",
     }
     assert launcher_calls[0]["discipline_trigger"] == expected_trigger
+    assert launcher_calls[0]["sync_before_analysis"] is True
 
     task = (await async_db_session.execute(select(AsyncTask))).scalars().one()
     assert task.parameters["discipline_trigger"] == expected_trigger
+    assert task.parameters["sync_before_analysis"] is True
 
     setting = (
         await async_db_session.execute(

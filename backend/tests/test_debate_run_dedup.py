@@ -10,6 +10,52 @@ from app.schemas.session import SessionCreate
 from app.schemas.user import UserCreate
 
 
+@pytest.mark.asyncio
+async def test_run_debate_defaults_to_sync_before_analysis(client, test_db, monkeypatch):
+    user_id, headers = await _create_authenticated_user(client, test_db, "debate_default_sync_user")
+    analysis_session = await crud_session.create(
+        obj_in=SessionCreate(
+            user_id=user_id,
+            stock_code="000001.SZ",
+            stock_name="平安银行",
+            trading_frequency="中线交易",
+            trading_strategy="价值投资",
+        )
+    )
+
+    submitted: dict = {}
+
+    async def _fake_submit_task(**kwargs):
+        submitted.update(kwargs)
+        return {
+            "task_id": "default-sync-task",
+            "status": "pending",
+            "message": "started",
+            "new_task": True,
+        }
+
+    async def _fake_send_debate_status(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("app.api.endpoints.debate.task_manager.submit_task", _fake_submit_task)
+    monkeypatch.setattr("app.api.endpoints.debate.send_debate_status", _fake_send_debate_status)
+
+    response = client.post(
+        "/api/v1/debate/run",
+        headers=headers,
+        json={
+            "session_id": str(analysis_session.session_id),
+            "stock_code": "000001.SZ",
+            "trading_frequency": "中线交易",
+            "trading_strategy": "价值投资",
+        },
+    )
+
+    assert response.status_code == 201
+    assert submitted["parameters"]["sync_before_analysis"] is True
+    assert submitted["task_kwargs"]["sync_before_analysis"] is True
+
+
 async def _create_authenticated_user(client, session_factory, username: str):
     password = "password123"
     async with session_factory() as db:

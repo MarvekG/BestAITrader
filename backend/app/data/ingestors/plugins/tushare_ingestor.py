@@ -864,6 +864,12 @@ class TushareIngestor(BaseIngestor):
                 df['change_amount'] = 0.0
                 df['change_percent'] = 0.0
 
+            if 'date' in df.columns and 'time' in df.columns:
+                df['timestamp'] = pd.to_datetime(
+                    df['date'].astype(str).str.strip() + ' ' + df['time'].astype(str).str.strip(),
+                    errors='coerce',
+                )
+
             # 3. 字段映射 (使用已配置的 data.stock_realtime_market 映射)
             mapping_key = 'data.stock_realtime_market'
             df = ColumnMapper.map_columns(df, mapping_key, source=self.source, strict=True)
@@ -893,7 +899,8 @@ class TushareIngestor(BaseIngestor):
                     df[col] = pd.to_numeric(df[col], errors='coerce')
 
             df['data_source'] = self.source
-            df['timestamp'] = pd.Timestamp.now()
+            if 'timestamp' not in df.columns:
+                df['timestamp'] = pd.NaT
 
             # 5. 持久化入库
             success = await self.ingestion_service.write_dataframe(
