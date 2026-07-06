@@ -20,6 +20,7 @@ Source traits:
 
 import asyncio
 import re
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
@@ -122,6 +123,19 @@ def _is_relevant_match(keyword: str, terms: list[str], *parts: str) -> bool:
     return len(core_terms) < 3 or not specific_terms or any(term in matched_terms for term in specific_terms)
 
 
+def _normalize_tavily_date_range(from_date: str, to_date: str) -> tuple[str, str]:
+    """归一化 Tavily 日期范围，避免供应商拒绝同日起止日期。"""
+    start_date = _normalize_inline_text(from_date)
+    end_date = _normalize_inline_text(to_date)
+    if not start_date or not end_date or start_date != end_date:
+        return start_date, end_date
+    try:
+        parsed_start = date.fromisoformat(start_date)
+    except ValueError:
+        return start_date, end_date
+    return (parsed_start - timedelta(days=1)).isoformat(), end_date
+
+
 async def search(
     keyword: str,
     limit: int = 10,
@@ -172,16 +186,17 @@ async def search_with_api_keys(
     normalized_keyword = _normalize_inline_text(keyword)
     query_terms = _extract_search_terms(normalized_keyword) or [normalized_keyword]
     max_retries = 3
+    start_date, end_date = _normalize_tavily_date_range(from_date, to_date)
     payload = {
         "query": keyword,
         "search_depth": "advanced",
         "max_results": limit,
         "include_raw_content": "markdown",
     }
-    if from_date:
-        payload["start_date"] = from_date
-    if to_date:
-        payload["end_date"] = to_date
+    if start_date:
+        payload["start_date"] = start_date
+    if end_date:
+        payload["end_date"] = end_date
 
     for attempt in range(max_retries):
         try:

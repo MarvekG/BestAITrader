@@ -3,7 +3,11 @@ from unittest.mock import AsyncMock, patch
 import httpx
 import pytest
 
-from app.ai.agentic.tooling.python_sandbox import execute_python_in_sandbox, validate_python_code
+from app.ai.agentic.tooling.python_sandbox import (
+    PY_SANDBOX_CODE_MAX_CHARS,
+    execute_python_in_sandbox,
+    validate_python_code,
+)
 from app.ai.agentic.tools import execute_python_sandboxed, get_all_tools
 from app.core.config import settings
 
@@ -227,6 +231,17 @@ async def test_execute_python_in_sandbox_returns_validation_error_without_http_c
     assert response["success"] is False
     assert response["metadata"]["error_type"] == "validation_error"
     assert "Import not allowed" in response["error"]
+
+
+@pytest.mark.asyncio
+async def test_execute_python_in_sandbox_rejects_oversized_code_without_http_call() -> None:
+    """超过 sandbox API code 上限时应本地拒绝，避免产生 HTTP 422。"""
+    with patch("app.ai.agentic.tooling.python_sandbox.httpx.AsyncClient", side_effect=AssertionError("unexpected")):
+        response = await execute_python_in_sandbox("x" * (PY_SANDBOX_CODE_MAX_CHARS + 1))
+
+    assert response["success"] is False
+    assert response["metadata"]["error_type"] == "request_too_large"
+    assert str(PY_SANDBOX_CODE_MAX_CHARS) in response["error"]
 
 
 @pytest.mark.asyncio
