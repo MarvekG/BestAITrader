@@ -30,7 +30,11 @@
 
 ## 编码约定
 - Python 使用 3.11+、PEP 8、绝对导入、`logging`，不使用 `print`、裸 `except`、`eval`、`exec`。
+- 代码标识符、字符串常量、日志和异常信息中不得使用中文；测试断言可按业务需要使用中文。
 - 新增或修改公共 Python 函数时补中文 Google 风格 docstring。
+- 代码注释与 docstring 使用中文，保持简洁准确。
+- 前端展示文案必须接入现有国际化体系，不直接硬编码展示文本或作为代码中文例外。
+- 前端展示数据时必须复用现有单位系统补全单位，不手写零散单位格式。
 - 不跨服务/模块传递数据库 session；除直接子函数场景外，优先在使用点通过 `async with AsyncSessionLocal()` 打开，且数据库会话作用域尽量小。
 - 前端 API 放入 `frontend/src/api/*.ts` 并复用 `apiClient`；UI 优先使用 Ant Design 5 和现有组件。
 - 单测禁止访问真实 LLM、Redis、Tushare、NewsAPI、Tavily、浏览器外部服务。
