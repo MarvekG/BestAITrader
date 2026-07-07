@@ -6,7 +6,7 @@ import pytest
 
 from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_engine.context.capital_flow import _build_money_flow_trend_summary
-from app.ai.llm_engine.context.providers import _compact_series_payload
+from app.ai.llm_engine.context.providers import _build_price_position_summary, _compact_series_payload
 from app.ai.llm_engine.context.service import AIContextService
 from app.ai.llm_engine.context.technical import TechnicalSource
 from app.ai.llm_engine.context.types import AI_CONTEXT_SECTION_ORDER, AIContextLayer
@@ -92,6 +92,58 @@ def test_money_flow_trend_summary_converts_cumulative_wan_to_yi():
     assert summary["net_inflow_main_daily_average"] == "-6.26亿元"
     assert summary["inflow_days"] == "7天"
     assert summary["outflow_days"] == "13天"
+    assert summary["inflow_day_ratio"] == "35%"
+    assert summary["outflow_day_ratio"] == "65%"
+    assert summary["net_flow_bias"] == "negative"
+
+
+class _FakeScalarResult:
+    def __init__(self, value):
+        self.value = value
+
+    def first(self):
+        return self.value
+
+
+class _FakeExecuteResult:
+    def __init__(self, value):
+        self.value = value
+
+    def scalars(self):
+        return _FakeScalarResult(self.value)
+
+
+class _FakeRawMarketDB:
+    def __init__(self, market, indicators):
+        self.results = [_FakeExecuteResult(market), _FakeExecuteResult(indicators)]
+
+    async def execute(self, _statement):
+        return self.results.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_price_position_summary_computes_realtime_technical_derivatives():
+    """实时层应只基于数据库原始行情和技术指标派生价格位置。"""
+    summary = await _build_price_position_summary(
+        _FakeRawMarketDB(
+            SimpleNamespace(current_price=110),
+            SimpleNamespace(
+                ma5=100,
+                ma20=80,
+                ma60=120,
+                boll_upper=120,
+                boll_mid=100,
+                boll_lower=80,
+            ),
+        ),
+        "000001.SZ",
+    )
+
+    assert summary["price_vs_ma5_pct"] == "10%"
+    assert summary["price_vs_ma20_pct"] == "37.5%"
+    assert summary["price_vs_ma60_pct"] == "-8.33%"
+    assert summary["price_vs_boll_mid_pct"] == "10%"
+    assert summary["price_position_in_boll_pct"] == "75%"
 
 
 @pytest.mark.asyncio

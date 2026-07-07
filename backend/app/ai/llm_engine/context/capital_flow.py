@@ -20,6 +20,15 @@ def _build_money_flow_trend_summary(flows: Sequence[StockMoneyFlow]) -> Dict[str
     ordered = sorted(flows, key=lambda flow: flow.trade_date)
     total_yuan = sum(flow.net_inflow_main or 0 for flow in ordered)
     count = len(ordered)
+    inflow_days = sum(1 for flow in ordered if (flow.net_inflow_main or 0) > 0)
+    outflow_days = sum(1 for flow in ordered if (flow.net_inflow_main or 0) < 0)
+    flat_days = sum(1 for flow in ordered if (flow.net_inflow_main or 0) == 0)
+    if total_yuan > 0:
+        net_flow_bias = "positive"
+    elif total_yuan < 0:
+        net_flow_bias = "negative"
+    else:
+        net_flow_bias = "flat"
     payload = {
         "status": "available",
         "window_records": count,
@@ -27,9 +36,13 @@ def _build_money_flow_trend_summary(flows: Sequence[StockMoneyFlow]) -> Dict[str
         "end_date": str(ordered[-1].trade_date),
         "net_inflow_main_total": total_yuan,
         "net_inflow_main_daily_average": total_yuan / count,
-        "inflow_days": sum(1 for flow in ordered if (flow.net_inflow_main or 0) > 0),
-        "outflow_days": sum(1 for flow in ordered if (flow.net_inflow_main or 0) < 0),
-        "flat_days": sum(1 for flow in ordered if (flow.net_inflow_main or 0) == 0),
+        "inflow_days": inflow_days,
+        "outflow_days": outflow_days,
+        "flat_days": flat_days,
+        "inflow_day_ratio": inflow_days / count * 100,
+        "outflow_day_ratio": outflow_days / count * 100,
+        "flat_day_ratio": flat_days / count * 100,
+        "net_flow_bias": net_flow_bias,
     }
     return format_payload_values("capital_flow.money_flow_trend_summary", payload)
 

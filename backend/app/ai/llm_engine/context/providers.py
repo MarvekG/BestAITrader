@@ -11,8 +11,94 @@ from app.ai.llm_engine.context.types import AIContextLayer, AIContextPayload
 from app.models.user import User
 from app.data.metadata.field_units import format_payload_values
 from app.models.data_storage import StockValuationHistory
+from app.models.data_storage import StockRealtimeMarket
+from app.models.stock_indicators import StockIndicators
 from app.performance.service import get_latest_performance_summary
 from app.portfolio.service import get_portfolio_overview
+
+
+def _raw_number(value: Any) -> float | None:
+    """转换数据库原始数值为浮点数。
+
+    Args:
+        value: 数据库原始数值。
+
+    Returns:
+        可参与计算的浮点数；无法转换时返回 None。
+    """
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _percent_change(current_value: Any, base_value: Any) -> float | None:
+    """计算两个同口径数值之间的百分比变化。
+
+    Args:
+        current_value: 当前值。
+        base_value: 基准值。
+
+    Returns:
+        百分比变化值；缺少数值或基准为零时返回 None。
+    """
+    current = _raw_number(current_value)
+    base = _raw_number(base_value)
+    if current is None or base in (None, 0):
+        return None
+    return round((current - base) / base * 100, 4)
+
+
+async def _build_price_position_summary(db: Any, stock_code: str) -> AIContextPayload:
+    """构建实时价格相对技术指标的位置摘要。
+
+    Args:
+        db: 数据库会话。
+        stock_code: 标准股票代码。
+
+    Returns:
+        仅使用实时行情和技术指标原始数据派生的价格位置摘要。
+    """
+    market_result = await db.execute(
+        select(StockRealtimeMarket)
+        .where(StockRealtimeMarket.stock_code == stock_code)
+        .order_by(
+            desc(StockRealtimeMarket.timestamp),
+            desc(StockRealtimeMarket.updated_at),
+            desc(StockRealtimeMarket.created_at),
+        )
+    )
+    market = market_result.scalars().first()
+    indicator_result = await db.execute(
+        select(StockIndicators)
+        .where(StockIndicators.stock_code == stock_code)
+        .order_by(desc(StockIndicators.trade_date))
+    )
+    indicators = indicator_result.scalars().first()
+
+    price = _raw_number(market.current_price) if market else None
+    boll_upper = _raw_number(indicators.boll_upper) if indicators else None
+    boll_lower = _raw_number(indicators.boll_lower) if indicators else None
+    boll_range = (
+        boll_upper - boll_lower
+        if boll_upper is not None and boll_lower is not None
+        else None
+    )
+    payload: AIContextPayload = {
+        "status": "available" if price is not None and indicators else "missing",
+        "price_vs_ma5_pct": _percent_change(price, indicators.ma5) if indicators else None,
+        "price_vs_ma20_pct": _percent_change(price, indicators.ma20) if indicators else None,
+        "price_vs_ma60_pct": _percent_change(price, indicators.ma60) if indicators else None,
+        "price_vs_boll_mid_pct": _percent_change(price, indicators.boll_mid) if indicators else None,
+        "price_position_in_boll_pct": (
+            round((price - boll_lower) / boll_range * 100, 4)
+            if price is not None and boll_lower is not None and boll_range not in (None, 0)
+            else None
+        ),
+    }
+    return format_payload_values("technical.price_position_summary", payload)
 
 
 def _csv_value(value: Any) -> str:
@@ -208,6 +294,7 @@ class RealtimeProvider:
                 "status": merge_status(market, indicators, money_flow, index_reference),
                 "market": market,
                 "indicators": indicators,
+                "price_position_summary": await _build_price_position_summary(db, runtime.stock_code),
                 "money_flow": money_flow,
                 "index_reference": index_reference,
             }

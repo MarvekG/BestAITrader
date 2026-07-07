@@ -1858,6 +1858,23 @@
       "precision": 2
     }
   },
+  "technical.price_position_summary": {
+    "price_vs_ma5_pct": {
+      "$ref": "percent"
+    },
+    "price_vs_ma20_pct": {
+      "$ref": "percent"
+    },
+    "price_vs_ma60_pct": {
+      "$ref": "percent"
+    },
+    "price_vs_boll_mid_pct": {
+      "$ref": "percent"
+    },
+    "price_position_in_boll_pct": {
+      "$ref": "percent"
+    }
+  },
   "capital_flow.money_flow": {
     "net_inflow_main": {
       "zh": {
@@ -2023,6 +2040,15 @@
         "scale": 1
       },
       "precision": 0
+    },
+    "inflow_day_ratio": {
+      "$ref": "percent"
+    },
+    "outflow_day_ratio": {
+      "$ref": "percent"
+    },
+    "flat_day_ratio": {
+      "$ref": "percent"
     }
   },
   "capital_flow.northbound": {
