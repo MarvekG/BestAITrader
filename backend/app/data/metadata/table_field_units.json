@@ -499,6 +499,68 @@
       "$ref": "shares_to_hundred_million"
     }
   },
+  "canonical_metrics.percentiles": {
+    "pe_ttm_percentile_1y": {
+      "$ref": "percent"
+    },
+    "pe_ttm_percentile_3y": {
+      "$ref": "percent"
+    },
+    "pe_ttm_percentile_5y": {
+      "$ref": "percent"
+    },
+    "pb_percentile_1y": {
+      "$ref": "percent"
+    },
+    "pb_percentile_3y": {
+      "$ref": "percent"
+    },
+    "pb_percentile_5y": {
+      "$ref": "percent"
+    },
+    "dividend_yield_percentile_1y": {
+      "$ref": "percent"
+    },
+    "dividend_yield_percentile_3y": {
+      "$ref": "percent"
+    },
+    "dividend_yield_percentile_5y": {
+      "$ref": "percent"
+    },
+    "sample_count_1y": {
+      "zh": {
+        "unit": "units.entries",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.entries",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "sample_count_3y": {
+      "zh": {
+        "unit": "units.entries",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.entries",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "sample_count_5y": {
+      "zh": {
+        "unit": "units.entries",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.entries",
+        "scale": 1
+      },
+      "precision": 0
+    }
+  },
   "portfolio.performance": {
     "available_cash": {
       "zh": {
@@ -1020,8 +1082,58 @@
       "$ref": "ten_thousand_cny"
     }
   },
+  "risk.lockup_release_summary": {
+    "days_to_next_release": {
+      "$ref": "days"
+    },
+    "release_count_3m": {
+      "zh": {
+        "unit": "units.entries",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.entries",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "release_count_12m": {
+      "zh": {
+        "unit": "units.entries",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.entries",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "total_release_ratio_3m": {
+      "$ref": "percent"
+    },
+    "total_release_ratio_12m": {
+      "$ref": "percent"
+    },
+    "total_release_market_value_3m": {
+      "$ref": "ten_thousand_cny"
+    },
+    "total_release_market_value_12m": {
+      "$ref": "ten_thousand_cny"
+    }
+  },
   "risk.shareholder": {
     "count": {
+      "zh": {
+        "unit": "units.households",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.households",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "latest_holder_count": {
       "zh": {
         "unit": "units.households",
         "scale": 1
@@ -1064,6 +1176,15 @@
         "scale": 1
       },
       "precision": 2
+    },
+    "holder_count_change_from_2q_pct": {
+      "$ref": "percent"
+    },
+    "holder_count_change_from_4q_pct": {
+      "$ref": "percent"
+    },
+    "latest_quarter_change_pct": {
+      "$ref": "percent"
     },
     "change_pct": {
       "zh": {
@@ -1344,6 +1465,17 @@
       "en": {
         "unit": "units.percent",
         "scale": 100
+      },
+      "precision": 4
+    },
+    "latest_two_record_hold_ratio_change_pp": {
+      "zh": {
+        "unit": "units.percent",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.percent",
+        "scale": 1
       },
       "precision": 4
     },
@@ -2008,6 +2140,15 @@
     "net_inflow_main_daily_average": {
       "$ref": "cny_to_hundred_million"
     },
+    "net_inflow_main_3d": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "net_inflow_main_5d": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "net_inflow_main_10d": {
+      "$ref": "cny_to_hundred_million"
+    },
     "inflow_days": {
       "zh": {
         "unit": "units.days",
@@ -2049,6 +2190,18 @@
     },
     "flat_day_ratio": {
       "$ref": "percent"
+    },
+    "latest_inflow_streak_days": {
+      "$ref": "days"
+    },
+    "latest_outflow_streak_days": {
+      "$ref": "days"
+    },
+    "max_inflow_streak_days": {
+      "$ref": "days"
+    },
+    "max_outflow_streak_days": {
+      "$ref": "days"
     }
   },
   "capital_flow.northbound": {

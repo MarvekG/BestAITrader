@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from typing import Dict, Any, List
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -98,7 +99,6 @@ class RiskSource:
     async def _get_lockup(self, db: AsyncSession,
                     stock_code: str) -> List[Dict[str, Any]]:
         # Get upcoming releases (Window extended to 12 months)
-        from datetime import datetime, timedelta
         today = datetime.now().date()
         one_year_later = today + timedelta(days=365)
 
@@ -125,6 +125,48 @@ class RiskSource:
                 "market_value": r.release_market_value  # 解禁市值
             })
         return format_payload_values("risk.lockup_release", results)
+
+    async def _get_lockup_summary(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
+        """构建未来解禁聚合摘要。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 标准股票代码。
+
+        Returns:
+            未来 3 个月和 12 个月解禁规模摘要。
+        """
+        today = datetime.now().date()
+        one_year_later = today + timedelta(days=365)
+        result = await db.execute(
+            select(StockRelease)
+            .where(
+                StockRelease.stock_code == stock_code,
+                StockRelease.release_date >= today,
+                StockRelease.release_date <= one_year_later,
+            )
+            .order_by(StockRelease.release_date)
+        )
+        releases = list(result.scalars().all())
+        if not releases:
+            return {"status": "missing", "has_upcoming_release": False}
+
+        three_month_end = today + timedelta(days=90)
+        releases_3m = [item for item in releases if item.release_date <= three_month_end]
+        payload = {
+            "status": "available",
+            "has_upcoming_release": True,
+            "next_release_date": str(releases[0].release_date),
+            "days_to_next_release": (releases[0].release_date - today).days,
+            "release_count_3m": len(releases_3m),
+            "release_count_12m": len(releases),
+            "total_release_ratio_3m": sum(item.ratio_to_total or 0 for item in releases_3m),
+            "total_release_ratio_12m": sum(item.ratio_to_total or 0 for item in releases),
+            "total_release_market_value_3m": sum(item.release_market_value or 0 for item in releases_3m),
+            "total_release_market_value_12m": sum(item.release_market_value or 0 for item in releases),
+            "has_material_release_3m": any((item.ratio_to_total or 0) >= 1 for item in releases_3m),
+        }
+        return format_payload_values("risk.lockup_release_summary", payload)
 
     async def _get_shareholder(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         result = await db.execute(
@@ -213,11 +255,28 @@ class RiskSource:
         else:
             total_change_pct = 0
 
+        def cumulative_change_pct(offset: int) -> float | None:
+            if len(shareholders) <= offset:
+                return None
+            base_count = shareholders[offset].holder_count
+            if not latest_count or not base_count:
+                return None
+            return round((latest_count - base_count) / base_count * 100, 2)
+
         payload = {
             "trend_signal": trend_signal,
+            "latest_holder_count": latest_count,
             "consecutive_decrease": consecutive_decrease,
             "consecutive_increase": consecutive_increase,
             "total_change_pct": round(total_change_pct, 2),
+            "holder_count_change_from_2q_pct": cumulative_change_pct(2),
+            "holder_count_change_from_4q_pct": cumulative_change_pct(4),
+            "latest_quarter_change_pct": changes[0]["change_pct"] if changes else None,
+            "concentration_bias": (
+                "concentrating"
+                if consecutive_decrease > 0
+                else "dispersing" if consecutive_increase > 0 else "stable"
+            ),
             "quarters_analyzed": len(changes),
             "recent_changes": changes[:4]  # 最近4个季度
         }

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, Mapping
 
 from sqlalchemy import desc, select
@@ -99,6 +100,59 @@ def _build_metrics(
     return metrics
 
 
+def _percentile_rank(current_value: float | None, history_values: list[float]) -> float | None:
+    """计算当前值在历史样本中的分位。
+
+    Args:
+        current_value: 当前指标值。
+        history_values: 历史样本值。
+
+    Returns:
+        小于等于当前值的样本占比百分数；缺少样本时返回 None。
+    """
+    if current_value is None or not history_values:
+        return None
+    valid_values = [value for value in history_values if value is not None]
+    if not valid_values:
+        return None
+    lower_count = sum(1 for value in valid_values if value < current_value)
+    return round(lower_count / len(valid_values) * 100, 4)
+
+
+def _build_percentile_payload(records: list[Any], valuation_date: Any) -> AIContextPayload:
+    """构建估值历史分位上下文。
+
+    Args:
+        records: 最新估值记录及历史样本。
+        valuation_date: 最新估值日期。
+
+    Returns:
+        PE/PB/股息率在 1/3/5 年窗口内的历史分位。
+    """
+    if not records or valuation_date is None:
+        return {"status": "missing"}
+
+    latest = records[0]
+    windows = {
+        "1y": valuation_date - timedelta(days=365),
+        "3y": valuation_date - timedelta(days=365 * 3),
+        "5y": valuation_date - timedelta(days=365 * 5),
+    }
+    payload: AIContextPayload = {"status": "available"}
+    for suffix, start_date in windows.items():
+        window_records = [record for record in records if record.data_date and record.data_date >= start_date]
+        payload[f"sample_count_{suffix}"] = len(window_records)
+        for field in ["pe_ttm", "pb", "dividend_yield"]:
+            current = _to_float(getattr(latest, field, None))
+            values = [
+                _to_float(getattr(record, field, None))
+                for record in window_records
+                if _to_float(getattr(record, field, None)) is not None
+            ]
+            payload[f"{field}_percentile_{suffix}"] = _percentile_rank(current, values)
+    return format_payload_values("canonical_metrics.percentiles", payload)
+
+
 def _render_table(metrics: list[CanonicalMetric], valuation_date: str | None) -> str:
     formatted_values = format_payload_values(
         "canonical_metrics",
@@ -132,7 +186,8 @@ async def build_canonical_metrics(db: Any, stock_code: str) -> AIContextPayload:
         .where(StockValuationHistory.stock_code == stock_code)
         .order_by(desc(StockValuationHistory.data_date))
     )
-    valuation = result.scalars().first()
+    records = list(result.scalars().all())
+    valuation = records[0] if records else None
     if valuation is None:
         return {"status": "missing"}
 
@@ -156,6 +211,7 @@ async def build_canonical_metrics(db: Any, stock_code: str) -> AIContextPayload:
             metric.key: metric.as_dict()
             for metric in metrics
         },
+        "percentiles": _build_percentile_payload(records, valuation.data_date if valuation else None),
     }
 
 

@@ -6,7 +6,12 @@ import pytest
 
 from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_engine.context.capital_flow import _build_money_flow_trend_summary
-from app.ai.llm_engine.context.providers import _build_price_position_summary, _compact_series_payload
+from app.ai.llm_engine.context.canonical_metrics import _build_percentile_payload
+from app.ai.llm_engine.context.providers import (
+    _build_price_position_summary,
+    _compact_series_payload,
+    _technical_signal_summary_from_raw,
+)
 from app.ai.llm_engine.context.service import AIContextService
 from app.ai.llm_engine.context.technical import TechnicalSource
 from app.ai.llm_engine.context.types import AI_CONTEXT_SECTION_ORDER, AIContextLayer
@@ -95,6 +100,29 @@ def test_money_flow_trend_summary_converts_cumulative_wan_to_yi():
     assert summary["inflow_day_ratio"] == "35%"
     assert summary["outflow_day_ratio"] == "65%"
     assert summary["net_flow_bias"] == "negative"
+    assert summary["latest_inflow_streak_days"] == "0天"
+    assert summary["latest_outflow_streak_days"] == "1天"
+    assert summary["max_inflow_streak_days"] == "2天"
+    assert summary["max_outflow_streak_days"] == "3天"
+    assert summary["net_inflow_main_3d"] == "16.74亿元"
+    assert summary["net_inflow_main_5d"] == "-64.53亿元"
+    assert summary["net_inflow_main_10d"] == "-32.94亿元"
+
+
+def test_canonical_metrics_percentiles_use_raw_history_values():
+    """估值分位应基于估值历史原始数值计算。"""
+    records = [
+        SimpleNamespace(data_date=date(2026, 7, 6), pe_ttm=20, pb=5, dividend_yield=1),
+        SimpleNamespace(data_date=date(2026, 7, 5), pe_ttm=10, pb=3, dividend_yield=2),
+        SimpleNamespace(data_date=date(2025, 7, 6), pe_ttm=30, pb=7, dividend_yield=0.5),
+    ]
+
+    payload = _build_percentile_payload(records, date(2026, 7, 6))
+
+    assert payload["sample_count_1y"] == "3笔"
+    assert payload["pe_ttm_percentile_1y"] == "33.33%"
+    assert payload["pb_percentile_1y"] == "33.33%"
+    assert payload["dividend_yield_percentile_1y"] == "33.33%"
 
 
 class _FakeScalarResult:
@@ -144,6 +172,31 @@ async def test_price_position_summary_computes_realtime_technical_derivatives():
     assert summary["price_vs_ma60_pct"] == "-8.33%"
     assert summary["price_vs_boll_mid_pct"] == "10%"
     assert summary["price_position_in_boll_pct"] == "75%"
+
+
+def test_technical_signal_summary_uses_raw_values():
+    """技术状态枚举应使用原始行情和指标值。"""
+    summary = _technical_signal_summary_from_raw(
+        SimpleNamespace(current_price=Decimal("110")),
+        SimpleNamespace(
+            ma5=Decimal("100"),
+            ma10="90",
+            ma20=80,
+            macd=Decimal("1.2"),
+            macd_signal="1.0",
+            rsi_6="75",
+            boll_upper=Decimal("120"),
+            boll_lower="80",
+        ),
+    )
+
+    assert summary == {
+        "status": "available",
+        "ma_alignment": "bullish",
+        "macd_relation": "dif_above_dea",
+        "rsi6_zone": "overbought",
+        "boll_zone": "inside_band",
+    }
 
 
 @pytest.mark.asyncio

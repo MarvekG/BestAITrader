@@ -51,15 +51,15 @@ def _percent_change(current_value: Any, base_value: Any) -> float | None:
     return round((current - base) / base * 100, 4)
 
 
-async def _build_price_position_summary(db: Any, stock_code: str) -> AIContextPayload:
-    """构建实时价格相对技术指标的位置摘要。
+async def _fetch_latest_market_and_indicators(db: Any, stock_code: str) -> tuple[Any, Any]:
+    """读取最新实时行情和技术指标原始记录。
 
     Args:
         db: 数据库会话。
         stock_code: 标准股票代码。
 
     Returns:
-        仅使用实时行情和技术指标原始数据派生的价格位置摘要。
+        最新实时行情记录和最新技术指标记录。
     """
     market_result = await db.execute(
         select(StockRealtimeMarket)
@@ -76,7 +76,11 @@ async def _build_price_position_summary(db: Any, stock_code: str) -> AIContextPa
         .where(StockIndicators.stock_code == stock_code)
         .order_by(desc(StockIndicators.trade_date))
     )
-    indicators = indicator_result.scalars().first()
+    return market, indicator_result.scalars().first()
+
+
+def _price_position_summary_from_raw(market: Any, indicators: Any) -> AIContextPayload:
+    """基于原始行情和指标记录计算价格位置摘要。"""
 
     price = _raw_number(market.current_price) if market else None
     boll_upper = _raw_number(indicators.boll_upper) if indicators else None
@@ -99,6 +103,91 @@ async def _build_price_position_summary(db: Any, stock_code: str) -> AIContextPa
         ),
     }
     return format_payload_values("technical.price_position_summary", payload)
+
+
+def _technical_signal_summary_from_raw(market: Any, indicators: Any) -> AIContextPayload:
+    """基于原始行情和指标记录计算客观技术状态枚举。"""
+    price = _raw_number(market.current_price) if market else None
+    if price is None or indicators is None:
+        return {"status": "missing"}
+
+    ma5 = _raw_number(indicators.ma5)
+    ma10 = _raw_number(indicators.ma10)
+    ma20 = _raw_number(indicators.ma20)
+    macd = _raw_number(indicators.macd)
+    macd_signal = _raw_number(indicators.macd_signal)
+    rsi_6 = _raw_number(indicators.rsi_6)
+    boll_upper = _raw_number(indicators.boll_upper)
+    boll_lower = _raw_number(indicators.boll_lower)
+
+    if None not in (ma5, ma10, ma20):
+        if price > ma5 > ma10 > ma20:
+            ma_alignment = "bullish"
+        elif price < ma5 < ma10 < ma20:
+            ma_alignment = "bearish"
+        else:
+            ma_alignment = "mixed"
+    else:
+        ma_alignment = "unknown"
+
+    if macd is not None and macd_signal is not None:
+        macd_relation = "dif_above_dea" if macd > macd_signal else "dif_below_dea"
+    else:
+        macd_relation = "unknown"
+
+    if rsi_6 is None:
+        rsi6_zone = "unknown"
+    elif rsi_6 < 30:
+        rsi6_zone = "oversold"
+    elif rsi_6 > 70:
+        rsi6_zone = "overbought"
+    else:
+        rsi6_zone = "neutral"
+
+    if boll_upper is None or boll_lower is None:
+        boll_zone = "unknown"
+    elif price > boll_upper:
+        boll_zone = "above_upper"
+    elif price < boll_lower:
+        boll_zone = "below_lower"
+    else:
+        boll_zone = "inside_band"
+
+    return {
+        "status": "available",
+        "ma_alignment": ma_alignment,
+        "macd_relation": macd_relation,
+        "rsi6_zone": rsi6_zone,
+        "boll_zone": boll_zone,
+    }
+
+
+async def _build_price_position_summary(db: Any, stock_code: str) -> AIContextPayload:
+    """构建实时价格相对技术指标的位置摘要。
+
+    Args:
+        db: 数据库会话。
+        stock_code: 标准股票代码。
+
+    Returns:
+        仅使用实时行情和技术指标原始数据派生的价格位置摘要。
+    """
+    market, indicators = await _fetch_latest_market_and_indicators(db, stock_code)
+    return _price_position_summary_from_raw(market, indicators)
+
+
+async def _build_technical_signal_summary(db: Any, stock_code: str) -> AIContextPayload:
+    """构建客观技术状态枚举。
+
+    Args:
+        db: 数据库会话。
+        stock_code: 标准股票代码。
+
+    Returns:
+        不含交易建议的技术状态枚举。
+    """
+    market, indicators = await _fetch_latest_market_and_indicators(db, stock_code)
+    return _technical_signal_summary_from_raw(market, indicators)
 
 
 def _csv_value(value: Any) -> str:
@@ -295,6 +384,7 @@ class RealtimeProvider:
                 "market": market,
                 "indicators": indicators,
                 "price_position_summary": await _build_price_position_summary(db, runtime.stock_code),
+                "technical_signal_summary": await _build_technical_signal_summary(db, runtime.stock_code),
                 "money_flow": money_flow,
                 "index_reference": index_reference,
             }
@@ -502,10 +592,12 @@ class EventsProvider:
             earnings = await runtime.build_earnings_countdown(db)
             lockup_items = await risk.lockup(db, runtime.stock_code)
             lockup = _wrap_list(risk, lockup_items)
+            lockup_summary = await risk.lockup_summary(db, runtime.stock_code)
             payload = {
-                "status": merge_status(earnings, lockup),
+                "status": merge_status(earnings, lockup, lockup_summary),
                 "earnings_countdown": earnings,
                 "lockup_release": lockup,
+                "lockup_release_summary": lockup_summary,
             }
             return AIContextLayer(self.name, payload)
 
