@@ -20,6 +20,44 @@ def _build_money_flow_trend_summary(flows: Sequence[StockMoneyFlow]) -> Dict[str
     ordered = sorted(flows, key=lambda flow: flow.trade_date)
     total_yuan = sum(flow.net_inflow_main or 0 for flow in ordered)
     count = len(ordered)
+    inflow_days = sum(1 for flow in ordered if (flow.net_inflow_main or 0) > 0)
+    outflow_days = sum(1 for flow in ordered if (flow.net_inflow_main or 0) < 0)
+    flat_days = sum(1 for flow in ordered if (flow.net_inflow_main or 0) == 0)
+    if total_yuan > 0:
+        net_flow_bias = "positive"
+    elif total_yuan < 0:
+        net_flow_bias = "negative"
+    else:
+        net_flow_bias = "flat"
+    recent = list(reversed(ordered))
+
+    def streak(sign: int) -> int:
+        count = 0
+        for flow in recent:
+            value = flow.net_inflow_main or 0
+            if (sign > 0 and value > 0) or (sign < 0 and value < 0):
+                count += 1
+                continue
+            break
+        return count
+
+    def max_streak(sign: int) -> int:
+        longest = 0
+        current = 0
+        for flow in ordered:
+            value = flow.net_inflow_main or 0
+            if (sign > 0 and value > 0) or (sign < 0 and value < 0):
+                current += 1
+                longest = max(longest, current)
+            else:
+                current = 0
+        return longest
+
+    def rolling_sum(days: int) -> float | None:
+        if not recent:
+            return None
+        return sum(flow.net_inflow_main or 0 for flow in recent[:days])
+
     payload = {
         "status": "available",
         "window_records": count,
@@ -27,9 +65,20 @@ def _build_money_flow_trend_summary(flows: Sequence[StockMoneyFlow]) -> Dict[str
         "end_date": str(ordered[-1].trade_date),
         "net_inflow_main_total": total_yuan,
         "net_inflow_main_daily_average": total_yuan / count,
-        "inflow_days": sum(1 for flow in ordered if (flow.net_inflow_main or 0) > 0),
-        "outflow_days": sum(1 for flow in ordered if (flow.net_inflow_main or 0) < 0),
-        "flat_days": sum(1 for flow in ordered if (flow.net_inflow_main or 0) == 0),
+        "inflow_days": inflow_days,
+        "outflow_days": outflow_days,
+        "flat_days": flat_days,
+        "inflow_day_ratio": inflow_days / count * 100,
+        "outflow_day_ratio": outflow_days / count * 100,
+        "flat_day_ratio": flat_days / count * 100,
+        "net_flow_bias": net_flow_bias,
+        "latest_inflow_streak_days": streak(1),
+        "latest_outflow_streak_days": streak(-1),
+        "max_inflow_streak_days": max_streak(1),
+        "max_outflow_streak_days": max_streak(-1),
+        "net_inflow_main_3d": rolling_sum(3),
+        "net_inflow_main_5d": rolling_sum(5),
+        "net_inflow_main_10d": rolling_sum(10),
     }
     return format_payload_values("capital_flow.money_flow_trend_summary", payload)
 

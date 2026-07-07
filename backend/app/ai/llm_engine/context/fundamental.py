@@ -225,6 +225,18 @@ class FundamentalSource:
             risk_flags.append("Foreign capital positioning is weakening")
         if latest.change_percent is not None and latest.change_percent <= -5 and net_buy_amount <= 0:
             risk_flags.append("Northbound flow did not absorb the recent selloff")
+        if age_days is None:
+            signal_weight = "unknown"
+        elif age_days > 120:
+            signal_weight = "downgraded_stale"
+        elif age_days > 60:
+            signal_weight = "downgraded_quarterly"
+        else:
+            signal_weight = "normal"
+
+        latest_two_record_hold_ratio_change_pp = None
+        if len(records) >= 2 and records[0].hold_ratio is not None and records[1].hold_ratio is not None:
+            latest_two_record_hold_ratio_change_pp = round((records[0].hold_ratio - records[1].hold_ratio) * 100, 4)
 
         recent_records = []
         for record in records:
@@ -268,6 +280,8 @@ class FundamentalSource:
             "signal": {
                 "flow_label": flow_label,
                 "foreign_sentiment_label": foreign_sentiment_label,
+                "signal_weight": signal_weight,
+                "latest_two_record_hold_ratio_change_pp": latest_two_record_hold_ratio_change_pp,
             },
             "risk_flags": risk_flags,
             "recent_records": recent_records,

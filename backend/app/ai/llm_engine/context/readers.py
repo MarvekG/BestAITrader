@@ -165,6 +165,9 @@ class RiskReader(_WrapDictMixin, _WrapListMixin):
     async def lockup(self, db: AsyncSession, stock_code: str) -> list[dict[str, Any]]:
         return await self.source._get_lockup(db, stock_code)
 
+    async def lockup_summary(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_lockup_summary(db, stock_code)
+
     async def shareholder(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
         return await self.source._get_shareholder(db, stock_code)
 

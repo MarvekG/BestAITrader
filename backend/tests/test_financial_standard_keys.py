@@ -771,6 +771,7 @@ async def test_northbound_flow_returns_structured_foreign_sentiment():
     assert result["quarter_change"]["net_buy_amount_10k_cny"] == "6800万元"
     assert result["signal"]["flow_label"] == "accumulating"
     assert result["signal"]["foreign_sentiment_label"] == "positive"
+    assert result["signal"]["latest_two_record_hold_ratio_change_pp"] == "0.23%"
     assert result["recent_records"][0]["date"] == str(latest.date)
     assert result["recent_records"][2]["hold_ratio_pct"] == "1.35%"
 
