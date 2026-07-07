@@ -1,4 +1,4 @@
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Sequence
 from datetime import datetime, timedelta
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +11,27 @@ from app.models.data_storage import (
     StockMoneyFlow, NorthboundData, DragonTigerData, StockMargin,
     StockBlockTrade, SectorMoneyFlow, StockBasic, StockShareholder
 )
+
+
+def _build_money_flow_trend_summary(flows: Sequence[StockMoneyFlow]) -> Dict[str, Any]:
+    if not flows:
+        return {"status": "missing"}
+
+    ordered = sorted(flows, key=lambda flow: flow.trade_date)
+    total_yuan = sum(flow.net_inflow_main or 0 for flow in ordered)
+    count = len(ordered)
+    payload = {
+        "status": "available",
+        "window_records": count,
+        "start_date": str(ordered[0].trade_date),
+        "end_date": str(ordered[-1].trade_date),
+        "net_inflow_main_total": total_yuan,
+        "net_inflow_main_daily_average": total_yuan / count,
+        "inflow_days": sum(1 for flow in ordered if (flow.net_inflow_main or 0) > 0),
+        "outflow_days": sum(1 for flow in ordered if (flow.net_inflow_main or 0) < 0),
+        "flat_days": sum(1 for flow in ordered if (flow.net_inflow_main or 0) == 0),
+    }
+    return format_payload_values("capital_flow.money_flow_trend_summary", payload)
 
 
 class CapitalFlowSource:
@@ -81,6 +102,21 @@ class CapitalFlowSource:
                 "pct_chg": f.change_pct,
             })
         return format_payload_values("capital_flow.money_flow", trend)
+
+    async def _get_money_flow_trend_summary(
+        self,
+        db: AsyncSession,
+        stock_code: str,
+        limit: int = 20,
+    ) -> Dict[str, Any]:
+        result = await db.execute(
+            select(StockMoneyFlow)
+            .where(StockMoneyFlow.stock_code == stock_code)
+            .order_by(desc(StockMoneyFlow.trade_date))
+            .limit(limit)
+        )
+        flows = result.scalars().all()
+        return _build_money_flow_trend_summary(flows)
 
     async def _get_northbound(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         result = await db.execute(

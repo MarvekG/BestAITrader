@@ -321,6 +321,7 @@ class HistoryProvider:
         async with runtime.async_session() as db:
             kline_items = await technical.recent_klines(db, runtime.stock_code, days=30)
             money_flow_trend_items = await capital_flow.money_flow_trend(db, runtime.stock_code)
+            money_flow_trend_summary = await capital_flow.money_flow_trend_summary(db, runtime.stock_code)
             northbound_trend = await capital_flow.northbound_trend(db, runtime.stock_code)
             insider_activity = await fundamental.insider_activity(db, runtime.stock_code)
             seo_history = await fundamental.seo_history(db, runtime.stock_code)
@@ -332,6 +333,7 @@ class HistoryProvider:
             money_flow_trend = _compact_series_payload(
                 money_flow_trend_items,
                 columns=self.MONEY_FLOW_TREND_COLUMNS,
+                summary=money_flow_trend_summary,
             )
             payload = {
                 "status": merge_status(

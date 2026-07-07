@@ -1973,6 +1973,58 @@
       "precision": 2
     }
   },
+  "capital_flow.money_flow_trend_summary": {
+    "window_records": {
+      "zh": {
+        "unit": "units.entries",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.entries",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "net_inflow_main_total": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "net_inflow_main_daily_average": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "inflow_days": {
+      "zh": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "outflow_days": {
+      "zh": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "precision": 0
+    },
+    "flat_days": {
+      "zh": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.days",
+        "scale": 1
+      },
+      "precision": 0
+    }
+  },
   "capital_flow.northbound": {
     "age_days": {
       "zh": {

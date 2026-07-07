@@ -129,6 +129,9 @@ class CapitalFlowReader:
     async def money_flow_trend(self, db: AsyncSession, stock_code: str) -> list[dict[str, Any]]:
         return await self.source._get_money_flow_trend(db, stock_code)
 
+    async def money_flow_trend_summary(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        return await self.source._get_money_flow_trend_summary(db, stock_code)
+
     async def northbound_trend(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
         return await self.source._get_northbound_trend(db, stock_code)
 

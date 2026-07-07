@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.ai.json_utils import stable_json_dumps
+from app.ai.llm_engine.context.capital_flow import _build_money_flow_trend_summary
 from app.ai.llm_engine.context.providers import _compact_series_payload
 from app.ai.llm_engine.context.service import AIContextService
 from app.ai.llm_engine.context.technical import TechnicalSource
@@ -50,6 +51,47 @@ def test_compact_series_payload_uses_csv_rows():
         "record_count": 2,
         "window_days": 30,
     }
+
+
+def test_money_flow_trend_summary_converts_cumulative_wan_to_yi():
+    """资金流趋势汇总应给出确定性亿元口径，避免 Agent 将万元误读为亿元。"""
+    amounts_in_10k_cny = [
+        -150773.99,
+        135415.02,
+        -470132.34,
+        -210842.59,
+        462879.95,
+        -247735.87,
+        -383886.75,
+        369898.27,
+        -30387.64,
+        -397182.85,
+        -141094.07,
+        146051.92,
+        -16680.34,
+        59631.62,
+        268039.5,
+        -365095.96,
+        -447625.34,
+        -764.09,
+        219304.8,
+        -51119.51,
+    ]
+    flows = [
+        SimpleNamespace(
+            trade_date=date(2026, 6, 8 + index),
+            net_inflow_main=amount * 10_000,
+        )
+        for index, amount in enumerate(amounts_in_10k_cny)
+    ]
+
+    summary = _build_money_flow_trend_summary(flows)
+
+    assert summary["window_records"] == "20笔"
+    assert summary["net_inflow_main_total"] == "-125.21亿元"
+    assert summary["net_inflow_main_daily_average"] == "-6.26亿元"
+    assert summary["inflow_days"] == "7天"
+    assert summary["outflow_days"] == "13天"
 
 
 @pytest.mark.asyncio
