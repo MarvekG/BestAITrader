@@ -5,6 +5,7 @@ from typing import Any, Mapping
 from sqlalchemy import desc, select
 
 from app.ai.llm_engine.context.canonical_metrics import CanonicalMetricsProvider
+from app.ai.llm_engine.context.calculations import percent_change, to_float
 from app.ai.llm_engine.context.portfolio import build_portfolio_risk_control_context
 from app.ai.llm_engine.context.runtime import merge_status
 from app.ai.llm_engine.context.types import AIContextLayer, AIContextPayload
@@ -15,41 +16,6 @@ from app.models.data_storage import StockRealtimeMarket
 from app.models.stock_indicators import StockIndicators
 from app.performance.service import get_latest_performance_summary
 from app.portfolio.service import get_portfolio_overview
-
-
-def _raw_number(value: Any) -> float | None:
-    """转换数据库原始数值为浮点数。
-
-    Args:
-        value: 数据库原始数值。
-
-    Returns:
-        可参与计算的浮点数；无法转换时返回 None。
-    """
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _percent_change(current_value: Any, base_value: Any) -> float | None:
-    """计算两个同口径数值之间的百分比变化。
-
-    Args:
-        current_value: 当前值。
-        base_value: 基准值。
-
-    Returns:
-        百分比变化值；缺少数值或基准为零时返回 None。
-    """
-    current = _raw_number(current_value)
-    base = _raw_number(base_value)
-    if current is None or base in (None, 0):
-        return None
-    return round((current - base) / base * 100, 4)
-
 
 async def _fetch_latest_market_and_indicators(db: Any, stock_code: str) -> tuple[Any, Any]:
     """读取最新实时行情和技术指标原始记录。
@@ -82,9 +48,9 @@ async def _fetch_latest_market_and_indicators(db: Any, stock_code: str) -> tuple
 def _price_position_summary_from_raw(market: Any, indicators: Any) -> AIContextPayload:
     """基于原始行情和指标记录计算价格位置摘要。"""
 
-    price = _raw_number(market.current_price) if market else None
-    boll_upper = _raw_number(indicators.boll_upper) if indicators else None
-    boll_lower = _raw_number(indicators.boll_lower) if indicators else None
+    price = to_float(market.current_price) if market else None
+    boll_upper = to_float(indicators.boll_upper) if indicators else None
+    boll_lower = to_float(indicators.boll_lower) if indicators else None
     boll_range = (
         boll_upper - boll_lower
         if boll_upper is not None and boll_lower is not None
@@ -92,33 +58,48 @@ def _price_position_summary_from_raw(market: Any, indicators: Any) -> AIContextP
     )
     payload: AIContextPayload = {
         "status": "available" if price is not None and indicators else "missing",
-        "price_vs_ma5_pct": _percent_change(price, indicators.ma5) if indicators else None,
-        "price_vs_ma20_pct": _percent_change(price, indicators.ma20) if indicators else None,
-        "price_vs_ma60_pct": _percent_change(price, indicators.ma60) if indicators else None,
-        "price_vs_boll_mid_pct": _percent_change(price, indicators.boll_mid) if indicators else None,
+        "data_sources": ["data.stock_realtime_market", "data.stock_indicators"],
+        "market_timestamp": market.timestamp.isoformat() if market and getattr(market, "timestamp", None) else None,
+        "indicator_date": str(indicators.trade_date) if indicators and getattr(indicators, "trade_date", None) else None,
+        "scope": (
+            "realtime price at "
+            f"{market.timestamp.isoformat() if market and getattr(market, 'timestamp', None) else 'missing'}; "
+            f"technical indicators dated {indicators.trade_date if indicators and getattr(indicators, 'trade_date', None) else 'missing'}"
+        ),
+        "price_vs_ma5_pct": percent_change(price, indicators.ma5) if indicators else None,
+        "price_vs_ma20_pct": percent_change(price, indicators.ma20) if indicators else None,
+        "price_vs_ma60_pct": percent_change(price, indicators.ma60) if indicators else None,
+        "price_vs_boll_mid_pct": percent_change(price, indicators.boll_mid) if indicators else None,
         "price_position_in_boll_pct": (
             round((price - boll_lower) / boll_range * 100, 4)
             if price is not None and boll_lower is not None and boll_range not in (None, 0)
             else None
         ),
+        "change_bases": {
+            "price_vs_ma5_pct": "current_price vs ma5 from indicator_date",
+            "price_vs_ma20_pct": "current_price vs ma20 from indicator_date",
+            "price_vs_ma60_pct": "current_price vs ma60 from indicator_date",
+            "price_vs_boll_mid_pct": "current_price vs boll_mid from indicator_date",
+            "price_position_in_boll_pct": "current_price position between boll_lower and boll_upper from indicator_date",
+        },
     }
     return format_payload_values("technical.price_position_summary", payload)
 
 
 def _technical_signal_summary_from_raw(market: Any, indicators: Any) -> AIContextPayload:
     """基于原始行情和指标记录计算客观技术状态枚举。"""
-    price = _raw_number(market.current_price) if market else None
+    price = to_float(market.current_price) if market else None
     if price is None or indicators is None:
         return {"status": "missing"}
 
-    ma5 = _raw_number(indicators.ma5)
-    ma10 = _raw_number(indicators.ma10)
-    ma20 = _raw_number(indicators.ma20)
-    macd = _raw_number(indicators.macd)
-    macd_signal = _raw_number(indicators.macd_signal)
-    rsi_6 = _raw_number(indicators.rsi_6)
-    boll_upper = _raw_number(indicators.boll_upper)
-    boll_lower = _raw_number(indicators.boll_lower)
+    ma5 = to_float(indicators.ma5)
+    ma10 = to_float(indicators.ma10)
+    ma20 = to_float(indicators.ma20)
+    macd = to_float(indicators.macd)
+    macd_signal = to_float(indicators.macd_signal)
+    rsi_6 = to_float(indicators.rsi_6)
+    boll_upper = to_float(indicators.boll_upper)
+    boll_lower = to_float(indicators.boll_lower)
 
     if None not in (ma5, ma10, ma20):
         if price > ma5 > ma10 > ma20:
@@ -155,10 +136,18 @@ def _technical_signal_summary_from_raw(market: Any, indicators: Any) -> AIContex
 
     return {
         "status": "available",
+        "data_sources": ["data.stock_realtime_market", "data.stock_indicators"],
+        "market_timestamp": market.timestamp.isoformat() if getattr(market, "timestamp", None) else None,
+        "indicator_date": str(indicators.trade_date) if getattr(indicators, "trade_date", None) else None,
+        "scope": (
+            f"realtime price at {market.timestamp.isoformat() if getattr(market, 'timestamp', None) else 'missing'}; "
+            f"technical indicators dated {indicators.trade_date if getattr(indicators, 'trade_date', None) else 'missing'}"
+        ),
         "ma_alignment": ma_alignment,
         "macd_relation": macd_relation,
         "rsi6_zone": rsi6_zone,
         "boll_zone": boll_zone,
+        "notes": "signal labels are rule-based thresholds, not trading advice.",
     }
 
 
@@ -497,6 +486,7 @@ class HistoryProvider:
         fundamental = runtime.readers.fundamental
         async with runtime.async_session() as db:
             kline_items = await technical.recent_klines(db, runtime.stock_code, days=30)
+            price_volume_summary = await technical.price_volume_summary(db, runtime.stock_code, days=60)
             money_flow_trend_items = await capital_flow.money_flow_trend(db, runtime.stock_code)
             money_flow_trend_summary = await capital_flow.money_flow_trend_summary(db, runtime.stock_code)
             northbound_trend = await capital_flow.northbound_trend(db, runtime.stock_code)
@@ -515,11 +505,13 @@ class HistoryProvider:
             payload = {
                 "status": merge_status(
                     kline,
+                    price_volume_summary,
                     money_flow_trend,
                     northbound_trend,
                     seo_history,
                 ),
                 "kline": kline,
+                "price_volume_summary": price_volume_summary,
                 "money_flow_trend": money_flow_trend,
                 "northbound_trend": northbound_trend,
                 "insider_activity": _wrap_dict(fundamental, insider_activity),
@@ -565,13 +557,22 @@ class SignalsProvider:
             sector_flow = await capital_flow.sector_flow(db, runtime.stock_code)
             block_trade = await capital_flow.block_trade(db, runtime.stock_code)
             margin = await capital_flow.margin(db, runtime.stock_code)
+            margin_trend_summary = await capital_flow.margin_trend_summary(db, runtime.stock_code)
             margin_analysis = await fundamental.margin_analysis(db, runtime.stock_code)
             flow_signals = {
-                "status": merge_status(dragon_tiger_effect, sector_flow, block_trade, margin, margin_analysis),
+                "status": merge_status(
+                    dragon_tiger_effect,
+                    sector_flow,
+                    block_trade,
+                    margin,
+                    margin_trend_summary,
+                    margin_analysis,
+                ),
                 "dragon_tiger_effect": dragon_tiger_effect,
                 "sector_flow": sector_flow,
                 "block_trade": block_trade,
                 "margin": margin,
+                "margin_trend_summary": margin_trend_summary,
                 "margin_analysis": _wrap_dict(fundamental, margin_analysis),
             }
             payload = {

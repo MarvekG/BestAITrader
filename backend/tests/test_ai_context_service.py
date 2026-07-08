@@ -6,6 +6,7 @@ import pytest
 
 from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_engine.context.capital_flow import _build_money_flow_trend_summary
+from app.ai.llm_engine.context.capital_flow import _build_margin_trend_summary_payload
 from app.ai.llm_engine.context.canonical_metrics import _build_percentile_payload
 from app.ai.llm_engine.context.providers import (
     _build_price_position_summary,
@@ -14,6 +15,7 @@ from app.ai.llm_engine.context.providers import (
 )
 from app.ai.llm_engine.context.service import AIContextService
 from app.ai.llm_engine.context.technical import TechnicalSource
+from app.ai.llm_engine.context.technical import _build_price_volume_summary_payload
 from app.ai.llm_engine.context.types import AI_CONTEXT_SECTION_ORDER, AIContextLayer
 from app.core.request_context import clear_current_user_id, set_current_user_id
 from app.models.account import Account
@@ -92,6 +94,10 @@ def test_money_flow_trend_summary_converts_cumulative_wan_to_yi():
 
     summary = _build_money_flow_trend_summary(flows)
 
+    assert summary["data_sources"] == ["data.stock_money_flow"]
+    assert summary["start_date"] == "2026-06-08"
+    assert summary["end_date"] == "2026-06-27"
+    assert summary["change_bases"]["net_inflow_main_total"] == "sum from 2026-06-08 to 2026-06-27"
     assert summary["window_records"] == "20笔"
     assert summary["net_inflow_main_total"] == "-125.21亿元"
     assert summary["net_inflow_main_daily_average"] == "-6.26亿元"
@@ -109,6 +115,101 @@ def test_money_flow_trend_summary_converts_cumulative_wan_to_yi():
     assert summary["net_inflow_main_10d"] == "-32.94亿元"
 
 
+def test_price_volume_summary_precomputes_debate_price_math():
+    """价格量能摘要应提前计算 LLM 高频手算的区间与量能指标。"""
+    klines = [
+        SimpleNamespace(date=date(2026, 6, 1), close=10, high=11, low=9, volume=100, turnover=1_000_000),
+        SimpleNamespace(date=date(2026, 6, 2), close=12, high=13, low=11, volume=200, turnover=2_000_000),
+        SimpleNamespace(date=date(2026, 6, 3), close=9, high=10, low=8, volume=300, turnover=3_000_000),
+        SimpleNamespace(date=date(2026, 6, 4), close=11, high=12, low=10, volume=400, turnover=4_000_000),
+        SimpleNamespace(date=date(2026, 6, 5), close=12, high=12.5, low=11, volume=500, turnover=5_000_000),
+    ]
+
+    summary = _build_price_volume_summary_payload(klines, SimpleNamespace(atr=1.5))
+
+    assert summary["data_sources"] == ["data.kline_data", "data.stock_indicators"]
+    assert summary["start_date"] == "2026-06-01"
+    assert summary["end_date"] == "2026-06-05"
+    assert summary["change_bases"]["window_return_pct"] == "latest_close(2026-06-05) vs start_close(2026-06-01)"
+    assert summary["window_records"] == "5笔"
+    assert summary["start_close"] == "10元"
+    assert summary["latest_close"] == "12元"
+    assert summary["window_return_pct"] == "20%"
+    assert summary["drawdown_from_window_high_pct"] == "-7.69%"
+    assert summary["max_drawdown_pct"] == "-38.46%"
+    assert summary["latest_volume"] == "500手"
+    assert summary["avg_volume_5d"] == "300手"
+    assert summary["volume_vs_5d_avg_pct"] == "66.67%"
+    assert summary["latest_turnover"] == "0.05亿元"
+    assert summary["atr"] == "1.5元"
+    assert summary["atr_pct"] == "12.5%"
+    assert summary["one_atr_stop_price"] == "10.5元"
+
+
+def test_margin_trend_summary_compares_leverage_and_price_drawdown():
+    """两融趋势摘要应提前计算融资余额变化和相对价格回撤。"""
+    margins = [
+        SimpleNamespace(
+            trade_date=date(2026, 6, 1 + index),
+            margin_balance=balance,
+            margin_buy_amount=10_000_000,
+            margin_repay_amount=8_000_000,
+            short_balance=1_000_000,
+            margin_short_balance=balance + 1_000_000,
+        )
+        for index, balance in enumerate(
+            [100_000_000, 110_000_000, 120_000_000, 130_000_000, 140_000_000, 150_000_000, 135_000_000]
+        )
+    ]
+    klines = [
+        SimpleNamespace(date=date(2026, 6, 1 + index), close=close)
+        for index, close in enumerate([10, 11, 12, 13, 14, 15, 12])
+    ]
+
+    summary = _build_margin_trend_summary_payload(margins, klines)
+
+    assert summary["data_sources"] == ["data.stock_margin_data", "data.kline_data"]
+    assert summary["start_date"] == "2026-06-01"
+    assert summary["end_date"] == "2026-06-07"
+    assert summary["change_bases"]["margin_balance_change_5d_pct"] == (
+        "latest_margin_balance(2026-06-07) vs margin_balance(2026-06-03)"
+    )
+    assert summary["window_records"] == "7笔"
+    assert summary["latest_margin_balance"] == "1.35亿元"
+    assert summary["margin_balance_change_5d_pct"] == "12.5%"
+    assert summary["peak_margin_balance"] == "1.5亿元"
+    assert summary["margin_balance_drawdown_from_peak_pct"] == "-10%"
+    assert summary["price_change_since_margin_peak_pct"] == "-20%"
+    assert summary["latest_price"] == "12元"
+    assert summary["price_at_margin_peak"] == "15元"
+    assert summary["leverage_pressure_bias"] == "crowded_not_cleared"
+
+
+def test_margin_trend_summary_uses_price_window_passed_by_reader():
+    """两融摘要应清楚暴露传入价格窗口，并用窗口末日收盘价对照。"""
+    margins = [
+        SimpleNamespace(
+            trade_date=date(2026, 6, 1 + index),
+            margin_balance=balance,
+            margin_buy_amount=0,
+            margin_repay_amount=0,
+            short_balance=0,
+            margin_short_balance=balance,
+        )
+        for index, balance in enumerate([100_000_000, 150_000_000, 120_000_000])
+    ]
+    klines = [
+        SimpleNamespace(date=date(2026, 6, 1), close=10),
+        SimpleNamespace(date=date(2026, 6, 2), close=15),
+        SimpleNamespace(date=date(2026, 6, 3), close=12),
+    ]
+
+    summary = _build_margin_trend_summary_payload(margins, klines)
+
+    assert summary["scope"] == "3 margin records from 2026-06-01 to 2026-06-03; daily closes from 2026-06-01 to 2026-06-03"
+    assert summary["price_change_since_margin_peak_pct"] == "-20%"
+
+
 def test_canonical_metrics_percentiles_use_raw_history_values():
     """估值分位应基于估值历史原始数值计算。"""
     records = [
@@ -119,6 +220,9 @@ def test_canonical_metrics_percentiles_use_raw_history_values():
 
     payload = _build_percentile_payload(records, date(2026, 7, 6))
 
+    assert payload["data_sources"] == ["data.stock_valuation_history"]
+    assert payload["window_start_1y"] == "2025-07-06"
+    assert payload["window_end_1y"] == "2026-07-06"
     assert payload["sample_count_1y"] == "3笔"
     assert payload["pe_ttm_percentile_1y"] == "33.33%"
     assert payload["pb_percentile_1y"] == "33.33%"
@@ -190,13 +294,12 @@ def test_technical_signal_summary_uses_raw_values():
         ),
     )
 
-    assert summary == {
-        "status": "available",
-        "ma_alignment": "bullish",
-        "macd_relation": "dif_above_dea",
-        "rsi6_zone": "overbought",
-        "boll_zone": "inside_band",
-    }
+    assert summary["status"] == "available"
+    assert summary["data_sources"] == ["data.stock_realtime_market", "data.stock_indicators"]
+    assert summary["ma_alignment"] == "bullish"
+    assert summary["macd_relation"] == "dif_above_dea"
+    assert summary["rsi6_zone"] == "overbought"
+    assert summary["boll_zone"] == "inside_band"
 
 
 @pytest.mark.asyncio

@@ -106,6 +106,19 @@ class TechnicalReader(_WrapDictMixin):
     async def recent_klines(self, db: AsyncSession, stock_code: str, *, days: int) -> list[dict[str, Any]]:
         return await self.source._get_recent_klines(db, stock_code, days=days)
 
+    async def price_volume_summary(self, db: AsyncSession, stock_code: str, *, days: int = 60) -> dict[str, Any]:
+        """读取价格量能派生摘要。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+            days: 参与计算的最近日 K 记录数。
+
+        Returns:
+            价格区间、回撤、量能对比和 ATR 风险边界摘要。
+        """
+        return await self.source._get_price_volume_summary(db, stock_code, days=days)
+
 
 @dataclass(slots=True)
 class CapitalFlowReader:
@@ -125,6 +138,18 @@ class CapitalFlowReader:
 
     async def margin(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
         return await self.source._get_margin(db, stock_code)
+
+    async def margin_trend_summary(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        """读取两融趋势派生摘要。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+
+        Returns:
+            融资余额变化、峰值回撤和相对价格回撤摘要。
+        """
+        return await self.source._get_margin_trend_summary(db, stock_code)
 
     async def money_flow_trend(self, db: AsyncSession, stock_code: str) -> list[dict[str, Any]]:
         return await self.source._get_money_flow_trend(db, stock_code)

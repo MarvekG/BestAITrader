@@ -151,6 +151,17 @@
       },
       "precision": 0
     },
+    "entries": {
+      "zh": {
+        "unit": "units.entries",
+        "scale": 1
+      },
+      "en": {
+        "unit": "units.entries",
+        "scale": 1
+      },
+      "precision": 0
+    },
     "times": {
       "zh": {
         "unit": "units.times",
@@ -1703,6 +1714,74 @@
       "precision": 2
     }
   },
+  "technical.price_volume_summary": {
+    "window_records": {
+      "$ref": "entries"
+    },
+    "start_close": {
+      "$ref": "cny"
+    },
+    "latest_close": {
+      "$ref": "cny"
+    },
+    "window_return_pct": {
+      "$ref": "percent"
+    },
+    "window_high_price": {
+      "$ref": "cny"
+    },
+    "window_low_price": {
+      "$ref": "cny"
+    },
+    "drawdown_from_window_high_pct": {
+      "$ref": "percent"
+    },
+    "rebound_from_window_low_pct": {
+      "$ref": "percent"
+    },
+    "max_drawdown_pct": {
+      "$ref": "percent"
+    },
+    "latest_volume": {
+      "$ref": "lots"
+    },
+    "avg_volume_5d": {
+      "$ref": "lots"
+    },
+    "avg_volume_20d": {
+      "$ref": "lots"
+    },
+    "volume_vs_5d_avg_pct": {
+      "$ref": "percent"
+    },
+    "volume_vs_20d_avg_pct": {
+      "$ref": "percent"
+    },
+    "volume_ratio_vs_20d": {
+      "$ref": "multiple"
+    },
+    "latest_turnover": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "avg_turnover_5d": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "avg_turnover_20d": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "atr": {
+      "$ref": "cny"
+    },
+    "atr_pct": {
+      "$ref": "percent"
+    },
+    "one_atr_stop_price": {
+      "$ref": "cny"
+    },
+    "two_atr_stop_price": {
+      "$ref": "cny"
+    }
+  },
   "technical.indicators": {},
   "stock_picker.quant_inputs": {
     "pe": {
@@ -2430,6 +2509,50 @@
         "scale": 1
       },
       "precision": 0
+    }
+  },
+  "capital_flow.margin_trend_summary": {
+    "window_records": {
+      "$ref": "entries"
+    },
+    "latest_margin_balance": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "latest_margin_buy_amount": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "latest_margin_repay_amount": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "latest_short_balance": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "latest_margin_short_balance": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "margin_balance_change_5d_pct": {
+      "$ref": "percent"
+    },
+    "margin_balance_change_10d_pct": {
+      "$ref": "percent"
+    },
+    "margin_balance_change_20d_pct": {
+      "$ref": "percent"
+    },
+    "peak_margin_balance": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "margin_balance_drawdown_from_peak_pct": {
+      "$ref": "percent"
+    },
+    "price_change_since_margin_peak_pct": {
+      "$ref": "percent"
+    },
+    "latest_price": {
+      "$ref": "cny"
+    },
+    "price_at_margin_peak": {
+      "$ref": "cny"
     }
   },
   "capital_flow.block_trade": {

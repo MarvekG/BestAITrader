@@ -1043,7 +1043,9 @@ class FundamentalSource:
         margin_short_ratio = round((margin_balance / short_balance), 2) if short_balance > 0 else None
 
         change_5d_pct = None
+        change_5d_base_date = None
         if len(margin_records) >= 5:
+            change_5d_base_date = margin_records[4].trade_date
             prev_balance = margin_records[4].margin_balance or 0
             if prev_balance > 0:
                 change_5d_pct = round(((margin_balance - prev_balance) / prev_balance) * 100, 2)
@@ -1084,8 +1086,15 @@ class FundamentalSource:
             risk_flags.append("Margin balance expanded quickly over the last 5 trading days")
 
         payload = {
+            "data_sources": ["data.stock_margin_data", "data.stock_valuation_history"],
+            "scope": (
+                f"{len(margin_records)} margin records from "
+                f"{margin_records[-1].trade_date if margin_records else 'missing'} to {latest_margin.trade_date}; "
+                f"market cap dated {valuation.data_date if valuation and valuation.data_date else 'missing'}"
+            ),
             "overview": {
                 "trade_date": str(latest_margin.trade_date) if latest_margin.trade_date else None,
+                "valuation_date": str(valuation.data_date) if valuation and valuation.data_date else None,
                 "market_cap_cny": round(market_cap, 2) if market_cap > 0 else None,
                 "margin_balance_cny": round(margin_balance, 2),
                 "short_balance_cny": round(short_balance, 2),
@@ -1095,9 +1104,17 @@ class FundamentalSource:
             },
             "trend": {
                 "window": "5tradingday",
+                "start_date": str(change_5d_base_date) if change_5d_base_date else None,
+                "end_date": str(latest_margin.trade_date) if latest_margin.trade_date else None,
                 "margin_balance_change_5d_pct": change_5d_pct,
                 "margin_buy_amount_cny": round(latest_margin.margin_buy_amount, 2) if latest_margin.margin_buy_amount is not None else None,
                 "margin_repay_amount_cny": round(latest_margin.margin_repay_amount, 2) if latest_margin.margin_repay_amount is not None else None,
+                "change_bases": {
+                    "margin_balance_change_5d_pct": (
+                        f"margin_balance({latest_margin.trade_date}) vs margin_balance({change_5d_base_date})"
+                        if change_5d_base_date else "missing"
+                    ),
+                },
             },
             "signal": {
                 "leverage_label": leverage_label,
