@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from app.core import database as database_module
 from app.core.database import Base
 from app.models.account import Account
-from app.models.data_storage import IndexDaily
+from app.models.data_storage import IndexDaily, StockBasic, StockRealtimeMarket
 from app.models.position import Position
 from app.models.user import User
 from app.performance.service import create_account_equity_snapshot
@@ -39,14 +39,14 @@ async def test_create_first_snapshot_uses_zero_returns(async_db_session) -> None
         Position(
             account_id=account.account_id,
             stock_code="000001.SZ",
-            total_shares=100,
-            available_shares=100,
+            total_shares=20000,
+            available_shares=20000,
             frozen_shares=0,
             avg_cost=Decimal("10.0000"),
-            current_price=Decimal("11.0000"),
-            market_value=Decimal("1100.0000"),
-            profit_loss=Decimal("100.0000"),
-            profit_loss_pct=Decimal("0.1000"),
+            current_price=Decimal("10.0000"),
+            market_value=Decimal("200000.0000"),
+            profit_loss=Decimal("0.0000"),
+            profit_loss_pct=Decimal("0.0000"),
             purchase_details={},
         )
     )
@@ -129,6 +129,69 @@ async def test_create_followup_snapshot_calculates_returns_and_drawdown(async_db
     assert snapshot.benchmark_cumulative_return == Decimal("0.01000000")
     assert snapshot.excess_return == Decimal("-0.02000000")
     assert snapshot.max_drawdown == Decimal("-0.10000000")
+
+
+@pytest.mark.asyncio
+async def test_create_snapshot_uses_dynamic_position_valuation_for_returns(async_db_session) -> None:
+    """绩效快照应使用最新持仓估值计算账户收益。"""
+    user = User(id=104, username="perf_user_4", email="perf4@example.com", password_hash="hash", is_active=True)
+    account = Account(
+        user_id=104,
+        total_assets=Decimal("100000.0000"),
+        available_cash=Decimal("90000.0000"),
+        frozen_cash=Decimal("0.0000"),
+        market_value=Decimal("10000.0000"),
+        initial_capital=Decimal("100000.0000"),
+        total_profit_loss=Decimal("0.0000"),
+        total_trades=0,
+    )
+    async_db_session.add(user)
+    async_db_session.add(account)
+    await async_db_session.flush()
+    async_db_session.add_all(
+        [
+            Position(
+                account_id=account.account_id,
+                stock_code="000001.SZ",
+                total_shares=1000,
+                available_shares=1000,
+                frozen_shares=0,
+                avg_cost=Decimal("10.0000"),
+                current_price=Decimal("10.0000"),
+                market_value=Decimal("10000.0000"),
+                profit_loss=Decimal("0.0000"),
+                profit_loss_pct=Decimal("0.0000"),
+            ),
+            StockBasic(stock_code="000001.SZ", name="Ping An Bank", industry="Banking"),
+            IndexDaily(index_code="000300.SH", trade_date=date(2026, 5, 20), close=4000.0),
+            IndexDaily(index_code="000300.SH", trade_date=date(2026, 5, 21), close=4040.0),
+        ]
+    )
+    await async_db_session.commit()
+
+    async with database_module.AsyncSessionLocal() as async_db:
+        async_account = await async_db.get(Account, account.account_id)
+        await create_account_equity_snapshot(async_db, account=async_account, snapshot_date=date(2026, 5, 20))
+
+    async_db_session.add(
+        StockRealtimeMarket(
+            stock_code="000001.SZ",
+            current_price=12.0,
+            timestamp=datetime(2026, 5, 21, 15, 0, 0),
+        )
+    )
+    await async_db_session.commit()
+
+    async with database_module.AsyncSessionLocal() as async_db:
+        async_account = await async_db.get(Account, account.account_id)
+        snapshot = await create_account_equity_snapshot(async_db, account=async_account, snapshot_date=date(2026, 5, 21))
+
+    assert snapshot.market_value == Decimal("12000.0000")
+    assert snapshot.total_assets == Decimal("102000.0000")
+    assert snapshot.daily_return == Decimal("0.02000000")
+    assert snapshot.cumulative_return == Decimal("0.02000000")
+    assert snapshot.benchmark_cumulative_return == Decimal("0.01000000")
+    assert snapshot.excess_return == Decimal("0.01000000")
 
 
 @pytest.mark.asyncio
