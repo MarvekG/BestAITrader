@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from sqlalchemy import desc, select
 
+from app.ai.llm_engine.context.calculations import to_float
 from app.ai.llm_engine.context.types import AIContextLayer, AIContextPayload
 from app.data.metadata.field_units import format_payload_values
 from app.models.data_storage import StockValuationHistory
@@ -30,15 +31,6 @@ class CanonicalMetric:
             "value": self.value,
             "formula": self.formula,
         }
-
-
-def _to_float(value: Any) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _build_metrics(
@@ -138,16 +130,26 @@ def _build_percentile_payload(records: list[Any], valuation_date: Any) -> AICont
         "3y": valuation_date - timedelta(days=365 * 3),
         "5y": valuation_date - timedelta(days=365 * 5),
     }
-    payload: AIContextPayload = {"status": "available"}
+    earliest_window_start = min(windows.values())
+    payload: AIContextPayload = {
+        "status": "available",
+        "data_sources": ["data.stock_valuation_history"],
+        "scope": f"valuation history percentile windows from {earliest_window_start} to {valuation_date}",
+        "valuation_date": str(valuation_date),
+        "notes": "percentile fields rank the current value inside each lookback window.",
+    }
     for suffix, start_date in windows.items():
         window_records = [record for record in records if record.data_date and record.data_date >= start_date]
+        payload[f"window_start_{suffix}"] = str(start_date)
+        payload[f"window_end_{suffix}"] = str(valuation_date)
         payload[f"sample_count_{suffix}"] = len(window_records)
+        payload[f"basis_{suffix}"] = f"history from {start_date} to {valuation_date}"
         for field in ["pe_ttm", "pb", "dividend_yield"]:
-            current = _to_float(getattr(latest, field, None))
+            current = to_float(getattr(latest, field, None))
             values = [
-                _to_float(getattr(record, field, None))
+                to_float(getattr(record, field, None))
                 for record in window_records
-                if _to_float(getattr(record, field, None)) is not None
+                if to_float(getattr(record, field, None)) is not None
             ]
             payload[f"{field}_percentile_{suffix}"] = _percentile_rank(current, values)
     return format_payload_values("canonical_metrics.percentiles", payload)
@@ -194,12 +196,12 @@ async def build_canonical_metrics(db: Any, stock_code: str) -> AIContextPayload:
     valuation_date = str(valuation.data_date) if valuation is not None else None
 
     metrics = _build_metrics(
-        close_price=_to_float(valuation.close_price) if valuation else None,
-        total_share=_to_float(valuation.total_share) if valuation else None,
-        total_market_value=_to_float(valuation.total_market_value) if valuation else None,
-        pe_ttm=_to_float(valuation.pe_ttm) if valuation else None,
-        pb=_to_float(valuation.pb) if valuation else None,
-        dividend_yield=_to_float(valuation.dividend_yield) if valuation else None,
+        close_price=to_float(valuation.close_price) if valuation else None,
+        total_share=to_float(valuation.total_share) if valuation else None,
+        total_market_value=to_float(valuation.total_market_value) if valuation else None,
+        pe_ttm=to_float(valuation.pe_ttm) if valuation else None,
+        pb=to_float(valuation.pb) if valuation else None,
+        dividend_yield=to_float(valuation.dividend_yield) if valuation else None,
         valuation_date=valuation_date,
     )
 

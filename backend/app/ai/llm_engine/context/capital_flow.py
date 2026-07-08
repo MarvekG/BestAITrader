@@ -5,10 +5,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.i18n import i18n_service
 from app.ai.llm_engine.context import constants as ctx_const
+from app.ai.llm_engine.context.calculations import percent_change, to_float, value_n_records_ago
 from app.data.metadata.field_units import format_payload_values
 from app.ai.llm_engine.context.section_wrappers import status_payload
 from app.models.data_storage import (
-    StockMoneyFlow, NorthboundData, DragonTigerData, StockMargin,
+    StockMoneyFlow, NorthboundData, DragonTigerData, StockMargin, KlineData,
     StockBlockTrade, SectorMoneyFlow, StockBasic, StockShareholder
 )
 
@@ -60,6 +61,8 @@ def _build_money_flow_trend_summary(flows: Sequence[StockMoneyFlow]) -> Dict[str
 
     payload = {
         "status": "available",
+        "data_sources": ["data.stock_money_flow"],
+        "scope": f"{count} money-flow records from {ordered[0].trade_date} to {ordered[-1].trade_date}",
         "window_records": count,
         "start_date": str(ordered[0].trade_date),
         "end_date": str(ordered[-1].trade_date),
@@ -79,8 +82,101 @@ def _build_money_flow_trend_summary(flows: Sequence[StockMoneyFlow]) -> Dict[str
         "net_inflow_main_3d": rolling_sum(3),
         "net_inflow_main_5d": rolling_sum(5),
         "net_inflow_main_10d": rolling_sum(10),
+        "change_bases": {
+            "net_inflow_main_total": f"sum from {ordered[0].trade_date} to {ordered[-1].trade_date}",
+            "net_inflow_main_daily_average": f"average over {count} records from {ordered[0].trade_date} to {ordered[-1].trade_date}",
+            "inflow_day_ratio": f"inflow_days / window_records from {ordered[0].trade_date} to {ordered[-1].trade_date}",
+            "outflow_day_ratio": f"outflow_days / window_records from {ordered[0].trade_date} to {ordered[-1].trade_date}",
+            "net_inflow_main_3d": "sum of latest 3 records ending at end_date",
+            "net_inflow_main_5d": "sum of latest 5 records ending at end_date",
+            "net_inflow_main_10d": "sum of latest 10 records ending at end_date",
+        },
     }
     return format_payload_values("capital_flow.money_flow_trend_summary", payload)
+
+
+def _build_margin_trend_summary_payload(
+    margins: Sequence[StockMargin],
+    klines: Sequence[KlineData] | None = None,
+) -> Dict[str, Any]:
+    if not margins:
+        return {"status": "missing"}
+
+    ordered_margins = sorted(margins, key=lambda item: item.trade_date)
+    recent_margins = list(reversed(ordered_margins))
+    latest = ordered_margins[-1]
+    latest_balance = to_float(latest.margin_balance)
+    peak = max(ordered_margins, key=lambda item: to_float(item.margin_balance) or float("-inf"))
+    peak_balance = to_float(peak.margin_balance)
+
+    ordered_klines = sorted(klines or [], key=lambda item: item.date)
+    latest_close = to_float(ordered_klines[-1].close) if ordered_klines else None
+    kline_start_date = ordered_klines[0].date if ordered_klines else None
+    kline_end_date = ordered_klines[-1].date if ordered_klines else None
+    peak_date_close = None
+    for kline in ordered_klines:
+        if kline.date == peak.trade_date:
+            peak_date_close = to_float(kline.close)
+            break
+
+    def balance_change(offset: int) -> float | None:
+        if offset <= 0:
+            return None
+        # N 日变化使用最新记录与 N 个交易日前收盘后的余额比较。
+        return percent_change(latest_balance, value_n_records_ago(recent_margins, "margin_balance", offset - 1))
+
+    def balance_change_base_date(offset: int) -> str:
+        if offset <= 0 or len(recent_margins) < offset:
+            return "missing"
+        return str(recent_margins[offset - 1].trade_date)
+
+    payload = {
+        "status": "available",
+        "data_sources": ["data.stock_margin_data", "data.kline_data"],
+        "scope": (
+            f"{len(ordered_margins)} margin records from {ordered_margins[0].trade_date} to {latest.trade_date}; "
+            f"daily closes from {kline_start_date or 'missing'} to {kline_end_date or 'missing'}"
+        ),
+        "window_records": len(ordered_margins),
+        "start_date": str(ordered_margins[0].trade_date),
+        "end_date": str(latest.trade_date),
+        "price_start_date": str(kline_start_date) if kline_start_date else None,
+        "price_end_date": str(kline_end_date) if kline_end_date else None,
+        "latest_margin_balance": latest_balance,
+        "latest_margin_buy_amount": latest.margin_buy_amount,
+        "latest_margin_repay_amount": latest.margin_repay_amount,
+        "latest_short_balance": latest.short_balance,
+        "latest_margin_short_balance": latest.margin_short_balance,
+        "margin_balance_change_5d_pct": balance_change(5),
+        "margin_balance_change_10d_pct": balance_change(10),
+        "margin_balance_change_20d_pct": balance_change(20),
+        "peak_margin_balance": peak_balance,
+        "peak_margin_balance_date": str(peak.trade_date),
+        "margin_balance_drawdown_from_peak_pct": percent_change(latest_balance, peak_balance),
+        "price_change_since_margin_peak_pct": percent_change(latest_close, peak_date_close),
+        "latest_price": latest_close,
+        "price_at_margin_peak": peak_date_close,
+        "leverage_pressure_bias": "unknown",
+        "change_bases": {
+            "margin_balance_change_5d_pct": f"latest_margin_balance({latest.trade_date}) vs margin_balance({balance_change_base_date(5)})",
+            "margin_balance_change_10d_pct": f"latest_margin_balance({latest.trade_date}) vs margin_balance({balance_change_base_date(10)})",
+            "margin_balance_change_20d_pct": f"latest_margin_balance({latest.trade_date}) vs margin_balance({balance_change_base_date(20)})",
+            "margin_balance_drawdown_from_peak_pct": f"latest_margin_balance({latest.trade_date}) vs peak_margin_balance({peak.trade_date})",
+            "price_change_since_margin_peak_pct": f"latest_close({kline_end_date or 'missing'}) vs close_at_margin_peak({peak.trade_date})",
+        },
+    }
+    margin_drawdown = to_float(payload["margin_balance_drawdown_from_peak_pct"])
+    price_drawdown = to_float(payload["price_change_since_margin_peak_pct"])
+    if margin_drawdown is not None and price_drawdown is not None:
+        if price_drawdown <= -10 and margin_drawdown >= price_drawdown / 2:
+            payload["leverage_pressure_bias"] = "crowded_not_cleared"
+        elif margin_drawdown <= price_drawdown:
+            payload["leverage_pressure_bias"] = "deleveraging_faster_than_price"
+        elif margin_drawdown < 0:
+            payload["leverage_pressure_bias"] = "deleveraging_in_progress"
+        else:
+            payload["leverage_pressure_bias"] = "margin_expanding"
+    return format_payload_values("capital_flow.margin_trend_summary", payload)
 
 
 class CapitalFlowSource:
@@ -266,6 +362,44 @@ class CapitalFlowSource:
             "rq_sell": mg.short_sell_volume,  # 融券卖出量
         }
         return format_payload_values("capital_flow.margin", payload)
+
+    async def _get_margin_trend_summary(
+        self,
+        db: AsyncSession,
+        stock_code: str,
+        limit: int = 60,
+    ) -> Dict[str, Any]:
+        """从两融和日 K 线源表确定性计算融资拥挤度摘要。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+            limit: 参与计算的最近记录数。
+
+        Returns:
+            带单位的融资余额趋势、峰值回撤和价格对照摘要。
+        """
+        margin_result = await db.execute(
+            select(StockMargin)
+            .where(StockMargin.stock_code == stock_code)
+            .order_by(desc(StockMargin.trade_date))
+            .limit(limit)
+        )
+        margin_records = list(margin_result.scalars().all())
+        latest_margin_date = max((item.trade_date for item in margin_records), default=None)
+        kline_filters = [KlineData.stock_code == stock_code, KlineData.freq == 'D']
+        if latest_margin_date is not None:
+            kline_filters.append(KlineData.date <= latest_margin_date)
+        kline_result = await db.execute(
+            select(KlineData)
+            .where(*kline_filters)
+            .order_by(desc(KlineData.date))
+            .limit(limit)
+        )
+        return _build_margin_trend_summary_payload(
+            margin_records,
+            list(kline_result.scalars().all()),
+        )
 
     async def _get_block_trade(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """获取大宗交易数据（近 30 个自然日全量窗口 + 买方结构聚合）"""

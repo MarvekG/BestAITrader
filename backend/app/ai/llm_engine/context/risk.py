@@ -250,6 +250,8 @@ class RiskSource:
         # 计算累计变化
         latest_count = shareholders[0].holder_count or 0
         oldest_count = shareholders[-1].holder_count or latest_count
+        latest_date = shareholders[0].end_date
+        oldest_date = shareholders[-1].end_date
         if oldest_count:
             total_change_pct = (latest_count - oldest_count) / oldest_count * 100
         else:
@@ -264,6 +266,10 @@ class RiskSource:
             return round((latest_count - base_count) / base_count * 100, 2)
 
         payload = {
+            "data_sources": ["data.stock_shareholder"],
+            "scope": f"{len(shareholders)} shareholder-count records from {oldest_date} to {latest_date}",
+            "start_date": str(oldest_date) if oldest_date else None,
+            "end_date": str(latest_date) if latest_date else None,
             "trend_signal": trend_signal,
             "latest_holder_count": latest_count,
             "consecutive_decrease": consecutive_decrease,
@@ -278,6 +284,21 @@ class RiskSource:
                 else "dispersing" if consecutive_increase > 0 else "stable"
             ),
             "quarters_analyzed": len(changes),
-            "recent_changes": changes[:4]  # 最近4个季度
+            "recent_changes": changes[:4],  # 最近4个季度
+            "change_bases": {
+                "total_change_pct": f"latest_holder_count({latest_date}) vs oldest_holder_count({oldest_date})",
+                "latest_quarter_change_pct": (
+                    f"holder_count({shareholders[0].end_date}) vs holder_count({shareholders[1].end_date})"
+                    if len(shareholders) >= 2 else "missing"
+                ),
+                "holder_count_change_from_2q_pct": (
+                    f"holder_count({shareholders[0].end_date}) vs holder_count({shareholders[2].end_date})"
+                    if len(shareholders) > 2 else "missing"
+                ),
+                "holder_count_change_from_4q_pct": (
+                    f"holder_count({shareholders[0].end_date}) vs holder_count({shareholders[4].end_date})"
+                    if len(shareholders) > 4 else "missing"
+                ),
+            },
         }
         return format_payload_values("risk.shareholder", payload)
