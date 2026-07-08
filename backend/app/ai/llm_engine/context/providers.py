@@ -366,14 +366,16 @@ class RealtimeProvider:
         async with runtime.async_session() as db:
             market = _wrap_dict(technical, await technical.realtime_market(db, runtime.stock_code))
             indicators = _wrap_dict(technical, await technical.latest_indicators(db, runtime.stock_code))
+            intraday_shape_summary = await technical.intraday_shape_summary(db, runtime.stock_code)
             money_flow = await capital_flow.money_flow(db, runtime.stock_code)
             index_reference = _wrap_dict(technical, await technical.index_context(db))
             payload = {
-                "status": merge_status(market, indicators, money_flow, index_reference),
+                "status": merge_status(market, indicators, intraday_shape_summary, money_flow, index_reference),
                 "market": market,
                 "indicators": indicators,
                 "price_position_summary": await _build_price_position_summary(db, runtime.stock_code),
                 "technical_signal_summary": await _build_technical_signal_summary(db, runtime.stock_code),
+                "intraday_shape_summary": intraday_shape_summary,
                 "money_flow": money_flow,
                 "index_reference": index_reference,
             }
@@ -555,6 +557,7 @@ class SignalsProvider:
 
             dragon_tiger_effect = await capital_flow.dragon_tiger_effect(db, runtime.stock_code)
             sector_flow = await capital_flow.sector_flow(db, runtime.stock_code)
+            sector_relative_flow_summary = await capital_flow.sector_relative_flow_summary(db, runtime.stock_code)
             block_trade = await capital_flow.block_trade(db, runtime.stock_code)
             margin = await capital_flow.margin(db, runtime.stock_code)
             margin_trend_summary = await capital_flow.margin_trend_summary(db, runtime.stock_code)
@@ -563,6 +566,7 @@ class SignalsProvider:
                 "status": merge_status(
                     dragon_tiger_effect,
                     sector_flow,
+                    sector_relative_flow_summary,
                     block_trade,
                     margin,
                     margin_trend_summary,
@@ -570,6 +574,7 @@ class SignalsProvider:
                 ),
                 "dragon_tiger_effect": dragon_tiger_effect,
                 "sector_flow": sector_flow,
+                "sector_relative_flow_summary": sector_relative_flow_summary,
                 "block_trade": block_trade,
                 "margin": margin,
                 "margin_trend_summary": margin_trend_summary,

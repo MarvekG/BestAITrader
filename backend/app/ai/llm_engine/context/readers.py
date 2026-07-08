@@ -119,6 +119,18 @@ class TechnicalReader(_WrapDictMixin):
         """
         return await self.source._get_price_volume_summary(db, stock_code, days=days)
 
+    async def intraday_shape_summary(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        """读取实时日内形态派生摘要。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+
+        Returns:
+            冲高回落、区间位置和振幅摘要。
+        """
+        return await self.source._get_intraday_shape_summary(db, stock_code)
+
 
 @dataclass(slots=True)
 class CapitalFlowReader:
@@ -165,6 +177,18 @@ class CapitalFlowReader:
 
     async def sector_flow(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
         return await self.source._get_sector_flow(db, stock_code)
+
+    async def sector_relative_flow_summary(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
+        """读取个股相对行业资金流摘要。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+
+        Returns:
+            个股主力资金与所属行业资金的同日相对强弱。
+        """
+        return await self.source._get_sector_relative_flow_summary(db, stock_code)
 
     async def block_trade(self, db: AsyncSession, stock_code: str) -> dict[str, Any]:
         return await self.source._get_block_trade(db, stock_code)

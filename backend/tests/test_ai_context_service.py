@@ -5,8 +5,11 @@ from types import SimpleNamespace
 import pytest
 
 from app.ai.json_utils import stable_json_dumps
+from app.ai.llm_engine.context.capital_flow import CapitalFlowSource
 from app.ai.llm_engine.context.capital_flow import _build_money_flow_trend_summary
 from app.ai.llm_engine.context.capital_flow import _build_margin_trend_summary_payload
+from app.ai.llm_engine.context.capital_flow import _build_sector_relative_flow_summary_payload
+from app.ai.llm_engine.context.capital_flow import _choose_sector_name
 from app.ai.llm_engine.context.canonical_metrics import _build_percentile_payload
 from app.ai.llm_engine.context.providers import (
     _build_price_position_summary,
@@ -15,6 +18,7 @@ from app.ai.llm_engine.context.providers import (
 )
 from app.ai.llm_engine.context.service import AIContextService
 from app.ai.llm_engine.context.technical import TechnicalSource
+from app.ai.llm_engine.context.technical import _build_intraday_shape_summary_payload
 from app.ai.llm_engine.context.technical import _build_price_volume_summary_payload
 from app.ai.llm_engine.context.types import AI_CONTEXT_SECTION_ORDER, AIContextLayer
 from app.core.request_context import clear_current_user_id, set_current_user_id
@@ -146,6 +150,40 @@ def test_price_volume_summary_precomputes_debate_price_math():
     assert summary["one_atr_stop_price"] == "10.5元"
 
 
+def test_intraday_shape_summary_precomputes_high_pullback_math():
+    """日内形态摘要应提前计算冲高回落和收盘区间位置。"""
+    summary = _build_intraday_shape_summary_payload(
+        SimpleNamespace(
+            timestamp=datetime(2026, 7, 8, 15, 0, 0),
+            open=102,
+            high=110,
+            low=98,
+            current_price=101,
+            prev_close=100,
+            change_percent=1,
+            amplitude=12,
+        )
+    )
+
+    assert summary["data_sources"] == ["data.stock_realtime_market"]
+    assert summary["market_timestamp"] == "2026-07-08T15:00:00"
+    assert summary["scope"] == "realtime OHLC snapshot at 2026-07-08T15:00:00"
+    assert summary["open"] == "102元"
+    assert summary["high"] == "110元"
+    assert summary["low"] == "98元"
+    assert summary["current_price"] == "101元"
+    assert summary["pct_chg"] == "1%"
+    assert summary["amplitude_pct"] == "12%"
+    assert summary["high_gain_from_prev_close_pct"] == "10%"
+    assert summary["low_change_from_prev_close_pct"] == "-2%"
+    assert summary["open_gap_pct"] == "2%"
+    assert summary["pullback_from_intraday_high_pct"] == "-8.18%"
+    assert summary["rebound_from_intraday_low_pct"] == "3.06%"
+    assert summary["pullback_from_intraday_high_pp"] == "9个百分点"
+    assert summary["close_position_in_intraday_range_pct"] == "25%"
+    assert summary["intraday_shape_label"] == "high_pullback"
+
+
 def test_margin_trend_summary_compares_leverage_and_price_drawdown():
     """两融趋势摘要应提前计算融资余额变化和相对价格回撤。"""
     margins = [
@@ -183,6 +221,52 @@ def test_margin_trend_summary_compares_leverage_and_price_drawdown():
     assert summary["latest_price"] == "12元"
     assert summary["price_at_margin_peak"] == "15元"
     assert summary["leverage_pressure_bias"] == "crowded_not_cleared"
+
+
+def test_sector_relative_flow_summary_compares_stock_and_sector_flow():
+    """板块相对资金摘要应提前裁定个股是否逆板块或弱于板块。"""
+    stock_flow = SimpleNamespace(
+        trade_date=date(2026, 7, 7),
+        net_inflow_main=350_000_000,
+        net_inflow_ratio_main=3.2,
+        change_pct=1.5,
+    )
+    sector_flow = SimpleNamespace(
+        sector_name="有色金属",
+        trade_date=date(2026, 7, 7),
+        main_net_inflow=-1_000_000_000,
+        net_inflow=-900_000_000,
+        net_inflow_rate=-2.0,
+        change_percent=-1.0,
+    )
+
+    summary = _build_sector_relative_flow_summary_payload(
+        stock_flow,
+        sector_flow,
+        stock_industry="有色金属",
+    )
+
+    assert summary["data_sources"] == ["data.stock_money_flow", "data.sector_money_flow", "data.stock_basic"]
+    assert summary["scope"] == "stock money-flow record dated 2026-07-07; sector money-flow record dated 2026-07-07"
+    assert summary["stock_industry"] == "有色金属"
+    assert summary["sector_name"] == "有色金属"
+    assert summary["data_alignment"] == "same_trade_date"
+    assert summary["stock_main_net_inflow"] == "3.5亿元"
+    assert summary["sector_main_net_inflow"] == "-10亿元"
+    assert summary["sector_net_inflow"] == "-9亿元"
+    assert summary["stock_vs_sector_pct_chg_pp"] == "2.5个百分点"
+    assert summary["stock_contribution_to_sector_main_flow_pct"] == "-35%"
+    assert summary["relative_flow_label"] == "stock_resilient_against_sector_outflow"
+
+
+def test_choose_sector_name_uses_generic_matching_without_special_mapping():
+    """行业板块匹配不应依赖少量硬编码行业别名。"""
+    sector_names = ["房地产", "光伏设备", "通信设备", "半导体", "风电设备"]
+
+    assert _choose_sector_name(["通信设备", None], sector_names) == "通信设备"
+    assert _choose_sector_name(["光伏", None], sector_names) == "光伏设备"
+    assert _choose_sector_name(["电气设备", None], sector_names) is None
+    assert _choose_sector_name(["完全无关行业", None], sector_names) is None
 
 
 def test_margin_trend_summary_uses_price_window_passed_by_reader():
@@ -236,6 +320,9 @@ class _FakeScalarResult:
     def first(self):
         return self.value
 
+    def all(self):
+        return self.value
+
 
 class _FakeExecuteResult:
     def __init__(self, value):
@@ -248,6 +335,14 @@ class _FakeExecuteResult:
 class _FakeRawMarketDB:
     def __init__(self, market, indicators):
         self.results = [_FakeExecuteResult(market), _FakeExecuteResult(indicators)]
+
+    async def execute(self, _statement):
+        return self.results.pop(0)
+
+
+class _FakeSequenceDB:
+    def __init__(self, values):
+        self.results = [_FakeExecuteResult(value) for value in values]
 
     async def execute(self, _statement):
         return self.results.pop(0)
@@ -276,6 +371,46 @@ async def test_price_position_summary_computes_realtime_technical_derivatives():
     assert summary["price_vs_ma60_pct"] == "-8.33%"
     assert summary["price_vs_boll_mid_pct"] == "10%"
     assert summary["price_position_in_boll_pct"] == "75%"
+
+
+@pytest.mark.asyncio
+async def test_sector_relative_flow_summary_prefers_same_trade_date_sector_record():
+    """个股与板块资金对比应优先使用同交易日板块记录。"""
+    source = CapitalFlowSource()
+    db = _FakeSequenceDB(
+        [
+            SimpleNamespace(industry="有色金属"),
+            SimpleNamespace(
+                sector_name="有色金属",
+                trade_date=date(2026, 7, 8),
+                main_net_inflow=-2_000_000_000,
+                net_inflow=-2_000_000_000,
+                net_inflow_rate=-3,
+                change_percent=-2,
+            ),
+            SimpleNamespace(
+                trade_date=date(2026, 7, 7),
+                net_inflow_main=300_000_000,
+                net_inflow_ratio_main=2,
+                change_pct=1,
+            ),
+            SimpleNamespace(
+                sector_name="有色金属",
+                trade_date=date(2026, 7, 7),
+                main_net_inflow=-1_000_000_000,
+                net_inflow=-1_000_000_000,
+                net_inflow_rate=-1,
+                change_percent=-0.5,
+            ),
+        ]
+    )
+
+    summary = await source._get_sector_relative_flow_summary(db, "000001.SZ")
+
+    assert summary["data_alignment"] == "same_trade_date"
+    assert summary["scope"] == "stock money-flow record dated 2026-07-07; sector money-flow record dated 2026-07-07"
+    assert summary["sector_main_net_inflow"] == "-10亿元"
+    assert summary["stock_vs_sector_pct_chg_pp"] == "1.5个百分点"
 
 
 def test_technical_signal_summary_uses_raw_values():

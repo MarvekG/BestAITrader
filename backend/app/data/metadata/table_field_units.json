@@ -186,11 +186,11 @@
     },
     "percentage_points": {
       "zh": {
-        "unit": "units.percent",
+        "unit": "units.percentage_points",
         "scale": 1
       },
       "en": {
-        "unit": "units.percent",
+        "unit": "units.percentage_points",
         "scale": 1
       },
       "precision": 2
@@ -2086,6 +2086,50 @@
       "$ref": "percent"
     }
   },
+  "technical.intraday_shape_summary": {
+    "open": {
+      "$ref": "cny"
+    },
+    "high": {
+      "$ref": "cny"
+    },
+    "low": {
+      "$ref": "cny"
+    },
+    "current_price": {
+      "$ref": "cny"
+    },
+    "prev_close": {
+      "$ref": "cny"
+    },
+    "pct_chg": {
+      "$ref": "percent"
+    },
+    "amplitude_pct": {
+      "$ref": "percent"
+    },
+    "high_gain_from_prev_close_pct": {
+      "$ref": "percent"
+    },
+    "low_change_from_prev_close_pct": {
+      "$ref": "percent"
+    },
+    "open_gap_pct": {
+      "$ref": "percent"
+    },
+    "pullback_from_intraday_high_pct": {
+      "$ref": "percent"
+    },
+    "rebound_from_intraday_low_pct": {
+      "$ref": "percent"
+    },
+    "pullback_from_intraday_high_pp": {
+      "$ref": "percentage_points"
+    },
+    "close_position_in_intraday_range_pct": {
+      "$ref": "percent"
+    }
+  },
   "capital_flow.money_flow": {
     "net_inflow_main": {
       "zh": {
@@ -2686,6 +2730,35 @@
         "scale": 1e-9
       },
       "precision": 2
+    }
+  },
+  "capital_flow.sector_relative_flow_summary": {
+    "stock_main_net_inflow": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "stock_main_net_inflow_rate_pct": {
+      "$ref": "percent"
+    },
+    "sector_main_net_inflow": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "sector_net_inflow": {
+      "$ref": "cny_to_hundred_million"
+    },
+    "sector_net_inflow_rate_pct": {
+      "$ref": "percent"
+    },
+    "sector_change_pct": {
+      "$ref": "percent"
+    },
+    "stock_pct_chg": {
+      "$ref": "percent"
+    },
+    "stock_vs_sector_pct_chg_pp": {
+      "$ref": "percentage_points"
+    },
+    "stock_contribution_to_sector_main_flow_pct": {
+      "$ref": "percent"
     }
   },
   "capital_flow.shareholder": {
