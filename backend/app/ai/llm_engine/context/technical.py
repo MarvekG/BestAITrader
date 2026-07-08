@@ -96,6 +96,85 @@ def _build_price_volume_summary_payload(
     return format_payload_values("technical.price_volume_summary", payload)
 
 
+def _build_intraday_shape_summary_payload(market: Any | None) -> Dict[str, Any]:
+    """基于实时行情确定性计算日内冲高回落和收盘位置。"""
+    if not market:
+        return {"status": "missing"}
+
+    current_price = to_float(getattr(market, "current_price", None))
+    high = to_float(getattr(market, "high", None))
+    low = to_float(getattr(market, "low", None))
+    open_price = to_float(getattr(market, "open", None))
+    prev_close = to_float(getattr(market, "prev_close", None))
+    pct_chg = to_float(getattr(market, "change_percent", None))
+    timestamp = getattr(market, "timestamp", None)
+    if current_price is None or high is None or low is None:
+        return {
+            "status": "missing",
+            "data_sources": ["data.stock_realtime_market"],
+            "reason": "missing_realtime_high_low_or_price",
+        }
+
+    intraday_range = high - low
+    high_gain_pct = percent_change(high, prev_close)
+    low_change_pct = percent_change(low, prev_close)
+    if pct_chg is None:
+        pct_chg = percent_change(current_price, prev_close)
+    close_position_pct = (
+        round((current_price - low) / intraday_range * 100, 4)
+        if intraday_range not in (None, 0)
+        else None
+    )
+    pullback_from_high_pct = percent_change(current_price, high)
+    rebound_from_low_pct = percent_change(current_price, low)
+    pullback_from_intraday_high_pp = (
+        round(high_gain_pct - pct_chg, 4)
+        if high_gain_pct is not None and pct_chg is not None
+        else None
+    )
+
+    if pullback_from_intraday_high_pp is not None and pullback_from_intraday_high_pp >= 2:
+        intraday_shape_label = "high_pullback"
+    elif close_position_pct is not None and close_position_pct >= 80:
+        intraday_shape_label = "close_near_high"
+    elif close_position_pct is not None and close_position_pct <= 20:
+        intraday_shape_label = "close_near_low"
+    else:
+        intraday_shape_label = "middle_close"
+
+    payload = {
+        "status": "available",
+        "data_sources": ["data.stock_realtime_market"],
+        "market_timestamp": timestamp.isoformat() if timestamp else None,
+        "scope": f"realtime OHLC snapshot at {timestamp.isoformat() if timestamp else 'missing'}",
+        "open": open_price,
+        "high": high,
+        "low": low,
+        "current_price": current_price,
+        "prev_close": prev_close,
+        "pct_chg": pct_chg,
+        "amplitude_pct": getattr(market, "amplitude", None),
+        "high_gain_from_prev_close_pct": high_gain_pct,
+        "low_change_from_prev_close_pct": low_change_pct,
+        "open_gap_pct": percent_change(open_price, prev_close),
+        "pullback_from_intraday_high_pct": pullback_from_high_pct,
+        "rebound_from_intraday_low_pct": rebound_from_low_pct,
+        "pullback_from_intraday_high_pp": pullback_from_intraday_high_pp,
+        "close_position_in_intraday_range_pct": close_position_pct,
+        "intraday_shape_label": intraday_shape_label,
+        "change_bases": {
+            "high_gain_from_prev_close_pct": "intraday high vs previous close",
+            "low_change_from_prev_close_pct": "intraday low vs previous close",
+            "open_gap_pct": "intraday open vs previous close",
+            "pullback_from_intraday_high_pct": "current_price vs intraday high",
+            "rebound_from_intraday_low_pct": "current_price vs intraday low",
+            "pullback_from_intraday_high_pp": "high_gain_from_prev_close_pct - pct_chg",
+            "close_position_in_intraday_range_pct": "current_price position between intraday low and high",
+        },
+    }
+    return format_payload_values("technical.intraday_shape_summary", payload)
+
+
 class TechnicalSource:
     """
     Builds context for Technical Analyst.
@@ -158,6 +237,27 @@ class TechnicalSource:
             klines,
             indicator_result.scalars().first(),
         )
+
+    async def _get_intraday_shape_summary(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
+        """从实时行情计算日内形态摘要。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+
+        Returns:
+            带单位的冲高回落、日内区间位置和振幅摘要。
+        """
+        result = await db.execute(
+            select(StockRealtimeMarket)
+            .where(StockRealtimeMarket.stock_code == stock_code)
+            .order_by(
+                desc(StockRealtimeMarket.timestamp),
+                desc(StockRealtimeMarket.updated_at),
+                desc(StockRealtimeMarket.created_at),
+            )
+        )
+        return _build_intraday_shape_summary_payload(result.scalars().first())
 
     async def _get_latest_indicators(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         result = await db.execute(

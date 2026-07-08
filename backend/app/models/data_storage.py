@@ -413,7 +413,7 @@ class  StockMoneyFlow(Base):
   stock_code  =  Column(String(20),  ForeignKey('data.stock_basic.stock_code',  ondelete='CASCADE'),  nullable=False,  index=True)
   trade_date  =  Column(Date,  nullable=False,  index=True)
 
-  #  五档资金流向  (单位:  万元)
+  #  五档资金流向  (单位:  元；Tushare 万元口径在入库前已转换)
   net_inflow_small  =  Column(Float, info={"name": "stock_money_flow.net_inflow_small", "unit": "units.cny"})  #  小单净流入
   net_inflow_medium  =  Column(Float, info={"name": "stock_money_flow.net_inflow_medium", "unit": "units.cny"})  #  中单净流入
   net_inflow_large  =  Column(Float, info={"name": "stock_money_flow.net_inflow_large", "unit": "units.cny"})  #  大单净流入

@@ -179,6 +179,116 @@ def _build_margin_trend_summary_payload(
     return format_payload_values("capital_flow.margin_trend_summary", payload)
 
 
+def _flow_sign(value: float | None) -> int:
+    if value is None or value == 0:
+        return 0
+    return 1 if value > 0 else -1
+
+
+def _build_sector_relative_flow_summary_payload(
+    stock_flow: StockMoneyFlow | None,
+    sector_flow: SectorMoneyFlow | None,
+    *,
+    stock_industry: str | None = None,
+) -> Dict[str, Any]:
+    """构建个股资金相对所属板块资金的派生摘要。"""
+    if not stock_flow or not sector_flow:
+        return {"status": "missing"}
+
+    stock_net_inflow = to_float(stock_flow.net_inflow_main)
+    sector_main_net_inflow = to_float(sector_flow.main_net_inflow)
+    sector_net_inflow = to_float(sector_flow.net_inflow)
+    sector_flow_value = sector_main_net_inflow if sector_main_net_inflow is not None else sector_net_inflow
+    stock_date = stock_flow.trade_date
+    sector_date = sector_flow.trade_date
+    data_alignment = "same_trade_date" if stock_date == sector_date else "date_mismatch"
+    stock_sign = _flow_sign(stock_net_inflow)
+    sector_sign = _flow_sign(sector_flow_value)
+
+    if stock_sign > 0 and sector_sign < 0:
+        relative_flow_label = "stock_resilient_against_sector_outflow"
+    elif stock_sign < 0 and sector_sign > 0:
+        relative_flow_label = "stock_lagging_sector_inflow"
+    elif stock_sign > 0 and sector_sign > 0:
+        relative_flow_label = "stock_and_sector_inflow"
+    elif stock_sign < 0 and sector_sign < 0:
+        relative_flow_label = "stock_and_sector_outflow"
+    else:
+        relative_flow_label = "mixed_or_flat"
+
+    payload = {
+        "status": "available",
+        "data_sources": ["data.stock_money_flow", "data.sector_money_flow", "data.stock_basic"],
+        "scope": (
+            f"stock money-flow record dated {stock_date}; "
+            f"sector money-flow record dated {sector_date}"
+        ),
+        "stock_industry": stock_industry,
+        "sector_name": sector_flow.sector_name,
+        "stock_flow_date": str(stock_date) if stock_date else None,
+        "sector_flow_date": str(sector_date) if sector_date else None,
+        "data_alignment": data_alignment,
+        "stock_main_net_inflow": stock_net_inflow,
+        "stock_main_net_inflow_rate_pct": stock_flow.net_inflow_ratio_main,
+        "sector_main_net_inflow": sector_main_net_inflow,
+        "sector_net_inflow": sector_net_inflow,
+        "sector_net_inflow_rate_pct": sector_flow.net_inflow_rate,
+        "sector_change_pct": sector_flow.change_percent,
+        "stock_pct_chg": stock_flow.change_pct,
+        "stock_vs_sector_pct_chg_pp": (
+            round((stock_flow.change_pct or 0) - (sector_flow.change_percent or 0), 4)
+            if stock_flow.change_pct is not None and sector_flow.change_percent is not None
+            else None
+        ),
+        "stock_contribution_to_sector_main_flow_pct": (
+            round(stock_net_inflow / sector_flow_value * 100, 4)
+            if stock_net_inflow is not None and sector_flow_value not in (None, 0)
+            else None
+        ),
+        "relative_flow_label": relative_flow_label,
+        "change_bases": {
+            "stock_vs_sector_pct_chg_pp": "stock pct_chg - sector change_percent on matched records",
+            "stock_contribution_to_sector_main_flow_pct": "stock_main_net_inflow / sector_main_net_inflow; falls back to sector_net_inflow if sector main flow is missing",
+        },
+        "notes": "date_mismatch means the stock and sector flow records are not from the same trade date.",
+    }
+    return format_payload_values("capital_flow.sector_relative_flow_summary", payload)
+
+
+def _normalize_sector_match_text(value: str | None) -> str:
+    return "".join(str(value or "").split()).lower()
+
+
+def _choose_sector_name(candidates: Sequence[str | None], sector_names: Sequence[str]) -> str | None:
+    """按精确和明确包含关系选择板块名。"""
+    candidate_names = [item for item in candidates if item]
+    if not candidate_names:
+        return None
+
+    sector_name_by_normalized = {
+        _normalize_sector_match_text(sector_name): sector_name
+        for sector_name in sector_names
+        if sector_name
+    }
+    for candidate in candidate_names:
+        normalized_candidate = _normalize_sector_match_text(candidate)
+        if normalized_candidate in sector_name_by_normalized:
+            return sector_name_by_normalized[normalized_candidate]
+
+    for candidate in candidate_names:
+        normalized_candidate = _normalize_sector_match_text(candidate)
+        if not normalized_candidate:
+            continue
+        contained_matches = [
+            sector_name
+            for normalized_sector, sector_name in sector_name_by_normalized.items()
+            if normalized_candidate in normalized_sector or normalized_sector in normalized_candidate
+        ]
+        if contained_matches:
+            return min(contained_matches, key=len)
+    return None
+
+
 class CapitalFlowSource:
     """
     Builds context for Capital Flow Analyst.
@@ -197,6 +307,42 @@ class CapitalFlowSource:
         result = await db.execute(select(StockBasic).where(StockBasic.stock_code == stock_code))
         stock = result.scalars().first()
         return stock.name if stock else "Unknown"
+
+    async def _get_stock_and_sector_flow_match(
+        self,
+        db: AsyncSession,
+        stock_code: str,
+    ) -> tuple[StockBasic | None, SectorMoneyFlow | None]:
+        """按股票行业候选字段匹配所属板块资金流。"""
+        stock_result = await db.execute(select(StockBasic).where(StockBasic.stock_code == stock_code))
+        stock = stock_result.scalars().first()
+        if not stock:
+            return stock, None
+
+        candidate_names = [stock.industry, getattr(stock, "sector", None)]
+        exact_candidates = [item for item in candidate_names if item]
+        if not exact_candidates:
+            return stock, None
+
+        sector_result = await db.execute(
+            select(SectorMoneyFlow)
+            .where(SectorMoneyFlow.sector_name.in_(exact_candidates))
+            .order_by(desc(SectorMoneyFlow.trade_date))
+        )
+        sector_flow = sector_result.scalars().first()
+
+        if not sector_flow:
+            all_sectors_result = await db.execute(select(SectorMoneyFlow.sector_name).distinct())
+            matched_name = _choose_sector_name(candidate_names, [item[0] for item in all_sectors_result.all()])
+            if matched_name:
+                matched_result = await db.execute(
+                    select(SectorMoneyFlow)
+                    .where(SectorMoneyFlow.sector_name == matched_name)
+                    .order_by(desc(SectorMoneyFlow.trade_date))
+                )
+                sector_flow = matched_result.scalars().first()
+
+        return stock, sector_flow
 
     async def _get_money_flow(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         # Get latest
@@ -515,59 +661,12 @@ class CapitalFlowSource:
 
     async def _get_sector_flow(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """获取所属板块的资金流向数据"""
-        # 首先获取股票所属行业
-        from app.models.data_storage import StockBasic
-        stock_result = await db.execute(select(StockBasic).where(StockBasic.stock_code == stock_code))
-        stock = stock_result.scalars().first()
+        stock, sector_flow = await self._get_stock_and_sector_flow_match(db, stock_code)
 
         if not stock or not stock.industry:
             return self.status_payload("missing", status="Industry Info Unavailable")
 
         industry = stock.industry
-        
-        # 1. 尝试直接匹配
-        sector_result = await db.execute(
-            select(SectorMoneyFlow)
-            .where(SectorMoneyFlow.sector_name == industry)
-            .order_by(desc(SectorMoneyFlow.trade_date))
-        )
-        sector_flow = sector_result.scalars().first()
-
-        # 2. 如果直接匹配失败，尝试显式映射
-        if not sector_flow:
-            mapping = {
-                '白酒': '酿酒行业',
-                '地产': '房地产开发',
-                '房地产': '房地产开发',
-                '银行': '银行行业',
-                '光伏': '光伏设备',
-            }
-            if industry in mapping:
-                mapped_name = mapping[industry]
-                mapped_result = await db.execute(
-                    select(SectorMoneyFlow)
-                    .where(SectorMoneyFlow.sector_name == mapped_name)
-                    .order_by(desc(SectorMoneyFlow.trade_date))
-                )
-                sector_flow = mapped_result.scalars().first()
-
-        # 3. 如果仍然失败，尝试模糊匹配
-        if not sector_flow:
-            try:
-                all_sectors_result = await db.execute(select(SectorMoneyFlow.sector_name).distinct())
-                all_sectors = all_sectors_result.all()
-                all_names = [s[0] for s in all_sectors]
-                from difflib import get_close_matches
-                matches = get_close_matches(industry, all_names, n=1, cutoff=0.3)
-                if matches:
-                    fuzzy_result = await db.execute(
-                        select(SectorMoneyFlow)
-                        .where(SectorMoneyFlow.sector_name == matches[0])
-                        .order_by(desc(SectorMoneyFlow.trade_date))
-                    )
-                    sector_flow = fuzzy_result.scalars().first()
-            except Exception:
-                pass
 
         if not sector_flow:
             return self.status_payload(
@@ -606,6 +705,42 @@ class CapitalFlowSource:
             "linkage_hint": linkage_hint
         }
         return format_payload_values("capital_flow.sector_flow", payload)
+
+    async def _get_sector_relative_flow_summary(
+        self,
+        db: AsyncSession,
+        stock_code: str,
+    ) -> Dict[str, Any]:
+        """读取并计算个股相对行业资金流强弱。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 股票代码。
+
+        Returns:
+            个股主力资金与所属行业资金的同日对比摘要。
+        """
+        stock, sector_flow = await self._get_stock_and_sector_flow_match(db, stock_code)
+        stock_flow_result = await db.execute(
+            select(StockMoneyFlow)
+            .where(StockMoneyFlow.stock_code == stock_code)
+            .order_by(desc(StockMoneyFlow.trade_date))
+        )
+        stock_flow = stock_flow_result.scalars().first()
+        if stock_flow and sector_flow and stock_flow.trade_date != sector_flow.trade_date:
+            matched_sector_result = await db.execute(
+                select(SectorMoneyFlow)
+                .where(
+                    SectorMoneyFlow.sector_name == sector_flow.sector_name,
+                    SectorMoneyFlow.trade_date == stock_flow.trade_date,
+                )
+            )
+            sector_flow = matched_sector_result.scalars().first() or sector_flow
+        return _build_sector_relative_flow_summary_payload(
+            stock_flow,
+            sector_flow,
+            stock_industry=stock.industry if stock else None,
+        )
 
     async def _get_northbound_trend(self, db: AsyncSession, stock_code: str) -> Dict[str, Any]:
         """
