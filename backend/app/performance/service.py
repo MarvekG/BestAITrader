@@ -12,6 +12,7 @@ from app.models.account import Account
 from app.models.account_equity_snapshot import AccountEquitySnapshot
 from app.models.data_storage import IndexDaily
 from app.models.position import Position
+from app.portfolio.valuation import build_portfolio_valuation
 
 DEFAULT_BENCHMARK_CODE = "000300.SH"
 RETURN_QUANT = Decimal("0.00000001")
@@ -243,9 +244,11 @@ async def create_account_equity_snapshot(
     Returns:
         已持久化的账户净值快照。
     """
-    total_assets = _quantize(_to_decimal(account.total_assets), MONEY_QUANT)
-    available_cash = _quantize(_to_decimal(account.available_cash), MONEY_QUANT)
-    market_value = _quantize(_to_decimal(account.market_value), MONEY_QUANT)
+    valuation = await build_portfolio_valuation(account)
+    summary = valuation["summary"]
+    total_assets = _quantize(_to_decimal(summary["total_assets_decimal"]), MONEY_QUANT)
+    available_cash = _quantize(_to_decimal(summary["available_cash_decimal"]), MONEY_QUANT)
+    market_value = _quantize(_to_decimal(summary["market_value_decimal"]), MONEY_QUANT)
     position_count = await _get_position_count(db, account.account_id)
     previous = await _get_latest_snapshot(
         db,
