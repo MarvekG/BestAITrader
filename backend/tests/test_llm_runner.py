@@ -88,6 +88,71 @@ async def test_run_analysis_task_binds_session_user_context(monkeypatch, test_db
 
 
 @pytest.mark.asyncio
+async def test_run_analysis_task_passes_session_user_to_pre_sync(monkeypatch, test_db) -> None:
+    """启用分析前同步时应把会话所属用户传给同步任务。
+
+    Args:
+        monkeypatch: pytest monkeypatch 工具。
+        test_db: 测试数据库会话工厂。
+    """
+    import app.api.endpoints.debate_ws as debate_ws_module
+    import app.ai.llm_engine.runner as runner_module
+
+    session_id, user_id = await _seed_runner_session(test_db, username="runner_pre_sync_user")
+    captured = {}
+
+    class _FakeWorkflow:
+        async def ainvoke(self, initial_state):
+            """返回成功状态，避免真实工作流执行。
+
+            Args:
+                initial_state: 传入工作流的初始状态。
+
+            Returns:
+                带空错误列表的工作流状态。
+            """
+            return {**initial_state, "errors": []}
+
+    async def _fake_send_debate_status(*_args, **_kwargs):
+        """跳过 WebSocket 状态推送。
+
+        Args:
+            *_args: 原状态推送调用的位置参数。
+            **_kwargs: 原状态推送调用的关键字参数。
+        """
+        return None
+
+    async def _fake_sync(stock_code, user_id=None):
+        """记录前置同步收到的股票和用户。
+
+        Args:
+            stock_code: 同步股票代码。
+            user_id: 同步任务归属用户。
+        """
+        captured["stock_code"] = stock_code
+        captured["user_id"] = user_id
+        return True
+
+    monkeypatch.setattr(runner_module.database_module, "AsyncSessionLocal", test_db)
+    monkeypatch.setattr(runner_module, "_update_task_status", AsyncMock())
+    monkeypatch.setattr(runner_module, "_update_session_status", AsyncMock())
+    monkeypatch.setattr(runner_module, "create_analyst_workflow", lambda: _FakeWorkflow())
+    monkeypatch.setattr(debate_ws_module, "send_debate_status", _fake_send_debate_status)
+    monkeypatch.setattr("app.tasks.analysis_data_sync.sync_stock_data_before_analysis", _fake_sync)
+
+    await run_analysis_task(
+        task_id="task-runner-pre-sync",
+        stock_code="000001.SZ",
+        trading_frequency="daily",
+        trading_strategy="value",
+        session_id=str(session_id),
+        sync_before_analysis=True,
+    )
+
+    assert captured == {"stock_code": "000001.SZ", "user_id": user_id}
+
+
+@pytest.mark.asyncio
 async def test_run_analysis_task_passes_trigger_reason_to_initial_state(monkeypatch, test_db) -> None:
     """后台分析任务应把盯盘启动原因传入工作流初始上下文。
 

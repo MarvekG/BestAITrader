@@ -207,9 +207,10 @@ async def _launch_analysis(
             if not stock:
                 return None
             stock_code = stock.stock_code
+            stock_user_id = stock.user_id
 
         # Sync stock data before launching AI analysis
-        await sync_stock_data_before_analysis(stock_code)
+        await sync_stock_data_before_analysis(stock_code, user_id=stock_user_id)
 
         async with database_module.AsyncSessionLocal() as db:
             stock = await _load_launchable_stock(db, stock_id, launched_at)

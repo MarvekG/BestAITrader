@@ -111,7 +111,10 @@ async def test_auto_analysis_task_records_owner_user_id(async_db_session, monkey
     await async_db_session.commit()
     await async_db_session.refresh(stock)
 
-    async def _noop_sync(_stock_code):
+    sync_calls = []
+
+    async def _noop_sync(stock_code, user_id=None):
+        sync_calls.append({"stock_code": stock_code, "user_id": user_id})
         return True
 
     async def _noop_analysis(**_kwargs):
@@ -125,6 +128,7 @@ async def test_auto_analysis_task_records_owner_user_id(async_db_session, monkey
     task = await async_db_session.scalar(select(AsyncTask).where(AsyncTask.task_id == launch_info["task_id"]))
     assert task is not None
     assert task.user_id == stock.user_id
+    assert sync_calls == [{"stock_code": stock.stock_code, "user_id": stock.user_id}]
 
 
 @pytest.mark.asyncio
@@ -150,7 +154,7 @@ async def test_auto_analysis_respects_global_debate_concurrency_limit(async_db_s
     await async_db_session.commit()
     await async_db_session.refresh(stock)
 
-    async def _noop_sync(_stock_code):
+    async def _noop_sync(_stock_code, user_id=None):
         return True
 
     monkeypatch.setattr(stock_analysis_scheduler, "sync_stock_data_before_analysis", _noop_sync)

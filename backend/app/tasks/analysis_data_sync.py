@@ -11,11 +11,12 @@ from app.tasks.task_manager import task_manager
 logger = get_logger(__name__)
 
 
-async def sync_stock_data_before_analysis(stock_code: str) -> bool:
+async def sync_stock_data_before_analysis(stock_code: str, user_id: int | None = None) -> bool:
     """提交并等待单股数据同步任务，供自动和手动分析启动前复用。
 
     Args:
         stock_code: 需要刷新数据的股票代码。
+        user_id: 分析任务所属用户 ID；为空时创建系统级同步任务。
 
     Returns:
         同步任务可正常结束或超时后继续分析时返回 True；任务提交失败时返回 False。
@@ -28,6 +29,7 @@ async def sync_stock_data_before_analysis(stock_code: str) -> bool:
         task_type="db_sync",
         parameters={"stock_code": stock_code},
         allow_concurrent=False,
+        user_id=user_id,
         task_func=sync_stock_data_func,
         task_kwargs={
             "stock_code": stock_code,

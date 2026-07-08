@@ -180,7 +180,8 @@ async def run_analysis_task(
     user_token = None
 
     try:
-        user_token = set_current_user_id(await _resolve_session_user_id(session_id))
+        resolved_user_id = await _resolve_session_user_id(session_id)
+        user_token = set_current_user_id(resolved_user_id)
 
         # 1. Update status to running
         await _update_task_status(task_id, "running")
@@ -193,7 +194,7 @@ async def run_analysis_task(
         if sync_before_analysis:
             from app.tasks.analysis_data_sync import sync_stock_data_before_analysis
 
-            await sync_stock_data_before_analysis(stock_code)
+            await sync_stock_data_before_analysis(stock_code, user_id=resolved_user_id)
 
         # 3. Run workflow
         logger.info(f"Starting analysis workflow for task {task_id}, stock {stock_code}, session {session_id}")
