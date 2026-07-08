@@ -277,6 +277,7 @@ class WebSocketManager:
                                 task_id=data.get("task_id"),
                                 task_name=data.get("task_name"),
                                 status=data.get("status"),
+                                user_id=data.get("user_id"),
                                 result=data.get("result"),
                                 error_message=data.get("error_message")
                             )
@@ -505,6 +506,7 @@ class WebSocketManager:
         task_id: str,
         task_name: str,
         status: str,
+        user_id: Optional[int] = None,
         result: Optional[Dict[str, Any]] = None,
         error_message: Optional[str] = None
     ):
@@ -514,6 +516,7 @@ class WebSocketManager:
             task_id: 任务ID
             task_name: 任务名称
             status: 任务状态 (completed/failed)
+            user_id: 任务所属用户 ID；为空时不推送给前端。
             result: 任务结果
             error_message: 错误信息
         """
@@ -523,13 +526,20 @@ class WebSocketManager:
                 "task_id": task_id,
                 "task_name": task_name,
                 "status": status,
+                "user_id": user_id,
                 "result": result,
                 "error_message": error_message
             },
             "timestamp": datetime.now().isoformat()
         }
-        # Broadcast to all active connections
-        await self.broadcast(message)
+        if user_id is not None:
+            for session_id, session_user_id in list(self.session_user_ids.items()):
+                if session_user_id == user_id:
+                    await self.broadcast_to_session(message, session_id)
+            return
+
+        # 前端任务查询按用户隔离；无归属任务无法被当前用户读取，避免推送后触发 404 轮询。
+        logger.info("Skipping ownerless task notification: %s", task_id)
 
     async def send_agentic_update(self, task_id: str, message: str, stage: str = "analysis", notif_type: str = "log"):
         """

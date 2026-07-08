@@ -131,3 +131,68 @@ async def test_interactive_stock_picker_update_is_scoped_to_owner_session(monkey
     )
 
     assert sent_sessions == ["owner-session"]
+
+
+@pytest.mark.asyncio
+async def test_task_notification_is_scoped_to_owner_sessions(monkeypatch):
+    """任务通知只推送给任务所属用户的 WebSocket 会话。
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture。
+    """
+    manager = WebSocketManager()
+    manager.session_user_ids = {
+        "owner-session": 1,
+        "other-session": 2,
+    }
+    sent_sessions = []
+
+    async def fake_broadcast_to_session(_message, session_id):
+        """记录收到任务通知的 session。
+
+        Args:
+            _message: 推送消息。
+            session_id: 目标 WebSocket session。
+        """
+        sent_sessions.append(session_id)
+
+    monkeypatch.setattr(manager, "broadcast_to_session", fake_broadcast_to_session)
+
+    await manager.send_task_notification(
+        task_id="task-1",
+        task_name="Owner Task",
+        status="running",
+        user_id=1,
+    )
+
+    assert sent_sessions == ["owner-session"]
+
+
+@pytest.mark.asyncio
+async def test_ownerless_task_notification_is_not_broadcast(monkeypatch):
+    """无归属任务通知不广播，避免前端轮询不可见任务。
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture。
+    """
+    manager = WebSocketManager()
+    broadcasted = False
+
+    async def fake_broadcast(_message):
+        """记录是否发生广播。
+
+        Args:
+            _message: 推送消息。
+        """
+        nonlocal broadcasted
+        broadcasted = True
+
+    monkeypatch.setattr(manager, "broadcast", fake_broadcast)
+
+    await manager.send_task_notification(
+        task_id="ownerless-task",
+        task_name="Ownerless Task",
+        status="running",
+    )
+
+    assert broadcasted is False

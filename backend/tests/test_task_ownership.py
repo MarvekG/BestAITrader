@@ -1,3 +1,4 @@
+import json
 import uuid
 from unittest.mock import AsyncMock, patch
 
@@ -113,6 +114,47 @@ async def test_submitted_api_task_records_current_user(client, test_db):
     ):
         result = await submitted["task_func"](**submitted["task_kwargs"])
     assert result["status"] == "success"
+
+
+@pytest.mark.asyncio
+async def test_task_status_update_notification_includes_owner_user(test_db, monkeypatch):
+    async with test_db() as db:
+        owner = await create_user(
+            db,
+            UserCreate(
+                username="notification_owner",
+                email="notification_owner@example.com",
+                password="password123",
+            ),
+        )
+        owner_id = owner.id
+        db.add(
+            AsyncTask(
+                task_id="notification-owner-task",
+                user_id=owner_id,
+                task_name="Notification Owner Task",
+                task_type="db_sync",
+                status="pending",
+            )
+        )
+        await db.commit()
+
+    published = {}
+
+    async def _capture_publish(channel, payload):
+        published["channel"] = channel
+        published["payload"] = json.loads(payload)
+        return 1
+
+    monkeypatch.setattr("app.core.redis_client.redis_client.publish", _capture_publish)
+
+    from app.tasks.task_manager import task_manager
+
+    await task_manager.update_task_status("notification-owner-task", "running")
+
+    assert published["channel"] == "task_notifications"
+    assert published["payload"]["task_id"] == "notification-owner-task"
+    assert published["payload"]["user_id"] == owner_id
 
 
 @pytest.mark.asyncio

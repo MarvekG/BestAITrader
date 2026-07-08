@@ -197,6 +197,7 @@ class TaskManager:
                 task.error_message = error_message
 
             task_name = task.task_name
+            task_user_id = task.user_id
             await db.commit()
         logger.info(f"Task {task_id} status updated to {status}")
 
@@ -207,6 +208,7 @@ class TaskManager:
                 "task_id": task_id,
                 "task_name": task_name,
                 "status": status,
+                "user_id": task_user_id,
                 "result": notification_result if notification_result is not None else result,
                 "error_message": error_message,
                 "timestamp": datetime.now().isoformat()
@@ -234,10 +236,10 @@ class TaskManager:
         async with database_module.AsyncSessionLocal() as db:
             result = await db.execute(select(AsyncTask).where(*filters))
             task = result.scalar_one_or_none()
-        if not task:
-            return None
+            if not task:
+                return None
 
-        return task.to_dict()
+            return task.to_dict()
 
     async def get_task_list(
         self,
