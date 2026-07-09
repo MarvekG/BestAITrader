@@ -14,7 +14,6 @@ const DataManagerPage = React.lazy(() => import('./pages/DataManagerPage').then(
 const ApiHistoryPage = React.lazy(() => import('./pages/ApiHistoryPage').then((module) => ({ default: module.ApiHistoryPage })));
 const AIStockPickerPage = React.lazy(() => import('./pages/AIStockPickerPage').then((module) => ({ default: module.AIStockPickerPage })));
 const ExperiencePage = React.lazy(() => import('./pages/ExperiencePage').then((module) => ({ default: module.ExperiencePage })));
-const TextLibraryPage = React.lazy(() => import('./texts/TextLibraryPage').then((module) => ({ default: module.TextLibraryPage })));
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isLoggedIn, token } = useSessionStore();
@@ -43,7 +42,6 @@ const App: React.FC = () => {
           <Route path="trading" element={<SimulatedTradingPage />} />
           <Route path="ai-stock-picker" element={<AIStockPickerPage />} />
           <Route path="experience" element={<ExperiencePage />} />
-          <Route path="texts" element={<TextLibraryPage />} />
           <Route path="api-history" element={<ApiHistoryPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
