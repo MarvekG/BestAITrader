@@ -13,7 +13,6 @@ import {
   KeyOutlined,
   RobotOutlined,
   ExperimentOutlined,
-  ReadOutlined,
 } from '@ant-design/icons';
 import { TaskCompletedMessage, WebSocketMessage, wsManager } from '../services/websocket';
 import { useWebSocketSubscription } from '../hooks/useWebSocketSubscription';
@@ -100,11 +99,6 @@ export const DashboardLayout: React.FC = () => {
     { key: '/ai-stock-picker', icon: <RobotOutlined />, label: t('layout.menu.ai_stock_picker') },
     { key: '/experience', icon: <ExperimentOutlined />, label: t('layout.menu.experience_analyst') },
     { key: '/trading', icon: <HistoryOutlined />, label: t('layout.menu.trading_center') },
-    {
-      key: '/texts',
-      icon: <ReadOutlined />,
-      label: t('layout.menu.trading_novel'),
-    },
     { key: '/api-history', icon: <HistoryOutlined />, label: t('layout.menu.api_history') },
     { key: '/settings', icon: <SettingOutlined />, label: t('layout.menu.settings') },
   ];
