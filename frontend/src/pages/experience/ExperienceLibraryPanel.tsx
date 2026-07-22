@@ -282,8 +282,7 @@ export const ExperienceLibraryPanel: React.FC<ExperienceLibraryPanelProps> = ({ 
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Alert type="info" showIcon message={t('experience_library.memory_first_notice')} />
             <Descriptions bordered size="small" column={1}>
-              <Descriptions.Item label={t('experience_library.memory_observation_id')}>{detail.memory_observation_id || '-'}</Descriptions.Item>
-              <Descriptions.Item label={t('experience_library.memory_source_id')}>{detail.memory_source_id || '-'}</Descriptions.Item>
+              <Descriptions.Item label={t('settings.memory_column_memory_id')}>{detail.memory_id || '-'}</Descriptions.Item>
               <Descriptions.Item label={t('experience.review_run_id')}>{detail.review_run_id}</Descriptions.Item>
               <Descriptions.Item label={t('experience.session')}>{detail.session_id}</Descriptions.Item>
               <Descriptions.Item label={t('experience_library.outcome_label')}>{detail.outcome_label || '-'}</Descriptions.Item>

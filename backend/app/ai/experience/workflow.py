@@ -200,7 +200,7 @@ def _extract_written_memories(tool_trace: List[Dict[str, Any]]) -> List[Dict[str
             "memo_session": memo_session,
             "stock_code": stock_code,
         }
-        for key in ("status", "observation_id", "source_id", "error"):
+        for key in ("status", "memory_id", "error"):
             value = result.get(key)
             if value not in (None, ""):
                 item[key] = value
@@ -745,8 +745,7 @@ async def review_debate_conclusion(state: ExperienceWorkflowState) -> Dict[str, 
                             tool_trace_entry["result"] = {
                                 "success": tool_result.get("success"),
                                 "status": tool_result.get("status"),
-                                "observation_id": tool_result.get("observation_id"),
-                                "source_id": tool_result.get("source_id"),
+                                "memory_id": tool_result.get("memory_id"),
                                 "memo_session": tool_result.get("memo_session"),
                                 "stock_code": tool_result.get("stock_code"),
                                 "error": tool_result.get("error"),

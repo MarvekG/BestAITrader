@@ -1,5 +1,6 @@
 from datetime import datetime
 import uuid
+from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
@@ -87,8 +88,7 @@ def _review_result(session, *, review_run_id="review-1"):
                     "memo_session": "stock",
                     "stock_code": session.stock_code,
                     "status": "success",
-                    "observation_id": "obs-memory-1",
-                    "source_id": "memory-source-1",
+                    "memory_id": "mem-memory-1",
                     "evidence_chain": {
                         "market_outcome_summary": {
                             "selected_horizon_outcome": {"absolute_return": 0.05},
@@ -100,7 +100,7 @@ def _review_result(session, *, review_run_id="review-1"):
                     "importance": "medium",
                     "status": "failed",
                     "error": "memory unavailable",
-                    "observation_id": "obs-memory-failed",
+                    "memory_id": "mem-memory-failed",
                 },
             ],
         },
@@ -162,8 +162,7 @@ async def test_sync_from_review_result_indexes_successful_memory_writes(async_db
     rows = (await async_db_session.execute(select(ExperienceIndex))).scalars().all()
     assert stats == {"created": 1, "updated": 0, "skipped": 1}
     assert len(rows) == 1
-    assert rows[0].memory_observation_id == "obs-memory-1"
-    assert rows[0].memory_source_id == "memory-source-1"
+    assert rows[0].memory_id == "mem-memory-1"
     assert rows[0].review_run_id == "review-1"
     assert rows[0].session_id == session.session_id
     assert rows[0].stock_code == "000001.SZ"
@@ -179,6 +178,20 @@ async def test_sync_from_review_result_indexes_successful_memory_writes(async_db
 
 
 @pytest.mark.asyncio
+async def test_sync_from_review_result_indexes_successful_memory_id(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    result = _review_result(session)
+    memory = result["analysis_payload"]["written_memories"][0]
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        stats = await experience_index_service.sync_from_review_result(db, user_id=user.id, result=result)
+
+    rows = (await async_db_session.execute(select(ExperienceIndex))).scalars().all()
+    assert stats == {"created": 1, "updated": 0, "skipped": 1}
+    assert len(rows) == 1
+    assert rows[0].memory_id == "mem-memory-1"
+
+
+@pytest.mark.asyncio
 async def test_sync_from_review_result_indexes_accepted_memory_writes(async_db_session):
     user, session = await _create_user_and_session(async_db_session)
     result = _review_result(session)
@@ -190,11 +203,11 @@ async def test_sync_from_review_result_indexes_accepted_memory_writes(async_db_s
     rows = (await async_db_session.execute(select(ExperienceIndex))).scalars().all()
     assert stats == {"created": 1, "updated": 0, "skipped": 1}
     assert len(rows) == 1
-    assert rows[0].memory_observation_id == "obs-memory-1"
+    assert rows[0].memory_id == "mem-memory-1"
 
 
 @pytest.mark.asyncio
-async def test_sync_from_review_result_is_idempotent_by_memory_observation_id(async_db_session):
+async def test_sync_from_review_result_is_idempotent_by_memory_id(async_db_session):
     user, session = await _create_user_and_session(async_db_session)
     result = _review_result(session)
 
@@ -227,7 +240,7 @@ async def test_list_items_filters_by_horizon_tag_keyword_and_stock(async_db_sess
     )
 
     assert matched["total"] == 1
-    assert matched["items"][0]["memory_observation_id"] == "obs-memory-1"
+    assert matched["items"][0]["memory_id"] == "mem-memory-1"
     assert missed["total"] == 0
 
 
@@ -250,7 +263,7 @@ async def test_list_items_uses_fuzzy_matching_for_each_filter_field(async_db_ses
     for filters in filter_cases:
         result = await experience_index_service.list_items(user_id=user.id, **filters)
         assert result["total"] == 1, filters
-        assert result["items"][0]["memory_observation_id"] == "obs-memory-1"
+        assert result["items"][0]["memory_id"] == "mem-memory-1"
 
 
 @pytest.mark.asyncio
@@ -264,7 +277,7 @@ async def test_list_items_keyword_searches_multiple_index_fields_and_tags(async_
     for keyword in keyword_cases:
         result = await experience_index_service.list_items(user_id=user.id, keyword=keyword)
         assert result["total"] == 1, keyword
-        assert result["items"][0]["memory_observation_id"] == "obs-memory-1"
+        assert result["items"][0]["memory_id"] == "mem-memory-1"
 
 
 @pytest.mark.asyncio
@@ -367,7 +380,7 @@ async def test_analyze_syncs_successful_memory_writes_to_experience_index(async_
     assert result["review_horizon"] == "20d"
     assert len(rows) == 1
     assert rows[0].review_run_id == result["review_run_id"]
-    assert rows[0].memory_observation_id == "obs-memory-1"
+    assert rows[0].memory_id == "mem-memory-1"
 
 
 @pytest.mark.asyncio

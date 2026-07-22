@@ -278,11 +278,16 @@ class MemoryServiceClient:
             user_id=user_id,
             stock_code=stock_code,
         )
-        return await self._ingest_scope(
+        response = await self._ingest_scope(
             session=session,
             context=content,
             operation="ingest",
         )
+        data = self._response_data(response)
+        return {
+            "memory_id": data.get("memory_id"),
+            "status": data.get("status"),
+        }
 
     async def preview_memories(
         self,
@@ -547,7 +552,7 @@ class MemoryServiceClient:
     def _summarize_response(response: Any) -> dict[str, Any]:
         if isinstance(response, dict):
             summary: dict[str, Any] = {}
-            for key in ("observation_id", "status", "provider", "model", "dimension"):
+            for key in ("memory_id", "status", "provider", "model", "dimension"):
                 value = response.get(key)
                 if value is not None:
                     summary[key] = value

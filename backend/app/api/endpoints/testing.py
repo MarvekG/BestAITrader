@@ -464,12 +464,11 @@ async def test_memory():
             content=MEMORY_TEST_CONTENT,
         )
         elapsed = int((time.time() - start_time) * 1000)
-        data = response.get("data") if isinstance(response, dict) else None
-        memory_id = data.get("memory_id") if isinstance(data, dict) else None
+        memory_id = response.get("memory_id") if isinstance(response, dict) else None
         if isinstance(response, dict) and memory_id:
             result = _success_response("memory_write", elapsed)
             result["memory_id"] = memory_id
-            result["data"] = data
+            result["data"] = response
             logger.info(f"Test memory write result: {result}")
             return result
         last_error = memory_client.get_last_error("ingest")

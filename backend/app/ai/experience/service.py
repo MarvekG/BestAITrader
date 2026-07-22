@@ -1694,7 +1694,7 @@ class ExperienceService:
                 "memo_session": memo_session,
                 "stock_code": stock_code,
             }
-            for key in ("status", "observation_id", "source_id", "error"):
+            for key in ("status", "memory_id", "error"):
                 value = result.get(key)
                 if value not in (None, ""):
                     item[key] = value
@@ -1725,7 +1725,7 @@ class ExperienceService:
                 "memo_session": memo_session,
                 "stock_code": stock_code,
             }
-            for key in ("status", "observation_id", "source_id", "error"):
+            for key in ("status", "memory_id", "error"):
                 value = item.get(key)
                 if value not in (None, ""):
                     normalized_item[key] = str(value)

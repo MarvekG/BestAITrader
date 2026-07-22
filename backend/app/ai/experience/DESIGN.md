@@ -263,7 +263,7 @@ failed
 Experience Index 只保存列表展示、筛选、统计和跳转所需字段，例如：
 
 ```text
-memory_observation_id / memory_source_id
+memory_id
 review_run_id
 session_id
 stock_code

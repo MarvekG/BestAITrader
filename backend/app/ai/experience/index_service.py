@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import select
 
 from app.core.utils.converters import safe_string, safe_uuid
 from app.core import database as database_module
@@ -109,16 +109,15 @@ class ExperienceIndexService:
         Returns:
             已存在的经验索引；没有匹配时返回 ``None``。
         """
-        observation_id = safe_string(memory.get("observation_id"))
-        source_id = safe_string(memory.get("source_id"))
-        filters = []
-        if observation_id:
-            filters.append(ExperienceIndex.memory_observation_id == observation_id)
-        if source_id:
-            filters.append(ExperienceIndex.memory_source_id == source_id)
-        if not filters:
+        memory_id = safe_string(memory.get("memory_id"))
+        if not memory_id:
             return None
-        result = await db.execute(select(ExperienceIndex).where(ExperienceIndex.user_id == user_id, or_(*filters)))
+        result = await db.execute(
+            select(ExperienceIndex).where(
+                ExperienceIndex.user_id == user_id,
+                ExperienceIndex.memory_id == memory_id,
+            )
+        )
         return result.scalars().first()
 
     def _row_payload(self, *, user_id: int, result: dict[str, Any], memory: dict[str, Any]) -> dict[str, Any]:
@@ -135,8 +134,7 @@ class ExperienceIndexService:
         payload = result.get("analysis_payload") if isinstance(result.get("analysis_payload"), dict) else {}
         return {
             "user_id": user_id,
-            "memory_observation_id": safe_string(memory.get("observation_id")),
-            "memory_source_id": safe_string(memory.get("source_id")),
+            "memory_id": safe_string(memory.get("memory_id")),
             "review_run_id": str(result.get("review_run_id") or ""),
             "session_id": safe_uuid(result.get("session_id")),
             "stock_code": safe_string(memory.get("stock_code")) or safe_string(result.get("stock_code")),
@@ -170,9 +168,7 @@ class ExperienceIndexService:
                 stats["skipped"] += 1
                 continue
             row_payload = self._row_payload(user_id=user_id, result=result, memory=memory)
-            if not row_payload["review_run_id"] or not row_payload["session_id"] or not (
-                row_payload["memory_observation_id"] or row_payload["memory_source_id"]
-            ):
+            if not row_payload["review_run_id"] or not row_payload["session_id"] or not row_payload["memory_id"]:
                 stats["skipped"] += 1
                 continue
             row = await self._find_existing(db, user_id=user_id, memory=memory)
@@ -198,8 +194,7 @@ class ExperienceIndexService:
         """
         return {
             "id": str(row.id),
-            "memory_observation_id": row.memory_observation_id,
-            "memory_source_id": row.memory_source_id,
+            "memory_id": row.memory_id,
             "review_run_id": row.review_run_id,
             "session_id": str(row.session_id),
             "stock_code": row.stock_code,
@@ -420,8 +415,7 @@ class ExperienceIndexService:
                 for item in memories
                 if isinstance(item, dict)
                 and (
-                    item.get("observation_id") == row.memory_observation_id
-                    or item.get("source_id") == row.memory_source_id
+                    item.get("memory_id") == row.memory_id
                 )
             ),
             {},

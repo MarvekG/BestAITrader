@@ -2865,8 +2865,7 @@
     "view_detail": "View Detail",
     "open_review": "Open Review",
     "detail_title": "Experience Detail",
-    "memory_observation_id": "Memory Observation ID",
-    "memory_source_id": "Memory Source ID",
+    "memory_id": "Memory ID",
     "outcome_label": "Outcome Label",
     "summary": "Experience Summary",
     "market_outcome": "Market Outcome Evidence"

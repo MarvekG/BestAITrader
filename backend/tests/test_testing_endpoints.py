@@ -128,11 +128,8 @@ async def test_query_calc_testing_endpoint_rejects_assignment_only_result():
 async def test_memory_testing_endpoint_writes_probe_event():
     mock_write = AsyncMock(
         return_value={
-            "data": {
-                "memory_id": "mem-123",
-                "session": f"user:{MEMORY_TEST_USER_ID}:stock:{MEMORY_TEST_STOCK_CODE}",
-            },
-            "error": None,
+            "memory_id": "mem-123",
+            "status": "accepted",
         }
     )
 
@@ -142,7 +139,7 @@ async def test_memory_testing_endpoint_writes_probe_event():
 
     assert result["status"] == "success"
     assert result["memory_id"] == "mem-123"
-    assert result["data"]["session"] == f"user:{MEMORY_TEST_USER_ID}:stock:{MEMORY_TEST_STOCK_CODE}"
+    assert result["data"] == {"memory_id": "mem-123", "status": "accepted"}
     assert "event_id" not in result
     assert "observation_id" not in result
     payload = mock_write.await_args.kwargs
@@ -152,16 +149,11 @@ async def test_memory_testing_endpoint_writes_probe_event():
 
 
 @pytest.mark.asyncio
-async def test_memory_testing_endpoint_accepts_memoflux_write_response():
+async def test_memory_testing_endpoint_accepts_memory_client_write_response():
     mock_write = AsyncMock(
         return_value={
-            "data": {
-                "memory_id": "mem-123",
-                "session": f"user:{MEMORY_TEST_USER_ID}:stock:{MEMORY_TEST_STOCK_CODE}",
-                "occurred_at": "2026-06-01T00:00:00Z",
-                "created_at": "2026-06-01T00:00:00Z",
-            },
-            "error": None,
+            "memory_id": "mem-123",
+            "status": "pending",
         }
     )
 
@@ -171,6 +163,7 @@ async def test_memory_testing_endpoint_accepts_memoflux_write_response():
 
     assert result["status"] == "success"
     assert result["memory_id"] == "mem-123"
+    assert result["data"]["status"] == "pending"
     assert "observation_id" not in result
 
 
