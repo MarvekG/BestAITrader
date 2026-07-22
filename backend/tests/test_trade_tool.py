@@ -23,7 +23,31 @@ def test_portfolio_manager_agent_exposes_order_type_guidance_tool():
     tool_names = {tool.name for tool in agent.tools}
 
     assert "get_pm_order_type_guidance" in tool_names
+    assert "calculate_executable_position_plan" in tool_names
     assert "execute_trading_order" in tool_names
+
+
+def test_calculate_executable_position_plan_only_exposes_target_position():
+    from app.ai.llm_engine.agents.governance import PortfolioManagerAgent
+
+    agent = PortfolioManagerAgent(state={"session_id": str(uuid4())})
+    position_tool = next(tool for tool in agent.tools if tool.name == "calculate_executable_position_plan")
+
+    assert set(position_tool.args_schema.model_fields) == {"target_position"}
+
+
+def test_portfolio_manager_prompt_requires_executable_position_plan_tool():
+    from app.ai.llm_engine.prompts.templates import (
+        SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN,
+        SYSTEM_PROMPT_PORTFOLIO_MANAGER_EN,
+    )
+
+    assert "calculate_executable_position_plan(target_position)" in SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN
+    assert "最小可执行试探仓" in SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN
+    assert "工具默认保留全部待成交订单" in SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN
+    assert "calculate_executable_position_plan(target_position)" in SYSTEM_PROMPT_PORTFOLIO_MANAGER_EN
+    assert "minimum executable trial position" in SYSTEM_PROMPT_PORTFOLIO_MANAGER_EN
+    assert "retains active pending" in SYSTEM_PROMPT_PORTFOLIO_MANAGER_EN
 
 
 @pytest.mark.asyncio
@@ -167,6 +191,141 @@ async def _wrapped_pm_tool(session_id):
     return next(t for t in agent.tools if t.name == "execute_trading_order")
 
 
+async def _wrapped_position_plan_tool(session_id):
+    from app.ai.llm_engine.agents.governance import PortfolioManagerAgent
+
+    agent = PortfolioManagerAgent(state={"session_id": str(session_id)})
+    return next(t for t in agent.tools if t.name == "calculate_executable_position_plan")
+
+
+@pytest.mark.asyncio
+async def test_calculate_executable_position_plan_rejects_nominal_position_below_one_lot(test_db):
+    session_id, _, _ = await _seed_trade_context(
+        test_db,
+        latest_price=Decimal("1113.00"),
+    )
+    position_tool = await _wrapped_position_plan_tool(session_id)
+
+    result = await position_tool.ainvoke({"target_position": 0.02})
+
+    assert result["success"] is True
+    assert result["executable"] is False
+    assert result["reason"] == "below_minimum_buy_lot"
+    assert result["action"] == "buy"
+    assert result["order_shares"] == 0
+    assert result["actual_target_position"] == 0
+    assert result["minimum_lot_position"] == pytest.approx(0.1113)
+
+
+@pytest.mark.asyncio
+async def test_calculate_executable_position_plan_returns_rounded_actual_position(test_db):
+    session_id, _, _ = await _seed_trade_context(
+        test_db,
+        latest_price=Decimal("123.00"),
+    )
+    position_tool = await _wrapped_position_plan_tool(session_id)
+
+    result = await position_tool.ainvoke({"target_position": 0.05})
+
+    assert result["success"] is True
+    assert result["executable"] is True
+    assert result["reason"] is None
+    assert result["action"] == "buy"
+    assert result["raw_target_shares"] == pytest.approx(406.504065)
+    assert result["order_shares"] == 400
+    assert result["actual_target_shares"] == 400
+    assert result["actual_target_position"] == pytest.approx(0.0492)
+    assert result["estimated_fee"] == pytest.approx(10.82)
+
+
+@pytest.mark.asyncio
+async def test_calculate_executable_position_plan_applies_available_shares_to_sell(test_db):
+    session_id, _, _ = await _seed_trade_context(
+        test_db,
+        latest_price=Decimal("100.00"),
+        position_shares=500,
+        available_shares=100,
+    )
+    position_tool = await _wrapped_position_plan_tool(session_id)
+
+    result = await position_tool.ainvoke({"target_position": 0.02})
+
+    assert result["success"] is True
+    assert result["executable"] is True
+    assert result["reason"] == "partially_executable_available_shares"
+    assert result["action"] == "sell"
+    assert result["order_shares"] == 100
+    assert result["actual_target_shares"] == 400
+    assert result["actual_target_position"] == pytest.approx(0.04)
+    assert result["target_fully_reachable"] is False
+
+
+@pytest.mark.asyncio
+async def test_calculate_executable_position_plan_includes_pending_buy_remaining_shares(test_db):
+    session_id, _, _ = await _seed_trade_context(
+        test_db,
+        latest_price=Decimal("100.00"),
+        available_cash=Decimal("40000.00"),
+        position_shares=100,
+        available_shares=100,
+        order=Order(
+            stock_code="600519.SH",
+            action="buy",
+            order_type="limit",
+            price=Decimal("100.00"),
+            shares=500,
+            filled_shares=100,
+            status="pending",
+        ),
+    )
+    position_tool = await _wrapped_position_plan_tool(session_id)
+
+    result = await position_tool.ainvoke({"target_position": 0.05})
+
+    assert result["success"] is True
+    assert result["executable"] is False
+    assert result["reason"] == "target_covered_by_pending_orders"
+    assert result["action"] == "hold"
+    assert result["pending_order_policy"] == "retain"
+    assert result["pending_buy_shares"] == 400
+    assert result["effective_total_shares"] == 500
+    assert result["order_shares"] == 0
+    assert result["actual_target_shares"] == 500
+
+
+@pytest.mark.asyncio
+async def test_calculate_executable_position_plan_subtracts_pending_sell_reservation(test_db):
+    session_id, _, _ = await _seed_trade_context(
+        test_db,
+        latest_price=Decimal("100.00"),
+        position_shares=500,
+        available_shares=500,
+        order=Order(
+            stock_code="600519.SH",
+            action="sell",
+            order_type="limit",
+            price=Decimal("100.00"),
+            shares=100,
+            filled_shares=0,
+            status="pending",
+        ),
+    )
+    position_tool = await _wrapped_position_plan_tool(session_id)
+
+    result = await position_tool.ainvoke({"target_position": 0})
+
+    assert result["success"] is True
+    assert result["executable"] is True
+    assert result["action"] == "sell"
+    assert result["pending_order_policy"] == "retain"
+    assert result["pending_sell_shares"] == 100
+    assert result["current_available_shares"] == 500
+    assert result["available_shares_after_pending_orders"] == 400
+    assert result["order_shares"] == 400
+    assert result["actual_target_shares"] == 0
+    assert result["target_fully_reachable"] is True
+
+
 def _track_tool_db_sessions(monkeypatch, session_factory):
     state = {"active": 0, "exited": 0}
 
@@ -265,6 +424,40 @@ async def test_execute_trading_order_sell_liquidation_rounds_down_to_lot_size(te
 
 
 @pytest.mark.asyncio
+async def test_execute_trading_order_subtracts_pending_sell_reservation(test_db):
+    session_id, _, _ = await _seed_trade_context(
+        test_db,
+        position_shares=500,
+        available_shares=500,
+        order=Order(
+            stock_code="600519.SH",
+            action="sell",
+            order_type="limit",
+            price=Decimal("100.00"),
+            shares=100,
+            filled_shares=0,
+            status="pending",
+        ),
+    )
+    wrapped_tool = await _wrapped_pm_tool(session_id)
+    with patch("app.core.config.settings.ENABLE_AUTO_TRADE", True), patch(
+        "app.trading.service.trading_service.execute_order_and_update_db", new_callable=AsyncMock
+    ) as mock_execute:
+        mock_execute.return_value = {"success": True, "message": "ok"}
+
+        result = await wrapped_tool.ainvoke({
+            "stock_code": "600519.SH",
+            "action": "sell",
+            "target_position": 0.0,
+            "stop_loss": 88.0,
+            "take_profit": 120.0,
+        })
+
+    assert result["success"] is True
+    assert mock_execute.call_args.kwargs["shares"] == 400
+
+
+@pytest.mark.asyncio
 async def test_execute_trading_order_buy_logic_accepts_decimal_account_assets(test_db):
     session_id, _, _ = await _seed_trade_context(
         test_db,
@@ -300,8 +493,8 @@ async def test_execute_trading_order_places_limit_order_with_limit_price(test_db
     session_id, _, _ = await _seed_trade_context(
         test_db,
         stock_code="600795.SH",
-        total_assets=Decimal("100000.00"),
-        latest_price=Decimal("10.00"),
+        total_assets=Decimal("1000000.00"),
+        latest_price=Decimal("100.00"),
     )
     wrapped_tool = await _wrapped_pm_tool(session_id)
     with patch("app.core.config.settings.ENABLE_AUTO_TRADE", True), patch(
@@ -313,15 +506,16 @@ async def test_execute_trading_order_places_limit_order_with_limit_price(test_db
             "stock_code": "600795.SH",
             "action": "buy",
             "target_position": 0.05,
-            "stop_loss": 4.7,
-            "take_profit": 12.0,
+            "stop_loss": 70.0,
+            "take_profit": 120.0,
             "order_type": "limit",
-            "limit_price": 9.8,
+            "limit_price": 80.0,
         })
 
     args = mock_execute.call_args.kwargs
     assert args["order_type"] == "limit"
-    assert args["price"] == 9.8
+    assert args["price"] == 80.0
+    assert args["shares"] == 500
     assert result["execution_status"] == "pending"
 
 
