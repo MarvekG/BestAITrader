@@ -8,6 +8,9 @@ from app.ai.agentic.tools import (
     get_pm_order_type_guidance,
 )
 from app.ai.llm_engine.pm_decision_service import save_pm_decision_record
+from app.ai.llm_engine.position_plan_service import (
+    calculate_executable_position_plan as calculate_executable_position_plan_service,
+)
 
 
 class PortfolioManagerAgent(BaseAgent):
@@ -21,7 +24,7 @@ class PortfolioManagerAgent(BaseAgent):
         """
         tools = super().get_tools()
 
-        # 定义一个闭包工具，LLM 只需看到必要的三个参数
+        # 通过闭包注入会话 ID，避免 LLM 传递内部关联参数。
         @tool
         async def execute_trading_order(
             stock_code: str = "",
@@ -75,6 +78,21 @@ class PortfolioManagerAgent(BaseAgent):
             )
 
         @tool
+        async def calculate_executable_position_plan(target_position: float):
+            """计算目标仓位按当前账户和 A 股整手规则能否执行。
+
+            Args:
+                target_position: 交易完成后的绝对目标仓位，范围为 0 到 1。
+
+            Returns:
+                自动读取当前会话、账户、行情、持仓和待成交订单后得到的整手数量、实际目标仓位及不可执行原因。
+            """
+            return await calculate_executable_position_plan_service(
+                session_id=self.session_id,
+                target_position=target_position,
+            )
+
+        @tool
         async def save_pm_decision(
             target_position: float = 0.0,
             confidence_score: float = 0.0,
@@ -114,6 +132,7 @@ class PortfolioManagerAgent(BaseAgent):
                 }
 
         tools.append(get_pm_order_type_guidance)
+        tools.append(calculate_executable_position_plan)
         tools.append(save_pm_decision)
         tools.append(execute_trading_order)
         return tools

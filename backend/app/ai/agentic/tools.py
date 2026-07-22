@@ -1390,8 +1390,8 @@ async def execute_trading_order(
     - stock_code: 股票代码，如 '600519.SH'
     - action: 'buy' 或 'sell'
     - target_position: 目标仓位比例 (0.0 - 1.0)。
-      - 如果是 'buy'，则计算达到目标比例所需买入的股数。
-      - 如果是 'sell'，则计算达到目标比例所需卖出的股数。
+      - 如果是 'buy'，按当前市场参考价计算达到目标比例所需买入的股数。
+      - 如果是 'sell'，按当前市场参考价计算达到目标比例所需卖出的股数。
       - target_position = 0 即为全额清仓。
     - session_id: 当前会话 ID (必须从 Context 中准确获取)，用于关联账户和持久化。
     - stop_loss: 止损价，必填。成交后会直接写入持仓 `purchase_details.stop_loss`。
@@ -1408,6 +1408,7 @@ async def execute_trading_order(
     4. `stop_loss` 为必填字段，必须传入明确的正数止损价。
     5. 若返回 `success=false`，你必须先阅读 `reason`，再决定是否调整 `target_position`
        继续调用本工具，或停止交易并输出最终报告。
+    6. 限价单不会按限价重新计算目标股数；限价仅用于委托金额、费用和资金校验。
     """
     from app.trading.service import trading_service
     from app.models.session import Session as DbSession
@@ -1415,9 +1416,13 @@ async def execute_trading_order(
     from app.models.account import Account
     from app.models.position import Position
     from app.models.order import Order
+    from app.ai.llm_engine.position_plan_service import (
+        build_executable_position_plan,
+        load_reference_price,
+        load_pending_order_shares,
+    )
     import app.core.database as database_module
-    from app.models.data_storage import StockRealtimeMarket
-    from sqlalchemy import desc, select
+    from sqlalchemy import select
     import app.core.config as config
 
     if not config.settings.ENABLE_AUTO_TRADE:
@@ -1497,29 +1502,8 @@ async def execute_trading_order(
             if normalized_operation != "cancel":
                 total_assets = float(account.total_assets or 0)
 
-                # 2. 获取最新价格
-                price = 0.0
-                latest_market = (await db.execute(
-                    select(StockRealtimeMarket)
-                    .where(StockRealtimeMarket.stock_code == stock_code)
-                    .order_by(desc(StockRealtimeMarket.timestamp))
-                    .limit(1)
-                )).scalar_one_or_none()
-
-                if latest_market:
-                    price = float(latest_market.current_price)
-
-                if price <= 0:
-                    # 尝试从 Kline 补全
-                    from app.models.data_storage import KlineData
-                    latest_kline = (await db.execute(
-                        select(KlineData)
-                        .where(KlineData.stock_code == stock_code)
-                        .order_by(desc(KlineData.date))
-                        .limit(1)
-                    )).scalar_one_or_none()
-                    if latest_kline:
-                        price = float(latest_kline.close)
+                # 2. 使用与仓位工具一致的行情来源确定参考价。
+                price, _, _ = await load_reference_price(db, stock_code)
 
                 if price <= 0:
                     return _format_trade_execution_result(
@@ -1528,10 +1512,7 @@ async def execute_trading_order(
 
                 order_price = float(limit_price) if normalized_order_type == "limit" else price
 
-                # 3. 计算目标总股数
-                target_total_shares = (total_assets * target_position) / order_price
-
-                # 4. 获取当前持仓
+                # 3. 获取当前持仓
                 pos = (await db.execute(
                     select(Position).where(
                         Position.account_id == account.account_id,
@@ -1542,6 +1523,11 @@ async def execute_trading_order(
                 current_available_shares = (
                     trading_engine.build_position_snapshot(pos)["available_shares"]
                     if pos else 0
+                )
+                pending_buy_shares, pending_sell_shares = await load_pending_order_shares(
+                    db,
+                    account.account_id,
+                    stock_code,
                 )
 
                 current_position = (
@@ -1560,65 +1546,40 @@ async def execute_trading_order(
                 if gate_result is not None:
                     return gate_result
 
-                # 5. 计算差额
-                diff_shares = target_total_shares - current_total_shares
-                suggested_shares = 0
-
-                # 6. 执行 A 股规则
                 act = action.lower()
-                if act == "buy" and diff_shares > 0:
-                    # 买入：向下取整到 100 的倍数
-                    suggested_shares = (int(diff_shares) // 100) * 100
-                elif act == "sell" and diff_shares < 0:
-                    if target_position == 0:
-                        # 清仓：卖出所有可用
-                        suggested_shares = (int(current_available_shares) // 100) * 100
-                    else:
-                        # 减仓：尽量取 100 倍数，不超可用
-                        abs_diff = abs(diff_shares)
-                        suggested_shares = min((int(abs_diff) // 100) * 100, current_available_shares)
-
-                can_sell_remaining_shares = (
-                    act == "sell" and target_position == 0 and current_available_shares > 0
+                position_plan = build_executable_position_plan(
+                    target_position=target_position,
+                    price=price,
+                    total_assets=total_assets,
+                    available_cash=float(account.available_cash or 0),
+                    current_total_shares=current_total_shares,
+                    current_available_shares=current_available_shares,
+                    pending_buy_shares=pending_buy_shares,
+                    pending_sell_shares=pending_sell_shares,
+                    order_price=order_price,
                 )
-                if suggested_shares <= 0 and not can_sell_remaining_shares:
-                    # 构建更详细的拒绝理由
-                    reason = "Rounding (less than 100 shares)" if abs(diff_shares) > 0 else "Target position already met"
-                    if act == "sell" and current_available_shares == 0 and current_total_shares > 0:
-                        reason = "No available shares (T+1 lock)"
-
-                    return {
-                        **_format_trade_execution_result({
-                            "success": False,
-                            "message": f"Trade skipped: {reason}. Suggested shares is 0.",
-                            "details": {
-                                "action": act,
-                                "stock_code": stock_code,
-                                "price": order_price,
-                                "target_position": target_position,
-                                "stop_loss": stop_loss,
-                                "current_total_shares": current_total_shares,
-                                "current_available_shares": current_available_shares,
-                                "available_cash": float(account.available_cash or 0),
-                                "diff_shares_raw": float(diff_shares),
-                                "suggested_shares": suggested_shares,
-                                "total_assets": total_assets
-                            }
-                        }),
-                        "details": {
-                            "action": act,
-                            "stock_code": stock_code,
-                            "price": price,
-                            "target_position": target_position,
-                            "stop_loss": stop_loss,
-                            "current_total_shares": current_total_shares,
-                            "current_available_shares": current_available_shares,
-                            "available_cash": float(account.available_cash or 0),
-                            "diff_shares_raw": float(diff_shares),
-                            "suggested_shares": suggested_shares,
-                            "total_assets": total_assets
-                        }
-                    }
+                if not position_plan["success"]:
+                    return _format_trade_execution_result({
+                        "success": False,
+                        "message": "Trade skipped: the executable position plan could not be calculated.",
+                        "reason": position_plan["reason"],
+                        "position_plan": position_plan,
+                    })
+                if position_plan["action"] != act:
+                    return _format_trade_execution_result({
+                        "success": False,
+                        "message": "Trade skipped: action conflicts with the executable position plan.",
+                        "reason": "decision_target_mismatch",
+                        "position_plan": position_plan,
+                    })
+                if not position_plan["executable"]:
+                    return _format_trade_execution_result({
+                        "success": False,
+                        "message": "Trade skipped: the target position is not currently executable.",
+                        "reason": position_plan["reason"],
+                        "position_plan": position_plan,
+                    })
+                suggested_shares = position_plan["order_shares"]
 
                 service_account_id = account.account_id
 
@@ -1626,7 +1587,7 @@ async def execute_trading_order(
             cancel_result = await trading_service.cancel_order(cancel_order_id, user_id=cancel_user_id)
             return _format_trade_execution_result(cancel_result)
 
-        # 7. 调用交易服务。此处不得持有上方查询会话，交易服务会自行管理写库会话。
+        # 4. 调用交易服务。此处不得持有上方查询会话，交易服务会自行管理写库会话。
         trade_result = await trading_service.execute_order_and_update_db(
             session_id=session_uuid,
             account_id=service_account_id,
