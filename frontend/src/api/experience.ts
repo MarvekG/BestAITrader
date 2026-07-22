@@ -51,8 +51,7 @@ export interface ExperienceWrittenMemory {
   stock_code?: string;
   stock_name?: string;
   status?: string;
-  observation_id?: string;
-  source_id?: string;
+  memory_id?: string;
   error?: string;
   evidence_chain?: Record<string, unknown>;
 }
@@ -175,8 +174,7 @@ export interface ExperienceReviewSchedulerConfig {
 
 export interface ExperienceLibraryItem {
   id: string;
-  memory_observation_id?: string | null;
-  memory_source_id?: string | null;
+  memory_id?: string | null;
   review_run_id: string;
   session_id: string;
   stock_code?: string | null;

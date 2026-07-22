@@ -112,8 +112,7 @@ class ExperienceReviewCandidateListResponse(BaseModel):
 
 class ExperienceLibraryItemResponse(BaseModel):
     id: UUID
-    memory_observation_id: Optional[str] = None
-    memory_source_id: Optional[str] = None
+    memory_id: Optional[str] = None
     review_run_id: str
     session_id: UUID
     stock_code: Optional[str] = None

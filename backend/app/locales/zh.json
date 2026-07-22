@@ -2865,8 +2865,7 @@
     "view_detail": "查看详情",
     "open_review": "打开复盘",
     "detail_title": "经验详情",
-    "memory_observation_id": "Memory 观察 ID",
-    "memory_source_id": "Memory 来源 ID",
+    "memory_id": "Memory ID",
     "outcome_label": "结果标签",
     "summary": "经验摘要",
     "market_outcome": "市场结果证据"

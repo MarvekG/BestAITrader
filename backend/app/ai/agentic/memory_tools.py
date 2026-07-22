@@ -106,13 +106,13 @@ def build_memory_tools(
             )
             last_error = memory_client.get_last_error("ingest")
             success = bool(response) and last_error is None
-            observation_id = response.get("observation_id") if isinstance(response, dict) else None
+            memory_id = response.get("memory_id") if isinstance(response, dict) else None
             result = {
                 "success": success,
                 "memo_session": "stock",
                 "stock_code": target_stock_code,
                 "status": response.get("status") if isinstance(response, dict) else "unknown",
-                "observation_id": observation_id,
+                "memory_id": memory_id,
             }
             if last_error:
                 result["error"] = last_error.get("message") or "memory write request failed"

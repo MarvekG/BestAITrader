@@ -17,7 +17,7 @@ def test_memory_service_defaults_to_memo_base_url():
 @pytest.mark.asyncio
 async def test_write_memory_posts_minimal_generic_payload(monkeypatch):
     client = MemoryServiceClient()
-    mock_post = AsyncMock(return_value={"observation_id": "obs_generic", "status": "pending"})
+    mock_post = AsyncMock(return_value={"data": {"memory_id": "mem_generic", "status": "pending"}})
     monkeypatch.setattr(client, "_post", mock_post)
 
     await client.write_memory(
@@ -180,7 +180,7 @@ async def test_recall_ignores_legacy_top_level_response(monkeypatch):
 @pytest.mark.asyncio
 async def test_write_memory_uses_general_scope_sentinel_when_stock_code_missing(monkeypatch):
     client = MemoryServiceClient()
-    mock_post = AsyncMock(return_value={"observation_id": "obs_general", "status": "pending"})
+    mock_post = AsyncMock(return_value={"data": {"memory_id": "mem_general", "status": "pending"}})
     monkeypatch.setattr(client, "_post", mock_post)
 
     await client.write_memory(

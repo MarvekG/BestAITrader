@@ -833,7 +833,7 @@ async def test_write_memory_tool_passes_minimal_session_inputs():
 
     with patch(
         "app.ai.agentic.memory_tools.memory_client.write_memory",
-        new=AsyncMock(return_value={"observation_id": "obs_1", "status": "pending"}),
+        new=AsyncMock(return_value={"memory_id": "mem_1", "status": "pending"}),
     ) as mock_write:
         result = await write_tool.ainvoke({
             "content": "This breakout only works when northbound inflow confirms within 2 sessions.",
@@ -850,7 +850,7 @@ async def test_write_memory_tool_passes_minimal_session_inputs():
 
 
 @pytest.mark.asyncio
-async def test_write_memory_tool_returns_observation_id_without_event_id_alias():
+async def test_write_memory_tool_returns_memory_id_without_event_id_alias():
     tools = build_memory_tools(
         state={
             "user_id": 7,
@@ -863,7 +863,7 @@ async def test_write_memory_tool_returns_observation_id_without_event_id_alias()
 
     with patch(
         "app.ai.agentic.memory_tools.memory_client.write_memory",
-        new=AsyncMock(return_value={"observation_id": "obs_1", "status": "accepted"}),
+        new=AsyncMock(return_value={"memory_id": "mem_1", "status": "accepted"}),
     ):
         result = await write_tool.ainvoke({
             "content": "复盘经验：趋势没有确认前，不扩大仓位。",
@@ -871,7 +871,7 @@ async def test_write_memory_tool_returns_observation_id_without_event_id_alias()
         })
 
     assert result["success"] is True
-    assert result["observation_id"] == "obs_1"
+    assert result["memory_id"] == "mem_1"
     assert "event_id" not in result
     assert result["stock_code"] == "000001.SZ"
 
@@ -890,7 +890,7 @@ async def test_write_memory_tool_uses_state_stock_code_without_tool_args():
 
     with patch(
         "app.ai.agentic.memory_tools.memory_client.write_memory",
-        new=AsyncMock(return_value={"observation_id": "obs_2", "status": "pending"}),
+        new=AsyncMock(return_value={"memory_id": "mem_2", "status": "pending"}),
     ) as mock_write:
         result = await write_tool.ainvoke({
             "content": "通用规则：先看证据质量，再决定是否扩大仓位。",
@@ -963,7 +963,7 @@ async def test_write_memory_tool_uses_memory_client_request_adapter():
          patch.object(
              memory_client,
              "_post",
-             new=AsyncMock(return_value={"observation_id": "obs_3", "status": "accepted"}),
+              new=AsyncMock(return_value={"data": {"memory_id": "mem_3", "status": "accepted"}}),
          ) as mock_post:
         result = await write_tool.ainvoke({
             "content": "通用纪律：证据不一致时，不扩大仓位。",

@@ -35,12 +35,11 @@ async def _create_user_and_session(db):
     return user, session
 
 
-async def _add_index(db, user, session, *, memory_observation_id: str, created_at: datetime) -> ExperienceIndex:
+async def _add_index(db, user, session, *, memory_id: str, created_at: datetime) -> ExperienceIndex:
     row = ExperienceIndex(
         user_id=user.id,
-        memory_observation_id=memory_observation_id,
-        memory_source_id=f"source-{memory_observation_id}",
-        review_run_id=f"review-{memory_observation_id}",
+        memory_id=memory_id,
+        review_run_id=f"review-{memory_id}",
         session_id=session.session_id,
         stock_code=session.stock_code,
         stock_name="平安银行",
@@ -50,7 +49,7 @@ async def _add_index(db, user, session, *, memory_observation_id: str, created_a
         outcome_label="profit",
         correctness="correct",
         importance="high",
-        summary=f"summary-{memory_observation_id}",
+        summary=f"summary-{memory_id}",
         tags={},
         created_at=created_at,
         updated_at=created_at,
@@ -113,19 +112,19 @@ def test_get_experience_cleanup_config_uses_config_settings(monkeypatch) -> None
 async def test_experience_index_cleanup_deletes_records_older_than_configured_retention(async_db_session, monkeypatch) -> None:
     now = datetime(2026, 5, 22, 12, 0)
     user, session = await _create_user_and_session(async_db_session)
-    await _add_index(async_db_session, user, session, memory_observation_id="old", created_at=now - timedelta(days=8))
-    await _add_index(async_db_session, user, session, memory_observation_id="recent", created_at=now - timedelta(days=6))
+    await _add_index(async_db_session, user, session, memory_id="old", created_at=now - timedelta(days=8))
+    await _add_index(async_db_session, user, session, memory_id="recent", created_at=now - timedelta(days=6))
 
     monkeypatch.setattr(scheduler_module, "_now", lambda: now)
     monkeypatch.setattr(scheduler_module, "settings", _settings(EXPERIENCE_INDEX_RETENTION_DAYS=7))
 
     result = await scheduler_module.cleanup_old_experience_indexes()
 
-    remaining_observation_ids = list((await async_db_session.execute(
-        select(ExperienceIndex.memory_observation_id).order_by(ExperienceIndex.memory_observation_id)
+    remaining_memory_ids = list((await async_db_session.execute(
+        select(ExperienceIndex.memory_id).order_by(ExperienceIndex.memory_id)
     )).scalars().all())
     assert result == {"deleted": 1, "retention_days": 7}
-    assert remaining_observation_ids == ["recent"]
+    assert remaining_memory_ids == ["recent"]
 
 
 @pytest.mark.asyncio
@@ -151,7 +150,7 @@ async def test_experience_cleanup_deletes_review_events_older_than_month(async_d
 async def test_experience_cleanup_scheduler_deletes_indexes_and_review_events(async_db_session, monkeypatch) -> None:
     now = datetime(2026, 5, 22, 12, 0)
     user, session = await _create_user_and_session(async_db_session)
-    await _add_index(async_db_session, user, session, memory_observation_id="old-index", created_at=now - timedelta(days=8))
+    await _add_index(async_db_session, user, session, memory_id="old-index", created_at=now - timedelta(days=8))
     await _add_review_event(async_db_session, user, session, review_run_id="old-review", created_at=now - timedelta(days=31))
 
     monkeypatch.setattr(scheduler_module, "_now", lambda: now)
@@ -175,19 +174,19 @@ async def test_experience_cleanup_scheduler_deletes_indexes_and_review_events(as
 async def test_experience_index_cleanup_uses_config_settings_retention_days(async_db_session, monkeypatch) -> None:
     now = datetime(2026, 5, 22, 12, 0)
     user, session = await _create_user_and_session(async_db_session)
-    await _add_index(async_db_session, user, session, memory_observation_id="five-days", created_at=now - timedelta(days=5))
-    await _add_index(async_db_session, user, session, memory_observation_id="two-days", created_at=now - timedelta(days=2))
+    await _add_index(async_db_session, user, session, memory_id="five-days", created_at=now - timedelta(days=5))
+    await _add_index(async_db_session, user, session, memory_id="two-days", created_at=now - timedelta(days=2))
 
     monkeypatch.setattr(scheduler_module, "_now", lambda: now)
     monkeypatch.setattr(scheduler_module, "settings", _settings(EXPERIENCE_INDEX_RETENTION_DAYS=3))
 
     result = await scheduler_module.cleanup_old_experience_indexes()
 
-    remaining_observation_ids = list((await async_db_session.execute(
-        select(ExperienceIndex.memory_observation_id).order_by(ExperienceIndex.memory_observation_id)
+    remaining_memory_ids = list((await async_db_session.execute(
+        select(ExperienceIndex.memory_id).order_by(ExperienceIndex.memory_id)
     )).scalars().all())
     assert result == {"deleted": 1, "retention_days": 3}
-    assert remaining_observation_ids == ["two-days"]
+    assert remaining_memory_ids == ["two-days"]
 
 
 def test_experience_index_cleanup_scheduler_registers_configured_daily_job(monkeypatch) -> None:

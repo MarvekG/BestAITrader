@@ -12,13 +12,12 @@ class ExperienceIndex(Base):
 
     __tablename__ = "experience_indexes"
     __table_args__ = (
-        UniqueConstraint("user_id", "memory_observation_id", name="uq_experience_indexes_user_memory_observation"),
+        UniqueConstraint("user_id", "memory_id", name="uq_experience_indexes_user_memory_id"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    memory_observation_id = Column(String(100), nullable=True, index=True)
-    memory_source_id = Column(String(100), nullable=True, index=True)
+    memory_id = Column(String(100), nullable=False, index=True)
     review_run_id = Column(String(36), nullable=False, index=True)
     session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.session_id", ondelete="CASCADE"), nullable=False, index=True)
     stock_code = Column(String(20), nullable=True, index=True)
