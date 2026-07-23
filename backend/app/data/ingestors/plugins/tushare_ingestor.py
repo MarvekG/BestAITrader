@@ -1266,10 +1266,13 @@ class TushareIngestor(BaseIngestor):
                         # 标准化 ts_code 以对齐 df
                         df_basic['stock_code'] = df_basic['ts_code'].apply(StockCodeStandardizer.standardize)
 
-                        # 确保日期类型兼容 (merge_asof 要求两边 key 的类型一致)
-                        # Ensure date types are compatible for merge_asof
-                        df['tmp_merge_date'] = pd.to_datetime(df['end_date'])
-                        df_basic['trade_date'] = pd.to_datetime(df_basic['trade_date'])
+                        # merge_asof 要求两侧日期精度完全一致，显式统一为纳秒。
+                        df['tmp_merge_date'] = pd.to_datetime(
+                            df['end_date']
+                        ).astype('datetime64[ns]')
+                        df_basic['trade_date'] = pd.to_datetime(
+                            df_basic['trade_date']
+                        ).astype('datetime64[ns]')
 
                         # Ensure both are sorted by merge key
                         df = df.sort_values('tmp_merge_date')
