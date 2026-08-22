@@ -1,5 +1,4 @@
 from sqlalchemy import select
-from sqlalchemy import text
 from sqlalchemy import update
 
 from app.core import database as database_module
@@ -11,16 +10,7 @@ logger = get_logger(__name__)
 
 
 async def initialize_database() -> None:
-    """初始化数据库 schema、表结构和默认管理员账号。"""
-    import app.models  # noqa: F401
-
-    if database_module.async_engine.dialect.name.startswith("postgresql"):
-        async with database_module.async_engine.begin() as conn:
-            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS data;"))
-            await conn.execute(text("CREATE SCHEMA IF NOT EXISTS stock_picker_interactive;"))
-    async with database_module.async_engine.begin() as conn:
-        await conn.run_sync(database_module.Base.metadata.create_all)
-
+    """初始化默认管理员账号。"""
     async with database_module.AsyncSessionLocal() as db:
         result = await db.execute(select(User).where(User.username == settings.FIRST_SUPERUSER))
         user = result.scalar_one_or_none()

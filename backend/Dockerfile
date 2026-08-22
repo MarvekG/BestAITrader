@@ -32,12 +32,16 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     -r requirements-skills.txt
 
 # 切换到非 root 用户
+COPY --chown=trader:trader entrypoint.sh /usr/local/bin/bat-backend-entrypoint
+RUN chmod 755 /usr/local/bin/bat-backend-entrypoint
 USER trader
 
 # 复制代码和配置文件
 COPY --chown=trader:trader . .
 
 EXPOSE 8000
+
+ENTRYPOINT ["/usr/local/bin/bat-backend-entrypoint"]
 
 # 启动命令 (使用 run.py 以支持热重载)
 CMD ["python", "run.py"]
