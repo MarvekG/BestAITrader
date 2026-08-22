@@ -105,6 +105,26 @@ docker compose logs -f litellm
 docker compose up -d --force-recreate backend memo litellm
 ```
 
+## 6. 数据库迁移
+
+backend 的 schema 由 Alembic 管理，应用启动不再执行 `Base.metadata.create_all()`。
+
+全新数据库、已有数据库首次接管和后续版本升级均由 backend 容器入口自动完成：
+
+1. 空数据库自动执行 `alembic upgrade head`。
+2. 首次接入已有数据库时，管理员需先备份并手动删除已废弃表；应用不负责删除历史表。
+3. 清理后启动 backend，入口会校验表集合、自动 `stamp` baseline、应用 reconciliation revision，并校验完整 schema。
+4. 表、列、索引、约束、默认值或类型存在差异时迁移失败，backend 不会启动，也不会静默覆盖数据库。
+5. 后续 revision 随 backend 镜像发布，容器启动时自动执行 `alembic upgrade head`。
+
+用户无需手动执行 Alembic。迁移日志可通过以下命令查看：
+
+```bash
+docker compose logs backend
+```
+
+首次接入当前主库时，需由管理员在备份后直接执行 DROP DDL。删除对象清单见 Alembic 设计文档第 3.4 节；该清理不进入代码和 Alembic revision。
+
 停止服务：
 
 ```bash
@@ -123,7 +143,7 @@ scripts/database-maintenance.sh backup
 scripts/database-maintenance.sh restore backups/bat.YYYYMMDD.HHMMSS
 ```
 
-## 6. 注意事项
+## 7. 注意事项
 
 - 生产或公网部署前建议按 `SECURITY.md` 收紧 Nginx、LiteLLM 暴露面、上传大小、超时和访问控制。
 - `sandbox`、`webfetch` 和 `scrapling.mcp` 默认只在 Compose 内部网络访问。
