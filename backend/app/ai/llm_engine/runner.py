@@ -143,6 +143,7 @@ def _build_initial_state(
         "strategic_round_2_1_reports": {},
         "pm_decision": "",
         "post_trade_reflection": {},
+        "decision_snapshot": None,
         "errors": [],
         "user_id": None,
         "session_id": UUID(session_id) if session_id else None,
@@ -212,6 +213,9 @@ async def run_analysis_task(
 
         # Run the graph (Long running async call, NO DB session held here)
         final_state = await workflow.ainvoke(initial_state)
+
+        # 内存快照只在工作流内使用，不写入异步任务结果。
+        final_state.pop("decision_snapshot", None)
 
         # Sanitize state for JSON serialization (handles NaN, Infinity, UUID, datetime)
         final_state = sanitize_for_json(final_state)

@@ -5,6 +5,7 @@ from uuid import UUID
 
 from sqlalchemy import desc, select
 
+from app.ai.llm_engine.decision_snapshot import DecisionSnapshot
 from app.core import database as database_module
 from app.models.account import Account
 from app.models.data_storage import KlineData, StockRealtimeMarket
@@ -191,6 +192,42 @@ def build_executable_position_plan(
             "estimated_fee": estimated_fee,
             "estimated_trade_value": normalized_order_price * order_shares,
             "target_fully_reachable": target_fully_reachable,
+        }
+    )
+    return plan
+
+
+def build_executable_position_plan_from_snapshot(
+    snapshot: DecisionSnapshot,
+    target_position: float,
+) -> dict[str, Any]:
+    """只基于固定内存快照计算整手数量、实际目标仓位和可执行性。
+
+    Args:
+        snapshot: 当前 Debate 的内存决策快照。
+        target_position: 交易完成后的绝对目标仓位。
+
+    Returns:
+        沿用现有仓位计划字段的可执行性结果。
+    """
+    plan = build_executable_position_plan(
+        target_position=target_position,
+        price=float(snapshot.reference_price),
+        total_assets=float(snapshot.account_total_assets),
+        available_cash=float(snapshot.available_cash),
+        current_total_shares=snapshot.position.total_shares,
+        current_available_shares=snapshot.position.available_shares,
+        pending_buy_shares=snapshot.pending_buy_shares,
+        pending_sell_shares=snapshot.pending_sell_shares,
+    )
+    plan.update(
+        {
+            "stock_code": snapshot.stock_code,
+            "price": float(snapshot.reference_price),
+            "price_source": snapshot.price_source,
+            "price_as_of": snapshot.price_as_of.isoformat() if snapshot.price_as_of else None,
+            "total_assets": float(snapshot.account_total_assets),
+            "available_cash": float(snapshot.available_cash),
         }
     )
     return plan

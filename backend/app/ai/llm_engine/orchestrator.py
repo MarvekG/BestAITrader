@@ -1,5 +1,7 @@
 import asyncio
+from copy import deepcopy
 from collections.abc import Awaitable, Callable
+from decimal import Decimal
 from operator import add
 from typing import Annotated, Dict, Any, TypedDict, List, Optional
 from uuid import UUID
@@ -10,12 +12,19 @@ from app.ai.llm_routing import should_run_debate_agents_in_parallel
 from app.ai.llm_engine.context import (
     AIContextService,
 )
+from app.ai.llm_engine.decision_snapshot import (
+    DecisionSnapshotError,
+    DecisionSnapshot,
+    PositionSnapshot,
+    build_decision_snapshot,
+)
 from app.core import database as database_module
 from app.data.metadata.field_units import format_payload_values
 from app.core.config import settings
 from app.core.i18n import i18n_service
 from app.core.logger import get_logger
 from app.core.utils.converters import safe_date, safe_float, safe_isoformat
+from app.core.utils.formatters import StockCodeStandardizer
 from app.ai.llm_engine.agents.specialists import (
     FundamentalAgent, TechnicalAgent, CapitalFlowAgent, SentimentAgent, RiskAgent, NewsAgent, PolicyAgent
 )
@@ -201,6 +210,261 @@ def _build_portfolio_info_position(
         )
     return position_payload
 
+
+def _snapshot_position_payload(position: PositionSnapshot) -> Dict[str, Any]:
+    """将内存快照中的目标持仓转换为组合上下文字段。"""
+    return {
+        "position_id": str(position.position_id) if position.position_id else None,
+        "session_id": str(position.session_id) if position.session_id else None,
+        "stock_code": position.stock_code,
+        "stock_name": position.stock_name,
+        "industry": position.industry,
+        "total_shares": position.total_shares,
+        "available_shares": position.available_shares,
+        "frozen_shares": position.frozen_shares,
+        "avg_cost": float(position.avg_cost),
+        "current_price": float(position.current_price),
+        "market_value": float(position.market_value),
+        "weight": float(position.weight),
+        "current_position": float(position.weight),
+        "unrealized_pnl": float(position.unrealized_pnl),
+        "unrealized_pnl_pct": float(position.unrealized_pnl_pct),
+        "profit_loss": float(position.unrealized_pnl),
+        "profit_loss_pct": float(position.unrealized_pnl_pct),
+        "stop_loss": float(position.stop_loss) if position.stop_loss is not None else None,
+        "has_stop_loss": position.has_stop_loss,
+        "updated_at": position.updated_at.isoformat() if position.updated_at else None,
+    }
+
+
+def _build_snapshot_portfolio_info(snapshot: DecisionSnapshot) -> Dict[str, Any]:
+    """从内存快照构建 PM 组合信息。"""
+    account = format_payload_values(
+        "portfolio.account",
+        {
+            "total_assets": float(snapshot.account_total_assets),
+            "available_cash": float(snapshot.available_cash),
+            "market_value": float(snapshot.portfolio_market_value),
+        },
+    )
+    position = format_payload_values(
+        "portfolio.overview",
+        _snapshot_position_payload(snapshot.position),
+    )
+    return {
+        "account": account,
+        "position": format_payload_values("portfolio.position", position),
+        "field_descriptions": _build_portfolio_field_descriptions(),
+    }
+
+
+def _apply_decision_snapshot_to_context(
+    context: Dict[str, Any],
+    snapshot: DecisionSnapshot,
+) -> Dict[str, Any]:
+    """用内存快照覆盖上下文中的决策敏感组合字段。"""
+    context_copy = deepcopy(context)
+    portfolio = dict(context_copy.get("portfolio") or {})
+    overview = dict(portfolio.get("overview") or {})
+    portfolio["overview"] = format_payload_values(
+        "portfolio.overview",
+        _build_snapshot_portfolio_overview(snapshot, overview),
+    )
+    portfolio["status"] = "available"
+    portfolio.pop("reason", None)
+    if "performance" in portfolio:
+        portfolio["performance"] = {
+            "status": "stale",
+            "reason": "decision_snapshot_portfolio_state",
+        }
+    context_copy["portfolio"] = portfolio
+
+    realtime = dict(context_copy.get("realtime") or {})
+    realtime["market"] = _build_snapshot_realtime_market(snapshot)
+    for field_name in (
+        "price_position_summary",
+        "technical_signal_summary",
+        "intraday_shape_summary",
+    ):
+        if field_name in realtime:
+            realtime[field_name] = {
+                "status": "stale",
+                "reason": "decision_snapshot_reference_price",
+            }
+    context_copy["realtime"] = realtime
+    return context_copy
+
+
+def _build_snapshot_portfolio_overview(
+    snapshot: DecisionSnapshot,
+    existing_overview: Dict[str, Any],
+) -> Dict[str, Any]:
+    """从同一内存快照重建组合概览的决策敏感字段。"""
+    existing_positions = {
+        str(item.get("stock_code")): dict(item)
+        for item in (existing_overview.get("positions") or [])
+        if isinstance(item, dict) and item.get("stock_code")
+    }
+    snapshot_positions = snapshot.portfolio_positions
+    if not snapshot_positions and snapshot.position.total_shares > 0:
+        snapshot_positions = (snapshot.position,)
+
+    positions = []
+    for position in snapshot_positions:
+        payload = existing_positions.get(position.stock_code, {})
+        payload.update(_snapshot_position_payload(position))
+        positions.append(payload)
+    positions.sort(key=lambda item: float(item["weight"]), reverse=True)
+
+    industry_allocations = _build_snapshot_industry_allocations(positions, snapshot.account_total_assets)
+    top_position = positions[0] if positions else None
+    top_industry = industry_allocations[0] if industry_allocations else None
+    loss_positions = [item for item in positions if float(item["unrealized_pnl_pct"]) < 0]
+    max_loss = min(loss_positions, key=lambda item: float(item["unrealized_pnl_pct"])) if loss_positions else None
+    stop_loss_coverage = (
+        Decimal(sum(1 for item in positions if item["has_stop_loss"])) / Decimal(len(positions))
+        if positions
+        else Decimal("0")
+    )
+    position_hhi = sum(
+        (Decimal(str(item["weight"])) ** 2 for item in positions),
+        Decimal("0"),
+    )
+    industry_hhi = sum(
+        (Decimal(str(item["weight"])) ** 2 for item in industry_allocations),
+        Decimal("0"),
+    )
+    total_assets = snapshot.account_total_assets
+    market_value = snapshot.portfolio_market_value
+    return {
+        "summary": {
+            "total_assets": float(total_assets),
+            "available_cash": float(snapshot.available_cash),
+            "frozen_cash": float(snapshot.frozen_cash),
+            "market_value": float(market_value),
+            "cash_ratio": float((snapshot.available_cash + snapshot.frozen_cash) / total_assets),
+            "position_ratio": float(market_value / total_assets),
+            "position_count": len(positions),
+        },
+        "positions": positions,
+        "industry_allocations": industry_allocations,
+        "risk_metrics": {
+            "top_single_position_pct": float(top_position["weight"]) if top_position else 0.0,
+            "top_single_position_stock_code": top_position["stock_code"] if top_position else None,
+            "top_industry_position_pct": float(top_industry["weight"]) if top_industry else 0.0,
+            "top_industry": top_industry["industry"] if top_industry else None,
+            "position_hhi": float(position_hhi),
+            "industry_hhi": float(industry_hhi),
+            "max_unrealized_loss_pct": float(max_loss["unrealized_pnl_pct"]) if max_loss else 0.0,
+            "max_unrealized_loss_stock_code": max_loss["stock_code"] if max_loss else None,
+            "stop_loss_coverage_pct": float(stop_loss_coverage),
+            "estimated_volatility_20d": None,
+            "estimated_volatility_60d": None,
+        },
+        "top_weights": [dict(item) for item in positions[:5]],
+        "top_gainers": sorted(
+            (dict(item) for item in positions),
+            key=lambda item: float(item["unrealized_pnl"]),
+            reverse=True,
+        )[:5],
+        "top_losers": sorted(
+            (dict(item) for item in positions),
+            key=lambda item: float(item["unrealized_pnl"]),
+        )[:5],
+    }
+
+
+def _build_snapshot_industry_allocations(
+    positions: list[Dict[str, Any]],
+    total_assets: Decimal,
+) -> list[Dict[str, Any]]:
+    """按快照持仓重建行业配置。"""
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for position in positions:
+        industry = str(position.get("industry") or "Unknown")
+        current = grouped.setdefault(
+            industry,
+            {
+                "industry": industry,
+                "market_value": Decimal("0"),
+                "position_count": 0,
+                "stock_codes": [],
+            },
+        )
+        current["market_value"] += Decimal(str(position["market_value"]))
+        current["position_count"] += 1
+        current["stock_codes"].append(position["stock_code"])
+
+    allocations = [
+        {
+            "industry": item["industry"],
+            "market_value": float(item["market_value"]),
+            "weight": float(item["market_value"] / total_assets),
+            "position_count": item["position_count"],
+            "stock_codes": item["stock_codes"],
+        }
+        for item in grouped.values()
+    ]
+    return sorted(allocations, key=lambda item: float(item["weight"]), reverse=True)
+
+
+def _build_snapshot_realtime_market(snapshot: DecisionSnapshot) -> Dict[str, Any]:
+    """从快照时刻行情构建实时行情上下文。"""
+    market = snapshot.realtime_market
+    if market is None:
+        return format_payload_values(
+            "technical.realtime_market",
+            {
+                "data_status": "stale",
+                "price": float(snapshot.reference_price),
+                "timestamp": snapshot.price_as_of.isoformat() if snapshot.price_as_of else None,
+                "reason": "decision_snapshot_daily_close",
+            },
+        )
+    return format_payload_values(
+        "technical.realtime_market",
+        {
+            "data_status": "available",
+            "price": float(market.price),
+            "pct_chg": _snapshot_decimal_to_float(market.pct_chg),
+            "turnover_rate": _snapshot_decimal_to_float(market.turnover_rate),
+            "volume_ratio": _snapshot_decimal_to_float(market.volume_ratio),
+            "amplitude": _snapshot_decimal_to_float(market.amplitude),
+            "pb": _snapshot_decimal_to_float(market.pb),
+            "pe": _snapshot_decimal_to_float(market.pe),
+            "amount": _snapshot_decimal_to_float(market.amount),
+            "volume": _snapshot_decimal_to_float(market.volume),
+            "turnover": _snapshot_decimal_to_float(market.turnover),
+            "total_market_cap": _snapshot_decimal_to_float(market.total_market_cap),
+            "circulating_market_cap": _snapshot_decimal_to_float(market.circulating_market_cap),
+            "timestamp": market.timestamp.isoformat() if market.timestamp else None,
+        },
+    )
+
+
+def _snapshot_decimal_to_float(value: Decimal | None) -> float | None:
+    return float(value) if value is not None else None
+
+
+def _build_snapshot_pending_order_items(snapshot: DecisionSnapshot) -> list[Dict[str, Any]]:
+    """将快照时刻待成交订单转换为 PM 运行时上下文。"""
+    return [
+        {
+            "order_id": _llm_order_id(order.order_id),
+            "session_id": str(order.session_id) if order.session_id else None,
+            "stock_code": order.stock_code,
+            "action": order.action,
+            "order_type": order.order_type,
+            "status": order.status,
+            "price": safe_float(order.price),
+            "shares": order.shares,
+            "filled_shares": order.filled_shares,
+            "created_at": safe_isoformat(order.created_at),
+            "source": order.source,
+        }
+        for order in snapshot.pending_orders
+    ]
+
 # Define State
 
 
@@ -232,6 +496,7 @@ class AnalystState(TypedDict):
     fact_arbitration_report: Optional[str]
     pm_decision: str
     post_trade_reflection: Dict[str, Any]
+    decision_snapshot: Optional[DecisionSnapshot]
     errors: Annotated[List[str], add]
 
 
@@ -333,6 +598,19 @@ async def fetch_context(state: AnalystState) -> Dict[str, Any]:
     stock_code = state["stock_code"]
     session_id = state.get("session_id")
     try:
+        decision_snapshot = state.get("decision_snapshot")
+        if session_id and decision_snapshot is None:
+            decision_snapshot = await build_decision_snapshot(session_id=session_id)
+
+        if decision_snapshot is not None:
+            if session_id is not None and decision_snapshot.session_id != session_id:
+                return {"errors": ["snapshot_session_mismatch"]}
+            requested_stock_code = StockCodeStandardizer.standardize(stock_code)
+            snapshot_stock_code = StockCodeStandardizer.standardize(decision_snapshot.stock_code)
+            if requested_stock_code != snapshot_stock_code:
+                return {"errors": ["snapshot_stock_code_mismatch"]}
+            stock_code = snapshot_stock_code
+
         ai_context_snapshot = await AIContextService().build(stock_code)
 
         portfolio_info = {
@@ -342,7 +620,14 @@ async def fetch_context(state: AnalystState) -> Dict[str, Any]:
         }
         user_id: Optional[int] = None
 
-        if session_id:
+        if decision_snapshot is not None:
+            user_id = decision_snapshot.user_id
+            ai_context_snapshot = _apply_decision_snapshot_to_context(
+                ai_context_snapshot,
+                decision_snapshot,
+            )
+            portfolio_info = _build_snapshot_portfolio_info(decision_snapshot)
+        elif session_id:
             # 获取账户和持仓信息
             from app.models.session import Session as SessionModel
             from app.models.account import Account
@@ -408,10 +693,15 @@ async def fetch_context(state: AnalystState) -> Dict[str, Any]:
         static_context["data"] = ai_context_snapshot
         static_context["portfolio_info"] = portfolio_info
         return {
+            "stock_code": stock_code,
             "static_context": static_context,
             "context": {},
             "user_id": user_id,
+            "decision_snapshot": decision_snapshot,
         }
+    except DecisionSnapshotError as e:
+        logger.warning("Decision snapshot construction failed: %s", e.code)
+        return {"errors": [e.code]}
     except Exception as e:
         logger.exception("Context Fetch Error")
         return {"errors": [f"Context Fetch Error: {str(e)}"]}
@@ -1289,7 +1579,12 @@ async def portfolio_management(state: AnalystState) -> Dict[str, Any]:
     session_id = state.get("session_id")
     previous_pm_decision = await _get_previous_pm_decision(session_id, state["stock_code"])
     same_stock_history = await _get_same_stock_history(session_id, state["stock_code"])
-    pending_orders = await _get_pending_orders_for_pm(session_id)
+    decision_snapshot = state.get("decision_snapshot")
+    pending_orders = (
+        _build_snapshot_pending_order_items(decision_snapshot)
+        if isinstance(decision_snapshot, DecisionSnapshot)
+        else await _get_pending_orders_for_pm(session_id)
+    )
     vertical_reports = state.get("vertical_reports", {})
     runtime_context = _build_runtime_context(
         state,
