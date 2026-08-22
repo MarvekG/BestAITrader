@@ -100,7 +100,11 @@ def _saved_pm_record():
 
 
 @pytest.fixture
-def initial_state():
+def initial_state(monkeypatch):
+    monkeypatch.setattr(
+        "app.ai.llm_engine.orchestrator.build_decision_snapshot",
+        AsyncMock(return_value=None),
+    )
     return {
         "stock_code": "000001.SZ",
         "trading_frequency": "swing",

@@ -120,7 +120,11 @@ async def test_save_pm_decision_record_persists_minimal_fields(async_db_session)
 
 
 @pytest.fixture
-def initial_state():
+def initial_state(monkeypatch):
+    monkeypatch.setattr(
+        "app.ai.llm_engine.orchestrator.build_decision_snapshot",
+        AsyncMock(return_value=None),
+    )
     return {
         "stock_code": "000001.SZ",
         "trading_frequency": "swing",
