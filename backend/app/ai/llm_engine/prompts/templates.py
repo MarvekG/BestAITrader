@@ -136,6 +136,10 @@ Context 中的 `canonical_metrics` 是估值与行情派生指标的可信口径
 4. 所有 Markdown 报告（包括最终 PM Markdown 报告）应在标题和日期后优先加入 `决策简报` 摘要，不超过 8 行：
    `信号`、`置信度`、`最关键证据`、`最大反证`、`交易影响`。
    摘要必须服务 PM 裁决，不得新增正文没有支撑的结论。
+5. 最终回复必须直接以报告正文的第一个一级标题（`# `）开头；一级标题之前不得输出任何文字，
+   包括工具调用小结、准备说明、思考过程或“Let me...”式过程叙述。中间工具调用轮次中的叙述
+   不属于最终回复，不得带入最终回复。
+6. 最终报告正文必须使用简体中文书写；专有名词、指标缩写和代码字段名可保留英文。
 """.strip()
 
 COMMON_AGENT_SYSTEM_PROMPT_EN = """
@@ -286,6 +290,10 @@ source fields first.
 4. Every Markdown report, including the final PM Markdown report, should place a `Decision Brief` after the title/date, no more than 8 lines:
    `signal`, `confidence`, `key evidence`, `strongest counter-evidence`, `trading impact`, and `PM decision item`.
    The digest must serve PM decision-making and must not add unsupported conclusions.
+5. The final reply must start directly with the first top-level heading (`# `) of the report body. Output nothing before that
+   heading: no tool-call recaps, preparation notes, thinking process, or "Let me..." style narration. Narration produced in
+   intermediate tool-calling turns is not part of the final reply and must not be carried into it.
+6. The final report body must be written in English; proper nouns, metric abbreviations, and code field names may stay as-is.
 """.strip()
 
 USER_PREFERENCE_INSTRUCTION_CN = """
@@ -3317,6 +3325,9 @@ PROMPT_MAP = {
 
 STRATEGIC_STYLE_PROMPT_KEYS = {"BULL", "BEAR", "AGGRESSIVE", "CONSERVATIVE", "NEUTRAL"}
 STRATEGIC_CROSS_EXAM_PROMPT_KEYS = {"AGGRESSIVE", "CONSERVATIVE", "NEUTRAL"}
+# 不注入用户交易偏好上下文的非决策角色：事实仲裁被角色禁令禁止输出交易动作，
+# 新闻/政策分析师只做数据供给；追加“参与下单判断”类指令会与角色职责冲突。
+NON_DECISION_PROMPT_KEYS = {"FACT_ARBITRATION", "NEWS_ANALYST", "POLICY_ANALYST"}
 
 
 def get_prompt(key: str, trading_frequency: str, trading_strategy: str) -> str:
@@ -3325,6 +3336,7 @@ def get_prompt(key: str, trading_frequency: str, trading_strategy: str) -> str:
 
     垂直分析师只获得轻量交易偏好上下文；战略辩论 Agent 额外获得风格适配论证提示；
     PM 额外获得完整的风格适配、风格突破和买卖反证纪律。
+    事实仲裁与新闻/政策分析师等非决策角色不注入交易偏好上下文，避免与角色职责冲突。
 
     Args:
         key: 提示词键，例如 "FUNDAMENTAL"、"BULL" 或 "PORTFOLIO_MANAGER"。
@@ -3339,7 +3351,7 @@ def get_prompt(key: str, trading_frequency: str, trading_strategy: str) -> str:
     prompt = PROMPT_MAP.get(key, {}).get(lang, PROMPT_MAP.get(key, {}).get("zh", ""))
 
     prompt_parts = [prompt]
-    if trading_frequency and trading_strategy:
+    if trading_frequency and trading_strategy and key not in NON_DECISION_PROMPT_KEYS:
         if lang == "zh":
             prompt_parts.append(USER_PREFERENCE_INSTRUCTION_CN.format(
                 frequency=trading_frequency,
