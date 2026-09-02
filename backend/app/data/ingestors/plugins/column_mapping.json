@@ -577,7 +577,6 @@
     "data.stock_margin_data": {
       "tushare": {
         "ts_code": "stock_code",
-        "name": "_unused_stock_name",
         "trade_date": "trade_date",
         "rzye": "margin_balance",
         "rzmre": "margin_buy_amount",

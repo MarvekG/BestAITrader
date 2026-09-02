@@ -191,16 +191,21 @@ class IndicatorService:
             return
 
         # Bulk upsert logic
-        stmt = insert(StockIndicators).values(records)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=['stock_code', 'trade_date'],
-            set_={
-                c.key: c for c in stmt.excluded if c.key not in ['id', 'stock_code', 'trade_date', 'created_at']
-            }
-        )
+        # asyncpg 单语句参数上限 32767：26 列时约 1260 行就会超限（600887 长历史
+        # 即触发），必须分块执行；500 行 x 26 列 = 13000 参数，留足余量。
+        chunk_size = 500
         try:
             async with database_module.AsyncSessionLocal() as db:
-                await db.execute(stmt)
+                for chunk_start in range(0, len(records), chunk_size):
+                    chunk = records[chunk_start:chunk_start + chunk_size]
+                    stmt = insert(StockIndicators).values(chunk)
+                    stmt = stmt.on_conflict_do_update(
+                        index_elements=['stock_code', 'trade_date'],
+                        set_={
+                            c.key: c for c in stmt.excluded if c.key not in ['id', 'stock_code', 'trade_date', 'created_at']
+                        }
+                    )
+                    await db.execute(stmt)
                 await db.commit()
             logger.info(f"Saved {len(records)} indicator records for {stock_code}")
         except Exception as e:

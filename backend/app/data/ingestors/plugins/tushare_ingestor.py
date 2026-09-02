@@ -2313,7 +2313,7 @@ class TushareIngestor(BaseIngestor):
                 df.copy(),
                 'data.stock_income_statement',
                 source='tushare_income_statement',
-                strict=True,
+                strict=False,  # income 对全空列直接省略返回，映射中未出现的稀疏字段属正常情况
             )
 
             records = []

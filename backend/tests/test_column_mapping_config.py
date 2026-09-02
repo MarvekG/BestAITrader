@@ -77,6 +77,25 @@ def test_tushare_income_statement_mapping_includes_optional_fields():
         assert mapping[field] == field
 
 
+def test_tushare_margin_mapping_matches_margin_detail_api():
+    """Tushare margin_detail 已不再返回 name 列，映射必须与其字段一一对应。"""
+    mapping = ColumnMapper.get_table_mapping("data.stock_margin_data", "tushare")
+
+    assert set(mapping.keys()) == {
+        "ts_code",
+        "trade_date",
+        "rzye",
+        "rqye",
+        "rzche",
+        "rqmcl",
+        "rqchl",
+        "rzmre",
+        "rqyl",
+        "rzrqye",
+    }
+    assert "name" not in mapping
+
+
 def test_get_table_field_label_prefers_table_labels():
     assert get_table_field_label("data.financial_indicator", "diluted_eps") == "稀释每股收益"
     assert get_table_field_label("data.financial_indicator", "gross_margin") == "毛利"
