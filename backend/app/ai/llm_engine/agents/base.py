@@ -15,6 +15,8 @@ from app.ai.llm_providers import get_llm_provider
 from app.core.config import settings
 from app.ai.agentic.tools import get_all_tools
 from app.ai.agentic.memory_tools import build_memory_tools
+from app.ai.llm_engine.roles import MEMORY_ENABLED_AGENT_NAMES
+from app.ai.memory_documents import store
 from app.ai.agentic.skills_loader.runtime import (
     build_skills_catalog_prompt,
     get_skills_loader_tools,
@@ -270,21 +272,53 @@ class BaseAgent(ABC):
             return common_prompt
         return f"{common_prompt}\n\n{skills_catalog_prompt}"
 
+    async def _build_memory_hint(self) -> str:
+        """构建记忆文档提示块，仅对启用记忆且有绑定股票的角色生效。
+
+        Returns:
+            文档存在时返回单行提示文本；否则返回空字符串。查询失败时降级为空，
+            不阻塞主决策流程。
+        """
+        if self.role_name not in MEMORY_ENABLED_AGENT_NAMES:
+            return ""
+        user_id = self.state.get("user_id")
+        stock_code = str(self.state.get("stock_code") or "").strip()
+        if not user_id or not stock_code:
+            return ""
+        try:
+            doc = await store.read_document(user_id=user_id, stock_code=stock_code)
+        except Exception:
+            logger.warning(
+                "[%s] memory hint lookup failed; continue without memory hint",
+                self.role_name,
+                exc_info=True,
+            )
+            return ""
+        if not doc.get("exists"):
+            return ""
+        return (
+            "MEMORY_DOCUMENT: 当前股票存在历史经验记忆文档"
+            f"（{doc.get('size_chars')} 字符，version {doc.get('version')}）。"
+            "可用 read_memory 工具按需读取全文；调用 write_memory 前必须先读取。"
+        )
+
     def _build_context_messages(
         self,
         static_context: Dict[str, Any],
         context: Dict[str, Any],
+        memory_hint: str = "",
     ) -> list[HumanMessage]:
         """构建传给 Agent 的紧凑上下文消息。
 
         Args:
             static_context: 工作流固定上下文。
             context: 当前运行时上下文。
+            memory_hint: 记忆文档提示块，为空时不注入。
 
         Returns:
             包含静态上下文和运行时上下文的消息列表。
         """
-        return [
+        messages = [
             HumanMessage(content=(
                 "STATIC_CONTEXT:\n"
                 f"{stable_json_dumps(static_context)}"
@@ -294,6 +328,9 @@ class BaseAgent(ABC):
                 f"{stable_json_dumps(context)}"
             )),
         ]
+        if memory_hint:
+            messages.append(HumanMessage(content=memory_hint))
+        return messages
 
     def _format_context_messages_for_prompt_log(self, context_messages: list[HumanMessage]) -> str:
         return "\n\n".join(
@@ -364,7 +401,8 @@ class BaseAgent(ABC):
         )
         skills_catalog_prompt = build_skills_catalog_prompt()
         common_system_prompt = self._build_common_system_prompt(skills_catalog_prompt)
-        context_messages = self._build_context_messages(static_context, context)
+        memory_hint = await self._build_memory_hint()
+        context_messages = self._build_context_messages(static_context, context, memory_hint=memory_hint)
         context_prompt_log = self._format_context_messages_for_prompt_log(context_messages)
 
         if output_model is str:

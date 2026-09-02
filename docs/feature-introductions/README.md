@@ -19,7 +19,7 @@
 | 组合与绩效分析 | [组合与绩效分析](./07-portfolio-performance.md) | 账户概览、组合估值、策略表现介绍 |
 | 风险控制 | [风险控制](./08-risk-control.md) | 仓位纪律、订单预检、交易约束介绍 |
 | 经验复盘 | [经验复盘](./09-experience-review.md) | 后验检验、归因分析、经验沉淀介绍 |
-| 长期记忆 | [长期记忆](./10-long-term-memory.md) | MemoFlux、历史经验、个性化投研介绍 |
+| 长期记忆 | [长期记忆](./10-long-term-memory.md) | 单文档记忆、历史经验、按需读取介绍 |
 | Agent 工具、Skills 与插件 | [Agent 工具、Skills 与插件](./11-agent-tools-skills-plugins.md) | 工具增强、新闻插件、专业技能扩展介绍 |
 | 实时任务与过程审计 | [实时任务与过程审计](./12-realtime-task-audit.md) | WebSocket、任务追踪、AI 过程透明化介绍 |
 | 系统设置 | [系统设置](./13-system-settings.md) | 运行时配置、插件管理、模型配置介绍 |

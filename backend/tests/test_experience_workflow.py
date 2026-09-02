@@ -148,94 +148,49 @@ def test_review_system_prompt_requires_process_improvements_for_future_pm(monkey
     assert "不要预设固定问题清单" in prompt
     assert "交易频率和交易策略" in prompt
     assert "止损或反转条件" in prompt
-    assert "写入记忆时" in prompt
-    assert "才调用 `write_memory` 写入记忆" in prompt
+    assert "才调用 `write_memory` 重写整份记忆文档" in prompt
     assert "如果没有新增可复用经验，可以跳过全部记忆写入" in prompt
     assert "如果调用 `write_memory`" in prompt
     assert "原始 PM 结论正确性" in prompt
-    assert "未来 Debate / PM / 风控检查项" in prompt
-    assert "不要把整个复盘表格原样塞进记忆" in prompt
-    assert "[MEMORY_TOPIC: decision_outcome]" in prompt
-    assert "[MEMORY_TOPIC: driver_validation]" in prompt
-    assert "[MEMORY_TOPIC: risk_control]" in prompt
-    assert "[MEMORY_TOPIC: strategy_fit]" in prompt
-    assert "[MEMORY_TOPIC: process_improvement]" in prompt
-    assert "不同主题必须分次调用 `write_memory`" in prompt
-    assert "一条 Memory 只写一个主主题" in prompt
-    assert "不要把多个主题揉成一条 Memory" in prompt
-    assert "没有新增经验的主题可以跳过" in prompt
-    assert "推荐写入顺序" in prompt
-    assert "复盘写入必须包含后验市场结果或信号验证证据" in prompt
-    assert "先判断哪些主题有新增经验" in prompt
-    assert "每个 `write_memory` 调用只承载一个主题" in prompt
-    assert "主题之间不要互相夹带" in prompt
+    assert "主导驱动、被验证信号、被证伪信号" in prompt
     assert "记忆写入协议:" in prompt
-    assert "1. 写入前提:" in prompt
-    assert "2. 内容要素:" in prompt
+    assert "1. 写前必读:" in prompt
+    assert "2. 整文档替换:" in prompt
+    assert "未包含进 `content` 的旧内容会被永久丢弃" in prompt
+    assert "3. 自由格式:" in prompt
+    assert "不设固定模板" in prompt
+    assert "4. 内容要素:" in prompt
     assert "必须同时包含真实股票名和股票代码" in prompt
-    assert "交易频率、交易策略" in prompt
     assert "若交易频率或交易策略无法确认" in prompt
-    assert "3. 推荐写入顺序:" in prompt
-    assert "3.1 [MEMORY_TOPIC: decision_outcome]:" in prompt
-    assert "如果原始 PM 结论有明确后验结果" in prompt
-    assert "后续收益/回撤/相对收益和结论正确性" in prompt
-    assert "3.2 [MEMORY_TOPIC: driver_validation]:" in prompt
-    assert "如果能区分被验证、被证伪和噪音信号" in prompt
-    assert "被排除伪因" in prompt
-    assert "3.3 [MEMORY_TOPIC: risk_control]:" in prompt
-    assert "如果仓位、止损、加仓、减仓、退出或回撤管理有教训" in prompt
-    assert "板块 Beta" in prompt
-    assert "3.4 [MEMORY_TOPIC: strategy_fit]:" in prompt
-    assert "如果经验的适用频率、策略或市场环境存在明显边界" in prompt
-    assert "经验是否过时及原因" in prompt
-    assert "3.5 [MEMORY_TOPIC: process_improvement]:" in prompt
-    assert "如果能提炼出未来 Debate / PM / Risk 的流程检查项" in prompt
-    assert "Risk Control 要检查哪些否决条件" in prompt
-    assert "4. 拆分规则:" in prompt
-    assert "5. 推荐结构:" in prompt
-    assert "对象:、交易频率:、交易策略:" in prompt
-    assert "对象必须同时包含真实股票名和股票代码" in prompt
-    assert "6. 写入质量:" in prompt
-    assert "7. 适用边界:" in prompt
-    assert "不要在代码中硬编码强制主题检查" not in prompt
-    assert "关键词匹配判断记忆是否合格" not in prompt
+    assert "5. 容量上限:" in prompt
+    assert "6. 版本冲突:" in prompt
+    assert "7. 写入次数:" in prompt
+    assert "决策时间、复盘时间和复盘周期由你在文档中自行标注" in prompt
+    assert "写入后的文档必须直接包含本次复盘得到的经验教训与可执行规则" in prompt
+    assert "[MEMORY_TOPIC" not in prompt
+    assert "不同主题必须分次调用 `write_memory`" not in prompt
 
     monkeypatch.setattr(workflow.settings, "SYSTEM_LANGUAGE", "en")
     english_prompt = workflow._build_review_system_prompt("")
 
     assert "Only after extracting reusable profitable experience" in english_prompt
+    assert "rewrite the whole memory document" in english_prompt
     assert "you may skip all memory writes" in english_prompt
     assert "If you call `write_memory`" in english_prompt
     assert "Memory write protocol:" in english_prompt
-    assert "1. Write precondition:" in english_prompt
-    assert "2. Content elements:" in english_prompt
+    assert "1. Read before write:" in english_prompt
+    assert "2. Whole-document replacement:" in english_prompt
+    assert "anything not included in `content` is permanently discarded" in english_prompt
+    assert "3. Free-form structure:" in english_prompt
+    assert "no fixed template" in english_prompt
+    assert "4. Content elements:" in english_prompt
     assert "include both the real stock name and stock code" in english_prompt
-    assert "trading frequency, trading strategy" in english_prompt
     assert "If trading frequency or strategy cannot be confirmed" in english_prompt
-    assert "3. Recommended write order:" in english_prompt
-    assert "3.1 [MEMORY_TOPIC: decision_outcome]:" in english_prompt
-    assert "if the original PM conclusion has clear later outcome evidence" in english_prompt
-    assert "later return/drawdown/relative return, and correctness" in english_prompt
-    assert "3.2 [MEMORY_TOPIC: driver_validation]:" in english_prompt
-    assert "if validated, falsified, and noisy signals can be separated" in english_prompt
-    assert "rejected false causes" in english_prompt
-    assert "3.3 [MEMORY_TOPIC: risk_control]:" in english_prompt
-    assert "if sizing, stop-loss, add, reduce, exit, or drawdown control produced a lesson" in english_prompt
-    assert "sector beta" in english_prompt
-    assert "3.4 [MEMORY_TOPIC: strategy_fit]:" in english_prompt
-    assert "if the lesson has clear frequency, strategy, or market-regime boundaries" in english_prompt
-    assert "whether the lesson is stale and why" in english_prompt
-    assert "3.5 [MEMORY_TOPIC: process_improvement]:" in english_prompt
-    assert "if future Debate / PM / Risk checklist items can be extracted" in english_prompt
-    assert "which veto checks Risk Control must run" in english_prompt
-    assert "4. Split rule:" in english_prompt
-    assert "5. Recommended structure:" in english_prompt
-    assert "Trading frequency:, Trading strategy:" in english_prompt
-    assert "Object must include both the real stock name and stock code" in english_prompt
-    assert "6. Write quality:" in english_prompt
-    assert "7. Applicability boundary:" in english_prompt
-    assert "Do not hard-code topic enforcement in code" not in english_prompt
-    assert "keyword matching" not in english_prompt
+    assert "5. Size limit:" in english_prompt
+    assert "6. Version conflict:" in english_prompt
+    assert "7. Write count:" in english_prompt
+    assert "[MEMORY_TOPIC" not in english_prompt
+    assert "4. Split rule:" not in english_prompt
 
 
 @pytest.mark.asyncio
@@ -294,10 +249,11 @@ async def test_review_records_write_memory_result_metadata(monkeypatch):
             write_memory_calls.append(args)
             return {
                 "success": True,
-                "status": "accepted",
-                "memory_id": "mem_1",
-                "memo_session": "stock",
+                "status": "success",
+                "memory_id": "md_abc123",
                 "stock_code": "601888.SH",
+                "version": 5,
+                "size_chars": 1234,
             }
 
     raw_llm = FakeRawLlm(
@@ -310,6 +266,7 @@ async def test_review_records_write_memory_result_metadata(monkeypatch):
                         "args": {
                             "content": "中国中免(601888.SH)复盘经验：事件催化需要成交确认。",
                             "importance": "high",
+                            "base_version": 4,
                         },
                         "id": "call_1",
                     }
@@ -349,19 +306,18 @@ async def test_review_records_write_memory_result_metadata(monkeypatch):
     trace_result = result["analysis_payload"]["tool_invocation_summary"][0]["result"]
     trace_args = result["analysis_payload"]["tool_invocation_summary"][0]["args"]
     written_memory = result["analysis_payload"]["written_memories"][0]
-    assert write_memory_calls[0]["content"].startswith(
-        "时间: 决策时间: 2026-01-02T09:35:00；复盘时间: 2026-01-30T15:30:00；复盘周期: 20d\n"
-    )
+    assert not write_memory_calls[0]["content"].startswith("时间:")
     assert trace_args["content"] == write_memory_calls[0]["content"]
     assert written_memory["content"] == write_memory_calls[0]["content"]
     assert "event_id" not in trace_result
-    assert trace_result["memory_id"] == "mem_1"
-    assert trace_result["memo_session"] == "stock"
+    assert trace_result["memory_id"] == "md_abc123"
     assert trace_result["stock_code"] == "601888.SH"
     assert "event_id" not in written_memory
-    assert written_memory["memory_id"] == "mem_1"
-    assert written_memory["memo_session"] == "stock"
+    assert written_memory["memory_id"] == "md_abc123"
     assert written_memory["stock_code"] == "601888.SH"
+    assert written_memory["version"] == 5
+    assert written_memory["size_chars"] == 1234
+    assert written_memory["content_chars"] == len(write_memory_calls[0]["content"])
 
 
 @pytest.fixture(autouse=True)

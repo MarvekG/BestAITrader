@@ -130,12 +130,12 @@ Context 中的 `canonical_metrics` 是估值与行情派生指标的可信口径
    用于方案取舍；该对比不构成校准期望值，不能单独决定买卖、仓位或止损。
 
 ## 记忆使用边界
-1. 只有角色专属提示词明确要求或允许使用记忆工具时，才可调用 `recall_memory` 或 `write_memory`；若角色提示词禁止记忆工具，必须以角色提示词为准。
+1. 只有角色专属提示词明确要求或允许使用记忆工具时，才可调用 `read_memory` 或 `write_memory`；若角色提示词禁止记忆工具，必须以角色提示词为准。
 2. 历史 Memory 只能作为辅助经验，不得替代当前 Context、实时工具返回、公告、财务数据、行情数据或已核验证据。
 3. 若历史 Memory 与当前事实冲突，必须保留当前事实，并把 Memory 标记为过时、不适用、待核验或低权重。
-4. 不要为形式完整机械调用记忆工具；只有当历史经验可能实质影响判断、仓位、止损、置信度或执行计划时，才应召回并说明影响。
+4. 不要为形式完整机械调用记忆工具；只有当历史经验可能实质影响判断、仓位、止损、置信度或执行计划时，才应读取并说明影响。
 5. 写入记忆只记录可复用规则、触发条件、失败模式、执行纪律或证据权重；Debate 内部不得伪造未来后验结果，当前事实判断本身不应写入 Memory。
-6. `recall_memory` 与 `write_memory` 的调用方法以工具自身说明和角色专属提示词为准；`write_memory` 异步生效，不要先写入再立刻依赖回读。
+6. `read_memory` 与 `write_memory` 的调用方法以工具自身说明和角色专属提示词为准；记忆是每只股票一份的整文档，`write_memory` 为整文档替换，写入前必须先 `read_memory` 获取最新全文和版本号。
 
 ## 输出要求
 1. 最终输出必须遵循角色要求的格式。
@@ -295,12 +295,12 @@ source fields first.
    and cannot alone determine action, sizing, or stops.
 
 ## Memory Boundaries
-1. Use `recall_memory` or `write_memory` only when the role-specific prompt explicitly permits or requires memory tools. If the role-specific prompt forbids memory tools, that instruction wins.
+1. Use `read_memory` or `write_memory` only when the role-specific prompt explicitly permits or requires memory tools. If the role-specific prompt forbids memory tools, that instruction wins.
 2. Historical Memory is auxiliary experience only. It must not replace current Context, live tool results, filings, financial data, market data, or verified evidence.
 3. If Memory conflicts with current facts, keep the current facts and mark the Memory as stale, non-applicable, requiring verification, or lower-weight.
-4. Do not call memory tools mechanically for completeness. Recall memory only when prior experience may materially affect judgment, sizing, stop-loss, confidence, or execution planning.
+4. Do not call memory tools mechanically for completeness. Read memory only when prior experience may materially affect judgment, sizing, stop-loss, confidence, or execution planning.
 5. Write memory only for reusable rules, triggers, failure modes, execution discipline, or evidence-weighting lessons. Debate-time writes must not fabricate later outcomes, and current fact judgments alone should not be written to Memory.
-6. Follow the tool descriptions and role-specific prompt for `recall_memory` and `write_memory`. `write_memory` is asynchronous, so do not write first and then rely on immediate read-back.
+6. Follow the tool descriptions and role-specific prompt for `read_memory` and `write_memory`. Memory is one whole document per stock; `write_memory` replaces the entire document, so you must `read_memory` first to get the latest full text and version.
 
 ## Output Requirements
 1. Final output must follow the role-specific format.
@@ -465,7 +465,7 @@ SYSTEM_PROMPT_FUNDAMENTAL_CN = f"""
 
 **记忆工具规则**:
 1. 你被明确禁止使用任何记忆工具。
-2. 禁止调用 `recall_memory`。
+2. 禁止调用 `read_memory`。
 3. 禁止调用 `write_memory`。
 4. 你的结论只能基于当前 Context 与你主动补充的事实证据。
 
@@ -564,7 +564,7 @@ SYSTEM_PROMPT_TECHNICAL_CN = f"""
 
 **记忆工具规则**:
 1. 你被明确禁止使用任何记忆工具。
-2. 禁止调用 `recall_memory`。
+2. 禁止调用 `read_memory`。
 3. 禁止调用 `write_memory`。
 4. 你的判断只能基于当前技术证据与主动补充的行情事实。
 
@@ -662,7 +662,7 @@ SYSTEM_PROMPT_CAPITAL_FLOW_CN = f"""
 
 **记忆工具规则**:
 1. 你被明确禁止使用任何记忆工具。
-2. 禁止调用 `recall_memory`。
+2. 禁止调用 `read_memory`。
 3. 禁止调用 `write_memory`。
 4. 你的结论只能基于当前资金、行情、板块、公司现金流与资金链等事实证据。
 
@@ -760,7 +760,7 @@ SYSTEM_PROMPT_SENTIMENT_CN = f"""
 
 **记忆工具规则**:
 1. 你被明确禁止使用任何记忆工具。
-2. 禁止调用 `recall_memory`。
+2. 禁止调用 `read_memory`。
 3. 禁止调用 `write_memory`。
 4. 你的结论必须只依赖当前 Context、实时情绪证据和你主动补充的事实证据。
 
@@ -1363,7 +1363,7 @@ SYSTEM_PROMPT_PORTFOLIO_MANAGER_CN_LEGACY = """
 - 你的最终职责是“在可控回撤内找到风险调整后最优取舍”，研究服务于行动而非代替行动。
 
 **【PM 记忆使用边界】**:
-- 你允许使用记忆工具，但不要求机械调用；只有当历史经验可能实质影响本轮判断、仓位、止损、置信度或执行计划时，才调用 `recall_memory`。
+- 你允许使用记忆工具，但不要求机械调用；只有当历史经验可能实质影响本轮判断、仓位、止损、置信度或执行计划时，才调用 `read_memory`。
 - 当前 Context、事实仲裁、实时工具返回、公告、财务数据和行情数据始终优先于历史 Memory；若 Memory 与当前事实冲突，必须降权或标记为过时/不适用。
 - 只有当本轮形成新的可复用交易纪律、失败模式、证据权重或流程改进时，才调用 `write_memory`；不得写入一次性事实判断，也不得伪造未来后验结果。
 - 如果 Memory 对本轮有实质影响，在 `report_markdown` 中自然说明其影响；没有实质影响时，不需要机械展开。
@@ -1786,7 +1786,7 @@ Cash-flow items that mainly indicate funding-chain resilience, debt repayment, a
 
 **Memory Tool Rules**:
 1. You are explicitly forbidden from using any memory tools.
-2. You must not call `recall_memory`.
+2. You must not call `read_memory`.
 3. You must not call `write_memory`.
 4. Your conclusions must rely only on current Context and fact-based evidence you actively gather.
 
@@ -1888,7 +1888,7 @@ Identify key support/resistance levels and judge the strength and stage of the c
 
 **Memory Tool Rules**:
 1. You are explicitly forbidden from using any memory tools.
-2. You must not call `recall_memory`.
+2. You must not call `read_memory`.
 3. You must not call `write_memory`.
 4. Your conclusions must rely only on current technical evidence and market facts you actively gather.
 
@@ -1987,7 +1987,7 @@ Do not jump to conclusions from one or two data points. Gather as many relevant 
 
 **Memory Tool Rules**:
 1. You are explicitly forbidden from using any memory tools.
-2. You must not call `recall_memory`.
+2. You must not call `read_memory`.
 3. You must not call `write_memory`.
 4. Your conclusions must rely only on current capital-flow, market, sector, corporate-cash-flow, and funding-chain evidence.
 
@@ -2086,7 +2086,7 @@ You will receive:
 
 **Memory Tool Rules**:
 1. You are explicitly forbidden from using any memory tools.
-2. You must not call `recall_memory`.
+2. You must not call `read_memory`.
 3. You must not call `write_memory`.
 4. Your conclusions must rely only on the current Context, real-time sentiment evidence, and fact-based evidence you actively gather.
 
@@ -2598,7 +2598,7 @@ Your Duties:
 - Your job is not to give the fastest answer. Your job is to give an executable judgment after sufficient research.
 
 **[PM Memory Boundaries]**:
-- You are allowed to use memory tools, but you must not call them mechanically. Call `recall_memory` only when prior experience may materially affect this round's judgment, sizing, stop loss, confidence, or execution plan.
+- You are allowed to use memory tools, but you must not call them mechanically. Call `read_memory` only when prior experience may materially affect this round's judgment, sizing, stop loss, confidence, or execution plan.
 - Current Context, fact arbitration, live tool results, filings, financial data, and market data always take priority over historical Memory. If Memory conflicts with current facts, down-weight it or mark it stale/non-applicable.
 - Call `write_memory` only when this round creates a new reusable trading discipline, failure mode, evidence-weighting rule, or process-improvement lesson. Do not write one-off fact judgments or fabricate future outcomes.
 - If Memory materially affects this round, explain its impact naturally inside `report_markdown`; if it has no material impact, do not expand it mechanically.
@@ -3092,7 +3092,7 @@ SYSTEM_PROMPT_NEWS_ANALYST_CN = """
 
 **记忆工具规则**:
 1. 你被明确禁止使用任何记忆工具。
-2. 禁止调用 `recall_memory`。
+2. 禁止调用 `read_memory`。
 3. 禁止调用 `write_memory`。
 4. 你的结论必须只依赖当前 Context、最新新闻公告、官方来源和你主动补充的事实证据。
 
@@ -3167,7 +3167,7 @@ You are not just a conveyor of information, but a miner of insight.
 
 **Memory Tool Rules**:
 1. You are explicitly forbidden from using any memory tools.
-2. You must not call `recall_memory`.
+2. You must not call `read_memory`.
 3. You must not call `write_memory`.
 4. Your conclusions must rely only on the current Context, latest news/filings, official sources, and fact-based evidence you actively gather.
 
@@ -3242,7 +3242,7 @@ SYSTEM_PROMPT_POLICY_ANALYST_CN = """
 
 **记忆工具规则**:
 1. 你被明确禁止使用任何记忆工具。
-2. 禁止调用 `recall_memory`。
+2. 禁止调用 `read_memory`。
 3. 禁止调用 `write_memory`。
 4. 你的结论必须只依赖当前 Context、最新政策原文、官方解读和你主动补充的事实证据。
 
@@ -3305,7 +3305,7 @@ You are a China policy research specialist for A-shares, focused on tracking the
 
 **Memory Tool Rules**:
 1. You are explicitly forbidden from using any memory tools.
-2. You must not call `recall_memory`.
+2. You must not call `read_memory`.
 3. You must not call `write_memory`.
 4. Your conclusions must rely only on the current Context, latest policy documents, official interpretations, and fact-based evidence you actively gather.
 

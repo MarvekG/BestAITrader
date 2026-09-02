@@ -50,7 +50,12 @@ export const WrittenMemoryCards: React.FC<Props> = ({
                   </Space>
                   <Space direction="vertical" size={4} style={{ width: '100%' }}>
                     <Text type="secondary">{t('experience.memory_write_content')}</Text>
-                    <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>{item.content || '-'}</Paragraph>
+                    <Paragraph
+                      style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}
+                      ellipsis={{ rows: 6, expandable: 'collapsible' }}
+                    >
+                      {item.content || '-'}
+                    </Paragraph>
                   </Space>
                   <Button size="small" onClick={() => setActiveMemory(item)}>
                     {t('experience.view_memory_evidence')}

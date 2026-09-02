@@ -14,7 +14,6 @@ from app.ai.agentic.mcp.runtime import get_mcp_tools
 from app.ai.agentic.skills_loader.runtime import build_skills_catalog_prompt, get_skills_loader_tools
 from app.ai.llm_routing import API_KEY_ALIAS_SHARED, CACHE_LANE_SHARED
 from app.ai.llm_providers.factory import build_chat_completion_kwargs, build_chat_model
-from app.ai.memory_client import memory_client
 from app.core.config import settings
 from app.core.security import get_current_user
 from app.crud.llm_usage_log import llm_usage_log, record_llm_usage
@@ -482,21 +481,6 @@ async def _request_llm_completion(
     }
 
 
-def _merge_usage_counts(
-    backend_counts: Dict[str, int] | None,
-    memory_stats: Dict[str, Any] | None,
-) -> Dict[str, int]:
-    combined: Dict[str, int] = {str(key): int(value or 0) for key, value in (backend_counts or {}).items()}
-    by_operation = (memory_stats or {}).get("by_operation")
-    if isinstance(by_operation, dict):
-        for operation, payload in by_operation.items():
-            calls = 0
-            if isinstance(payload, dict):
-                calls = int(payload.get("calls") or 0)
-            combined[str(operation)] = combined.get(str(operation), 0) + calls
-    return combined
-
-
 def _usage_int(stats: Dict[str, Any] | None, key: str) -> int:
     return int((stats or {}).get(key) or 0)
 
@@ -511,45 +495,24 @@ def _cache_hit_rate(cached_tokens: int, input_tokens: int) -> float:
 async def get_llm_usage_stats():
     """
     获取 LLM 使用统计数据
-    
+
     Returns:
         使用统计汇总
     """
     try:
         backend_stats = await llm_usage_log.get_stats()
-        memory_stats = await memory_client.get_usage_stats()
-        memory_error = memory_client.get_last_error("usage_stats")
-        if not memory_stats and memory_error:
-            memory_stats = {
-                "status": "error",
-                "error": memory_error,
-            }
-        memory_totals = memory_stats if memory_stats and memory_stats.get("status") != "error" else {}
-        combined_by_role = _merge_usage_counts(backend_stats.get("by_role"), memory_stats)
-        combined_total_calls = _usage_int(backend_stats, "total_calls") + _usage_int(memory_totals, "total_calls")
-        combined_input_tokens = _usage_int(backend_stats, "input_tokens") + _usage_int(memory_totals, "input_tokens")
-        combined_output_tokens = _usage_int(backend_stats, "output_tokens") + _usage_int(memory_totals, "output_tokens")
-        combined_total_tokens = _usage_int(backend_stats, "total_tokens") + _usage_int(memory_totals, "total_tokens")
-        combined_cached_tokens = _usage_int(backend_stats, "cached_tokens") + _usage_int(memory_totals, "cached_tokens")
-        combined_cache_miss_tokens = _usage_int(backend_stats, "cache_miss_tokens") + _usage_int(
-            memory_totals,
-            "cache_miss_tokens",
-        )
-        combined_reasoning_tokens = _usage_int(backend_stats, "reasoning_tokens") + _usage_int(
-            memory_totals,
-            "reasoning_tokens",
-        )
-        combined_cache_hit_rate = _cache_hit_rate(combined_cached_tokens, combined_input_tokens)
-        return {
-            "total_calls": combined_total_calls,
-            "input_tokens": combined_input_tokens,
-            "output_tokens": combined_output_tokens,
-            "total_tokens": combined_total_tokens,
-            "cached_tokens": combined_cached_tokens,
-            "cache_miss_tokens": combined_cache_miss_tokens,
-            "reasoning_tokens": combined_reasoning_tokens,
-            "cache_hit_rate": combined_cache_hit_rate,
-            "by_role": combined_by_role,
+        input_tokens = _usage_int(backend_stats, "input_tokens")
+        cached_tokens = _usage_int(backend_stats, "cached_tokens")
+        summary = {
+            "total_calls": _usage_int(backend_stats, "total_calls"),
+            "input_tokens": input_tokens,
+            "output_tokens": _usage_int(backend_stats, "output_tokens"),
+            "total_tokens": _usage_int(backend_stats, "total_tokens"),
+            "cached_tokens": cached_tokens,
+            "cache_miss_tokens": _usage_int(backend_stats, "cache_miss_tokens"),
+            "reasoning_tokens": _usage_int(backend_stats, "reasoning_tokens"),
+            "cache_hit_rate": _cache_hit_rate(cached_tokens, input_tokens),
+            "by_role": backend_stats.get("by_role") or {},
             "by_role_detail": backend_stats.get("by_role_detail"),
             "by_workflow": backend_stats.get("by_workflow"),
             "by_stage": backend_stats.get("by_stage"),
@@ -559,27 +522,8 @@ async def get_llm_usage_stats():
             "by_cache_lane": backend_stats.get("by_cache_lane"),
             "by_api_key_alias": backend_stats.get("by_api_key_alias"),
             "backend": backend_stats,
-            "memory": memory_stats or None,
-            "combined": {
-                "total_calls": combined_total_calls,
-                "input_tokens": combined_input_tokens,
-                "output_tokens": combined_output_tokens,
-                "total_tokens": combined_total_tokens,
-                "cached_tokens": combined_cached_tokens,
-                "cache_miss_tokens": combined_cache_miss_tokens,
-                "reasoning_tokens": combined_reasoning_tokens,
-                "cache_hit_rate": combined_cache_hit_rate,
-                "by_role": combined_by_role,
-                "by_role_detail": backend_stats.get("by_role_detail"),
-                "by_workflow": backend_stats.get("by_workflow"),
-                "by_stage": backend_stats.get("by_stage"),
-                "by_workflow_stage": backend_stats.get("by_workflow_stage"),
-                "by_workflow_call_kind": backend_stats.get("by_workflow_call_kind"),
-                "by_call_kind": backend_stats.get("by_call_kind"),
-                "by_cache_lane": backend_stats.get("by_cache_lane"),
-                "by_api_key_alias": backend_stats.get("by_api_key_alias"),
-            },
         }
+        return summary
     except Exception as e:
         logger.error(f"Failed to fetch LLM usage stats: {str(e)}")
         raise HTTPException(
@@ -594,20 +538,10 @@ async def clear_llm_usage_stats():
 
     try:
         backend_deleted = await llm_usage_log.clear()
-        memory_result = await memory_client.clear_usage_stats()
-        memory_error = memory_client.get_last_error("clear_usage_stats")
-        if not memory_result and memory_error:
-            memory_result = {
-                "status": "error",
-                "error": memory_error,
-            }
-        memory_deleted = int(memory_result.get("deleted") or 0) if isinstance(memory_result, dict) else 0
-        clear_status = "ok" if not memory_error else "partial"
         return {
-            "status": clear_status,
+            "status": "ok",
             "backend": {"deleted": backend_deleted},
-            "memory": memory_result or None,
-            "total_deleted": backend_deleted + memory_deleted,
+            "total_deleted": backend_deleted,
         }
     except Exception as e:
         logger.error(f"Failed to clear LLM usage stats: {str(e)}")

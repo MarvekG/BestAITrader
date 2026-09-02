@@ -16,7 +16,7 @@ LLM 模型访问通过固定 `litellm` provider 进入 LiteLLM Proxy。Agent 工
 - 可审计：每个 Agent 的输入、输出、阶段、角色和置信度都写入数据库。
 - 可控执行：PM 决策结构化输出，交易工具只在 PM 阶段暴露。
 - 可扩展：上下文 provider、Agent、prompt、工具和图节点可以按边界独立演进。
-- 用户隔离：记忆召回和写入绑定 `user_id + stock_code` scope。
+- 用户隔离：记忆读取和写入绑定 `user_id + stock_code`，每对锚定一份记忆文档。
 
 ### 1.2 总体架构
 
@@ -303,7 +303,7 @@ PM 的职责是输出最终 `PMDecision`。它可以调用专属 `execute_tradin
 默认工具来自：
 
 - `get_all_tools()`
-- 记忆工具 `recall_memory / write_memory`
+- 记忆工具 `read_memory / write_memory`
 - Skills loader 工具
 
 PM 额外追加交易工具。长工具输出由共享 summarizer 控制，目前主要针对 `search_news`。
@@ -314,18 +314,16 @@ LLM usage 记录通过 `get_research_usage_lane()` 写入 research lane，便于
 
 记忆工具由 `backend/app/ai/agentic/memory_tools.py` 构造，并挂载到支持记忆的 Agent。
 
-记忆 scope：
-
-```text
-user:{user_id}:stock:{stock_code}
-```
+记忆采用单文档模型：`(user_id, stock_code)` 锚定一份 Markdown 活文档（`memory_documents` 表），
+prompt 只注入一行存在性提示，`read_memory` 按需返回整份文档，`write_memory` 整文档替换。
 
 设计约束：
 
 - 记忆只能作为经验和偏好增强，不是实时事实源。
-- 召回和写入必须绑定当前用户和当前股票。
+- 读取和写入必须绑定当前用户和当前股票；写入前必须先读取最新全文并以 `version` 作为 `base_version`。
 - Agent 不需要手动传 `stock_code`，由后端状态注入。
 - 记忆不能覆盖行情、财务、新闻和政策等当前事实数据。
+- 完整设计（并发与容量约束）见 `docs/improvements/009-single-document-memory-design.md`。
 
 ## 7. 持久化与前端契约
 

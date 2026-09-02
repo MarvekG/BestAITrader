@@ -8,8 +8,6 @@
 
 天枢智投（Best-AI-Trader）采用 MIT License 公开源码。该许可证允许商业和非商业用途，包括使用、复制、修改、合并、出版发行、散布、再许可和/或销售本软件的副本。详情请参见 [LICENSE](./LICENSE)。
 
-`memo/` 子模块是独立的 MemoFlux 记忆服务项目，同样使用 MIT License。
-
 ## 投资建议边界
 
 系统可以生成股票分析、`buy` / `sell` / `hold` 标签、目标仓位、止损字段和模拟订单执行。这些输出只应被视为模拟研究工作流中的研究材料。
@@ -82,8 +80,6 @@ compliance program.
 Best-AI-Trader is released under the MIT License. The license permits commercial and noncommercial use, including
 use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software. See [LICENSE](./LICENSE)
 for details.
-
-The `memo/` submodule is a separate MemoFlux memory service project, also under the MIT License.
 
 ## Investment Advice Boundary
 

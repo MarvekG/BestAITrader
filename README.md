@@ -32,12 +32,12 @@
 - **工具增强型 AI 投研**：Agent 不只生成文本，而是通过行情、财务、新闻、政策、资金流、技术指标和沙箱计算工具形成证据。
 - **多智能体投资委员会**：新闻、政策、情绪、基本面、技术面、资金流、风控、多头、空头和 PM 分工协作，模拟专业投委会流程。
 - **多轮辩论与结构化决策**：系统把分析、质疑、反驳、收敛和 PM 决策拆成可追踪工作流，不依赖单次 prompt 碰运气。
-- **AI 长期记忆闭环**：集成 MemoFlux，把经验、复盘、偏好和历史结论沉淀为可召回、可审计的长期记忆。
+- **AI 长期记忆闭环**：一用户一股票一份 Markdown 活文档，复盘经验自主组织、按需读取、带版本与容量约束，token 成本可控。
 - **后验经验复盘系统**：用真实价格路径检验 PM 决策，自动归因涨跌主因、修正辩论流程，并把可复用规则写回记忆。
 - **数据工程底座**：使用 PostgreSQL、JSONB、API 注册表和数据刷新调度承载 A 股核心数据与长尾异构数据。
 - **模拟交易引擎**：支持账户、订单、成交记录、持仓、FIFO 批次账本、费用、A 股一手和 T+1 约束。
 - **实时可观测体验**：异步任务、WebSocket、前端审计页和统一日志让 AI 分析过程可看、可查、可复盘。
-- **Docker 一体化部署**：PostgreSQL、Redis、LiteLLM、MemoFlux、独立沙箱、网页抓取、后端、前端和 Nginx 一套 Compose 拉起。
+- **Docker 一体化部署**：PostgreSQL、Redis、LiteLLM、独立沙箱、网页抓取、后端、前端和 Nginx 一套 Compose 拉起。
 
 ## 先进 AI 特性
 
@@ -49,8 +49,8 @@
 | Tool-use Reasoning | Agent 可以调用数据查询、新闻检索、政策分析、技术指标、资金流和 Python 沙箱工具，而不是只依赖模型记忆 |
 | Multi-Agent Debate | 多头、空头、风控、情绪、新闻、政策等角色互相制衡，降低单一视角直接拍脑袋的风险 |
 | Structured Decision | PM 输出结构化决策，包含动作、理由、信心、仓位、风险和交易参数，便于审计和执行 |
-| Long-Term Memory | 集成 MemoFlux，让系统能沉淀经验、召回历史上下文，并保留可审计召回证据 |
-| Evidence-Backed Recall | 记忆和分析结果可以携带证据、引用和上下文，不只返回相似文本 |
+| Long-Term Memory | 每只股票维护一份自由格式的记忆文档，索引常驻 prompt、全文按需读取，写入带乐观版本锁和容量上限 |
+| Evidence-Backed Recall | 记忆文档按时间沉淀后验收益与信号验证证据，读取即整份原文，不做有损加工 |
 | Post-Decision Review | 经验复盘系统把 PM 结论、真实走势、交易执行和 Agent timeline 放在一起复核，提炼可复用规则 |
 | Human-in-the-loop Audit | 前端实时展示 AI 过程，后端保存 session、message、task、order 和 memory 事件，便于人工复盘 |
 | Closed-loop Trading Simulation | AI 决策可以进入模拟交易、持仓账本和后续复盘，形成从分析到执行再到学习的闭环 |
@@ -59,7 +59,7 @@
 
 ## 部署
 
-当前推荐并支持的完整启动方式是 Docker Compose。服务会启动 PostgreSQL、Redis、LiteLLM、MemoFlux、Memory pgvector、独立 Python 沙箱、独立 WebFetch 网页渲染服务、可选 Scrapling MCP、FastAPI 后端、React 前端和 Nginx 统一入口。
+当前推荐并支持的完整启动方式是 Docker Compose。服务会启动 PostgreSQL、Redis、LiteLLM、独立 Python 沙箱、独立 WebFetch 网页渲染服务、可选 Scrapling MCP、FastAPI 后端、React 前端和 Nginx 统一入口。
 
 完整部署步骤、环境变量、启动停止、验证和排障见 [部署指南](./docs/002-deployment.md)。
 Windows 用户建议使用
@@ -72,7 +72,7 @@ Windows 用户建议使用
 | 数据输入 | 少量手写 prompt 或单一行情 | 行情、财务、新闻、政策、情绪、资金流等上下文分层 |
 | AI 形态 | 单模型一次性输出 | 工具增强、多角色、多阶段、多轮辩论的 Agent 工作流 |
 | 决策方式 | 直接输出买卖建议 | 垂直分析、战略辩论、PM 汇总、结构化决策 |
-| 长期能力 | 每次分析互相割裂 | MemoFlux 记忆历史结论，经验复盘系统把后验教训写回长期记忆 |
+| 长期能力 | 每次分析互相割裂 | 单文档记忆沉淀历史结论，经验复盘系统把后验教训写回长期记忆 |
 | 可审计性 | 结论难以回放 | session、message、task、order、memory 和 WebSocket 事件可追踪 |
 | 模拟交易 | 简化买卖记录 | 订单、账户、持仓、成交、费用、T+1、FIFO 批次账本 |
 | 选股流程 | 直接让模型挑股票 | 自然语言需求、计划确认、工具循环、证据合成和消息流 |
@@ -126,14 +126,14 @@ AI 决策不会停留在文本层面，而是可以进入模拟账户和交易�
 
 ### 5. 长期记忆
 
-系统集成 MemoFlux，让交易系统不只是“每次重新分析”，而是可以沉淀和调用历史经验：
+系统内置单文档记忆，让交易系统不只是“每次重新分析”，而是可以沉淀和调用历史经验：
 
-1. 交易辩论和经验复盘结论可以写入长期记忆；
-2. 后续分析可召回同一用户、同一股票或通用经验；
-3. 记忆服务按 `session` 隔离用户与股票范围，提供结构化召回、引用和 audit；
-4. 通过 pgvector、LLM 和审计记录维护召回、证据和 usage 统计。
+1. 交易辩论和经验复盘结论通过 `write_memory` 整文档替换写入，文档结构由 AI 自主组织；
+2. 每个用户和股票锚定一份记忆文档，按用户隔离；
+3. prompt 只注入一行存在性提示，Agent 判断历史经验有助当前判断时再通过 `read_memory` 读取全文；
+4. 写入带乐观版本锁（防止并行覆盖）和容量上限（防止无限膨胀）。
 
-核心实现见 [`memo/`](./memo/README.md)。
+核心实现见 [`backend/app/ai/memory_documents/store.py`](./backend/app/ai/memory_documents/store.py)，设计说明见 [单文档记忆系统设计](./docs/improvements/009-single-document-memory-design.md)。
 
 ## 文档导航
 
@@ -144,7 +144,7 @@ AI 决策不会停留在文本层面，而是可以进入模拟账户和交易�
 - [Trading Architecture](./backend/app/trading/README.md)：当前真实生效的交易链路、T+1、账本和止损字段行为。
 - [LLM Debate Engine](./backend/app/ai/llm_engine/README.md)：多 Agent 工作流、节点职责、状态流转和持久化。
 - [Experience Review System](./backend/app/ai/experience/README.md)：后验经验复盘、市场结果校验、事件流和记忆写入。
-- [MemoFlux](./memo/README.md)：当前主系统长期记忆服务文档。
+- [单文档记忆系统设计](./docs/improvements/009-single-document-memory-design.md)：长期记忆的存储、读写协议和并发/容量约束设计。
 - [Skills Loader Integration Guide](./backend/app/ai/agentic/skills_loader/README.md)：如何新增 Skills、references 和 scripts，让 Agent 加载专业能力。
 - [News Plugins Integration Guide](./backend/app/ai/agentic/tooling/news_plugins/README.md)：如何替换自己的新闻插件库、开发新闻源插件并验证 `search_news`。
 

@@ -80,7 +80,7 @@ Agent 可以调用 Python 做数值计算和表格分析，但不是直接执行
 - [`ai/agentic/tooling/browser_tool.py`](./ai/agentic/tooling/browser_tool.py)：独立 `webfetch` 服务网页渲染和 HTML/Markdown 抓取入口。
 - [`ai/agentic/tooling/pdf_tool.py`](./ai/agentic/tooling/pdf_tool.py)：通过 `webfetch` 下载 PDF 后解析为 Markdown。
 - [`ai/agentic/skills_loader/runtime.py`](./ai/agentic/skills_loader/runtime.py)：Skills loader 运行时工具。
-- [`ai/agentic/memory_tools.py`](./ai/agentic/memory_tools.py)：通过 MemoFlux 提供 Memory 召回和写入工具。
+- [`ai/agentic/memory_tools.py`](./ai/agentic/memory_tools.py)：提供单文档记忆的 `read_memory` / `write_memory` 工具。
 
 关键机制：
 
@@ -123,7 +123,7 @@ Agent 可以调用 Python 做数值计算和表格分析，但不是直接执行
 
 - 交互式选股先把自然语言需求转成可确认计划，再用工具循环补全数据、新闻和证据。
 - 复盘读取 PM 决策后的市场结果，检查收益、回撤、相对指数、相对行业表现。
-- 经验复盘只在提炼出可复用赚钱经验、失败教训、仓位纪律或流程改进时写入 MemoFlux Memory；没有新增可复用经验时允许跳过写入。
+- 经验复盘只在提炼出可复用赚钱经验、失败教训、仓位纪律或流程改进时整文档重写记忆；没有新增可复用经验时允许跳过写入。
 
 ### 2.6 模拟交易账本
 
@@ -154,7 +154,7 @@ Agent 可以调用 Python 做数值计算和表格分析，但不是直接执行
 关键机制：
 
 - WebSocket 支持按资源订阅，前端重连后会自动恢复订阅。
-- 自检中心覆盖 Redis、DB、Tushare、Tavily、沙箱、Skills、新闻插件、MemoFlux 读写和 DB schema。
+- 自检中心覆盖 Redis、DB、Tushare、Tavily、沙箱、Skills、新闻插件和 DB schema。
 - Prompt 由代码中的静态模板管理，避免运行时覆盖破坏 LLM 缓存前缀稳定性。
 
 ## 3. 详细技术点清单
@@ -175,7 +175,7 @@ Agent 可以调用 Python 做数值计算和表格分析，但不是直接执行
 | 独立 Python 沙箱 | `ai/agentic/tooling/python_sandbox.py` | 后端 AST 校验危险 import/call，再通过 `sandbox` 服务受限执行计算 |
 | 独立 WebFetch 服务 | `ai/agentic/tooling/browser_tool.py` | 通过 `webfetch` 服务渲染网页并返回 HTML 或 Markdown |
 | Skills Loader | `ai/agentic/skills_loader/runtime.py` | 让 Agent 读取 `SKILL.md`、references 和 scripts 扩展专业能力 |
-| Memory 工具绑定 | `ai/agentic/memory_tools.py` | 自动绑定用户和股票 scope，提供 `recall_memory` / `write_memory` |
+| Memory 工具绑定 | `ai/agentic/memory_tools.py` | 自动绑定用户和股票，提供 `read_memory` / `write_memory` 整文档读写 |
 | 数据源插件发现 | `data/ingestors/plugin_loader.py` | 自动发现 `*_ingestor.py`，无需手动改注册表 |
 | 数据源 failover | `data/ingestors/manager.py` | 按默认源、Tushare、其他插件顺序尝试，失败自动切换 |
 | DataFrame 智能落库 | `data/ingestion/service.py` | 自动过滤无效股票、按唯一约束去重、执行 PostgreSQL upsert |

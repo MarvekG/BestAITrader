@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
   Alert,
@@ -34,8 +34,6 @@ import { testingApi } from '../api/testing';
 import type {
   AiFunctionTestResult,
   AiFunctionScenario,
-  MemoryPreviewParams,
-  MemoryRecallAuditPreviewParams,
   NewsTestingTool,
   ToolDocstringItem,
 } from '../api/testing';
@@ -161,8 +159,6 @@ const SETTINGS_TAB_KEYS = new Set([
   'news_plugins',
   'mcp',
   'skills',
-  'memory-preview',
-  'memory-recall-audits',
   'playground',
   'stats',
 ]);
@@ -307,10 +303,6 @@ export const SettingsPage: React.FC = () => {
   const [testQueryCalcLoading, setTestQueryCalcLoading] = useState(false);
   const [testPdfToolLoading, setTestPdfToolLoading] = useState(false);
   const [pdfToolTestUrl, setPdfToolTestUrl] = useState('');
-  const [testMemoryLoading, setTestMemoryLoading] = useState(false);
-  const [testMemoryReadLoading, setTestMemoryReadLoading] = useState(false);
-  const [testMemoryPreviewLoading, setTestMemoryPreviewLoading] = useState(false);
-  const [testMemoryRecallAuditLoading, setTestMemoryRecallAuditLoading] = useState(false);
   const [testDocstringLoading, setTestDocstringLoading] = useState(false);
   const [newsTestTools, setNewsTestTools] = useState<NewsTestingTool[]>([]);
   const [newsTestToolsLoading, setNewsTestToolsLoading] = useState(false);
@@ -354,25 +346,6 @@ export const SettingsPage: React.FC = () => {
   const [newsTestResult, setNewsTestResult] = useState<Record<string, unknown> | null>(null);
   const [docstringModalOpen, setDocstringModalOpen] = useState(false);
   const [toolDocstrings, setToolDocstrings] = useState<ToolDocstringItem[]>([]);
-  const [memoryPreviewItems, setMemoryPreviewItems] = useState<MemoryPreviewItem[]>([]);
-  const [memoryPreviewTotal, setMemoryPreviewTotal] = useState(0);
-  const [memoryPreviewPage, setMemoryPreviewPage] = useState(1);
-  const [memoryPreviewPageSize, setMemoryPreviewPageSize] = useState(20);
-  const [memoryPreviewFilters, setMemoryPreviewFilters] = useState<MemoryPreviewFilters>({
-    userId: '',
-    stockCode: '',
-    status: undefined,
-  });
-  const [memoryRecallAuditItems, setMemoryRecallAuditItems] = useState<MemoryRecallAuditItem[]>([]);
-  const [memoryRecallAuditTotal, setMemoryRecallAuditTotal] = useState(0);
-  const [memoryRecallAuditPage, setMemoryRecallAuditPage] = useState(1);
-  const [memoryRecallAuditPageSize, setMemoryRecallAuditPageSize] = useState(20);
-  const [memoryRecallAuditFilters, setMemoryRecallAuditFilters] = useState<MemoryRecallAuditFilters>({
-    userId: '',
-    stockCode: '',
-    status: undefined,
-    errorCode: '',
-  });
   // System Testing Handlers
   const handleTestRedis = async () => {
     setTestRedisLoading(true);
@@ -508,198 +481,6 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
-  const handleTestMemory = async () => {
-    setTestMemoryLoading(true);
-    try {
-      const res = await testingApi.testMemory();
-      if (res.status === 'success') {
-        message.success(`${res.message} (${res.elapsed_ms}ms)`);
-      } else {
-        message.error(res.message);
-      }
-    } catch (error) {
-      message.error(getApiErrorMessage(error, t('settings.test_failed')));
-    } finally {
-      setTestMemoryLoading(false);
-    }
-  };
-
-  const handleTestMemoryRead = async () => {
-    setTestMemoryReadLoading(true);
-    try {
-      const res = await testingApi.testMemoryRead();
-      if (res.status === 'success') {
-        message.success(`${res.message} (${res.elapsed_ms}ms)`);
-      } else {
-        message.error(res.message);
-      }
-    } catch (error) {
-      message.error(getApiErrorMessage(error, t('settings.test_failed')));
-    } finally {
-      setTestMemoryReadLoading(false);
-    }
-  };
-
-  const buildMemoryPreviewParams = (
-    page = 1,
-    pageSize = 20,
-    filters: MemoryPreviewFilters = memoryPreviewFilters,
-  ): MemoryPreviewParams => {
-    const parsedUserId = Number.parseInt(filters.userId.trim(), 10);
-    return {
-      user_id: Number.isInteger(parsedUserId) && parsedUserId > 0 ? parsedUserId : undefined,
-      stock_code: filters.stockCode.trim() || undefined,
-      status: filters.status || undefined,
-      limit: pageSize,
-      offset: (page - 1) * pageSize,
-    };
-  };
-
-  const fetchMemoryPreviewPage = async (
-    page = 1,
-    pageSize = 20,
-    filters: MemoryPreviewFilters = memoryPreviewFilters,
-  ) => {
-    setTestMemoryPreviewLoading(true);
-    try {
-      const res = await testingApi.testMemoryPreview(buildMemoryPreviewParams(page, pageSize, filters));
-      if (res.status === 'success') {
-        const data = res.data as MemoryPreviewResultData | undefined;
-        const items = Array.isArray(data?.items) ? data.items : [];
-        setMemoryPreviewItems(items as MemoryPreviewItem[]);
-        setMemoryPreviewTotal(typeof res.total === 'number' ? res.total : 0);
-        setMemoryPreviewPage(page);
-        setMemoryPreviewPageSize(pageSize);
-        return res;
-      }
-      message.error(res.message || t('testing.memory_preview-failed'));
-      return res;
-    } catch (err) {
-      message.error(getApiErrorMessage(err, t('testing.memory_preview-failed')));
-      throw err;
-    } finally {
-      setTestMemoryPreviewLoading(false);
-    }
-  };
-
-  const handleApplyMemoryPreviewFilters = async () => {
-    try {
-      await fetchMemoryPreviewPage(1, memoryPreviewPageSize);
-    } catch {
-      // Error is already surfaced by fetchMemoryPreviewPage.
-    }
-  };
-
-  const handleResetMemoryPreviewFilters = async () => {
-    const nextFilters: MemoryPreviewFilters = {
-      userId: '',
-      stockCode: '',
-      status: undefined,
-    };
-    setMemoryPreviewFilters(nextFilters);
-    try {
-      await fetchMemoryPreviewPage(1, memoryPreviewPageSize, nextFilters);
-    } catch {
-      // Error is already surfaced by fetchMemoryPreviewPage.
-    }
-  };
-
-  const buildMemoryRecallAuditParams = (
-    page = 1,
-    pageSize = 20,
-    filters: MemoryRecallAuditFilters = memoryRecallAuditFilters,
-  ): MemoryRecallAuditPreviewParams => {
-    const parsedUserId = Number.parseInt(filters.userId.trim(), 10);
-    return {
-      user_id: Number.isInteger(parsedUserId) && parsedUserId > 0 ? parsedUserId : undefined,
-      stock_code: filters.stockCode.trim() || undefined,
-      status: filters.status || undefined,
-      error_code: filters.errorCode.trim() || undefined,
-      limit: pageSize,
-      offset: (page - 1) * pageSize,
-    };
-  };
-
-  const fetchMemoryRecallAuditPage = async (
-    page = 1,
-    pageSize = 20,
-    filters: MemoryRecallAuditFilters = memoryRecallAuditFilters,
-  ) => {
-    setTestMemoryRecallAuditLoading(true);
-    try {
-      const res = await testingApi.testMemoryRecallAudits(buildMemoryRecallAuditParams(page, pageSize, filters));
-      if (res.status === 'success') {
-        const data = res.data as MemoryRecallAuditResultData | undefined;
-        const items = Array.isArray(data?.items) ? data.items : [];
-        setMemoryRecallAuditItems(items as MemoryRecallAuditItem[]);
-        setMemoryRecallAuditTotal(typeof res.total === 'number' ? res.total : 0);
-        setMemoryRecallAuditPage(page);
-        setMemoryRecallAuditPageSize(pageSize);
-        return res;
-      }
-      message.error(res.message || t('testing.memory_recall_audits-failed'));
-      return res;
-    } catch (err) {
-      message.error(getApiErrorMessage(err, t('testing.memory_recall_audits-failed')));
-      throw err;
-    } finally {
-      setTestMemoryRecallAuditLoading(false);
-    }
-  };
-
-  const handleApplyMemoryRecallAuditFilters = async () => {
-    try {
-      await fetchMemoryRecallAuditPage(1, memoryRecallAuditPageSize);
-    } catch {
-      // Error is already surfaced by fetchMemoryRecallAuditPage.
-    }
-  };
-
-  const handleResetMemoryRecallAuditFilters = async () => {
-    const nextFilters: MemoryRecallAuditFilters = {
-      userId: '',
-      stockCode: '',
-      status: undefined,
-      errorCode: '',
-    };
-    setMemoryRecallAuditFilters(nextFilters);
-    try {
-      await fetchMemoryRecallAuditPage(1, memoryRecallAuditPageSize, nextFilters);
-    } catch {
-      // Error is already surfaced by fetchMemoryRecallAuditPage.
-    }
-  };
-
-  const memoryRecallAuditSuccessStats = useMemo(() => {
-    const total = memoryRecallAuditItems.length;
-    const success = memoryRecallAuditItems.filter((item) => item.status === 'ok').length;
-    return {
-      success,
-      total,
-      rate: total > 0 ? success / total : 0,
-    };
-  }, [memoryRecallAuditItems]);
-
-  const compactPreviewText = (value?: string) =>
-    String(value || '')
-      .replace(/\r\n/g, '\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-
-  const renderCompactPreview = (value?: string, maxHeight = 120) => (
-    <div
-      style={{
-        ...promptTextBlockStyle,
-        whiteSpace: 'pre-wrap',
-        lineHeight: 1.35,
-        maxHeight,
-        margin: 0,
-      }}
-    >
-      {compactPreviewText(value)}
-    </div>
-  );
-
   const fetchAiFunctionTaskResult = useCallback(async (taskId: string, tracker: AiFunctionTaskTracker) => {
     const activeTaskId = aiFunctionTaskIdByScenarioRef.current[tracker.scenario];
     if (activeTaskId !== taskId) {
@@ -764,125 +545,6 @@ export const SettingsPage: React.FC = () => {
 
       void fetchAiFunctionTaskResult(taskId, tracker);
   });
-
-  const memoryPreviewColumns: ColumnsType<MemoryPreviewItem> = [
-    {
-      title: t('settings.memory_column_memory_id'),
-      dataIndex: 'memory_id',
-      key: 'memory_id',
-      width: 220,
-      ellipsis: true,
-    },
-    {
-      title: t('settings.memory_column_session'),
-      dataIndex: 'session',
-      key: 'session',
-      width: 260,
-      ellipsis: true,
-      render: (value?: string) => value || '-',
-    },
-    {
-      title: t('settings.memory_column_content'),
-      dataIndex: 'content',
-      key: 'content',
-      width: 720,
-      render: (value: string) => renderCompactPreview(value, 132),
-    },
-    {
-      title: t('settings.memory_column_occurred_at'),
-      dataIndex: 'occurred_at',
-      key: 'occurred_at',
-      width: 180,
-      ellipsis: true,
-    },
-    {
-      title: t('settings.memory_column_created_at'),
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 180,
-      ellipsis: true,
-    },
-  ];
-
-  const memoryRecallAuditColumns: ColumnsType<MemoryRecallAuditItem> = [
-    {
-      title: t('settings.memory_column_created_at'),
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 170,
-      render: (value: string) => value || '',
-    },
-    {
-      title: t('settings.memory_column_status'),
-      dataIndex: 'status',
-      key: 'status',
-      width: 100,
-      render: (value: string) => <Tag color={value === 'ok' ? 'green' : value === 'not_ready' ? 'gold' : 'red'}>{value}</Tag>,
-    },
-    {
-      title: t('settings.memory_column_error_code'),
-      dataIndex: 'error_code',
-      key: 'error_code',
-      width: 180,
-      ellipsis: true,
-      render: (value?: string | null) => value || '-',
-    },
-    {
-      title: t('settings.memory_column_session'),
-      dataIndex: 'session',
-      key: 'session',
-      width: 260,
-      ellipsis: true,
-    },
-    {
-      title: t('settings.memory_column_query'),
-      dataIndex: 'query',
-      key: 'query',
-      width: 380,
-      render: (value: string) => renderCompactPreview(value, 84),
-    },
-    {
-      title: t('settings.memory_column_answer'),
-      dataIndex: 'final_answer',
-      key: 'final_answer',
-      width: 520,
-      render: (value: string) => renderCompactPreview(value, 112),
-    },
-    {
-      title: t('settings.memory_column_citations'),
-      dataIndex: 'selected_memory_ids',
-      key: 'selected_memory_ids',
-      width: 95,
-      render: (value: string[]) => (Array.isArray(value) ? value.length : 0),
-    },
-    {
-      title: t('settings.memory_column_edges'),
-      dataIndex: 'retrieved',
-      key: 'retrieved',
-      width: 80,
-      render: (value: unknown[]) => (Array.isArray(value) ? value.length : 0),
-    },
-    {
-      title: t('settings.memory_column_answerability'),
-      dataIndex: 'answerability',
-      key: 'answerability',
-      width: 260,
-      render: (value?: string) => (value ? <Tag>{value}</Tag> : '-'),
-    },
-    {
-      title: t('settings.memory_column_answerability_reason'),
-      key: 'answerability_reason',
-      width: 360,
-      render: (_, record) => renderCompactPreview(record.answerability_reason || '', 48),
-    },
-    {
-      title: t('settings.memory_column_audit_id'),
-      dataIndex: 'audit_id',
-      key: 'audit_id',
-      width: 220,
-      ellipsis: true,
-    },
-  ];
 
   const handleTestDocstrings = async () => {
     setTestDocstringLoading(true);
@@ -1525,8 +1187,6 @@ export const SettingsPage: React.FC = () => {
       handleTestSkills(),
       handleTestDbSchema(),
       handleTestQueryCalc(),
-      handleTestMemory(),
-      handleTestMemoryRead(),
       ...newsTestTools.map((tool) => handleDynamicNewsTest(tool)),
     ]);
   };
@@ -1683,55 +1343,6 @@ export const SettingsPage: React.FC = () => {
     workflow: string,
     callKind: string,
   ) => backendStats?.by_workflow_call_kind?.[`${workflow}/${callKind}`];
-
-  const renderMemoryStatsPanel = (memoryStats: PromptStats['memory']) => (
-    <Col span={24}>
-      <div style={{ border: '1px solid #f0f0f0', borderRadius: 6, padding: 16 }}>
-        <div style={{ fontWeight: 600, marginBottom: 16 }}>{t('settings.memory_system_stats')}</div>
-        <Row gutter={[12, 12]}>
-          <Col xs={12} md={6}>
-            <Statistic
-              title={t('settings.memory_llm_runs')}
-              value={memoryStats?.llm_runs || 0}
-              valueStyle={{ fontSize: 16 }}
-            />
-          </Col>
-          <Col xs={12} md={6}>
-            <Statistic
-              title={t('settings.total_calls')}
-              value={memoryStats?.total_calls || 0}
-              valueStyle={{ fontSize: 16 }}
-            />
-          </Col>
-          <Col xs={12} md={6}>
-            <Statistic
-              title={t('settings.input_tokens')}
-              value={memoryStats?.input_tokens || 0}
-              valueStyle={{ fontSize: 16 }}
-            />
-          </Col>
-          <Col xs={12} md={6}>
-            <Statistic
-              title={t('settings.cache_miss_tokens')}
-              value={memoryStats?.cache_miss_tokens || 0}
-              valueStyle={{ fontSize: 16 }}
-            />
-          </Col>
-          <Col xs={12} md={6}>
-            <Statistic
-              title={t('settings.cache_hit_rate')}
-              value={formatPercent(memoryStats?.cache_hit_rate)}
-              valueStyle={{ fontSize: 16 }}
-            />
-          </Col>
-        </Row>
-        <div style={{ marginTop: 16 }}>
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>{t('settings.role_granularity_stats')}</div>
-          {renderRoleStatsTable(buildRoleRows(memoryStats?.by_operation))}
-        </div>
-      </div>
-    </Col>
-  );
 
   const renderMainSystemStatsPanel = (backendStats: PromptStats['backend']) => (
     <Col span={24}>
@@ -2487,179 +2098,6 @@ export const SettingsPage: React.FC = () => {
           )
         },
         {
-          key: 'memory-preview',
-          label: t('settings.memory_preview_test_title'),
-          children: (
-            <Card title={`${t('settings.memory_preview_test_title')} (${memoryPreviewTotal})`}>
-              <div
-                style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: 12,
-                  marginBottom: 16,
-                  alignItems: 'center',
-                }}
-              >
-                <Input
-                  placeholder={t('settings.memory_filter_user_id')}
-                  value={memoryPreviewFilters.userId}
-                  onChange={(e) =>
-                    setMemoryPreviewFilters((prev) => ({ ...prev, userId: e.target.value }))
-                  }
-                  onPressEnter={() => void handleApplyMemoryPreviewFilters()}
-                  style={{ width: 140 }}
-                  allowClear
-                />
-                <Input
-                  placeholder={t('settings.memory_filter_stock_code')}
-                  value={memoryPreviewFilters.stockCode}
-                  onChange={(e) =>
-                    setMemoryPreviewFilters((prev) => ({ ...prev, stockCode: e.target.value }))
-                  }
-                  onPressEnter={() => void handleApplyMemoryPreviewFilters()}
-                  style={{ width: 160 }}
-                  allowClear
-                />
-                <Select
-                  placeholder={t('settings.memory_filter_status')}
-                  value={memoryPreviewFilters.status}
-                  onChange={(value) =>
-                    setMemoryPreviewFilters((prev) => ({ ...prev, status: value }))
-                  }
-                  options={MEMORY_PREVIEW_STATUS_OPTIONS}
-                  style={{ width: 140 }}
-                  allowClear
-                />
-                <Button type="primary" onClick={() => void handleApplyMemoryPreviewFilters()}>
-                  {t('settings.memory_search')}
-                </Button>
-                <Button onClick={() => void handleResetMemoryPreviewFilters()}>
-                  {t('settings.memory_reset')}
-                </Button>
-              </div>
-              <Table
-                rowKey="memory_id"
-                dataSource={memoryPreviewItems}
-                columns={memoryPreviewColumns}
-                loading={testMemoryPreviewLoading}
-                pagination={{
-                  current: memoryPreviewPage,
-                  pageSize: memoryPreviewPageSize,
-                  total: memoryPreviewTotal,
-                  showSizeChanger: true,
-                  pageSizeOptions: ['10', '20', '50', '100'],
-                  onChange: (page, pageSize) => {
-                    void fetchMemoryPreviewPage(page, pageSize);
-                  },
-                }}
-                scroll={{ x: 'max-content' }}
-                size="small"
-              />
-            </Card>
-          )
-        },
-        {
-          key: 'memory-recall-audits',
-          label: t('settings.memory_audit_title'),
-          children: (
-            <Card title={t('settings.memory_audit_title')}>
-              <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-                <Col xs={24} sm={8} md={6}>
-                  <Statistic
-                    title={t('settings.memory_audit_success_rate')}
-                    value={memoryRecallAuditSuccessStats.rate * 100}
-                    precision={1}
-                    suffix="%"
-                  />
-                </Col>
-                <Col xs={24} sm={8} md={6}>
-                  <Statistic
-                    title={t('settings.memory_audit_ok_rows')}
-                    value={`${memoryRecallAuditSuccessStats.success}/${memoryRecallAuditSuccessStats.total}`}
-                  />
-                </Col>
-                <Col xs={24} sm={8} md={6}>
-                  <Statistic title={t('settings.memory_audit_total')} value={memoryRecallAuditTotal} />
-                </Col>
-              </Row>
-              <div
-                style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  gap: 12,
-                  marginBottom: 16,
-                  alignItems: 'center',
-                }}
-              >
-                <Input
-                  placeholder={t('settings.memory_filter_user_id')}
-                  value={memoryRecallAuditFilters.userId}
-                  onChange={(e) =>
-                    setMemoryRecallAuditFilters((prev) => ({ ...prev, userId: e.target.value }))
-                  }
-                  onPressEnter={() => void handleApplyMemoryRecallAuditFilters()}
-                  style={{ width: 140 }}
-                  allowClear
-                />
-                <Input
-                  placeholder={t('settings.memory_filter_stock_code')}
-                  value={memoryRecallAuditFilters.stockCode}
-                  onChange={(e) =>
-                    setMemoryRecallAuditFilters((prev) => ({ ...prev, stockCode: e.target.value }))
-                  }
-                  onPressEnter={() => void handleApplyMemoryRecallAuditFilters()}
-                  style={{ width: 160 }}
-                  allowClear
-                />
-                <Select
-                  placeholder={t('settings.memory_filter_status')}
-                  value={memoryRecallAuditFilters.status}
-                  onChange={(value) =>
-                    setMemoryRecallAuditFilters((prev) => ({ ...prev, status: value }))
-                  }
-                  options={MEMORY_RECALL_AUDIT_STATUS_OPTIONS}
-                  style={{ width: 140 }}
-                  allowClear
-                />
-                <Input
-                  placeholder={t('settings.memory_filter_error_code')}
-                  value={memoryRecallAuditFilters.errorCode}
-                  onChange={(e) =>
-                    setMemoryRecallAuditFilters((prev) => ({ ...prev, errorCode: e.target.value }))
-                  }
-                  onPressEnter={() => void handleApplyMemoryRecallAuditFilters()}
-                  style={{ width: 220 }}
-                  allowClear
-                />
-                <Button type="primary" onClick={() => void handleApplyMemoryRecallAuditFilters()}>
-                  {t('settings.memory_search')}
-                </Button>
-                <Button onClick={() => void handleResetMemoryRecallAuditFilters()}>
-                  {t('settings.memory_reset')}
-                </Button>
-              </div>
-              <Table
-                rowKey="audit_id"
-                dataSource={memoryRecallAuditItems}
-                columns={memoryRecallAuditColumns}
-                loading={testMemoryRecallAuditLoading}
-                pagination={{
-                  current: memoryRecallAuditPage,
-                  pageSize: memoryRecallAuditPageSize,
-                  total: memoryRecallAuditTotal,
-                  showSizeChanger: true,
-                  pageSizeOptions: ['10', '20', '50', '100'],
-                  onChange: (page, pageSize) => {
-                    void fetchMemoryRecallAuditPage(page, pageSize);
-                  },
-                }}
-                scroll={{ x: 'max-content' }}
-                size="small"
-              />
-            </Card>
-          )
-        },
-        {
           key: 'playground',
           label: t('settings.system_test'),
           children: (
@@ -2676,8 +2114,6 @@ export const SettingsPage: React.FC = () => {
                       testSkillsLoading ||
                       testDbSchemaLoading ||
                       testQueryCalcLoading ||
-                      testMemoryLoading ||
-                      testMemoryReadLoading ||
                       newsTestToolsLoading ||
                       Object.values(dynamicNewsLoading).some(Boolean)
                     }
@@ -2748,20 +2184,6 @@ export const SettingsPage: React.FC = () => {
                         allowClear
                       />
                       <Button type="default" onClick={handleTestPdfTool} loading={testPdfToolLoading} block>
-                        {t('settings.execute_test')}
-                      </Button>
-                    </Card>
-                  </Col>
-                  <Col span={4}>
-                    <Card size="small" title={t('settings.memory_write_test_title')}>
-                      <Button type="default" onClick={handleTestMemory} loading={testMemoryLoading} block>
-                        {t('settings.execute_test')}
-                      </Button>
-                    </Card>
-                  </Col>
-                  <Col span={4}>
-                    <Card size="small" title={t('settings.memory_read_test_title')}>
-                      <Button type="default" onClick={handleTestMemoryRead} loading={testMemoryReadLoading} block>
                         {t('settings.execute_test')}
                       </Button>
                     </Card>
@@ -2977,7 +2399,6 @@ export const SettingsPage: React.FC = () => {
                         getBusinessCacheUsage(stats.backend, 'debate_analysis', 'tool_summary'),
                       )}
                       {renderMainSystemStatsPanel(stats.backend)}
-                      {renderMemoryStatsPanel(stats.memory)}
                     </Row>
                   </Col>
                 </Row>
@@ -3170,64 +2591,4 @@ export const SettingsPage: React.FC = () => {
 
     </div>
   );
-};
-type MemoryPreviewFilters = {
-  userId: string;
-  stockCode: string;
-  status?: string;
-};
-
-type MemoryRecallAuditFilters = MemoryPreviewFilters & {
-  errorCode: string;
-};
-
-const MEMORY_PREVIEW_STATUS_OPTIONS = [
-  { value: 'active', label: 'active' },
-  { value: 'stale', label: 'stale' },
-  { value: 'superseded', label: 'superseded' },
-  { value: 'archived', label: 'archived' },
-];
-
-const MEMORY_RECALL_AUDIT_STATUS_OPTIONS = [
-  { value: 'ok', label: 'ok' },
-  { value: 'partial', label: 'partial' },
-  { value: 'rejected', label: 'rejected' },
-  { value: 'not_ready', label: 'not_ready' },
-];
-
-type MemoryPreviewItem = {
-  memory_id: string;
-  session?: string;
-  content: string;
-  occurred_at?: string;
-  created_at: string;
-};
-
-type MemoryPreviewResultData = {
-  items?: MemoryPreviewItem[];
-  next_cursor?: string | null;
-};
-
-type MemoryRecallAuditItem = {
-  audit_id?: string;
-  audit_type?: string;
-  query_id?: string;
-  delete_id?: string;
-  session: string;
-  query: string;
-  status: string;
-  error_code?: string | null;
-  error_stage?: string | null;
-  error_message?: string | null;
-  final_answer?: string;
-  selected_memory_ids?: string[];
-  retrieved?: unknown[];
-  answerability?: string;
-  answerability_reason?: string;
-  created_at: string;
-};
-
-type MemoryRecallAuditResultData = {
-  items?: MemoryRecallAuditItem[];
-  next_cursor?: string | null;
 };

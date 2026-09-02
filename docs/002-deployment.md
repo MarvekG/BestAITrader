@@ -53,9 +53,9 @@ python3 deploy.py
 
 1. 交互式读取初始用户和 LLM 配置。
 2. 调用 OpenAI-compatible `chat/completions` 接口验证 LLM Key 和模型是否可用；验证失败会要求重新输入。
-3. 生成 `backend/.env`、`memo/.env`、`litellm/config.yaml`。
+3. 生成 `backend/.env`、`litellm/config.yaml`。
 4. 执行 `docker compose pull`、`docker compose up -d`、`docker compose ps`。
-5. 检查 backend、sandbox、webfetch 和 memo 健康状态，并用生成的 LiteLLM master key 调用 `openai-compatible` 模型别名。
+5. 检查 backend、sandbox、webfetch 健康状态，并用生成的 LiteLLM master key 调用 `openai-compatible` 模型别名。
 
 已有本地配置时，脚本会先询问是否覆盖。确认要覆盖也可以直接运行：
 
@@ -102,7 +102,7 @@ docker compose logs -f litellm
 修改配置后重建服务，不要只用 `restart`：
 
 ```bash
-docker compose up -d --force-recreate backend memo litellm
+docker compose up -d --force-recreate backend litellm
 ```
 
 ## 6. 数据库迁移
@@ -131,13 +131,13 @@ docker compose logs backend
 docker compose down
 ```
 
-备份主系统数据库和 Memo 数据库。脚本会先提示将停止 `backend`、`memo`，输入 `BACKUP` 确认后继续，完成后自动拉起服务：
+备份主系统数据库。脚本会先提示将停止 `backend`，输入 `BACKUP` 确认后继续，完成后自动拉起服务：
 
 ```bash
 scripts/database-maintenance.sh backup
 ```
 
-恢复主系统数据库和 Memo 数据库。脚本会先提示将停止 `backend`、`memo`，输入 `RESTORE` 确认后继续，完成后自动拉起服务：
+恢复主系统数据库。脚本会先提示将停止 `backend`，输入 `RESTORE` 确认后继续，完成后自动拉起服务：
 
 ```bash
 scripts/database-maintenance.sh restore backups/bat.YYYYMMDD.HHMMSS

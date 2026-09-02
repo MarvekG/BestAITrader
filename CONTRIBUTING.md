@@ -6,8 +6,6 @@
 
 提交 Pull Request、补丁或其他贡献，即表示你确认自己有权贡献这些内容，并同意贡献内容按本仓库的 MIT License 分发。
 
-如果你单独向 `memo/` 子模块贡献，请遵循 MemoFlux 项目的上游贡献流程。
-
 ## 不要提交的内容
 
 不要提交：
@@ -71,9 +69,6 @@ regulated financial workflows and third-party data.
 
 By submitting a pull request, issue patch, or other contribution to this repository, you confirm that you have the
 right to contribute it and that your contribution may be distributed under the repository's MIT License.
-
-If you contribute to the `memo/` submodule separately, follow the MemoFlux project's upstream contribution
-process.
 
 ## What Not To Submit
 

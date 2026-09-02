@@ -10,7 +10,6 @@
 - `stock_analysis/`：面向单股分析页面/API 的分析能力。
 - `experience/`：PM 决策后验复盘、事件流和 Memory 写入判断。
 - `market_watch/`：市场监控相关 AI 能力。
-- `memory_client.py`：主后端访问 MemoFlux 的 HTTP client。
 - `llm_routing.py`、`llm_providers/`：模型别名和 LiteLLM/OpenAI 兼容调用边界。
 
 ## 设计约束
@@ -20,7 +19,7 @@
 - PM 是唯一能追加交易工具的 Agent；普通分析师不能直接下单。
 - 交互式选股只输出推荐、观察名单、淘汰候选和证据摘要，不构建持仓组合、不执行交易。
 - 后验评估统一落在 `experience`，不新增平行历史评估中心。
-- 主后端只通过 `memory_client.py` 或 Memory 工具访问 MemoFlux HTTP API，不直接写 MemoFlux 数据库。
+- 长期记忆是 backend 内置的单文档记忆（`memory_documents` 表），Memory 工具直接读写本地存储，不经外部服务。
 - Prompt 变更不要新增 pytest 字符串断言；通过人工审计、既有 eval 或明确 live eval 验证效果。
 
 ## 验证

@@ -188,13 +188,6 @@ async def lifespan(app: Any):
     except Exception as e:
         logger.error(f"Failed to close Redis connection: {e}")
 
-    try:
-        from app.ai.memory_client import memory_client
-        await memory_client.close()
-        logger.info("Memory service HTTP client closed")
-    except Exception as e:
-        logger.error(f"Failed to close Memory service HTTP client: {e}")
-
 
 async def access_log_middleware(request, call_next):
     started_at = perf_counter()
