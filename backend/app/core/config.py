@@ -118,10 +118,8 @@ class Settings(BaseSettings):
     DEFAULT_HTTP_TIMEOUT: int = 120
     ENABLE_DATA_SOURCE_FAILOVER: bool = True
 
-    # Memory Service Config
-    MEMORY_SERVICE_ENABLED: bool = True
-    MEMORY_SERVICE_BASE_URL: str = "http://memo:8020"
-    MEMORY_SERVICE_TIMEOUT_SECONDS: float = 90.0
+    # Memory Document Config
+    MEMORY_DOC_MAX_CHARS: int = 8000
 
     # Webfetch Service Config
     WEBFETCH_BASE_URL: str = "http://webfetch:8010"

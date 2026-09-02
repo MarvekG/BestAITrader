@@ -48,30 +48,6 @@ services:
     networks:
       - bat.network
 
-  memo-postgres:
-    image: pgvector/pgvector:pg17
-    container_name: bat.memo.postgres
-    restart: unless-stopped
-    mem_limit: 2g
-    memswap_limit: 4g
-    mem_swappiness: 0
-    environment:
-      POSTGRES_USER: tradeuser
-      POSTGRES_PASSWORD: tradepassword
-      POSTGRES_DB: memory
-      TZ: Asia/Shanghai
-    volumes:
-      - memo.pgvector17.data:/var/lib/postgresql/data
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U tradeuser -d memory" ]
-      interval: 1m
-      start_interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 20s
-    networks:
-      - bat.network
-
   litellm:
     image: docker.litellm.ai/berriai/litellm-non_root:latest
     container_name: bat.litellm
@@ -96,37 +72,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-    networks:
-      - bat.network
-
-  memo:
-    build:
-      context: ./memo
-      dockerfile: Dockerfile
-    container_name: bat.memo
-    restart: unless-stopped
-    mem_limit: 2g
-    memswap_limit: 4g
-    mem_swappiness: 0
-    env_file:
-      - ./memo/.env
-    environment:
-      TZ: Asia/Shanghai
-    volumes:
-      - ./memo:/app # FOR DEBUG
-      - memo.runtime.data:/home/memo/.memoflux/data
-    depends_on:
-      memo-postgres:
-        condition: service_healthy
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://127.0.0.1:8020/v1/health" ]
-      interval: 1m
-      start_interval: 10s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    ports:
-      - "8020:8020"
     networks:
       - bat.network
 
@@ -323,10 +268,6 @@ volumes:
     name: bat.postgres17.data
   redis.data:
     name: bat.redis.data
-  memo.pgvector17.data:
-    name: bat.memo.pgvector17.data
-  memo.runtime.data:
-    name: bat.memo.runtime.data
   backend.runtime.data:
     name: bat.backend.runtime.data
   sandbox.runtime.data:

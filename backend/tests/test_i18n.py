@@ -29,16 +29,6 @@ def test_i18n_translate():
         assert service.t('common.success') == 'Success'
 
 
-def test_memory_session_label_replaces_legacy_scope_label():
-    service = I18nService()
-
-    assert service.get_locale('zh')['settings']['memory_column_session'] == '会话'
-    assert service.get_locale('en')['settings']['memory_column_session'] == 'Session'
-    legacy_key = 'memory_column_' + 'memory' + '_' + 'scope'
-    assert legacy_key not in service.get_locale('zh')['settings']
-    assert legacy_key not in service.get_locale('en')['settings']
-
-
 def test_legacy_memory_session_range_identifier_is_removed_from_source():
     forbidden = 'memory' + '_' + 'scope'
     repo_root = Path(__file__).resolve().parents[2]

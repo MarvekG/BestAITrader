@@ -1690,11 +1690,12 @@ class ExperienceService:
                 memo_session = "stock" if stock_code else "general"
             item: Dict[str, Any] = {
                 "content": content,
+                "content_chars": len(content),
                 "importance": _normalize_memory_importance(args.get("importance")),
                 "memo_session": memo_session,
                 "stock_code": stock_code,
             }
-            for key in ("status", "memory_id", "error"):
+            for key in ("status", "memory_id", "error", "version", "size_chars"):
                 value = result.get(key)
                 if value not in (None, ""):
                     item[key] = value
@@ -1721,14 +1722,15 @@ class ExperienceService:
                 memo_session = "stock" if stock_code else "general"
             normalized_item: Dict[str, Any] = {
                 "content": content,
+                "content_chars": len(content),
                 "importance": _normalize_memory_importance(item.get("importance")),
                 "memo_session": memo_session,
                 "stock_code": stock_code,
             }
-            for key in ("status", "memory_id", "error"):
+            for key in ("status", "memory_id", "error", "version", "size_chars"):
                 value = item.get(key)
                 if value not in (None, ""):
-                    normalized_item[key] = str(value)
+                    normalized_item[key] = str(value) if key in ("status", "memory_id", "error") else value
             normalized_items.append(normalized_item)
         return normalized_items
 

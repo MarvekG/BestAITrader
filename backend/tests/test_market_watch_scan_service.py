@@ -1267,7 +1267,14 @@ async def test_scan_successful_launch_writes_audit_and_returns_session_and_task_
     assert session.trading_strategy == "趋势追踪 (Trend Following)"
     task = await async_db_session.scalar(select(AsyncTask).where(AsyncTask.task_id == launch["task_id"]))
     assert task is not None
-    assert set(task.parameters) == {"session_id", "stock_code", "trading_frequency", "trading_strategy"}
+    assert set(task.parameters) == {
+        "session_id",
+        "stock_code",
+        "trading_frequency",
+        "trading_strategy",
+        "sync_before_analysis",
+    }
+    assert task.parameters["sync_before_analysis"] is True
     assert task.parameters["trading_frequency"] == "日内交易 (Day Trading)"
     assert task.parameters["trading_strategy"] == "趋势追踪 (Trend Following)"
     launch_event = await async_db_session.scalar(
@@ -1286,7 +1293,9 @@ async def test_scan_successful_launch_writes_audit_and_returns_session_and_task_
         "trading_strategy",
         "trigger_reason",
         "evidence_summary",
+        "sync_before_analysis",
     }
+    assert launcher_calls[0]["sync_before_analysis"] is True
     assert launcher_calls[0]["trading_frequency"] == "日内交易 (Day Trading)"
     assert launcher_calls[0]["trading_strategy"] == "趋势追踪 (Trend Following)"
     assert launcher_calls[0]["trigger_reason"] == "Strong anomaly and news context"

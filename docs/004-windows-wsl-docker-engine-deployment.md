@@ -23,8 +23,6 @@ Windows
         ├── LiteLLM           -> LLM 代理和模型别名网关
         ├── PostgreSQL        -> 主业务库
         ├── Redis             -> 缓存和任务辅助
-        ├── MemoFlux          -> 长期记忆服务
-        └── Memo PostgreSQL   -> pgvector 记忆库
 ```
 
 浏览器仍然在 Windows 里打开：
@@ -41,7 +39,7 @@ http://localhost:8080
 
 ## 2. 为什么不建议原生 Windows 手动部署
 
-天枢智投（Best-AI-Trader）不是一个单进程应用。完整部署至少包含后端、前端、Nginx、PostgreSQL、Redis、pgvector、LiteLLM、MemoFlux、独立沙箱、网页渲染和可选 MCP 服务。原生 Windows 手动部署会遇到这些问题：
+天枢智投（Best-AI-Trader）不是一个单进程应用。完整部署至少包含后端、前端、Nginx、PostgreSQL、Redis、LiteLLM、独立沙箱、网页渲染和可选 MCP 服务。原生 Windows 手动部署会遇到这些问题：
 
 - Python、Node、PostgreSQL、pgvector、Redis、LiteLLM、Deno/Pyodide、浏览器运行时和 MCP 服务需要分别安装和维护。
 - 本项目的 Compose 健康检查、服务名网络、命名卷和容器内路径天然按 Linux 容器设计。
@@ -443,7 +441,7 @@ git submodule update --init --recursive
 
 ```bash
 ls -la
-ls -la backend/.env.example memo/.env.example docker-compose.yml nginx.conf
+ls -la backend/.env.example docker-compose.yml nginx.conf
 ```
 
 ## 11. 下一步

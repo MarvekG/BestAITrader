@@ -72,55 +72,11 @@ export interface PromptStats {
     by_cache_lane?: UsageBreakdown;
     by_api_key_alias?: UsageBreakdown;
   } | null;
-  memory?: {
-    llm_runs?: number;
-    total_calls?: number;
-    input_tokens?: number;
-    output_tokens?: number;
-    total_tokens?: number;
-    cached_tokens?: number;
-    cache_miss_tokens?: number;
-    reasoning_tokens?: number;
-    cache_hit_rate?: number;
-    by_operation?: Record<
-      string,
-      {
-        calls?: number;
-        input_tokens?: number;
-        output_tokens?: number;
-        total_tokens?: number;
-        cached_tokens?: number;
-        cache_miss_tokens?: number;
-        reasoning_tokens?: number;
-        cache_hit_rate?: number;
-      }
-    >;
-  } | null;
-  combined?: {
-    total_calls?: number;
-    input_tokens?: number;
-    output_tokens?: number;
-    total_tokens?: number;
-    cached_tokens?: number;
-    cache_miss_tokens?: number;
-    reasoning_tokens?: number;
-    cache_hit_rate?: number;
-    by_role?: Record<string, number>;
-    by_role_detail?: UsageBreakdown;
-    by_workflow?: UsageBreakdown;
-    by_stage?: UsageBreakdown;
-    by_workflow_stage?: UsageBreakdown;
-    by_workflow_call_kind?: UsageBreakdown;
-    by_call_kind?: UsageBreakdown;
-    by_cache_lane?: UsageBreakdown;
-    by_api_key_alias?: UsageBreakdown;
-  } | null;
 }
 
 export interface ClearUsageStatsResult {
   status: string;
   backend?: { deleted?: number } | null;
-  memory?: { status?: string; deleted?: number; error?: Record<string, unknown> } | null;
   total_deleted: number;
 }
 

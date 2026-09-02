@@ -14,7 +14,7 @@
 
 ## 2. 这个功能是什么
 
-一体化部署是天枢智投的工程化落地能力。完整部署会启动 PostgreSQL、Redis、LiteLLM、MemoFlux、Memory pgvector、独立 Python 沙箱、网页抓取服务、FastAPI 后端、React 前端和 Nginx 统一入口。
+一体化部署是天枢智投的工程化落地能力。完整部署会启动 PostgreSQL、Redis、LiteLLM、独立 Python 沙箱、网页抓取服务、FastAPI 后端、React 前端和 Nginx 统一入口。
 
 它让天枢智投不只是代码仓库，而是一套可运行的 AI 投研平台。用户可以在统一环境中体验数据管理、AI 分析、智能选股、模拟交易、长期记忆和经验复盘，而不是只运行某个孤立模块。
 
@@ -24,7 +24,6 @@
 flowchart TD
     A["Docker Compose 启动"] --> B["PostgreSQL 与 Redis"]
     A --> C["LiteLLM 模型代理"]
-    A --> D["MemoFlux 与 Memory pgvector"]
     A --> E["Python 沙箱与 WebFetch"]
     B --> F["FastAPI 后端"]
     C --> F

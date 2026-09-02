@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
 from typing import Any, Awaitable, Callable, Dict, List, Optional, TypedDict
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
@@ -23,7 +22,6 @@ from app.ai.llm_routing import get_research_usage_lane
 from app.ai.json_utils import stable_json_dumps
 from app.core.config import settings
 from app.core.logger import get_logger
-from app.core.utils.converters import safe_isoformat
 from app.crud.llm_usage_log import record_llm_usage
 from app.ai.llm_engine.roles import AGENT_NAME_PORTFOLIO_MANAGER
 from app.websocket.manager import ws_manager
@@ -196,81 +194,17 @@ def _extract_written_memories(tool_trace: List[Dict[str, Any]]) -> List[Dict[str
             importance = "medium"
         item: dict[str, Any] = {
             "content": content,
+            "content_chars": len(content),
             "importance": importance,
             "memo_session": memo_session,
             "stock_code": stock_code,
         }
-        for key in ("status", "memory_id", "error"):
+        for key in ("status", "memory_id", "error", "version", "size_chars"):
             value = result.get(key)
             if value not in (None, ""):
                 item[key] = value
         items.append(item)
     return items
-
-
-def _memory_time_text(value: Any) -> str:
-    """把时间值转换为稳定的 ISO 文本。
-
-    Args:
-        value: 可能来自复盘上下文的时间对象或字符串。
-
-    Returns:
-        可写入记忆正文的时间文本；无法识别时返回空字符串。
-    """
-    if value is None:
-        return ""
-    if isinstance(value, str):
-        return value.strip()
-    if hasattr(value, "isoformat"):
-        return safe_isoformat(value) or ""
-    return ""
-
-
-def _build_memory_time_prefix(state: ExperienceWorkflowState) -> str:
-    """构造写入结构化记忆所需的时间前缀。
-
-    Args:
-        state: 经验复盘工作流状态，包含 PM 决策上下文和复盘周期。
-
-    Returns:
-        包含决策时间、复盘时间和复盘周期的单行前缀。
-    """
-    full_context = state.get("full_context") or {}
-    pm_decision = full_context.get("pm_decision") if isinstance(full_context.get("pm_decision"), dict) else {}
-    session = full_context.get("session") if isinstance(full_context.get("session"), dict) else {}
-    decision_time = _memory_time_text(pm_decision.get("created_at") or session.get("created_at"))
-    reviewed_at = _memory_time_text(state.get("reviewed_at") or datetime.now())
-    review_horizon = str(state.get("review_horizon") or "").strip()
-
-    parts = []
-    if decision_time:
-        parts.append(f"决策时间: {decision_time}")
-    if reviewed_at:
-        parts.append(f"复盘时间: {reviewed_at}")
-    if review_horizon:
-        parts.append(f"复盘周期: {review_horizon}")
-    return "时间: " + "；".join(parts) if parts else ""
-
-
-def _attach_time_to_memory_args(tool_args: Dict[str, Any], state: ExperienceWorkflowState) -> Dict[str, Any]:
-    """为 write_memory 参数中的正文补充复盘时间信息。
-
-    Args:
-        tool_args: 模型生成的工具调用参数。
-        state: 经验复盘工作流状态，用于读取决策时间和复盘周期。
-
-    Returns:
-        带时间前缀的工具调用参数副本。
-    """
-    content = str(tool_args.get("content") or "").strip()
-    if not content:
-        return tool_args
-
-    time_prefix = _build_memory_time_prefix(state)
-    if not time_prefix:
-        return tool_args
-
-    return {**tool_args, "content": f"{time_prefix}\n{content}"}
 
 
 def _build_experience_analysis_payload(
@@ -498,8 +432,8 @@ def _build_review_system_prompt(skills_prompt_suffix: str) -> str:
             "如果多个因素都相关，你必须指出 1-3 个主导因素，并说明它们如何对应到价格路径和回撤。"
             "如果当前上下文不足以解释涨跌原因，可以调用外部工具补证据；但如果已有证据足够，不要机械搜索。"
             "在引用工具返回的行情、财务或基本面数据前，必须先调用 `get_current_time` 确认当前系统时间，以判断数据的时效性和有效性。"
-            "历史经验只能通过记忆工具读取和写入，不要假设有额外的经验表可用。"
-            "是否调用 `recall_memory` 由你自己决定。只有当历史经验确实能降低当前不确定性时，才调用它；不要机械调用。"
+            "历史经验只能通过记忆工具读取和写入：每只股票维护一份自由格式的记忆文档，不要假设有额外的经验表可用。"
+            "是否调用 `read_memory` 由你自己决定。只有当历史经验确实能降低当前不确定性时，才调用它；不要机械调用。"
             "是否调用互联网或其他工具也由你自己决定，但你必须把股票涨跌的主要驱动原因查清楚，并在正确性解释里说明清楚。"
             "你必须显式区分：A. 被市场验证的信号；B. 被市场证伪的信号；C. 虽然说得有道理，但对实际涨跌贡献不大的噪音信号。"
             "你必须做一次多维原因检查，至少逐项检查这些维度：国家政策/监管、行业景气度与板块强弱、国际局势与宏观环境、业绩与基本面、估值、资金流与成交结构、市场情绪、事件催化、商品价格或成本、利率/汇率。"
@@ -509,23 +443,18 @@ def _build_review_system_prompt(skills_prompt_suffix: str) -> str:
             "`driver_dimension_review` 要按“维度 -> 证据 -> 影响 -> 结论”逐项写，尽量覆盖上面的多维检查。"
             "market_experience_summary 必须写成经验，不是摘要。至少包含：实际涨跌主因、被验证信号、被证伪信号、可复用经验。"
             "buy_sell_rules 必须写成未来可执行规则，而不是抽象观点。"
-            "只有在总结出可复用的赚钱经验、失败教训、仓位纪律或 debate 流程改进规则后，才调用 `write_memory` 写入记忆；如果没有新增可复用经验，可以跳过全部记忆写入。"
+            "只有在总结出可复用的赚钱经验、失败教训、仓位纪律或 debate 流程改进规则后，才调用 `write_memory` 重写整份记忆文档；如果没有新增可复用经验，可以跳过全部记忆写入。"
             "在调用 `write_memory` 之前，先把本次复盘提炼成 1-3 条可独立复用的高信息密度经验教训；每条都应能单独成立，避免空泛套话。"
             "记忆工具已自动绑定到当前股票，只允许写入当前股票记忆，不支持通用记忆，也不要尝试传入 `stock_code`。"
             "\n记忆写入协议:\n"
-            "1. 写入前提: 在调用 `write_memory` 前，先判断哪些主题有新增经验；没有新增经验的主题可以跳过。\n"
-            "2. 内容要素: 写入记忆时，`content` 必须同时包含真实股票名和股票代码，并清楚覆盖本次对象、交易频率、交易策略、原始 PM 结论正确性、决策后实际涨跌结果、`take_profit` 与 `holding_horizon_days` 的后验评价、主导驱动、多维原因拆解、被验证信号、被证伪信号、可复用规则、未来 Debate / PM / 风控检查项、失效条件/边界；若交易频率或交易策略无法确认，必须在正文中说明缺失。\n"
-            "3. 推荐写入顺序:\n"
-            "3.1 [MEMORY_TOPIC: decision_outcome]: 如果原始 PM 结论有明确后验结果，记录原始决策、目标仓位、置信度、止损/加仓计划、后续收益/回撤/相对收益和结论正确性。\n"
-            "3.2 [MEMORY_TOPIC: driver_validation]: 如果能区分被验证、被证伪和噪音信号，记录主导驱动、被验证信号、被证伪信号、噪音信号和被排除伪因。\n"
-            "3.3 [MEMORY_TOPIC: risk_control]: 如果仓位、止损、加仓、减仓、退出或回撤管理有教训，记录仓位大小、买入/卖出/持有条件、止损是否缺失/失效、流动性、板块 Beta、事件落地和失效条件。\n"
-            "3.4 [MEMORY_TOPIC: strategy_fit]: 如果经验的适用频率、策略或市场环境存在明显边界，记录适用的交易频率、交易策略、市场环境、失效环境和经验是否过时及原因。\n"
-            "3.5 [MEMORY_TOPIC: process_improvement]: 如果能提炼出未来 Debate / PM / Risk 的流程检查项，记录哪个 Agent 要补什么证据、哪类推理错误要避免、PM 如何调整仓位/置信度/卖出设计、Risk Control 要检查哪些否决条件。\n"
-            "4. 拆分规则: 一条 Memory 只写一个主主题；不同主题必须分次调用 `write_memory`，不要把多个主题揉成一条 Memory。每个 `write_memory` 调用只承载一个主题，主题之间不要互相夹带。\n"
-            "5. 推荐结构: 单条 Memory 正文建议包含 [MEMORY_TOPIC: ...]、对象:、交易频率:、交易策略:、场景:、经验:、触发条件:、未来动作:、失效边界:、证据:。对象必须同时包含真实股票名和股票代码。\n"
-            "6. 写入质量: 复盘写入必须包含后验市场结果或信号验证证据；不要把整个复盘表格原样塞进记忆；应提炼成高信息密度、可召回、可执行的经验正文。\n"
-            "7. 适用边界: 每条经验必须说明适用的交易频率和交易策略；每条改进都必须说明触发条件、未来 PM 或 Agent 要检查的证据，以及历史经验在什么边界下不再适用。\n"
-            "如果调用 `write_memory`，至少一条写入记忆必须直接总结本次复盘得到的经验教训与可执行规则，而不是只重复结论标签。"
+            "1. 写前必读: 调用 `write_memory` 前必须先 `read_memory` 获取最新全文，并把返回的 `version` 作为 `base_version` 传入。\n"
+            "2. 整文档替换: `content` 必须是重写后的完整文档全文；未包含进 `content` 的旧内容会被永久丢弃，重写时必须保留仍然有效的历史经验，并把本次复盘新增经验合并进去。\n"
+            "3. 自由格式: 文档结构由你自主组织，不设固定模板；建议按时间组织、标注决策与复盘日期、保留后验收益与信号验证证据、合并过时或重复内容。\n"
+            "4. 内容要素: 新增经验必须同时包含真实股票名和股票代码，并清楚覆盖对象、交易频率、交易策略、原始 PM 结论正确性、决策后实际涨跌结果、`take_profit` 与 `holding_horizon_days` 的后验评价、主导驱动、被验证信号、被证伪信号、可复用规则、失效条件与适用边界；决策时间、复盘时间和复盘周期由你在文档中自行标注。若交易频率或交易策略无法确认，必须在正文中说明缺失。\n"
+            "5. 容量上限: 文档超过系统上限时写入失败，必须在同一轮先精炼合并旧内容再重试，不要直接放弃。\n"
+            "6. 版本冲突: 写入失败并返回最新全文时，把你的新增经验合并进最新全文后用返回的版本号重试；禁止覆盖其他来源新增的内容。\n"
+            "7. 写入次数: 通常一次 `write_memory` 即可完成本次复盘的记忆更新；只有确实需要再次补充时才多次调用。\n"
+            "如果调用 `write_memory`，写入后的文档必须直接包含本次复盘得到的经验教训与可执行规则，而不是只重复结论标签。"
             "不要把普通背景信息和流水账写入记忆。"
             "最终结论必须明确区分：原始 PM 决策、你复盘后的改进动作、以及 debate 流程该如何优化。"
             "decision_process_improvement 必须写成给未来 Debate / PM 可直接执行的流程检查项，不能只是抽象建议。"
@@ -558,8 +487,8 @@ def _build_review_system_prompt(skills_prompt_suffix: str) -> str:
         "If several factors matter, identify the top 1-3 dominant drivers and connect them to the price path and drawdown. "
         "If the current context is insufficient to explain the move, you may call external tools for evidence; otherwise do not search mechanically. "
         "Before using market, financial, or fundamental data from tools, call `get_current_time` to confirm the current system time and assess data freshness and validity. "
-        "Historical experience can only be read or written through memory tools; do not assume any extra experience tables exist. "
-        "Whether to call `recall_memory` is your decision; only do so when prior experience can materially reduce uncertainty. "
+        "Historical experience can only be read or written through memory tools: each stock keeps one free-form memory document. Do not assume any extra experience tables exist. "
+        "Whether to call `read_memory` is your decision; only do so when prior experience can materially reduce uncertainty. "
         "Whether to call internet or other tools is also your decision, but you must clearly identify the main drivers of the stock move and explain them in correctness analysis. "
         "You must explicitly separate: A. validated signals; B. falsified signals; C. noisy signals that sounded plausible but contributed little to the actual move. "
         "You must perform a multi-dimensional driver check that covers at least: national policy/regulation, industry cycle and sector strength, international situation and macro backdrop, earnings/fundamentals, valuation, capital flow and trading structure, market sentiment, event catalysts, commodity prices/costs, and rates/FX. "
@@ -569,23 +498,18 @@ def _build_review_system_prompt(skills_prompt_suffix: str) -> str:
         "`driver_dimension_review` should be written in the format 'dimension -> evidence -> impact -> conclusion' and should reflect the multi-factor scan above. "
         "`market_experience_summary` must be written as reusable experience, not as a generic summary. It must include actual move drivers, validated signals, falsified signals, and reusable lessons. "
         "`buy_sell_rules` must be executable future rules, not abstract opinions. "
-        "Only after extracting reusable profitable experience, failed lessons, position discipline, or debate-process improvement rules should you call `write_memory`; if there is no new reusable lesson, you may skip all memory writes. "
+        "Only after extracting reusable profitable experience, failed lessons, position discipline, or debate-process improvement rules should you call `write_memory` to rewrite the whole memory document; if there is no new reusable lesson, you may skip all memory writes. "
         "Before calling `write_memory`, distill the review into 1-3 self-contained, high-density lessons that can stand on their own and avoid vague wording. "
         "The memory tools are already bound to the current stock. Only stock-bound memory is supported here, general memory is not supported, and you must not try to pass `stock_code`. "
         "\nMemory write protocol:\n"
-        "1. Write precondition: before calling `write_memory`, decide which topics contain new lessons; topics without new lessons may be skipped.\n"
-        "2. Content elements: memory `content` must include both the real stock name and stock code, and clearly cover the object, trading frequency, trading strategy, original PM correctness, actual post-decision outcome, hindsight evaluation of `take_profit` and `holding_horizon_days`, dominant drivers, multi-factor driver decomposition, validated signals, falsified signals, reusable rules, future Debate / PM / risk-control checklist items, and failure conditions or boundaries. If trading frequency or strategy cannot be confirmed, state the missing field in the content.\n"
-        "3. Recommended write order:\n"
-        "3.1 [MEMORY_TOPIC: decision_outcome]: if the original PM conclusion has clear later outcome evidence, record the original decision, target size, confidence, stop/add plan, later return/drawdown/relative return, and correctness.\n"
-        "3.2 [MEMORY_TOPIC: driver_validation]: if validated, falsified, and noisy signals can be separated, record dominant drivers, validated signals, falsified signals, noisy signals, and rejected false causes.\n"
-        "3.3 [MEMORY_TOPIC: risk_control]: if sizing, stop-loss, add, reduce, exit, or drawdown control produced a lesson, record sizing, buy/sell/hold conditions, missing/failed stops, liquidity, sector beta, event realization, and invalidation conditions.\n"
-        "3.4 [MEMORY_TOPIC: strategy_fit]: if the lesson has clear frequency, strategy, or market-regime boundaries, record applicable trading frequency, strategy, market regime, invalidation regime, and whether the lesson is stale and why.\n"
-        "3.5 [MEMORY_TOPIC: process_improvement]: if future Debate / PM / Risk checklist items can be extracted, record which Agent should verify what evidence, which reasoning error to avoid, how PM should adjust sizing/confidence/sell design, and which veto checks Risk Control must run.\n"
-        "4. Split rule: one Memory must carry one primary topic only. Different topics must use separate `write_memory` calls; do not mix multiple topics into one Memory. Each `write_memory` call must carry only one topic, and topics must not be bundled together.\n"
-        "5. Recommended structure: each Memory body should contain [MEMORY_TOPIC: ...], Object:, Trading frequency:, Trading strategy:, Scenario:, Lesson:, Trigger conditions:, Future action:, Invalidation boundary:, and Evidence:. Object must include both the real stock name and stock code.\n"
-        "6. Write quality: review writes must include later market outcome or signal-validation evidence. Do not copy the full review into memory; distill it into high-density, retrievable, executable experience text.\n"
-        "7. Applicability boundary: each lesson must state the trading frequency and strategy it applies to. Each improvement must state the trigger condition, the evidence future PM or agents must check, and the boundary where the historical lesson no longer applies.\n"
-        "If you call `write_memory`, at least one memory write must directly capture the reusable lesson and executable rule from this review instead of merely repeating verdict labels. "
+        "1. Read before write: before calling `write_memory`, call `read_memory` to get the latest full text, and pass its `version` as `base_version`.\n"
+        "2. Whole-document replacement: `content` must be the complete rewritten document; anything not included in `content` is permanently discarded, so preserve still-valid historical experience and merge this review's new lessons into it.\n"
+        "3. Free-form structure: you organize the document yourself with no fixed template; prefer time-ordered sections with decision/review dates, preserved posterior return and signal-validation evidence, and merged outdated or duplicated content.\n"
+        "4. Content elements: new lessons must include both the real stock name and stock code, and clearly cover the object, trading frequency, trading strategy, original PM correctness, actual post-decision outcome, hindsight evaluation of `take_profit` and `holding_horizon_days`, dominant drivers, validated signals, falsified signals, reusable rules, failure conditions, and applicability boundaries; you must annotate decision time, review time, and review horizon inside the document yourself. If trading frequency or strategy cannot be confirmed, state the missing field in the content.\n"
+        "5. Size limit: when the document exceeds the system limit the write fails; consolidate outdated content in the same turn and retry instead of giving up.\n"
+        "6. Version conflict: when the write fails and returns the latest full text, merge your new lessons into it and retry with the returned version; never overwrite content added by other sources.\n"
+        "7. Write count: one `write_memory` call is normally enough for this review; only call it again when a supplement is truly needed.\n"
+        "If you call `write_memory`, the resulting document must directly capture the reusable lesson and executable rule from this review instead of merely repeating verdict labels. "
         "Do not write generic background information or diary-style notes into memory. "
         "Your final answer must clearly distinguish the original PM decision, your revised action after review, and how the debate flow should improve. "
         "`decision_process_improvement` must be written as concrete future Debate / PM checklist items, not abstract advice. "
@@ -696,8 +620,6 @@ async def review_debate_conclusion(state: ExperienceWorkflowState) -> Dict[str, 
                     if tool_name == "search_news":
                         internet_tools_used.add(tool_name)
                     tool_args = make_json_serializable(tool_call["args"])
-                    if tool_name == "write_memory" and isinstance(tool_args, dict):
-                        tool_args = _attach_time_to_memory_args(tool_args, state)
                     tool_trace_entry = {"name": tool_name, "args": tool_args}
                     tool_trace.append(tool_trace_entry)
                     await _push_review_update(
@@ -746,9 +668,10 @@ async def review_debate_conclusion(state: ExperienceWorkflowState) -> Dict[str, 
                                 "success": tool_result.get("success"),
                                 "status": tool_result.get("status"),
                                 "memory_id": tool_result.get("memory_id"),
-                                "memo_session": tool_result.get("memo_session"),
                                 "stock_code": tool_result.get("stock_code"),
                                 "error": tool_result.get("error"),
+                                "version": tool_result.get("version"),
+                                "size_chars": tool_result.get("size_chars"),
                             }
                     if should_summarize_tool_output(tool_name, tool_payload):
                         tool_payload = await summarize_tool_output(

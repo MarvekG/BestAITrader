@@ -1,15 +1,14 @@
 from datetime import date
 import pytest
-import httpx
 from unittest.mock import MagicMock, patch, AsyncMock
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.messages.tool import invalid_tool_call
 from app.ai.agentic.tools import get_all_tools
 from app.ai.agentic.memory_tools import build_memory_tools
-from app.ai.memory_client import memory_client
 from app.ai.llm_providers.litellm import LiteLLMProvider
 from app.ai.llm_engine.agents import base as base_agent_module
 from app.ai.llm_engine.agents.base import BaseAgent
+from app.ai.llm_engine.prompts import templates
 from app.ai.llm_engine.roles import (
     AGENT_NAME_BULLISH_RESEARCHER,
     AGENT_NAME_CAPITAL_FLOW_ANALYST,
@@ -522,7 +521,7 @@ async def test_fetch_financial_data_rejects_invalid_table_type():
     ]
 
 
-def test_base_agent_can_attach_runtime_recall_tools_for_bull_role():
+def test_base_agent_can_attach_runtime_memory_tools_for_bull_role():
     mock_llm = MagicMock()
     mock_llm.bind_tools.return_value = MagicMock()
     with _patch_base_agent_llm_provider(mock_llm):
@@ -536,7 +535,7 @@ def test_base_agent_can_attach_runtime_recall_tools_for_bull_role():
         )
 
     tool_names = {tool.name for tool in agent.tools}
-    assert "recall_memory" in tool_names
+    assert "read_memory" in tool_names
     assert "write_memory" in tool_names
 
 
@@ -554,11 +553,11 @@ def test_base_agent_can_attach_runtime_write_tools_for_pm_role():
         )
 
     tool_names = {tool.name for tool in agent.tools}
-    assert "recall_memory" in tool_names
+    assert "read_memory" in tool_names
     assert "write_memory" in tool_names
 
 
-def test_recall_memory_tool_description_requires_focused_natural_query():
+def test_read_memory_tool_description_requires_whole_document_protocol():
     tools = build_memory_tools(
         state={
             "user_id": 7,
@@ -567,50 +566,23 @@ def test_recall_memory_tool_description_requires_focused_natural_query():
             "agent_role": AGENT_NAME_PORTFOLIO_MANAGER,
         },
     )
-    recall_tool = next(tool for tool in tools if tool.name == "recall_memory")
+    read_tool = next(tool for tool in tools if tool.name == "read_memory")
 
-    assert "真实股票名 + 股票代码" in recall_tool.description
-    assert "同时取真实股票名和股票代码写进 query" in recall_tool.description
-    assert "要复用的经验主题" in recall_tool.description
-    assert "2-5 个关键变量/动作/触发器" in recall_tool.description
-    assert "中远海控(601919.SH) PM裁决 HOLD 仓位 止损 加仓触发" in recall_tool.description
-    assert "时间意图" in recall_tool.description
-    assert "问题类型" in recall_tool.description
-    assert "不是必填项" in recall_tool.description
-    assert "不要只写" in recall_tool.description
-    assert "_target_stock_name" in recall_tool.description
-    assert "_target_stock_code" in recall_tool.description
-    assert "[MEMORY_TOPIC: risk_control]" in recall_tool.description
-    assert "[MEMORY_TOPIC: driver_validation]" in recall_tool.description
-    assert "[MEMORY_TOPIC: process_improvement]" in recall_tool.description
-    assert "不按 Agent 角色固定召回主题" in recall_tool.description
-    assert "自主决定是否召回以及召回哪些主题" in recall_tool.description
-    assert "记忆召回协议:" in recall_tool.description
-    assert "1. 使用时机:" in recall_tool.description
-    assert "2. Query 结构:" in recall_tool.description
-    assert "3. 主题召回:" in recall_tool.description
-    assert "3.1 [MEMORY_TOPIC: decision_outcome]:" in recall_tool.description
-    assert "当需要对比历史类似 PM 决策结果" in recall_tool.description
-    assert "3.2 [MEMORY_TOPIC: risk_control]:" in recall_tool.description
-    assert "当需要输出仓位、止损、`buy`/`sell`/`hold` 或失效条件时召回" in recall_tool.description
-    assert "3.3 [MEMORY_TOPIC: driver_validation]:" in recall_tool.description
-    assert "当需要判断当前核心驱动、信号或噪音是否已有历史验证/证伪经验时召回" in recall_tool.description
-    assert "3.4 [MEMORY_TOPIC: strategy_fit]:" in recall_tool.description
-    assert "当需要判断历史经验是否适配当前交易频率、交易策略或市场环境时召回" in recall_tool.description
-    assert "3.5 [MEMORY_TOPIC: process_improvement]:" in recall_tool.description
-    assert "当需要检查本轮 Debate / PM / 风控流程是否可能重复历史流程缺陷时召回" in recall_tool.description
-    assert "4. Query 示例:" in recall_tool.description
-    assert "5. 限制:" in recall_tool.description
-    assert "交通银行(601328.SH) [MEMORY_TOPIC: risk_control] 中长线 价值投资 银行Beta 仓位 止损 加仓" in recall_tool.description
-    assert "交通银行(601328.SH) [MEMORY_TOPIC: driver_validation] 业绩说明会 高股息 PB低估 板块资金流" in recall_tool.description
-    assert "交通银行(601328.SH) [MEMORY_TOPIC: process_improvement] Debate PM 风控 检查项 催化验证" in recall_tool.description
-    assert "当前目标股票 PM决策经验" not in recall_tool.description
-    assert "真实股票名/代码 + 经验主体" not in recall_tool.description
-    assert "不要在代码中硬编码强制主题检查" not in recall_tool.description
-    assert "关键词匹配判断记忆是否合格" not in recall_tool.description
+    assert "整份记忆文档" in read_tool.description
+    assert "自由格式的 Markdown 活文档" in read_tool.description
+    assert "自动绑定到分析目标股票" in read_tool.description
+    assert "不接受外部传入的 `stock_code`" in read_tool.description
+    assert "不能替代实时行情、财务数据、新闻或政策检索" in read_tool.description
+    assert "1. 使用时机:" in read_tool.description
+    assert "不要机械调用" in read_tool.description
+    assert "2. 返回内容:" in read_tool.description
+    assert "`version` 为当前版本号" in read_tool.description
+    assert "3. 文档尚不存在时" in read_tool.description
+    assert "不要重复调用" in read_tool.description
+    assert "[MEMORY_TOPIC" not in read_tool.description
 
 
-def test_write_memory_tool_description_requires_reusable_auditable_experience():
+def test_write_memory_tool_description_requires_whole_document_protocol():
     tools = build_memory_tools(
         state={
             "user_id": 7,
@@ -621,58 +593,28 @@ def test_write_memory_tool_description_requires_reusable_auditable_experience():
     )
     write_tool = next(tool for tool in tools if tool.name == "write_memory")
 
-    assert "能让系统持续进步的记忆" in write_tool.description
-    assert "必须同时包含真实股票名和股票代码" in write_tool.description
-    assert "交易频率" in write_tool.description
-    assert "交易策略" in write_tool.description
-    assert "若交易频率或交易策略无法确认" in write_tool.description
-    assert "对象必须同时包含真实股票名和股票代码" in write_tool.description
+    assert "整文档替换写入" in write_tool.description
+    assert "写前必读" in write_tool.description
+    assert "必须先调用 `read_memory` 获取最新全文和 `version`" in write_tool.description
+    assert "`base_version` 与当前版本不一致会写入失败" in write_tool.description
+    assert "2. 整文档替换:" in write_tool.description
+    assert "未包含进 `content` 的旧内容将被永久丢弃" in write_tool.description
+    assert "3. 自由格式:" in write_tool.description
+    assert "不设固定模板" in write_tool.description
+    assert "内容要素" in write_tool.description
     assert "场景" in write_tool.description
     assert "关键证据" in write_tool.description
-    assert "触发器" in write_tool.description
-    assert "失效条件" in write_tool.description
-    assert "常见误判" in write_tool.description
+    assert "触发条件" in write_tool.description
+    assert "失效边界" in write_tool.description
     assert "执行纪律" in write_tool.description
-    assert "中远海控(601919.SH) PM裁决经验" in write_tool.description
-    assert "高股息是后视镜数据" in write_tool.description
-    assert "[MEMORY_TOPIC: risk_control]" in write_tool.description
-    assert "[MEMORY_TOPIC: strategy_fit]" in write_tool.description
-    assert "一条 Memory 只写一个主主题" in write_tool.description
-    assert "不同主题分次调用" in write_tool.description
-    assert "不要把多个主题揉成一条" in write_tool.description
-    assert "对象:" in write_tool.description
-    assert "经验:" in write_tool.description
-    assert "触发条件:" in write_tool.description
-    assert "未来动作:" in write_tool.description
-    assert "失效边界:" in write_tool.description
-    assert "证据:" in write_tool.description
-    assert "复盘写入必须包含后验市场结果或信号验证证据" in write_tool.description
-    assert "Debate 内部写入不能伪造未来后验结果" in write_tool.description
-    assert "记忆写入协议:" in write_tool.description
-    assert "1. 写入前提:" in write_tool.description
-    assert "2. 内容要素:" in write_tool.description
-    assert "3. 协议主题:" in write_tool.description
-    assert "3.1 [MEMORY_TOPIC: decision_outcome]:" in write_tool.description
-    assert "如果原始 PM 结论有明确后验结果" in write_tool.description
-    assert "后续收益/回撤/相对收益和结论正确性" in write_tool.description
-    assert "3.2 [MEMORY_TOPIC: driver_validation]:" in write_tool.description
-    assert "如果能区分被验证、被证伪和噪音信号" in write_tool.description
-    assert "被排除伪因" in write_tool.description
-    assert "3.3 [MEMORY_TOPIC: risk_control]:" in write_tool.description
-    assert "如果仓位、止损、`buy`/`sell`/`hold` 或回撤管理有教训" in write_tool.description
-    assert "板块 Beta" in write_tool.description
-    assert "3.4 [MEMORY_TOPIC: strategy_fit]:" in write_tool.description
-    assert "如果经验的适用频率、策略或市场环境存在明显边界" in write_tool.description
-    assert "经验是否过时及原因" in write_tool.description
-    assert "3.5 [MEMORY_TOPIC: process_improvement]:" in write_tool.description
-    assert "如果能提炼出未来 Debate / PM / Risk 的流程检查项" in write_tool.description
-    assert "Risk Control 要检查哪些否决条件" in write_tool.description
-    assert "4. 拆分规则:" in write_tool.description
-    assert "5. 推荐结构:" in write_tool.description
-    assert "6. 禁止事项:" in write_tool.description
-    assert "7. 异步语义:" in write_tool.description
-    assert "不要在代码中硬编码强制主题检查" not in write_tool.description
-    assert "关键词匹配判断记忆是否合格" not in write_tool.description
+    assert "4. 容量上限:" in write_tool.description or "5. 容量上限:" in write_tool.description
+    assert "6. 版本冲突:" in write_tool.description
+    assert "并行 Agent 写入冲突时禁止覆盖他人新增内容" in write_tool.description
+    assert "7. 写入时机:" in write_tool.description
+    assert "Debate 内部不得伪造未来后验结果" in write_tool.description
+    assert "8. `importance`" in write_tool.description
+    assert "[MEMORY_TOPIC" not in write_tool.description
+    assert "不同主题分次调用" not in write_tool.description
 
 
 def test_base_agent_can_attach_runtime_recall_and_write_tools_for_risk_role():
@@ -689,7 +631,7 @@ def test_base_agent_can_attach_runtime_recall_and_write_tools_for_risk_role():
         )
 
     tool_names = {tool.name for tool in agent.tools}
-    assert "recall_memory" in tool_names
+    assert "read_memory" in tool_names
     assert "write_memory" in tool_names
 
 
@@ -707,7 +649,7 @@ def test_base_agent_does_not_attach_runtime_memory_tools_for_fundamental_role():
         )
 
     tool_names = {tool.name for tool in agent.tools}
-    assert "recall_memory" not in tool_names
+    assert "read_memory" not in tool_names
     assert "write_memory" not in tool_names
 
 
@@ -735,7 +677,7 @@ def test_base_agent_does_not_attach_runtime_memory_tools_for_fact_first_roles():
             )
 
         tool_names = {tool.name for tool in agent.tools}
-        assert "recall_memory" not in tool_names, role_name
+        assert "read_memory" not in tool_names, role_name
         assert "write_memory" not in tool_names, role_name
 
 
@@ -752,47 +694,12 @@ def test_base_agent_does_not_attach_runtime_memory_tools_without_stock_code():
         )
 
     tool_names = {tool.name for tool in agent.tools}
-    assert "recall_memory" not in tool_names
+    assert "read_memory" not in tool_names
     assert "write_memory" not in tool_names
 
 
 @pytest.mark.asyncio
-async def test_memory_client_records_last_error_for_failed_requests():
-    class _FailingAsyncClient:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        async def post(self, url, json, headers=None, timeout=None):
-            del headers, timeout
-            raise httpx.ConnectTimeout("memory backend timeout")
-
-    memory_client.clear_last_error("recall")
-    with patch("app.ai.memory_client.settings.MEMORY_SERVICE_ENABLED", True), \
-         patch("app.ai.memory_client.settings.MEMORY_SERVICE_BASE_URL", "http://memo"), \
-         patch("app.ai.memory_client.httpx.AsyncClient", _FailingAsyncClient):
-        result = await memory_client.recall(
-            user_id=1,
-            stock_code="000001.SZ",
-            query="history lesson",
-        )
-
-    assert result == {}
-    assert memory_client.get_last_error("recall") == {
-        "operation": "recall",
-        "path": "/v1/recall",
-        "message": "memory backend timeout",
-        "error_type": "ConnectTimeout",
-    }
-
-
-@pytest.mark.asyncio
-async def test_recall_memory_tool_surfaces_memory_backend_failure():
+async def test_read_memory_tool_returns_whole_document():
     tools = build_memory_tools(
         state={
             "user_id": 7,
@@ -801,20 +708,44 @@ async def test_recall_memory_tool_surfaces_memory_backend_failure():
             "agent_role": AGENT_NAME_PORTFOLIO_MANAGER,
         },
     )
-    recall_tool = next(tool for tool in tools if tool.name == "recall_memory")
+    read_tool = next(tool for tool in tools if tool.name == "read_memory")
 
-    with patch("app.ai.agentic.memory_tools.memory_client.recall", new=AsyncMock(return_value={})), \
-         patch(
-             "app.ai.agentic.memory_tools.memory_client.get_last_error",
-             return_value={"message": "memory backend timeout"},
-         ):
-        result = await recall_tool.ainvoke({"query": "history lesson"})
+    with patch(
+        "app.ai.agentic.memory_tools.store.read_document",
+        new=AsyncMock(return_value={"exists": True, "content": "# 记忆文档", "size_chars": 6, "version": 3}),
+    ) as mock_read:
+        result = await read_tool.ainvoke({})
 
-    assert result["data"] == {}
-    assert result["count"] == 0
-    assert result["memo_session"] == "stock"
+    payload = mock_read.await_args.kwargs
+    assert payload["user_id"] == 7
+    assert payload["stock_code"] == "000001.SZ"
+    assert result["exists"] is True
+    assert result["content"] == "# 记忆文档"
+    assert result["version"] == 3
     assert result["stock_code"] == "000001.SZ"
-    assert result["error"] == "memory backend timeout"
+
+
+@pytest.mark.asyncio
+async def test_read_memory_tool_reports_missing_document():
+    tools = build_memory_tools(
+        state={
+            "user_id": 7,
+            "stock_code": "000001.SZ",
+            "session_id": "sess-1",
+            "agent_role": AGENT_NAME_PORTFOLIO_MANAGER,
+        },
+    )
+    read_tool = next(tool for tool in tools if tool.name == "read_memory")
+
+    with patch(
+        "app.ai.agentic.memory_tools.store.read_document",
+        new=AsyncMock(return_value={"exists": False, "content": "", "size_chars": 0, "version": 0}),
+    ):
+        result = await read_tool.ainvoke({})
+
+    assert result["exists"] is False
+    assert result["content"] == ""
+    assert result["version"] == 0
 
 
 @pytest.mark.asyncio
@@ -832,25 +763,35 @@ async def test_write_memory_tool_passes_minimal_session_inputs():
     write_tool = next(tool for tool in tools if tool.name == "write_memory")
 
     with patch(
-        "app.ai.agentic.memory_tools.memory_client.write_memory",
-        new=AsyncMock(return_value={"memory_id": "mem_1", "status": "pending"}),
-    ) as mock_write:
+        "app.ai.agentic.memory_tools.store.update_document",
+        new=AsyncMock(return_value={
+            "success": True,
+            "status": "success",
+            "memory_id": "md_abc",
+            "stock_code": "000001.SZ",
+            "version": 4,
+            "size_chars": 88,
+        }),
+    ) as mock_update:
         result = await write_tool.ainvoke({
             "content": "This breakout only works when northbound inflow confirms within 2 sessions.",
             "importance": "high",
+            "base_version": 3,
         })
 
-    assert result["success"] is True
-    payload = mock_write.await_args.kwargs
+    payload = mock_update.await_args.kwargs
     assert payload["user_id"] == 7
     assert payload["stock_code"] == "000001.SZ"
     assert payload["content"] == "This breakout only works when northbound inflow confirms within 2 sessions."
-    assert result["memo_session"] == "stock"
+    assert payload["base_version"] == 3
+    assert result["success"] is True
+    assert result["memory_id"] == "md_abc"
     assert result["stock_code"] == "000001.SZ"
+    assert "event_id" not in result
 
 
 @pytest.mark.asyncio
-async def test_write_memory_tool_returns_memory_id_without_event_id_alias():
+async def test_write_memory_tool_requires_non_negative_base_version():
     tools = build_memory_tools(
         state={
             "user_id": 7,
@@ -861,150 +802,16 @@ async def test_write_memory_tool_returns_memory_id_without_event_id_alias():
     )
     write_tool = next(tool for tool in tools if tool.name == "write_memory")
 
-    with patch(
-        "app.ai.agentic.memory_tools.memory_client.write_memory",
-        new=AsyncMock(return_value={"memory_id": "mem_1", "status": "accepted"}),
-    ):
+    with patch("app.ai.agentic.memory_tools.store.update_document", new=AsyncMock()) as mock_update:
         result = await write_tool.ainvoke({
             "content": "复盘经验：趋势没有确认前，不扩大仓位。",
             "importance": "high",
+            "base_version": -1,
         })
 
-    assert result["success"] is True
-    assert result["memory_id"] == "mem_1"
-    assert "event_id" not in result
-    assert result["stock_code"] == "000001.SZ"
-
-
-@pytest.mark.asyncio
-async def test_write_memory_tool_uses_state_stock_code_without_tool_args():
-    tools = build_memory_tools(
-        state={
-            "user_id": 7,
-            "stock_code": "000001.SZ",
-            "session_id": "sess-1",
-            "agent_role": AGENT_NAME_PORTFOLIO_MANAGER,
-        },
-    )
-    write_tool = next(tool for tool in tools if tool.name == "write_memory")
-
-    with patch(
-        "app.ai.agentic.memory_tools.memory_client.write_memory",
-        new=AsyncMock(return_value={"memory_id": "mem_2", "status": "pending"}),
-    ) as mock_write:
-        result = await write_tool.ainvoke({
-            "content": "通用规则：先看证据质量，再决定是否扩大仓位。",
-            "importance": "medium",
-        })
-
-    payload = mock_write.await_args.kwargs
-    assert payload["stock_code"] == "000001.SZ"
-    assert payload["content"] == "通用规则：先看证据质量，再决定是否扩大仓位。"
-    assert result["memo_session"] == "stock"
-    assert result["stock_code"] == "000001.SZ"
-
-
-@pytest.mark.asyncio
-async def test_recall_memory_tool_returns_memoflux_data_shape():
-    tools = build_memory_tools(
-        state={
-            "user_id": 7,
-            "stock_code": "000001.SZ",
-            "session_id": "sess-1",
-            "agent_role": AGENT_NAME_PORTFOLIO_MANAGER,
-        },
-    )
-    recall_tool = next(tool for tool in tools if tool.name == "recall_memory")
-
-    with patch("app.ai.memory_client.settings.MEMORY_SERVICE_ENABLED", True), \
-         patch("app.ai.memory_client.settings.MEMORY_SERVICE_BASE_URL", "http://memo"), \
-         patch.object(memory_client, "_post", new=AsyncMock(return_value={
-             "success": True,
-             "data": {
-                 "answer": "通用规则：先看证据质量，再决定是否扩大仓位。",
-                 "references": [
-                     {
-                         "memory_id": "mem_1",
-                         "content": "证据",
-                         "occurred_at": "2026-05-01T00:00:00Z",
-                         "relevance": "证据",
-                     }
-                 ],
-                 "uncertainties": ["contradicting_memory:mem_2"],
-             },
-          })):
-        result = await recall_tool.ainvoke({"query": "之前的通用规则是什么？"})
-
-    assert result["count"] == 1
-    assert result["memo_session"] == "stock"
-    assert result["stock_code"] == "000001.SZ"
-    assert result["data"]["answer"] == "通用规则：先看证据质量，再决定是否扩大仓位。"
-    assert result["data"]["references"][0]["memory_id"] == "mem_1"
-    assert result["data"]["uncertainties"] == ["contradicting_memory:mem_2"]
-    assert "items" not in result
-
-
-@pytest.mark.asyncio
-async def test_write_memory_tool_uses_memory_client_request_adapter():
-    tools = build_memory_tools(
-        state={
-            "user_id": 7,
-            "stock_code": "000001.SZ",
-            "session_id": "sess-1",
-            "agent_role": AGENT_NAME_PORTFOLIO_MANAGER,
-            "trading_strategy": "momentum",
-            "trading_frequency": "swing",
-        },
-    )
-    write_tool = next(tool for tool in tools if tool.name == "write_memory")
-
-    with patch("app.ai.memory_client.settings.MEMORY_SERVICE_ENABLED", True), \
-         patch("app.ai.memory_client.settings.MEMORY_SERVICE_BASE_URL", "http://memo"), \
-         patch.object(
-             memory_client,
-             "_post",
-              new=AsyncMock(return_value={"data": {"memory_id": "mem_3", "status": "accepted"}}),
-         ) as mock_post:
-        result = await write_tool.ainvoke({
-            "content": "通用纪律：证据不一致时，不扩大仓位。",
-            "importance": "medium",
-        })
-
-    assert result["success"] is True
-    assert result["memo_session"] == "stock"
-    assert result["stock_code"] == "000001.SZ"
-    payload = mock_post.await_args.args[1]
-    assert mock_post.await_args.args[0] == "/v1/ingest"
-    assert payload["session"] == "user:7:stock:000001.SZ"
-    assert payload["content"] == "通用纪律：证据不一致时，不扩大仓位。"
-    assert "occurred_at" in payload
-
-
-@pytest.mark.asyncio
-@pytest.mark.asyncio
-async def test_write_memory_tool_surfaces_memory_backend_failure():
-    tools = build_memory_tools(
-        state={
-            "user_id": 7,
-            "stock_code": "000001.SZ",
-            "session_id": "sess-1",
-            "agent_role": AGENT_NAME_PORTFOLIO_MANAGER,
-        },
-    )
-    write_tool = next(tool for tool in tools if tool.name == "write_memory")
-
-    with patch("app.ai.agentic.memory_tools.memory_client.write_memory", new=AsyncMock(return_value={})), \
-         patch(
-             "app.ai.agentic.memory_tools.memory_client.get_last_error",
-             return_value={"message": "memory backend timeout"},
-         ):
-        result = await write_tool.ainvoke({
-            "content": "high value lesson",
-            "importance": "high",
-        })
-
+    mock_update.assert_not_awaited()
     assert result["success"] is False
-    assert result["error"] == "memory backend timeout"
+    assert "base_version" in result["error"]
 
 
 @pytest.mark.asyncio
@@ -1023,10 +830,132 @@ async def test_write_memory_tool_rejects_invalid_importance():
         await write_tool.ainvoke({
             "content": "short note",
             "importance": "urgent",
+            "base_version": 0,
         })
 
     assert "low" in str(exc_info.value)
     assert "high" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_base_agent_builds_memory_hint_when_document_exists(test_db, async_db_session):
+    from app.ai.memory_documents import store
+    from app.models.user import User
+
+    user = User(username="hint_user_a", email="hint_user_a@example.com", password_hash="x")
+    async_db_session.add(user)
+    await async_db_session.commit()
+    await async_db_session.refresh(user)
+    await store.update_document(
+        user_id=user.id,
+        stock_code="000001.SZ",
+        content="doc content",
+        base_version=0,
+    )
+
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.return_value = MagicMock()
+    with _patch_base_agent_llm_provider(mock_llm):
+        agent = _DummyLLMEngineAgent(
+            role_name=AGENT_NAME_RISK_CONTROL_ANALYST,
+            state={"session_id": "sess-1", "user_id": user.id, "stock_code": "000001.SZ"},
+        )
+
+    hint = await agent._build_memory_hint()
+
+    assert hint.startswith("MEMORY_DOCUMENT:")
+    assert "read_memory" in hint
+    assert "version 1" in hint
+    assert "11 字符" in hint
+
+
+@pytest.mark.asyncio
+async def test_base_agent_memory_hint_absent_without_document(test_db, async_db_session):
+    from app.models.user import User
+
+    user = User(username="hint_user_b", email="hint_user_b@example.com", password_hash="x")
+    async_db_session.add(user)
+    await async_db_session.commit()
+    await async_db_session.refresh(user)
+
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.return_value = MagicMock()
+    with _patch_base_agent_llm_provider(mock_llm):
+        agent = _DummyLLMEngineAgent(
+            role_name=AGENT_NAME_RISK_CONTROL_ANALYST,
+            state={"session_id": "sess-1", "user_id": user.id, "stock_code": "000001.SZ"},
+        )
+
+    assert await agent._build_memory_hint() == ""
+
+
+@pytest.mark.asyncio
+async def test_base_agent_memory_hint_skipped_for_non_memory_role():
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.return_value = MagicMock()
+    with _patch_base_agent_llm_provider(mock_llm):
+        agent = _DummyLLMEngineAgent(
+            role_name=AGENT_NAME_FUNDAMENTAL_ANALYST,
+            state={"session_id": "sess-1", "user_id": 1, "stock_code": "000001.SZ"},
+        )
+
+    assert await agent._build_memory_hint() == ""
+
+
+@pytest.mark.asyncio
+async def test_base_agent_memory_hint_skipped_without_user_or_stock():
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.return_value = MagicMock()
+
+    for state in ({"session_id": "sess-1"}, {"session_id": "sess-1", "user_id": 1}):
+        with _patch_base_agent_llm_provider(mock_llm):
+            agent = _DummyLLMEngineAgent(
+                role_name=AGENT_NAME_PORTFOLIO_MANAGER,
+                state=dict(state),
+            )
+        assert await agent._build_memory_hint() == "", state
+
+
+@pytest.mark.asyncio
+async def test_base_agent_memory_hint_degrades_when_store_fails():
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.return_value = MagicMock()
+    with _patch_base_agent_llm_provider(mock_llm):
+        agent = _DummyLLMEngineAgent(
+            role_name=AGENT_NAME_PORTFOLIO_MANAGER,
+            state={"session_id": "sess-1", "user_id": 1, "stock_code": "000001.SZ"},
+        )
+
+    with patch(
+        "app.ai.memory_documents.store.read_document",
+        side_effect=Exception("db down"),
+    ):
+        assert await agent._build_memory_hint() == ""
+
+
+def test_build_context_messages_appends_memory_hint_as_last_message():
+    mock_llm = MagicMock()
+    mock_llm.bind_tools.return_value = MagicMock()
+    with _patch_base_agent_llm_provider(mock_llm):
+        agent = _DummyLLMEngineAgent(role_name=AGENT_NAME_PORTFOLIO_MANAGER, state={})
+
+    with_hint = agent._build_context_messages({"static": 1}, {"runtime": 2}, memory_hint="HINT")
+    assert len(with_hint) == 3
+    assert with_hint[0].content.startswith("STATIC_CONTEXT:")
+    assert with_hint[1].content.startswith("RUNTIME_CONTEXT:")
+    assert with_hint[2].content == "HINT"
+
+    without_hint = agent._build_context_messages({"static": 1}, {"runtime": 2})
+    assert len(without_hint) == 2
+
+
+def test_common_system_prompt_describes_whole_document_memory_protocol():
+    prompt = templates.get_common_agent_system_prompt()
+
+    assert "`read_memory`" in prompt
+    assert "`write_memory` 为整文档替换" in prompt
+    assert "写入前必须先 `read_memory` 获取最新全文和版本号" in prompt
+    assert "recall_memory" not in prompt
 
 
 @pytest.mark.asyncio

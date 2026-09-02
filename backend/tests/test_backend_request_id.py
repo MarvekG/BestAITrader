@@ -5,9 +5,6 @@ import re
 import pytest
 
 from app.core.request_context import get_request_id
-from app.core.request_context import clear_request_id
-from app.core.request_context import set_request_id
-from app.ai.memory_client import MemoryServiceClient
 from app.tasks.async_task_runner import AsyncTaskRunner
 
 
@@ -26,57 +23,6 @@ def test_backend_preserves_request_id_header(client) -> None:
 
     assert response.status_code == 200
     assert response.headers["x-request-id"] == request_id
-
-
-@pytest.mark.asyncio
-async def test_memory_client_forwards_request_id(monkeypatch) -> None:
-    client = MemoryServiceClient()
-    request_id = "00112233445566778899aabbccddeeff"
-    captured_headers: dict[str, str] = {}
-
-    class _FakeResponse:
-        status_code = 200
-
-        def raise_for_status(self) -> None:
-            return None
-
-        def json(self) -> dict[str, object]:
-            return {"status": "ok"}
-
-    class _FakeAsyncClient:
-        def __init__(self, *args, **kwargs) -> None:
-            del args, kwargs
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb) -> None:
-            del exc_type, exc, tb
-
-        async def post(
-            self,
-            url: str,
-            json: dict[str, object],
-            headers: dict[str, str],
-            timeout: float | None = None,
-        ):
-            del url, json, timeout
-            captured_headers.update(headers)
-            return _FakeResponse()
-
-    token = set_request_id(request_id)
-    monkeypatch.setattr("app.ai.memory_client.httpx.AsyncClient", _FakeAsyncClient)
-    try:
-        response = await client._post(
-            "/v1/ingest",
-            {"session": "user:7:general", "content": "note", "occurred_at": "2026-06-01T00:00:00Z"},
-            operation="ingest",
-        )
-    finally:
-        clear_request_id(token)
-
-    assert response == {"status": "ok"}
-    assert captured_headers["x-request-id"] == request_id
 
 
 @pytest.mark.asyncio

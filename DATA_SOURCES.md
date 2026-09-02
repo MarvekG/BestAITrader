@@ -25,7 +25,7 @@
 | 盯盘网页源 | 由部署方配置必填的数据源和新闻源 URL，运行时通过 `browse_web_page_html` 渲染为 Markdown；默认移除 Markdown 中的 URL 目标和裸 URL，可在设置中关闭清理；仓库不内置固定行情源或固定新闻源，也不缓存新闻正文。 | `backend/app/ai/market_watch/web_sources.py`, `backend/app/ai/market_watch/settings.py` | 配置的每个 URL 是否允许自动访问、Markdown 转换、模型输入、实时推送和展示。 |
 | NewsAPI | 通过用户提供的必填 API Key 进行新闻搜索。 | `backend/app/ai/agentic/tooling/news_plugins/newsapi.py` | 当前计划限制、生产使用、署名、存储和文章内容处理要求。 |
 | Tavily | 通过用户提供的 API Key 进行可选网页/新闻搜索。 | `backend/app/ai/agentic/tooling/news_plugins/tavily.py` | API 条款、可接受使用限制、高风险金融约束和输出处理要求。 |
-| LLM 服务商 | 使用用户提供的 Key 生成聊天、记忆和分析结果。 | LiteLLM Proxy via `litellm/config.yaml`, `backend/app/ai/llm_providers/`, `memo/memoflux/llm.py` | 是否可以向服务商发送 prompt、输出、个人数据、账户数据和金融分析内容。 |
+| LLM 服务商 | 使用用户提供的 Key 生成聊天、记忆和分析结果。 | LiteLLM Proxy via `litellm/config.yaml`, `backend/app/ai/llm_providers/` | 是否可以向服务商发送 prompt、输出、个人数据、账户数据和金融分析内容。 |
 | 外部插件和 Skills | 用户安装的数据源插件和脚本。 | `/runtime/news_plugins/external/`, `/runtime/skills/` | 安装前审查代码、依赖、数据权利、网络目标和许可证兼容性。 |
 
 ## 原始数据处理
@@ -96,7 +96,7 @@ rules, caching rules, redistribution limits, and use permissions.
 | Market-watch web sources | Operators configure required data-source and news-source URLs; runtime renders pages through `browse_web_page_html` into Markdown. URL targets and bare URLs are removed from Markdown by default and can be kept through settings. The repository does not include a fixed quote extractor or fixed news-source watcher, and it does not cache news bodies. | `backend/app/ai/market_watch/web_sources.py`, `backend/app/ai/market_watch/settings.py` | Confirm each configured URL permits automated access, Markdown conversion, model input, live push, and display. |
 | NewsAPI | News search provider through a required user-provided API key. | `backend/app/ai/agentic/tooling/news_plugins/newsapi.py` | Confirm current plan limits, production use, attribution, storage, and article-content handling. |
 | Tavily | Optional web/news search provider through a user-provided API key. | `backend/app/ai/agentic/tooling/news_plugins/tavily.py` | Confirm API terms, acceptable-use limits, high-risk finance constraints, and output handling. |
-| LLM providers | Chat/completion, memory, and analysis generation through user-provided keys. | LiteLLM Proxy via `litellm/config.yaml`, `backend/app/ai/llm_providers/`, `memo/memoflux/llm.py` | Confirm whether prompts, outputs, personal data, account data, and financial analysis may be sent to the provider. |
+| LLM providers | Chat/completion, memory, and analysis generation through user-provided keys. | LiteLLM Proxy via `litellm/config.yaml`, `backend/app/ai/llm_providers/` | Confirm whether prompts, outputs, personal data, account data, and financial analysis may be sent to the provider. |
 | External plugins and skills | User-installed source plugins and scripts. | `/runtime/news_plugins/external/`, `/runtime/skills/` | Review code, dependencies, source rights, network targets, and license compatibility before installing. |
 
 ## Handling Raw Data

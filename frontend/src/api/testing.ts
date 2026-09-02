@@ -12,18 +12,6 @@ export interface TestResult {
   data?: unknown;
 }
 
-export interface MemoryPreviewParams {
-  user_id?: number;
-  stock_code?: string;
-  status?: string;
-  limit?: number;
-  offset?: number;
-}
-
-export interface MemoryRecallAuditPreviewParams extends MemoryPreviewParams {
-  error_code?: string;
-}
-
 export interface ToolDocstringItem {
   name: string;
   description: string;
@@ -161,18 +149,6 @@ export const testingApi = {
   },
   testPdfTool: async (url: string): Promise<TestResult> => {
     return apiClient.get('/testing/pdf_tool', { params: { url }, timeout: 300000 });
-  },
-  testMemory: async (): Promise<TestResult> => {
-    return apiClient.get('/testing/memory');
-  },
-  testMemoryRead: async (): Promise<TestResult> => {
-    return apiClient.get('/testing/memory_read');
-  },
-  testMemoryPreview: async (params?: MemoryPreviewParams): Promise<TestResult> => {
-    return apiClient.get('/testing/memory_preview', { params });
-  },
-  testMemoryRecallAudits: async (params?: MemoryRecallAuditPreviewParams): Promise<TestResult> => {
-    return apiClient.get('/testing/memory_recall_audits', { params });
   },
   testDocstrings: async (): Promise<ToolDocstringResult> => {
     return apiClient.get('/testing/docstrings');

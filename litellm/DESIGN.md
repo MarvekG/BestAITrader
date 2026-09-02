@@ -16,7 +16,7 @@ provider 会让接入层越来越复杂。
 
 ## 目标
 
-- 后端统一通过 OpenAI-compatible gateway 访问 LLM；MemoFlux 部署时通过 `MEMOFLUX_LLM_*`
+- 后端统一通过 OpenAI-compatible gateway 访问 LLM。（历史：MemoFlux 已于 2026-09 移除，其相关章节仅作记录）此前 MemoFlux 部署时通过 `MEMOFLUX_LLM_*`
   `.env` 配置指向 LiteLLM。
 - 业务侧切换模型时优先只修改 LiteLLM 配置中的模型别名、真实模型、URL 和 key。
 - 后端沿用原有 `LLM_PROVIDER`、`LLM_MODEL`、`LLM_API_KEY`、`LLM_BASE_URL` 配置名，但默认值集中在

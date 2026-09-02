@@ -9,7 +9,6 @@ from sqlalchemy import text
 from app.ai.agentic import tools
 from app.ai.agentic.skills_loader import skill_tools
 from app.ai.agentic.tooling.news_plugins import get_news_plugins
-from app.ai.memory_client import memory_client
 from app.core import database as database_module
 from app.core.i18n import i18n_service
 from app.core.logger import get_logger
@@ -29,18 +28,8 @@ FIXED_TEST_TOOLS: List[Dict[str, Any]] = [
     {"name": "db_schema", "title_key": "settings.db_schema_test_title", "route_slug": "db_schema"},
     {"name": "query_calc", "title_key": "settings.query_calc_test_title", "route_slug": "query_calc"},
     {"name": "pdf_tool", "title_key": "settings.pdf_tool_test_title", "route_slug": "pdf_tool"},
-    {"name": "memory_write", "title_key": "settings.memory_write_test_title", "route_slug": "memory"},
-    {"name": "memory_read", "title_key": "settings.memory_read_test_title", "route_slug": "memory_read"},
     {"name": "docstring", "title_key": "settings.docstring_test_title", "route_slug": "docstrings"},
 ]
-
-MEMORY_TEST_USER_ID = 999999
-MEMORY_TEST_STOCK_CODE = "TEST.MEM"
-MEMORY_TEST_CONTENT = (
-    "Memory connectivity probe TEST.MEM: current service status is healthy, "
-    "and the backend memory write path should persist this probe record."
-)
-MEMORY_TEST_QUERY = "What is the current service status of the Memory connectivity probe TEST.MEM?"
 
 
 def _build_test_message_keys(name: str) -> tuple[str, str]:
@@ -449,160 +438,6 @@ async def test_pdf_tool(
     except Exception as e:
         logger.exception("Test PDF tool failed: %s", e)
         return _error_response("pdf_tool", str(e))
-
-
-@router.get("/memory", response_model=Dict[str, Any])
-async def test_memory():
-    try:
-        if not memory_client.enabled:
-            return _error_response("memory_write", "Memory service not enabled")
-
-        start_time = time.time()
-        response = await memory_client.write_memory(
-            user_id=MEMORY_TEST_USER_ID,
-            stock_code=MEMORY_TEST_STOCK_CODE,
-            content=MEMORY_TEST_CONTENT,
-        )
-        elapsed = int((time.time() - start_time) * 1000)
-        memory_id = response.get("memory_id") if isinstance(response, dict) else None
-        if isinstance(response, dict) and memory_id:
-            result = _success_response("memory_write", elapsed)
-            result["memory_id"] = memory_id
-            result["data"] = response
-            logger.info(f"Test memory write result: {result}")
-            return result
-        last_error = memory_client.get_last_error("ingest")
-        if last_error:
-            return _error_response("memory_write", str(last_error.get("message") or "Memory write request failed"))
-        return _error_response("memory_write", "Empty or invalid write response")
-    except Exception as e:
-        logger.exception("Test memory failed: %s", e)
-        return _error_response("memory_write", str(e))
-
-
-@router.get("/memory_read", response_model=Dict[str, Any])
-async def test_memory_read():
-    try:
-        if not memory_client.enabled:
-            return _error_response("memory_read", "Memory service not enabled")
-
-        start_time = time.time()
-        data = await memory_client.recall(
-            user_id=MEMORY_TEST_USER_ID,
-            stock_code=MEMORY_TEST_STOCK_CODE,
-            query=MEMORY_TEST_QUERY,
-        )
-        elapsed = int((time.time() - start_time) * 1000)
-        if isinstance(data, dict):
-            last_error = memory_client.get_last_error("recall")
-            if last_error:
-                return _error_response("memory_read", str(last_error.get("message") or "Memory recall request failed"))
-            result = _success_response("memory_read", elapsed)
-            references = data.get("references") if isinstance(data.get("references"), list) else []
-            result["count"] = len(references)
-            result["data"] = data
-            logger.info(f"Test memory read result: {result}")
-            return result
-        return _error_response("memory_read", "Invalid recall response")
-    except Exception as e:
-        logger.exception("Test memory read failed: %s", e)
-        return _error_response("memory_read", str(e))
-
-
-@router.get("/memory_preview", response_model=Dict[str, Any])
-async def test_memory_preview(
-    user_id: Annotated[int | None, Query(ge=1)] = None,
-    stock_code: Annotated[str | None, Query(max_length=64)] = None,
-    status: Annotated[str | None, Query(max_length=64)] = None,
-    limit: Annotated[int, Query(ge=1, le=200)] = 20,
-    offset: Annotated[int, Query(ge=0)] = 0,
-):
-    try:
-        if not memory_client.enabled:
-            return _error_response("memory_preview", "Memory service not enabled")
-
-        start_time = time.time()
-        response = await memory_client.preview_memories(
-            user_id=user_id,
-            stock_code=stock_code,
-            status=status,
-            limit=limit,
-            offset=offset,
-        )
-        elapsed = int((time.time() - start_time) * 1000)
-        data = response.get("data") if isinstance(response, dict) else None
-        if isinstance(data, dict):
-            result = _success_response("memory_preview", elapsed)
-            items = [item for item in data.get("items") or [] if isinstance(item, dict)]
-            result["data"] = data
-            result["total"] = int(data.get("total") if isinstance(data.get("total"), int) else len(items))
-            result["limit"] = int(data.get("limit") or limit)
-            result["offset"] = int(data.get("offset") or offset)
-            logger.info(f"Test memory preview result: total={result['total']} count={len(items)}")
-            return result
-        last_error = memory_client.get_last_error("preview")
-        if last_error:
-            return _error_response("memory_preview", str(last_error.get("message") or "Memory preview request failed"))
-        return _error_response("memory_preview", "Empty or invalid preview response")
-    except Exception as e:
-        logger.exception("Test memory preview failed: %s", e)
-        return _error_response("memory_preview", str(e))
-
-
-@router.get("/memory_recall_audits", response_model=Dict[str, Any])
-async def test_memory_recall_audits(
-    user_id: Annotated[int | None, Query(ge=1)] = None,
-    stock_code: Annotated[str | None, Query(max_length=64)] = None,
-    status: Annotated[str | None, Query(max_length=64)] = None,
-    error_code: Annotated[str | None, Query(max_length=128)] = None,
-    limit: Annotated[int, Query(ge=1, le=200)] = 20,
-    offset: Annotated[int, Query(ge=0)] = 0,
-):
-    try:
-        if not memory_client.enabled:
-            return _error_response("memory_recall_audits", "Memory service not enabled", fallback_key="memory_preview")
-
-        start_time = time.time()
-        response = await memory_client.preview_recall_audits(
-            user_id=user_id,
-            stock_code=stock_code,
-            status=status,
-            error_code=error_code,
-            limit=limit,
-            offset=offset,
-        )
-        elapsed = int((time.time() - start_time) * 1000)
-        data = response.get("data") if isinstance(response, dict) else None
-        if isinstance(data, dict):
-            result = _success_response("memory_recall_audits", elapsed, fallback_key="memory_preview")
-            items = [item for item in data.get("items") or [] if isinstance(item, dict)]
-            for item in items:
-                item["audit_id"] = item.get("audit_id") or item.get("query_id") or item.get("delete_id") or ""
-            result["data"] = data
-            result["total"] = int(data.get("total") if isinstance(data.get("total"), int) else len(items))
-            result["limit"] = int(data.get("limit") or limit)
-            result["offset"] = int(data.get("offset") or offset)
-            logger.info(
-                "Test memory recall audit preview result: total=%s count=%s",
-                result["total"],
-                len(items),
-            )
-            return result
-        last_error = memory_client.get_last_error("recall_audit_preview")
-        if last_error:
-            return _error_response(
-                "memory_recall_audits",
-                str(last_error.get("message") or "Memory recall audit preview request failed"),
-                fallback_key="memory_preview",
-            )
-        return _error_response(
-            "memory_recall_audits",
-            "Empty or invalid recall audit preview response",
-            fallback_key="memory_preview",
-        )
-    except Exception as e:
-        logger.exception("Test memory recall audit preview failed: %s", e)
-        return _error_response("memory_recall_audits", str(e), fallback_key="memory_preview")
 
 
 _register_dynamic_news_test_routes()

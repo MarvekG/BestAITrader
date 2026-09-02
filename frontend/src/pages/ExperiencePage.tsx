@@ -200,8 +200,8 @@ export const ExperiencePage: React.FC = () => {
     () => toolTrace.filter((item) => item?.name === 'write_memory').length,
     [toolTrace],
   );
-  const recallMemoryCount = React.useMemo(
-    () => toolTrace.filter((item) => item?.name === 'recall_memory').length,
+  const readMemoryCount = React.useMemo(
+    () => toolTrace.filter((item) => item?.name === 'read_memory').length,
     [toolTrace],
   );
   const externalToolCount = React.useMemo(
@@ -234,7 +234,7 @@ export const ExperiencePage: React.FC = () => {
     if (name === 'write_memory') {
       return 'green';
     }
-    if (name === 'recall_memory') {
+    if (name === 'read_memory') {
       return 'blue';
     }
     if (name === 'search_tavily' || name === 'search_news') {
@@ -969,8 +969,8 @@ export const ExperiencePage: React.FC = () => {
                   <Tag color={writeMemoryCount > 0 ? 'green' : 'default'}>
                     {t('experience.tool_write_memory_count', { count: writeMemoryCount })}
                   </Tag>
-                  <Tag color={recallMemoryCount > 0 ? 'blue' : 'default'}>
-                    {t('experience.tool_recall_memory_count', { count: recallMemoryCount })}
+                  <Tag color={readMemoryCount > 0 ? 'blue' : 'default'}>
+                    {t('experience.tool_read_memory_count', { count: readMemoryCount })}
                   </Tag>
                   <Tag color={externalToolCount > 0 ? 'cyan' : 'default'}>
                     {t('experience.tool_external_search_count', { count: externalToolCount })}

@@ -280,7 +280,7 @@ def test_request_llm_completion_records_market_watch_workflow():
 
 
 @pytest.mark.asyncio
-async def test_get_llm_usage_stats_merges_backend_and_memory_usage(monkeypatch):
+async def test_get_llm_usage_stats_returns_backend_usage_only(monkeypatch):
     backend_stats = {
         "total_calls": 10,
         "input_tokens": 500,
@@ -303,123 +303,35 @@ async def test_get_llm_usage_stats_merges_backend_and_memory_usage(monkeypatch):
             },
         },
     }
-    memory_stats = {
-        "status": "ok",
-        "total_calls": 3,
-        "input_tokens": 100,
-        "output_tokens": 20,
-        "total_tokens": 120,
-        "cached_tokens": 30,
-        "cache_miss_tokens": 70,
-        "reasoning_tokens": 10,
-        "cache_hit_rate": 0.3,
-        "by_operation": {
-            "memory_summary": {"calls": 2, "total_tokens": 80, "cached_tokens": 20},
-            "memory_query_optimizer": {"calls": 1, "total_tokens": 40, "cached_tokens": 10},
-        },
-    }
 
     monkeypatch.setattr(llm, "llm_usage_log", MagicMock(get_stats=AsyncMock(return_value=backend_stats)))
-    monkeypatch.setattr(llm.memory_client, "get_usage_stats", AsyncMock(return_value=memory_stats))
-    monkeypatch.setattr(llm.memory_client, "get_last_error", MagicMock(return_value=None))
 
     result = await llm.get_llm_usage_stats()
 
-    assert result["total_calls"] == 13
-    assert result["input_tokens"] == 600
-    assert result["output_tokens"] == 120
-    assert result["total_tokens"] == 620
-    assert result["cached_tokens"] == 180
-    assert result["cache_miss_tokens"] == 420
-    assert result["reasoning_tokens"] == 30
+    assert result["total_calls"] == 10
+    assert result["input_tokens"] == 500
+    assert result["output_tokens"] == 100
+    assert result["total_tokens"] == 500
+    assert result["cached_tokens"] == 150
+    assert result["cache_miss_tokens"] == 350
+    assert result["reasoning_tokens"] == 20
     assert result["cache_hit_rate"] == 0.3
     assert result["by_role"]["Agentic Decision"] == 6
-    assert result["by_role"]["memory_summary"] == 2
-    assert result["by_role"]["memory_query_optimizer"] == 1
     assert result["backend"] == backend_stats
     assert result["by_workflow_call_kind"] == backend_stats["by_workflow_call_kind"]
-    assert result["memory"] == memory_stats
-    assert result["combined"]["total_calls"] == 13
-    assert result["combined"]["input_tokens"] == 600
-    assert result["combined"]["output_tokens"] == 120
-    assert result["combined"]["total_tokens"] == 620
-    assert result["combined"]["cached_tokens"] == 180
-    assert result["combined"]["cache_miss_tokens"] == 420
-    assert result["combined"]["reasoning_tokens"] == 30
-    assert result["combined"]["cache_hit_rate"] == 0.3
-    assert result["combined"]["by_workflow_call_kind"] == backend_stats["by_workflow_call_kind"]
+    assert "memory" not in result
+    assert "combined" not in result
 
 
 @pytest.mark.asyncio
-async def test_get_llm_usage_stats_surfaces_memory_fetch_error_without_breaking(monkeypatch):
-    backend_stats = {
-        "total_calls": 4,
-        "input_tokens": 100,
-        "output_tokens": 20,
-        "total_tokens": 80,
-        "cached_tokens": 25,
-        "reasoning_tokens": 5,
-        "cache_hit_rate": 0.25,
-        "by_role": {"generic": 4},
-    }
-    memory_error = {
-        "operation": "usage_stats",
-        "path": "/v1/usage/stats",
-        "message": "503 Server Error",
-        "error_type": "HTTPStatusError",
-    }
-
-    monkeypatch.setattr(llm, "llm_usage_log", MagicMock(get_stats=AsyncMock(return_value=backend_stats)))
-    monkeypatch.setattr(llm.memory_client, "get_usage_stats", AsyncMock(return_value={}))
-    monkeypatch.setattr(llm.memory_client, "get_last_error", MagicMock(return_value=memory_error))
-
-    result = await llm.get_llm_usage_stats()
-
-    assert result["total_calls"] == 4
-    assert result["input_tokens"] == 100
-    assert result["total_tokens"] == 80
-    assert result["cached_tokens"] == 25
-    assert result["cache_hit_rate"] == 0.25
-    assert result["memory"]["status"] == "error"
-    assert result["memory"]["error"] == memory_error
-    assert result["combined"]["by_role"] == {"generic": 4}
-
-
-@pytest.mark.asyncio
-async def test_clear_llm_usage_stats_clears_backend_and_memory(monkeypatch):
+async def test_clear_llm_usage_stats_clears_backend(monkeypatch):
     backend_usage = MagicMock(clear=AsyncMock(return_value=5))
-    memory_result = {"status": "ok", "deleted": 3}
     monkeypatch.setattr(llm, "llm_usage_log", backend_usage)
-    monkeypatch.setattr(llm.memory_client, "clear_usage_stats", AsyncMock(return_value=memory_result))
-    monkeypatch.setattr(llm.memory_client, "get_last_error", MagicMock(return_value=None))
 
     result = await llm.clear_llm_usage_stats()
 
     assert result == {
         "status": "ok",
         "backend": {"deleted": 5},
-        "memory": memory_result,
-        "total_deleted": 8,
-    }
-
-
-@pytest.mark.asyncio
-async def test_clear_llm_usage_stats_returns_partial_when_memory_clear_fails(monkeypatch):
-    memory_error = {
-        "operation": "clear_usage_stats",
-        "path": "/v1/usage/stats",
-        "message": "503 Server Error",
-        "error_type": "HTTPStatusError",
-    }
-    monkeypatch.setattr(llm, "llm_usage_log", MagicMock(clear=AsyncMock(return_value=5)))
-    monkeypatch.setattr(llm.memory_client, "clear_usage_stats", AsyncMock(return_value={}))
-    monkeypatch.setattr(llm.memory_client, "get_last_error", MagicMock(return_value=memory_error))
-
-    result = await llm.clear_llm_usage_stats()
-
-    assert result == {
-        "status": "partial",
-        "backend": {"deleted": 5},
-        "memory": {"status": "error", "error": memory_error},
         "total_deleted": 5,
     }

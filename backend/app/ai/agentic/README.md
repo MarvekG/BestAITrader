@@ -9,7 +9,7 @@
 - 通过 `tooling/python_sandbox.py` 调用独立沙箱服务。
 - 通过 browser/PDF 工具调用独立 WebFetch 服务。
 - 通过 Skills Loader 让 Agent 按需读取专业技能文档和脚本。
-- 通过 Memory tools 绑定用户和股票 scope，召回或写入 MemoFlux。
+- 通过 Memory tools 绑定用户和股票，按需读取或整文档替换内置单文档记忆。
 
 ## 设计约束
 

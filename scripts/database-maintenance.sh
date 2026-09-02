@@ -5,13 +5,10 @@ PROJECT_ROOT="${PROJECT_ROOT:-${PWD}}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
 BACKUP_DIR="${BACKUP_DIR:-${PROJECT_ROOT}/backups}"
 
-APP_SERVICES="${APP_SERVICES:-backend memo}"
+APP_SERVICES="${APP_SERVICES:-backend}"
 BACKEND_DB_SERVICE="${BACKEND_DB_SERVICE:-postgres}"
 BACKEND_DB_USER="${BACKEND_DB_USER:-tradeuser}"
 BACKEND_DB_NAME="${BACKEND_DB_NAME:-trading}"
-MEMO_DB_SERVICE="${MEMO_DB_SERVICE:-memo-postgres}"
-MEMO_DB_USER="${MEMO_DB_USER:-tradeuser}"
-MEMO_DB_NAME="${MEMO_DB_NAME:-memory}"
 
 usage() {
   cat <<'EOF'
@@ -19,20 +16,17 @@ Usage:
   scripts/database-maintenance.sh backup [backup-dir]
   scripts/database-maintenance.sh restore <backup-dir>
 
-This script stops backend and memo during backup or restore, then starts them again.
+This script stops backend during backup or restore, then starts it again.
 Run it from the repository root, or set PROJECT_ROOT=/path/to/Best-AI-Trader.
 
 Environment overrides:
   PROJECT_ROOT=/path/to/Best-AI-Trader
   COMPOSE_FILE=docker-compose.dev.yml
   BACKUP_DIR=/path/to/backups
-  APP_SERVICES="backend memo"
+  APP_SERVICES="backend"
   BACKEND_DB_SERVICE=postgres
   BACKEND_DB_USER=tradeuser
   BACKEND_DB_NAME=trading
-  MEMO_DB_SERVICE=memo-postgres
-  MEMO_DB_USER=tradeuser
-  MEMO_DB_NAME=memory
 
 Examples:
   scripts/database-maintenance.sh backup
@@ -128,14 +122,11 @@ backup_all() {
   trap start_app_services EXIT
 
   dump_database "${BACKEND_DB_SERVICE}" "${BACKEND_DB_USER}" "${BACKEND_DB_NAME}" "${output_dir}/backend.dump"
-  dump_database "${MEMO_DB_SERVICE}" "${MEMO_DB_USER}" "${MEMO_DB_NAME}" "${output_dir}/memo.dump"
   cat > "${output_dir}/manifest.txt" <<EOF
 created_at=$(date -Iseconds)
 compose_file=${COMPOSE_FILE}
 backend_db_service=${BACKEND_DB_SERVICE}
 backend_db_name=${BACKEND_DB_NAME}
-memo_db_service=${MEMO_DB_SERVICE}
-memo_db_name=${MEMO_DB_NAME}
 EOF
   printf 'Backup completed: %s\n' "${output_dir}"
 }
@@ -154,7 +145,6 @@ restore_all() {
   trap start_app_services EXIT
 
   restore_database "${BACKEND_DB_SERVICE}" "${BACKEND_DB_USER}" "${BACKEND_DB_NAME}" "${input_dir}/backend.dump"
-  restore_database "${MEMO_DB_SERVICE}" "${MEMO_DB_USER}" "${MEMO_DB_NAME}" "${input_dir}/memo.dump"
   printf 'Restore completed: %s\n' "${input_dir}"
 }
 

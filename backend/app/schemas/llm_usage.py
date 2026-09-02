@@ -49,5 +49,3 @@ class LLMUsageStatsSchema(BaseModel):
     by_cache_lane: Dict[str, Any] | None = None
     by_api_key_alias: Dict[str, Any] | None = None
     backend: Dict[str, Any] | None = None
-    memory: Dict[str, Any] | None = None
-    combined: Dict[str, Any] | None = None
