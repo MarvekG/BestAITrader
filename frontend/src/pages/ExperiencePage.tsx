@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Col,
+  Collapse,
   Descriptions,
   Drawer,
   Empty,
@@ -39,7 +40,6 @@ import {
 } from '../api/experience';
 import { MemoryDocumentsPanel } from './experience/MemoryDocumentsPanel';
 import { ReviewCandidatePanel } from './experience/ReviewCandidatePanel';
-import { ReviewTriadCards } from './experience/ReviewTriadCards';
 import { WrittenMemoryCards } from './experience/WrittenMemoryCards';
 import { WebSocketMessage } from '../services/websocket';
 import { useResourceSubscription } from '../hooks/useWebSocketSubscription';
@@ -212,27 +212,11 @@ export const ExperiencePage: React.FC = () => {
     [toolTrace],
   );
 
-  const getStyleLabel = React.useCallback((value: string) => t(`experience.styles.${value}`), [t]);
   const getActionLabel = React.useCallback((value: string) => t(`experience.actions.${value}`), [t]);
   const getCorrectnessLabel = React.useCallback(
     (value: string) => t(`experience.correctness_statuses.${value}`),
     [t],
   );
-  const getMemoSessionLabel = React.useCallback((value?: string) => {
-    if (value === 'stock') {
-      return t('experience.memo_session_stock');
-    }
-    return t('experience.memo_session_general');
-  }, [t]);
-  const getMemoryImportanceLabel = React.useCallback((value?: string) => {
-    if (value === 'low') {
-      return t('experience.memory_importance_low');
-    }
-    if (value === 'high') {
-      return t('experience.memory_importance_high');
-    }
-    return t('experience.memory_importance_medium');
-  }, [t]);
   const getToolColor = React.useCallback((name?: string) => {
     if (name === 'write_memory') {
       return 'green';
@@ -557,6 +541,11 @@ export const ExperiencePage: React.FC = () => {
     label: `${item.stock_code} - ${item.stock_name || item.stock_code} / ${item.trading_frequency} / ${item.trading_strategy}`,
   }));
 
+  const analysisOriginalPmDecision = analyzeResult?.analysis_payload?.original_pm_decision
+    || selectedSession?.pm_decision
+    || '';
+  const analysisDebateCorrectness = analyzeResult?.analysis_payload?.debate_correctness || 'inconclusive';
+
   const analysisContent = (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Card>
@@ -722,208 +711,82 @@ export const ExperiencePage: React.FC = () => {
       {analyzeResult ? (
         <Card title={t('experience.analysis_result')} loading={loading}>
           <div className="experience-scroll-panel experience-analysis-result-scroll">
-            <Space direction="vertical" size={16} style={{ width: '100%', marginBottom: 16 }}>
-              <ReviewTriadCards triads={analyzeResult.analysis_payload?.review_triads} />
+            <Space direction="vertical" size={12} style={{ width: '100%' }}>
+              <Descriptions
+                title={t('experience.review_information')}
+                className="experience-analysis-descriptions"
+                bordered
+                size="small"
+                column={{ xs: 1, sm: 2, lg: 3 }}
+                items={[
+                  {
+                    key: 'stock',
+                    label: t('experience.stock'),
+                    children: (
+                      <Space wrap>
+                        <Tag>{analyzeResult.stock_code}</Tag>
+                        {analyzeResult.stock_name ? <Tag>{analyzeResult.stock_name}</Tag> : null}
+                      </Space>
+                    ),
+                  },
+                  {
+                    key: 'horizon',
+                    label: t('experience.review_horizon'),
+                    children: analyzeResult.review_horizon
+                      ? t(`experience.review_horizons.${analyzeResult.review_horizon}`)
+                      : '-',
+                  },
+                  {
+                    key: 'analysis-time',
+                    label: t('experience.analysis_time'),
+                    children: dayjs(analyzeResult.analysis_date).format('YYYY-MM-DD HH:mm'),
+                  },
+                  {
+                    key: 'review-time',
+                    label: t('experience.review_time'),
+                    children: dayjs(analyzeResult.reviewed_at).format('YYYY-MM-DD HH:mm'),
+                  },
+                ]}
+              />
+              <Descriptions
+                title={t('experience.review_conclusion')}
+                className="experience-analysis-descriptions"
+                bordered
+                size="small"
+                column={{ xs: 1, sm: 2 }}
+                items={[
+                  {
+                    key: 'original-pm-decision',
+                    label: t('experience.original_pm_decision'),
+                    children: analysisOriginalPmDecision ? (
+                      <Tag color={actionColorMap[analysisOriginalPmDecision] || 'default'}>
+                        {actionColorMap[analysisOriginalPmDecision]
+                          ? getActionLabel(analysisOriginalPmDecision)
+                          : analysisOriginalPmDecision}
+                      </Tag>
+                    ) : <Text type="secondary">-</Text>,
+                  },
+                  {
+                    key: 'correctness',
+                    label: t('experience.debate_correctness'),
+                    children: (
+                      <Tag color={correctnessColorMap[analysisDebateCorrectness] || 'default'}>
+                        {getCorrectnessLabel(analysisDebateCorrectness)}
+                      </Tag>
+                    ),
+                  },
+                ]}
+              />
+              <Card title={t('experience.correctness_reasoning')} size="small">
+                <Paragraph style={longTextStyle}>
+                  {analyzeResult.analysis_payload?.correctness_reasoning || '-'}
+                </Paragraph>
+              </Card>
               <WrittenMemoryCards
                 memories={analyzeResult.analysis_payload?.written_memories || []}
-                getMemoSessionLabel={getMemoSessionLabel}
-                getMemoryImportanceLabel={getMemoryImportanceLabel}
+                onOpenDocument={() => setActiveTab('memory')}
               />
             </Space>
-            <Descriptions
-              className="experience-analysis-descriptions"
-              bordered
-              size="small"
-              column={1}
-              items={[
-              {
-                key: 'session',
-                label: t('experience.session'),
-                children: (
-                  <Space wrap>
-                    <Tag>{analyzeResult.stock_code}</Tag>
-                    {analyzeResult.stock_name ? <Tag>{analyzeResult.stock_name}</Tag> : null}
-                    <Tag>{getStyleLabel(analyzeResult.style_bucket)}</Tag>
-                    {analyzeResult.trading_frequency ? <Tag>{analyzeResult.trading_frequency}</Tag> : null}
-                    {analyzeResult.trading_strategy ? <Tag>{analyzeResult.trading_strategy}</Tag> : null}
-                  </Space>
-                ),
-              },
-              {
-                key: 'times',
-                label: t('experience.snapshot_time'),
-                children: (
-                  <Space direction="vertical" size={0}>
-                    <Text>{`${t('experience.analysis_time')}: ${dayjs(analyzeResult.analysis_date).format('YYYY-MM-DD HH:mm')}`}</Text>
-                    <Text type="secondary">{`${t('experience.review_time')}: ${dayjs(analyzeResult.reviewed_at).format('YYYY-MM-DD HH:mm')}`}</Text>
-                  </Space>
-                ),
-              },
-              {
-                key: 'action',
-                label: t('experience.current_action'),
-                children: (
-                  <Space wrap>
-                    <Tag color={actionColorMap[analyzeResult.analysis_payload?.recommended_action || ''] || 'default'}>
-                      {getActionLabel(analyzeResult.analysis_payload?.recommended_action || 'watch')}
-                    </Tag>
-                    <Text>{`${Number(analyzeResult.analysis_payload?.confidence_score || 0).toFixed(1)}%`}</Text>
-                  </Space>
-                ),
-              },
-              {
-                key: 'correctness',
-                label: t('experience.debate_correctness'),
-                children: (
-                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                    <Tag color={correctnessColorMap[analyzeResult.analysis_payload?.debate_correctness || ''] || 'default'}>
-                      {getCorrectnessLabel(analyzeResult.analysis_payload?.debate_correctness || 'inconclusive')}
-                    </Tag>
-                    <Paragraph style={longTextStyle}>{analyzeResult.analysis_payload?.correctness_reasoning || '-'}</Paragraph>
-                  </Space>
-                ),
-              },
-              {
-                key: 'written-memories',
-                label: t('experience.written_memories'),
-                children: (
-                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                    {(analyzeResult.analysis_payload?.written_memories || []).length > 0
-                      ? (analyzeResult.analysis_payload?.written_memories || []).map((item, index) => (
-                        <Space key={`${item.content || 'memory'}-${index}`} direction="vertical" size={4} style={{ width: '100%' }}>
-                          <Space wrap>
-                            <Text strong>{`${index + 1}.`}</Text>
-                            <Tag color={item.memo_session === 'stock' ? 'blue' : 'default'}>
-                              {getMemoSessionLabel(item.memo_session)}
-                            </Tag>
-                            <Tag>{getMemoryImportanceLabel(item.importance)}</Tag>
-                            {item.stock_code ? <Tag>{item.stock_code}</Tag> : null}
-                            {item.stock_name ? <Tag>{item.stock_name}</Tag> : null}
-                          </Space>
-                          <Paragraph style={longTextStyle}>
-                            {item.content}
-                          </Paragraph>
-                        </Space>
-                      ))
-                      : <Text type="secondary">-</Text>}
-                  </Space>
-                ),
-              },
-              {
-                key: 'thesis',
-                label: t('experience.thesis_summary'),
-                children: <Paragraph style={longTextStyle}>{analyzeResult.analysis_payload?.thesis_summary || '-'}</Paragraph>,
-              },
-              {
-                key: 'market-experience-summary',
-                label: t('experience.market_experience_summary'),
-                children: <Paragraph style={longTextStyle}>{analyzeResult.analysis_payload?.market_experience_summary || '-'}</Paragraph>,
-              },
-              {
-                key: 'dominant-drivers',
-                label: t('experience.dominant_drivers'),
-                children: (
-                  <Space wrap>
-                    {(analyzeResult.analysis_payload?.dominant_drivers || []).length > 0
-                      ? (analyzeResult.analysis_payload?.dominant_drivers || []).map((item: string) => <Tag key={item} color="red">{item}</Tag>)
-                      : <Text type="secondary">-</Text>}
-                  </Space>
-                ),
-              },
-              {
-                key: 'rejected-drivers',
-                label: t('experience.rejected_drivers'),
-                children: (
-                  <Space wrap>
-                    {(analyzeResult.analysis_payload?.rejected_drivers || []).length > 0
-                      ? (analyzeResult.analysis_payload?.rejected_drivers || []).map((item: string) => <Tag key={item} color="default">{item}</Tag>)
-                      : <Text type="secondary">-</Text>}
-                  </Space>
-                ),
-              },
-              {
-                key: 'driver-dimension-review',
-                label: t('experience.driver_dimension_review'),
-                children: (
-                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                    {(analyzeResult.analysis_payload?.driver_dimension_review || []).length > 0
-                      ? (analyzeResult.analysis_payload?.driver_dimension_review || []).map((item: string) => (
-                        <Paragraph key={item} style={longTextStyle}>
-                          {item}
-                        </Paragraph>
-                      ))
-                      : <Text type="secondary">-</Text>}
-                  </Space>
-                ),
-              },
-              {
-                key: 'buy-sell-rules',
-                label: t('experience.buy_sell_rules'),
-                children: (
-                  <Space wrap>
-                    {(analyzeResult.analysis_payload?.buy_sell_rules || []).length > 0
-                      ? (analyzeResult.analysis_payload?.buy_sell_rules || []).map((item: string) => <Tag key={item}>{item}</Tag>)
-                      : <Text type="secondary">-</Text>}
-                  </Space>
-                ),
-              },
-              {
-                key: 'process-issues',
-                label: t('experience.debate_process_issues'),
-                children: (
-                  <Space wrap>
-                    {(analyzeResult.analysis_payload?.debate_process_issues || []).length > 0
-                      ? (analyzeResult.analysis_payload?.debate_process_issues || []).map((item: string) => <Tag key={item} color="orange">{item}</Tag>)
-                      : <Text type="secondary">-</Text>}
-                  </Space>
-                ),
-              },
-              {
-                key: 'optimization',
-                label: t('experience.optimization_directions'),
-                children: (
-                  <Space wrap>
-                    {(analyzeResult.analysis_payload?.optimization_directions || []).length > 0
-                      ? (analyzeResult.analysis_payload?.optimization_directions || []).map((item: string) => <Tag key={item} color="blue">{item}</Tag>)
-                      : <Text type="secondary">-</Text>}
-                  </Space>
-                ),
-              },
-              {
-                key: 'rules',
-                label: t('experience.improved_debate_rules'),
-                children: (
-                  <Space wrap>
-                    {(analyzeResult.analysis_payload?.improved_debate_rules || []).length > 0
-                      ? (analyzeResult.analysis_payload?.improved_debate_rules || []).map((item: string) => <Tag key={item}>{item}</Tag>)
-                      : <Text type="secondary">-</Text>}
-                  </Space>
-                ),
-              },
-              {
-                key: 'memory-used',
-                label: t('experience.memory_used'),
-                children: (
-                  <Space wrap>
-                    {(analyzeResult.analysis_payload?.memory_evidence_used || []).length > 0
-                      ? (analyzeResult.analysis_payload?.memory_evidence_used || []).map((item: string) => <Tag key={item}>{item}</Tag>)
-                      : <Text type="secondary">-</Text>}
-                  </Space>
-                ),
-              },
-              {
-                key: 'internet-evidence',
-                label: t('experience.internet_evidence'),
-                children: (
-                  <Space wrap>
-                    {(analyzeResult.analysis_payload?.internet_evidence_used || []).length > 0
-                      ? (analyzeResult.analysis_payload?.internet_evidence_used || []).map((item: string) => <Tag key={item}>{item}</Tag>)
-                      : <Text type="secondary">-</Text>}
-                  </Space>
-                ),
-              },
-              ]}
-            />
           </div>
         </Card>
       ) : (
@@ -936,26 +799,23 @@ export const ExperiencePage: React.FC = () => {
       )}
 
       <Card title={t('experience.tool_trace')}>
-        <div
-          aria-label={t('experience.tool_trace')}
-          className="experience-scroll-panel experience-tool-trace-scroll"
-          role="region"
-          tabIndex={0}
-        >
-          {hasLiveProgress ? (
-            <Space direction="vertical" size={8} style={{ width: '100%', marginBottom: 16 }}>
-              {liveEvents.map((event, index) => (
-                <Tag key={`${event.stage}-${event.status}-${index}`} color={event.stage === 'tool_call' ? getToolColor(getToolName(event.payload)) : 'processing'}>
-                  {renderEventMessage(event)}
-                </Tag>
-              ))}
-            </Space>
-          ) : null}
-          {toolTrace.length ? (
-            <List
-              size="small"
-              header={(
+        {hasLiveProgress ? (
+          <Space direction="vertical" size={8} style={{ width: '100%', marginBottom: 12 }}>
+            {liveEvents.map((event, index) => (
+              <Tag key={`${event.stage}-${event.status}-${index}`} color={event.stage === 'tool_call' ? getToolColor(getToolName(event.payload)) : 'processing'}>
+                {renderEventMessage(event)}
+              </Tag>
+            ))}
+          </Space>
+        ) : null}
+        {toolTrace.length ? (
+          <Collapse
+            defaultActiveKey={[]}
+            items={[{
+              key: 'tool-trace',
+              label: (
                 <Space wrap>
+                  <Text strong>{t('experience.tool_trace_details')}</Text>
                   <Tag>{t('experience.tool_call_count', { count: toolTrace.length })}</Tag>
                   <Tag color={writeMemoryCount > 0 ? 'green' : 'default'}>
                     {t('experience.tool_write_memory_count', { count: writeMemoryCount })}
@@ -967,29 +827,46 @@ export const ExperiencePage: React.FC = () => {
                     {t('experience.tool_external_search_count', { count: externalToolCount })}
                   </Tag>
                 </Space>
-              )}
-              dataSource={toolTrace}
-              renderItem={(item, index) => (
-                <List.Item>
-                  <Space direction="vertical" size={2} style={{ width: '100%' }}>
-                    <Space wrap>
-                      <Text strong>{`${index + 1}.`}</Text>
-                      <Tag color={getToolColor(item.name)}>{item.name || '-'}</Tag>
-                      {item.name === 'write_memory' ? (
-                        <Tag color="gold">{t('experience.tool_key_step')}</Tag>
-                      ) : null}
-                    </Space>
-                    <Paragraph code style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
-                      {JSON.stringify(item.args || {}, null, 2)}
-                    </Paragraph>
-                  </Space>
-                </List.Item>
-              )}
-            />
-          ) : (
-            <Empty description={t('experience.no_tool_trace')} />
-          )}
-        </div>
+              ),
+              children: (
+                <div
+                  aria-label={t('experience.tool_trace')}
+                  className="experience-scroll-panel experience-tool-trace-scroll"
+                  role="region"
+                  tabIndex={0}
+                >
+                  <List
+                    size="small"
+                    dataSource={toolTrace}
+                    renderItem={(item, index) => (
+                      <List.Item>
+                        <Space direction="vertical" size={2} style={{ width: '100%' }}>
+                          <Space wrap>
+                            <Text strong>{`${index + 1}.`}</Text>
+                            <Tag color={getToolColor(item.name)}>{item.name || '-'}</Tag>
+                            {item.name === 'write_memory' ? (
+                              <Tag color="gold">{t('experience.tool_key_step')}</Tag>
+                            ) : null}
+                          </Space>
+                          <Paragraph code style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
+                            {JSON.stringify(item.args || {}, null, 2)}
+                          </Paragraph>
+                          {item.result !== undefined ? (
+                            <Paragraph code style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
+                              {JSON.stringify(item.result, null, 2)}
+                            </Paragraph>
+                          ) : null}
+                        </Space>
+                      </List.Item>
+                    )}
+                  />
+                </div>
+              ),
+            }]}
+          />
+        ) : (
+          <Empty description={t('experience.no_tool_trace')} />
+        )}
       </Card>
 
       <Drawer

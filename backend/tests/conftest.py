@@ -280,14 +280,15 @@ def sqlite_async_test_engine(sqlite_test_paths):
 
     yield engine
     _run_async(engine.dispose())
-@pytest.fixture(scope="session", autouse=True)
+# 数据库夹具只供显式声明的持久化测试使用，避免纯单元测试启动 SQLite schema。
+@pytest.fixture(scope="session")
 def sqlite_async_session_factory(sqlite_async_test_engine):
     return async_sessionmaker(
         sqlite_async_test_engine,
         expire_on_commit=False,
         autoflush=False,
     )
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def sqlite_test_schema(sqlite_async_test_engine):
     from app.core.database import Base
 

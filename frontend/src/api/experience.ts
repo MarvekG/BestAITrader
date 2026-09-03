@@ -45,73 +45,25 @@ export interface ExperienceDebateSession {
 }
 
 export interface ExperienceWrittenMemory {
-  content?: string;
-  memo_session?: string;
-  importance?: string;
-  stock_code?: string;
-  stock_name?: string;
-  status?: string;
-  memory_id?: string;
-  error?: string;
-  evidence_chain?: Record<string, unknown>;
-}
-
-export interface ExperienceSignalReviewItem {
-  signal: string;
-  evidence?: string;
-  impact?: string;
-  lesson?: string;
-}
-
-export interface ExperienceNoiseSignalItem {
-  signal: string;
-  reason?: string;
-}
-
-export interface ExperienceReviewTriads {
-  original_judgment?: {
-    verdict?: string;
-    score?: number;
-    pm_decision?: string;
-    outcome_basis?: string;
-    reasoning?: string;
-  };
-  signal_validation?: {
-    validated_signals?: ExperienceSignalReviewItem[];
-    invalidated_signals?: ExperienceSignalReviewItem[];
-    noise_signals?: ExperienceNoiseSignalItem[];
-  };
-  decision_process_improvement?: {
-    debate_changes?: string[];
-    pm_changes?: string[];
-    risk_control_changes?: string[];
-  };
+  stock_code?: string | null;
+  status?: string | null;
+  version?: number | null;
+  size_chars?: number | null;
+  max_chars?: number | null;
+  error?: string | null;
 }
 
 export interface ExperienceAnalysisPayload extends Record<string, unknown> {
-  recommended_action?: string;
-  confidence_score?: number;
+  original_pm_decision?: string;
   debate_correctness?: string;
   correctness_reasoning?: string;
-  review_triads?: ExperienceReviewTriads;
-  experience_tags?: Record<string, string[]>;
   written_memories?: ExperienceWrittenMemory[];
-  thesis_summary?: string;
-  market_experience_summary?: string;
-  dominant_drivers?: string[];
-  rejected_drivers?: string[];
-  driver_dimension_review?: string[];
-  buy_sell_rules?: string[];
-  debate_process_issues?: string[];
-  optimization_directions?: string[];
-  improved_debate_rules?: string[];
-  memory_evidence_used?: string[];
-  internet_evidence_used?: string[];
 }
 
 export interface ExperienceToolTraceItem extends Record<string, unknown> {
   name?: string;
   args?: unknown;
+  result?: unknown;
 }
 
 export interface ExperienceAnalyzeResponse {

@@ -62,66 +62,21 @@ class FakeRawLlm:
 
 def _valid_review_payload() -> dict[str, Any]:
     return {
-        "thesis_summary": "PM 结论部分有效，但复盘后需要降低确定性。",
-        "recommended_action": "hold",
-        "confidence_score": 70,
+        "original_pm_decision": "buy",
         "debate_correctness": "partially_correct",
-        "correctness_score": 65,
-        "review_triads": {
-            "original_judgment": {
-                "verdict": "partially_correct",
-                "score": 65,
-                "pm_decision": "buy",
-                "outcome_basis": "20D 收益跑赢指数但回撤较大。",
-                "reasoning": "方向判断部分正确，仓位纪律不足。",
-            },
-            "signal_validation": {
-                "validated_signals": [
-                    {
-                        "signal": "行业相对强势",
-                        "evidence": "20D 相对行业收益为正。",
-                        "impact": "high",
-                        "lesson": "行业相对强势可以提高持有耐心。",
-                    }
-                ],
-                "invalidated_signals": [
-                    {
-                        "signal": "短线突破",
-                        "evidence": "突破后回撤较大。",
-                        "impact": "medium",
-                        "lesson": "突破信号需要成交确认。",
-                    }
-                ],
-                "noise_signals": [
-                    {
-                        "signal": "短期情绪",
-                        "reason": "未对应价格路径。",
-                    }
-                ],
-            },
-            "decision_process_improvement": {
-                "debate_changes": ["技术面 Agent 补充成交确认。"],
-                "pm_changes": ["PM 加仓前检查回撤承受度。"],
-                "risk_control_changes": ["跌破失效位时重新辩论。"],
-            },
-        },
-        "experience_tags": {
-            "stock_tags": ["601888.SH"],
-            "industry_tags": ["旅游"],
-            "strategy_tags": ["swing"],
-            "failure_lesson_tags": ["仓位纪律不足"],
-            "position_discipline_tags": ["加仓过早"],
-            "signal_tags": ["行业相对强势", "短线突破"],
-            "market_regime_tags": ["震荡市"],
-        },
+        "correctness_reasoning": "方向判断部分正确，但回撤较大；行业强势被验证，追涨缺少成交确认。",
     }
 
 
-def test_experience_review_output_requires_triads():
-    payload = _valid_review_payload()
-    payload.pop("review_triads")
+def test_experience_review_output_uses_compact_fields():
+    parsed = workflow._parse_experience_output(json.dumps(_valid_review_payload(), ensure_ascii=False))
 
-    assert workflow._parse_experience_output(json.dumps(payload, ensure_ascii=False)) is None
+    assert parsed is not None
+    assert set(parsed.model_dump()) == {
+        "original_pm_decision",
+        "debate_correctness",
+        "correctness_reasoning",
+    }
 
 
 def test_review_system_prompt_uses_configured_language(monkeypatch):
@@ -138,21 +93,18 @@ def test_review_system_prompt_uses_configured_language(monkeypatch):
     assert "Final JSON Schema" in en_prompt
 
 
-def test_review_system_prompt_requires_process_improvements_for_future_pm(monkeypatch):
+def test_review_system_prompt_keeps_memory_protocol_and_compact_output(monkeypatch):
     monkeypatch.setattr(workflow.settings, "SYSTEM_LANGUAGE", "zh")
 
     prompt = workflow._build_review_system_prompt("")
 
-    assert "未来 Debate / PM" in prompt
-    assert "从本次复盘证据和召回记忆中归纳" in prompt
-    assert "不要预设固定问题清单" in prompt
-    assert "交易频率和交易策略" in prompt
-    assert "止损或反转条件" in prompt
+    assert "只需要完成三项输出" in prompt
+    assert "不要输出记忆文档全文" in prompt
     assert "才调用 `write_memory` 重写整份记忆文档" in prompt
     assert "如果没有新增可复用经验，可以跳过全部记忆写入" in prompt
     assert "如果调用 `write_memory`" in prompt
-    assert "原始 PM 结论正确性" in prompt
-    assert "主导驱动、被验证信号、被证伪信号" in prompt
+    assert "原始 PM 结论" in prompt
+    assert "区分真正主因、被验证信号、被证伪信号与噪音" in prompt
     assert "记忆写入协议:" in prompt
     assert "1. 写前必读:" in prompt
     assert "2. 整文档替换:" in prompt
@@ -165,14 +117,16 @@ def test_review_system_prompt_requires_process_improvements_for_future_pm(monkey
     assert "5. 容量上限:" in prompt
     assert "6. 版本冲突:" in prompt
     assert "7. 写入次数:" in prompt
-    assert "决策时间、复盘时间和复盘周期由你在文档中自行标注" in prompt
-    assert "写入后的文档必须直接包含本次复盘得到的经验教训与可执行规则" in prompt
+    assert "写入后的文档必须直接包含本次复盘的经验教训、可执行规则和适用边界" in prompt
+    assert "最终 JSON 只返回 schema 中的三个字段" in prompt
     assert "[MEMORY_TOPIC" not in prompt
     assert "不同主题必须分次调用 `write_memory`" not in prompt
 
     monkeypatch.setattr(workflow.settings, "SYSTEM_LANGUAGE", "en")
     english_prompt = workflow._build_review_system_prompt("")
 
+    assert "Return only three analytical fields" in english_prompt
+    assert "do not repeat the timeline or the memory document" in english_prompt
     assert "Only after extracting reusable profitable experience" in english_prompt
     assert "rewrite the whole memory document" in english_prompt
     assert "you may skip all memory writes" in english_prompt
@@ -225,7 +179,14 @@ async def test_review_allows_final_json_without_memory_write(monkeypatch):
     )
 
     assert result["errors"] == []
-    assert result["analysis_payload"]["recommended_action"] == "hold"
+    assert result["analysis_payload"]["original_pm_decision"] == "buy"
+    assert result["analysis_payload"]["debate_correctness"] == "partially_correct"
+    assert set(result["analysis_payload"]) == {
+        "original_pm_decision",
+        "debate_correctness",
+        "correctness_reasoning",
+        "written_memories",
+    }
     assert result["analysis_payload"]["written_memories"] == []
     assert len(raw_llm.call_messages) == 1
     retry_messages = [
@@ -303,21 +264,23 @@ async def test_review_records_write_memory_result_metadata(monkeypatch):
         }
     )
 
-    trace_result = result["analysis_payload"]["tool_invocation_summary"][0]["result"]
-    trace_args = result["analysis_payload"]["tool_invocation_summary"][0]["args"]
+    trace_result = result["tool_trace"][0]["result"]
+    trace_args = result["tool_trace"][0]["args"]
     written_memory = result["analysis_payload"]["written_memories"][0]
     assert not write_memory_calls[0]["content"].startswith("时间:")
     assert trace_args["content"] == write_memory_calls[0]["content"]
-    assert written_memory["content"] == write_memory_calls[0]["content"]
     assert "event_id" not in trace_result
     assert trace_result["memory_id"] == "md_abc123"
     assert trace_result["stock_code"] == "601888.SH"
-    assert "event_id" not in written_memory
-    assert written_memory["memory_id"] == "md_abc123"
-    assert written_memory["stock_code"] == "601888.SH"
-    assert written_memory["version"] == 5
-    assert written_memory["size_chars"] == 1234
-    assert written_memory["content_chars"] == len(write_memory_calls[0]["content"])
+    assert written_memory == {
+        "stock_code": "601888.SH",
+        "status": "success",
+        "size_chars": 1234,
+        "max_chars": workflow.settings.MEMORY_DOC_MAX_CHARS,
+        "version": 5,
+    }
+    assert "content" not in written_memory
+    assert "memory_id" not in written_memory
 
 
 @pytest.fixture(autouse=True)
@@ -348,16 +311,20 @@ async def test_final_json_retry_uses_raw_llm_without_tools():
             }
         ],
         review_events=[],
-        internet_tools_used={"search_news"},
         session_id="9a392c04-e965-41f2-8f74-f1163cedab6b",
         stock_code="601888.SH",
     )
 
     assert result is not None
     assert result["errors"] == []
-    assert result["analysis_payload"]["recommended_action"] == "hold"
-    assert result["analysis_payload"]["internet_tools_used"] == ["search_news"]
-    assert result["analysis_payload"]["written_memories"][0]["content"] == "复盘经验"
+    assert result["analysis_payload"]["original_pm_decision"] == "buy"
+    assert "internet_tools_used" not in result["analysis_payload"]
+    assert result["analysis_payload"]["written_memories"][0] == {
+        "stock_code": None,
+        "status": "success",
+        "size_chars": len("复盘经验"),
+        "max_chars": workflow.settings.MEMORY_DOC_MAX_CHARS,
+    }
     assert isinstance(raw_llm.call_messages[0][-1], HumanMessage)
     assert "不要再调用任何工具" in raw_llm.call_messages[0][-1].content
 
@@ -378,7 +345,6 @@ async def test_final_json_retry_records_research_usage_lane(monkeypatch):
         messages=[],
         tool_trace=[],
         review_events=[],
-        internet_tools_used=set(),
         session_id="9a392c04-e965-41f2-8f74-f1163cedab6b",
         stock_code="601888.SH",
     )
@@ -412,7 +378,6 @@ async def test_final_json_retry_retries_when_model_attempts_tool_call():
         messages=[],
         tool_trace=[],
         review_events=[],
-        internet_tools_used=set(),
         session_id="9a392c04-e965-41f2-8f74-f1163cedab6b",
         stock_code="601888.SH",
     )
