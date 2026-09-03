@@ -20,8 +20,8 @@ from app.ai.experience.horizons import (
     normalize_review_horizon,
     review_status_for_candidate,
 )
-from app.ai.experience.index_service import experience_index_service
 from app.core import database as database_module
+from app.core.config import settings
 from app.core.i18n import i18n_service
 from app.core.logger import get_logger
 from app.core.utils.converters import safe_float, safe_isoformat
@@ -62,11 +62,6 @@ def _style_bucket_from_frequency(trading_frequency: str | None) -> str:
     if any(token in text for token in ("long", "长线")):
         return "long_term"
     return "position"
-
-
-def _normalize_memory_importance(value: Any) -> str:
-    text = str(value or "").strip().lower()
-    return text if text in {"low", "medium", "high"} else "medium"
 
 
 def _extract_original_conclusion(message: DebateMessage) -> str:
@@ -742,9 +737,14 @@ class ExperienceService:
                 "analysis_payload": normalized_payload,
                 "tool_trace": result_state.get("tool_trace") or [],
             }
+            pm_decision_context = debate_review_context.get("pm_decision") or {}
+            original_pm_action = self._normalize_action(
+                normalized_payload.get("original_pm_decision")
+                or pm_decision_context.get("decision")
+            )
             completed_payload = self._build_completed_event_payload(
                 result=result,
-                recommended_action=normalized_payload.get("recommended_action"),
+                recommended_action=original_pm_action,
                 debate_correctness=normalized_payload.get("debate_correctness"),
             )
             async with database_module.AsyncSessionLocal() as db:
@@ -766,19 +766,6 @@ class ExperienceService:
                 message_key="experience.live_messages.completed",
                 payload=completed_payload,
             )
-            try:
-                async with database_module.AsyncSessionLocal() as db:
-                    await experience_index_service.sync_from_review_result(db, user_id=user_id, result=result)
-            except Exception as index_exc:
-                logger.warning(
-                    "experience index sync failed",
-                    extra={
-                        "review_run_id": review_run_id,
-                        "user_id": user_id,
-                        "error": str(index_exc),
-                    },
-                    exc_info=True,
-                )
             return result
         except Exception as exc:
             await self._push_review_update(
@@ -1073,7 +1060,20 @@ class ExperienceService:
             completed_payload = completed_event.payload or {}
             result = completed_payload.get("result")
             if isinstance(result, dict) and result.get("analysis_payload"):
-                return result
+                normalized_result = dict(result)
+                persisted_tool_trace = result.get("tool_trace") or completed_payload.get("tool_trace") or []
+                normalized_result["analysis_payload"] = self._normalize_analysis_payload(
+                    result.get("analysis_payload") or {},
+                    debate_review_context={
+                        "pm_decision": {
+                            "decision": completed_payload.get("original_pm_decision")
+                            or completed_payload.get("recommended_action")
+                        }
+                    },
+                    tool_trace=persisted_tool_trace,
+                )
+                normalized_result["tool_trace"] = persisted_tool_trace
+                return normalized_result
 
             return await self._build_review_run_result_fallback(
                 db,
@@ -1569,108 +1569,6 @@ class ExperienceService:
         text = str(value or "").strip().lower()
         return text if text in VALID_ACTIONS else "watch"
 
-    def _normalize_string_list(self, value: Any) -> List[str]:
-        if isinstance(value, list):
-            return [str(item).strip() for item in value if str(item).strip()]
-        if value in (None, ""):
-            return []
-        return [str(value).strip()]
-
-    def _normalize_signal_items(self, value: Any) -> List[Dict[str, str]]:
-        """规范化信号复盘条目列表。
-
-        Args:
-            value: 工作流输出的原始信号条目。
-
-        Returns:
-            仅保留有效 signal 字段后的标准化信号条目列表。
-        """
-        if not isinstance(value, list):
-            return []
-        items: List[Dict[str, str]] = []
-        for item in value:
-            if not isinstance(item, dict):
-                continue
-            signal = str(item.get("signal") or "").strip()
-            if not signal:
-                continue
-            items.append(
-                {
-                    "signal": signal,
-                    "evidence": str(item.get("evidence") or ""),
-                    "impact": str(item.get("impact") or "medium"),
-                    "lesson": str(item.get("lesson") or ""),
-                }
-            )
-        return items
-
-    def _normalize_review_triads(self, value: Any, *, original_pm: Dict[str, Any]) -> Dict[str, Any]:
-        """规范化经验复盘三件套输出。
-
-        Args:
-            value: 工作流输出的原始三件套结构。
-            original_pm: 原始 PM 决策信息，用于补齐缺失字段。
-
-        Returns:
-            包含原判断、信号验证和决策流程改进的标准化三件套。
-        """
-        raw = value if isinstance(value, dict) else {}
-        original = raw.get("original_judgment") if isinstance(raw.get("original_judgment"), dict) else {}
-        signals = raw.get("signal_validation") if isinstance(raw.get("signal_validation"), dict) else {}
-        improvements = raw.get("decision_process_improvement") if isinstance(
-            raw.get("decision_process_improvement"),
-            dict,
-        ) else {}
-        verdict = str(original.get("verdict") or "inconclusive").strip().lower()
-        if verdict not in CORRECTNESS_BUCKETS:
-            verdict = "inconclusive"
-        return {
-            "original_judgment": {
-                "verdict": verdict,
-                "score": max(0.0, min(100.0, safe_float(original.get("score"), 50.0))),
-                "pm_decision": str(original.get("pm_decision") or ""),
-                "outcome_basis": str(original.get("outcome_basis") or ""),
-                "reasoning": str(original.get("reasoning") or ""),
-            },
-            "signal_validation": {
-                "validated_signals": self._normalize_signal_items(signals.get("validated_signals")),
-                "invalidated_signals": self._normalize_signal_items(signals.get("invalidated_signals")),
-                "noise_signals": [
-                    {
-                        "signal": str(item.get("signal") or ""),
-                        "reason": str(item.get("reason") or ""),
-                    }
-                    for item in signals.get("noise_signals", [])
-                    if isinstance(item, dict) and str(item.get("signal") or "").strip()
-                ],
-            },
-            "decision_process_improvement": {
-                "debate_changes": self._normalize_string_list(improvements.get("debate_changes")),
-                "pm_changes": self._normalize_string_list(improvements.get("pm_changes")),
-                "risk_control_changes": self._normalize_string_list(improvements.get("risk_control_changes")),
-            },
-        }
-
-    def _normalize_experience_tags(self, value: Any) -> Dict[str, List[str]]:
-        """规范化经验标签输出。
-
-        Args:
-            value: 工作流输出的原始标签结构。
-
-        Returns:
-            按股票、行业、策略、失败教训、仓位纪律、信号和市场状态分类的标签。
-        """
-        raw = value if isinstance(value, dict) else {}
-        return {
-            "stock_tags": self._normalize_string_list(raw.get("stock_tags")),
-            "industry_tags": self._normalize_string_list(raw.get("industry_tags")),
-            "strategy_tags": self._normalize_string_list(raw.get("strategy_tags")),
-            "failure_lesson_tags": self._normalize_string_list(raw.get("failure_lesson_tags")),
-            "position_discipline_tags": self._normalize_string_list(raw.get("position_discipline_tags")),
-            "signal_tags": self._normalize_string_list(raw.get("signal_tags")),
-            "market_regime_tags": self._normalize_string_list(raw.get("market_regime_tags")),
-        }
-
     def _extract_written_memories_from_tool_trace(self, tool_trace: Any) -> List[Dict[str, Any]]:
         if not isinstance(tool_trace, list):
             return []
@@ -1681,24 +1579,32 @@ class ExperienceService:
                 continue
             args = entry.get("args") if isinstance(entry.get("args"), dict) else {}
             content = str(args.get("content") or "").strip()
-            if not content:
-                continue
             result = entry.get("result") if isinstance(entry.get("result"), dict) else {}
             stock_code = str(args.get("stock_code") or result.get("stock_code") or "").strip() or None
-            memo_session = str(result.get("memo_session") or "").strip().lower()
-            if memo_session not in {"stock", "general"}:
-                memo_session = "stock" if stock_code else "general"
+            status = str(
+                result.get("status")
+                or (
+                    "success"
+                    if result.get("success") is True
+                    else "failed"
+                    if result.get("success") is False or result.get("error")
+                    else "unknown"
+                )
+            )
             item: Dict[str, Any] = {
-                "content": content,
-                "content_chars": len(content),
-                "importance": _normalize_memory_importance(args.get("importance")),
-                "memo_session": memo_session,
+                "status": status,
                 "stock_code": stock_code,
+                "max_chars": result.get("max_chars") or settings.MEMORY_DOC_MAX_CHARS,
             }
-            for key in ("status", "memory_id", "error", "version", "size_chars"):
+            size_chars = result.get("size_chars") or (len(content) if content else None)
+            if size_chars not in (None, ""):
+                item["size_chars"] = size_chars
+            for key in ("error", "version"):
                 value = result.get(key)
                 if value not in (None, ""):
                     item[key] = value
+            if not content and not result and not stock_code:
+                continue
             items.append(item)
         return items
 
@@ -1709,28 +1615,29 @@ class ExperienceService:
         tool_trace: Any = None,
     ) -> List[Dict[str, Any]]:
         source_items = value if isinstance(value, list) else self._extract_written_memories_from_tool_trace(tool_trace)
+        if not source_items and tool_trace:
+            source_items = self._extract_written_memories_from_tool_trace(tool_trace)
         normalized_items: List[Dict[str, Any]] = []
         for item in source_items:
             if not isinstance(item, dict):
                 continue
             content = str(item.get("content") or "").strip()
-            if not content:
-                continue
+            status = str(item.get("status") or ("failed" if item.get("error") else "success" if content else "unknown"))
             stock_code = str(item.get("stock_code") or "").strip() or None
-            memo_session = str(item.get("memo_session") or "").strip().lower()
-            if memo_session not in {"stock", "general"}:
-                memo_session = "stock" if stock_code else "general"
+            if not content and not item.get("size_chars") and not item.get("error") and not stock_code:
+                continue
             normalized_item: Dict[str, Any] = {
-                "content": content,
-                "content_chars": len(content),
-                "importance": _normalize_memory_importance(item.get("importance")),
-                "memo_session": memo_session,
+                "status": status,
                 "stock_code": stock_code,
+                "max_chars": item.get("max_chars") or settings.MEMORY_DOC_MAX_CHARS,
             }
-            for key in ("status", "memory_id", "error", "version", "size_chars"):
+            size_chars = item.get("size_chars") or (len(content) if content else None)
+            if size_chars not in (None, ""):
+                normalized_item["size_chars"] = size_chars
+            for key in ("error", "version"):
                 value = item.get(key)
                 if value not in (None, ""):
-                    normalized_item[key] = str(value) if key in ("status", "memory_id", "error") else value
+                    normalized_item[key] = str(value) if key == "error" else value
             normalized_items.append(normalized_item)
         return normalized_items
 
@@ -1749,77 +1656,36 @@ class ExperienceService:
             tool_trace: 工具调用轨迹，用于回填写入记忆信息。
 
         Returns:
-            字段类型稳定、包含三件套、标签和记忆证据链的分析结果。
+            字段类型稳定的精简分析结果；完整工具轨迹由顶层结果单独保留。
         """
-        normalized = dict(payload or {})
+        raw_payload = payload if isinstance(payload, dict) else {}
         original_pm = debate_review_context.get("pm_decision") or {}
-        normalized["review_triads"] = self._normalize_review_triads(
-            normalized.get("review_triads"),
-            original_pm=original_pm,
-        )
-        normalized["experience_tags"] = self._normalize_experience_tags(normalized.get("experience_tags"))
-        normalized["recommended_action"] = self._normalize_action(normalized.get("recommended_action"))
-        normalized["confidence_score"] = max(0.0, min(100.0, safe_float(normalized.get("confidence_score"), 55.0)))
-        normalized["risk_flags"] = self._normalize_string_list(normalized.get("risk_flags"))
-        normalized["memory_evidence_used"] = self._normalize_string_list(normalized.get("memory_evidence_used"))
-        normalized["similar_success_patterns"] = self._normalize_string_list(normalized.get("similar_success_patterns"))
-        normalized["similar_failure_patterns"] = self._normalize_string_list(normalized.get("similar_failure_patterns"))
-        normalized["lessons_applied"] = self._normalize_string_list(normalized.get("lessons_applied"))
-        normalized["dominant_drivers"] = self._normalize_string_list(normalized.get("dominant_drivers"))
-        normalized["rejected_drivers"] = self._normalize_string_list(normalized.get("rejected_drivers"))
-        normalized["driver_dimension_review"] = self._normalize_string_list(normalized.get("driver_dimension_review"))
-        normalized["buy_sell_rules"] = self._normalize_string_list(normalized.get("buy_sell_rules"))
-        normalized["internet_evidence_used"] = self._normalize_string_list(normalized.get("internet_evidence_used"))
-        normalized["internet_tools_used"] = self._normalize_string_list(normalized.get("internet_tools_used"))
-        normalized["debate_process_issues"] = self._normalize_string_list(normalized.get("debate_process_issues"))
-        normalized["optimization_directions"] = self._normalize_string_list(normalized.get("optimization_directions"))
-        normalized["improved_debate_rules"] = self._normalize_string_list(normalized.get("improved_debate_rules"))
-        normalized["current_case_vs_history"] = str(normalized.get("current_case_vs_history") or "")
-        normalized["why_this_is_not_blind_guess"] = str(normalized.get("why_this_is_not_blind_guess") or "")
-        normalized["action_plan"] = str(normalized.get("action_plan") or "")
-        normalized["entry_plan"] = str(normalized.get("entry_plan") or "")
-        normalized["exit_plan"] = str(normalized.get("exit_plan") or "")
-        normalized["position_management"] = str(normalized.get("position_management") or "")
-        normalized["profit_hypothesis"] = str(normalized.get("profit_hypothesis") or "")
-        normalized["market_experience_summary"] = str(normalized.get("market_experience_summary") or "")
-        normalized["debate_correctness"] = (
-            str(normalized.get("debate_correctness") or "").strip().lower()
-            if str(normalized.get("debate_correctness") or "").strip().lower() in CORRECTNESS_BUCKETS
+        original_decision = str(
+            raw_payload.get("original_pm_decision")
+            or original_pm.get("decision")
+            or raw_payload.get("recommended_action")
+            or ""
+        ).strip()
+        correctness_reasoning = str(
+            raw_payload.get("correctness_reasoning")
+            or raw_payload.get("thesis_summary")
+            or raw_payload.get("market_experience_summary")
+            or ""
+        ).strip()
+        debate_correctness = (
+            str(raw_payload.get("debate_correctness") or "").strip().lower()
+            if str(raw_payload.get("debate_correctness") or "").strip().lower() in CORRECTNESS_BUCKETS
             else "inconclusive"
         )
-        normalized["correctness_score"] = max(0.0, min(100.0, safe_float(normalized.get("correctness_score"), 50.0)))
-        normalized["correctness_reasoning"] = str(normalized.get("correctness_reasoning") or "")
-        normalized["process_improvement_summary"] = str(normalized.get("process_improvement_summary") or "")
-        normalized["reviewed_pm_decision"] = self._normalize_action(
-            normalized.get("reviewed_pm_decision") or normalized.get("recommended_action")
-        )
-        normalized["original_pm_decision"] = self._normalize_action(normalized.get("original_pm_decision"))
-        revised_target_position = normalized.get("revised_target_position")
-        normalized["revised_target_position"] = (
-            max(0.0, min(1.0, safe_float(revised_target_position, 0.0)))
-            if revised_target_position not in (None, "")
-            else None
-        )
-        original_target_position = normalized.get("original_target_position", original_pm.get("target_position"))
-        normalized["original_target_position"] = (
-            max(0.0, min(1.0, safe_float(original_target_position, 0.0)))
-            if original_target_position not in (None, "")
-            else None
-        )
-        normalized["revised_stop_loss"] = str(normalized.get("revised_stop_loss") or "")
-        normalized["tool_invocation_summary"] = normalized.get("tool_invocation_summary") or []
-        normalized["written_memories"] = self._normalize_written_memories(
-            normalized.get("written_memories"),
-            tool_trace=tool_trace or normalized.get("tool_invocation_summary"),
-        )
-        evidence_chain = {
-            "session": debate_review_context.get("session") or {},
-            "pm_decision": debate_review_context.get("pm_decision") or {},
-            "market_outcome_summary": debate_review_context.get("market_outcome_summary") or {},
-            "review_triads": normalized["review_triads"],
+        normalized = {
+            "original_pm_decision": original_decision,
+            "debate_correctness": debate_correctness,
+            "correctness_reasoning": correctness_reasoning,
+            "written_memories": self._normalize_written_memories(
+                raw_payload.get("written_memories"),
+                tool_trace=tool_trace,
+            ),
         }
-        for item in normalized["written_memories"]:
-            item["evidence_chain"] = evidence_chain
         return normalized
 
     def _build_completed_event_payload(
@@ -1845,6 +1711,8 @@ class ExperienceService:
             "market_day_count": result.get("market_day_count"),
             "recommended_action": recommended_action,
             "debate_correctness": debate_correctness,
+            "original_pm_decision": (result.get("analysis_payload") or {}).get("original_pm_decision"),
+            "correctness_reasoning": (result.get("analysis_payload") or {}).get("correctness_reasoning"),
             "result": self._serialize_review_result(result),
         }
 
@@ -1938,12 +1806,18 @@ class ExperienceService:
             ]
 
         analysis_payload = {
-            "recommended_action": self._normalize_action(completed_payload.get("recommended_action")),
+            "original_pm_decision": str(
+                completed_payload.get("original_pm_decision")
+                or getattr(pm_message, "decision", None)
+                or completed_payload.get("recommended_action")
+                or ""
+            ).strip(),
             "debate_correctness": (
                 str(completed_payload.get("debate_correctness") or "").strip().lower()
                 if str(completed_payload.get("debate_correctness") or "").strip().lower() in CORRECTNESS_BUCKETS
                 else "inconclusive"
             ),
+            "correctness_reasoning": str(completed_payload.get("correctness_reasoning") or "").strip(),
             "written_memories": self._extract_written_memories_from_tool_trace(tool_trace),
         }
         return {

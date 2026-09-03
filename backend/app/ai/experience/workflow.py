@@ -32,130 +32,19 @@ EXPERIENCE_REVIEW_MAX_ITERATIONS = 50
 EXPERIENCE_REVIEW_FINAL_RETRY_LIMIT = 3
 
 
-class SignalReviewItem(BaseModel):
-    """描述单个被验证或被证伪的复盘信号。"""
-
-    signal: str
-    evidence: str = ""
-    impact: str = Field(default="medium", pattern="^(low|medium|high)$")
-    lesson: str = ""
-
-
-class NoiseSignalItem(BaseModel):
-    """描述对实际涨跌贡献较低的噪音信号。"""
-
-    signal: str
-    reason: str = ""
-
-
-class OriginalJudgmentReview(BaseModel):
-    """描述原始 PM 判断相对市场结果的正确性。"""
-
-    verdict: str = Field(pattern="^(correct|partially_correct|incorrect|inconclusive)$")
-    score: float = Field(ge=0, le=100)
-    pm_decision: str = ""
-    outcome_basis: str = ""
-    reasoning: str = ""
-
-
-class SignalValidationReview(BaseModel):
-    """按验证、证伪和噪音三类组织信号复盘结果。"""
-
-    validated_signals: List[SignalReviewItem] = Field(default_factory=list)
-    invalidated_signals: List[SignalReviewItem] = Field(default_factory=list)
-    noise_signals: List[NoiseSignalItem] = Field(default_factory=list)
-
-
-class DecisionProcessImprovementReview(BaseModel):
-    """描述后续 debate、PM 决策和风控流程的改进项。"""
-
-    debate_changes: List[str] = Field(default_factory=list)
-    pm_changes: List[str] = Field(default_factory=list)
-    risk_control_changes: List[str] = Field(default_factory=list)
-
-
-class ExperienceReviewTriads(BaseModel):
-    """承载经验复盘必须输出的三件套结构。"""
-
-    original_judgment: OriginalJudgmentReview
-    signal_validation: SignalValidationReview
-    decision_process_improvement: DecisionProcessImprovementReview
-
-
-class ExperienceTags(BaseModel):
-    """承载经验复盘结果的展示和筛选标签。"""
-
-    stock_tags: List[str] = Field(default_factory=list)
-    industry_tags: List[str] = Field(default_factory=list)
-    strategy_tags: List[str] = Field(default_factory=list)
-    failure_lesson_tags: List[str] = Field(default_factory=list)
-    position_discipline_tags: List[str] = Field(default_factory=list)
-    signal_tags: List[str] = Field(default_factory=list)
-    market_regime_tags: List[str] = Field(default_factory=list)
-
-
 class ExperienceReviewOutput(BaseModel):
-    thesis_summary: str = Field(
-        description="用 2-4 句总结原始 PM 结论是否正确、股票实际涨跌主因，以及最重要的复盘结论。 / Summarize in 2-4 sentences whether the original PM conclusion was correct, what mainly drove the stock move, and the key review takeaway."
-    )
-    recommended_action: str = Field(pattern="^(avoid|watch|buy|add|hold|reduce|sell)$")
-    confidence_score: float = Field(ge=0, le=100)
-    risk_flags: List[str] = Field(default_factory=list)
-    memory_evidence_used: List[str] = Field(default_factory=list)
-    similar_success_patterns: List[str] = Field(
-        default_factory=list,
-        description="过去类似上涨或成功案例中真正有效的模式。 / Patterns that truly worked in similar rising or successful cases."
-    )
-    similar_failure_patterns: List[str] = Field(
-        default_factory=list,
-        description="过去类似下跌或失败案例中经常导致判断失效的模式。 / Patterns that often led to failure in similar falling or failed cases."
-    )
-    lessons_applied: List[str] = Field(default_factory=list)
-    current_case_vs_history: str = ""
-    why_this_is_not_blind_guess: str = ""
-    action_plan: str = ""
-    entry_plan: str = ""
-    exit_plan: str = ""
-    position_management: str = ""
-    profit_hypothesis: str = ""
-    market_experience_summary: str = Field(
+    original_pm_decision: str = Field(
         default="",
-        description="必须总结这次股票为什么涨或跌，区分被验证信号、被证伪信号，并提炼可复用的涨跌经验。 / Must explain why the stock rose or fell, separate validated vs falsified signals, and extract reusable price-move experience."
+        description="原始 PM 的简短动作或结论，例如 buy、hold 或 sell。 / The original PM action or conclusion in a short form, such as buy, hold, or sell."
     )
-    dominant_drivers: List[str] = Field(
-        default_factory=list,
-        description="本次涨跌最主要的 1-3 个驱动因素。 / The top 1-3 dominant drivers behind the price move."
+    debate_correctness: str = Field(
+        pattern="^(correct|partially_correct|incorrect|inconclusive)$",
+        description="原始 PM 结论相对后验市场结果的正确性。 / Correctness of the original PM conclusion against the posterior market outcome."
     )
-    rejected_drivers: List[str] = Field(
-        default_factory=list,
-        description="被讨论过但最终不构成主因的伪因或噪音。 / Candidate drivers that were considered but rejected as noise or non-dominant."
-    )
-    driver_dimension_review: List[str] = Field(
-        default_factory=list,
-        description="按维度逐项复盘，例如 政策/行业/国际局势/业绩/估值/资金/情绪/事件/商品价格/利率汇率，并说明证据与影响。 / Dimension-by-dimension review across policy, industry, geopolitics, earnings, valuation, flow, sentiment, events, commodities, rates/FX, with evidence and impact."
-    )
-    buy_sell_rules: List[str] = Field(
-        default_factory=list,
-        description="每条都用“触发条件 -> 动作 -> 原因”格式，写成未来可执行的买卖规则。 / Each rule must follow 'trigger -> action -> reason' so it is executable in future cases."
-    )
-    internet_evidence_used: List[str] = Field(default_factory=list)
-    review_triads: ExperienceReviewTriads
-    experience_tags: ExperienceTags = Field(default_factory=ExperienceTags)
-    debate_correctness: str = Field(pattern="^(correct|partially_correct|incorrect|inconclusive)$")
-    correctness_score: float = Field(ge=0, le=100)
     correctness_reasoning: str = Field(
         default="",
-        description="基于决策后的价格路径、回撤和驱动因素，解释原始 PM 结论为什么对或错。 / Explain why the original PM conclusion was right or wrong based on post-decision price path, drawdown, and drivers."
+        description="用 1-3 句说明原始结论为何正确、部分正确或错误，并提炼最重要的涨跌原因与可复用教训。不要重复记忆文档全文。 / In 1-3 concise sentences, explain why the original conclusion was correct, partially correct, or incorrect, and state the key price driver and reusable lesson. Do not repeat the memory document."
     )
-    debate_process_issues: List[str] = Field(default_factory=list)
-    optimization_directions: List[str] = Field(default_factory=list)
-    improved_debate_rules: List[str] = Field(default_factory=list)
-    process_improvement_summary: str = ""
-    revised_target_position: Optional[float] = Field(default=None, ge=0, le=1)
-    revised_stop_loss: str = ""
-    reviewed_pm_decision: str = ""
-    original_pm_decision: str = ""
-    original_target_position: Optional[float] = Field(default=None, ge=0, le=1)
 
 
 class ExperienceWorkflowState(TypedDict, total=False):
@@ -185,21 +74,19 @@ def _extract_written_memories(tool_trace: List[Dict[str, Any]]) -> List[Dict[str
         args = entry.get("args") if isinstance(entry.get("args"), dict) else {}
         result = entry.get("result") if isinstance(entry.get("result"), dict) else {}
         content = str(args.get("content") or "").strip()
-        if not content:
+        if not content and not result.get("error") and result.get("success") is not False:
             continue
         stock_code = str(result.get("stock_code") or "").strip() or None
-        memo_session = str(result.get("memo_session") or "stock").strip() or "stock"
-        importance = str(args.get("importance") or "medium").strip().lower()
-        if importance not in {"low", "medium", "high"}:
-            importance = "medium"
+        status = result.get("status")
+        if not status:
+            status = "success" if result.get("success") is True else "failed" if result.get("success") is False or result.get("error") else "unknown"
         item: dict[str, Any] = {
-            "content": content,
-            "content_chars": len(content),
-            "importance": importance,
-            "memo_session": memo_session,
             "stock_code": stock_code,
+            "status": status,
+            "size_chars": result.get("size_chars") or len(content),
+            "max_chars": result.get("max_chars") or settings.MEMORY_DOC_MAX_CHARS,
         }
-        for key in ("status", "memory_id", "error", "version", "size_chars"):
+        for key in ("error", "version"):
             value = result.get(key)
             if value not in (None, ""):
                 item[key] = value
@@ -210,11 +97,8 @@ def _extract_written_memories(tool_trace: List[Dict[str, Any]]) -> List[Dict[str
 def _build_experience_analysis_payload(
     validated_output: ExperienceReviewOutput,
     tool_trace: List[Dict[str, Any]],
-    internet_tools_used: set[str],
 ) -> Dict[str, Any]:
     payload = validated_output.model_dump(mode="python")
-    payload["tool_invocation_summary"] = tool_trace
-    payload["internet_tools_used"] = sorted(internet_tools_used)
     payload["written_memories"] = _extract_written_memories(tool_trace)
     return payload
 
@@ -275,7 +159,6 @@ async def _retry_final_experience_json(
     messages: List[Any],
     tool_trace: List[Dict[str, Any]],
     review_events: List[Dict[str, Any]],
-    internet_tools_used: set[str],
     session_id: Optional[str],
     stock_code: str,
 ) -> Optional[Dict[str, Any]]:
@@ -322,7 +205,6 @@ async def _retry_final_experience_json(
                 "analysis_payload": _build_experience_analysis_payload(
                     validated_output,
                     tool_trace,
-                    internet_tools_used,
                 ),
                 "tool_trace": tool_trace,
                 "review_events": review_events,
@@ -416,35 +298,17 @@ def _build_review_system_prompt(skills_prompt_suffix: str) -> str:
     schema = stable_json_dumps(ExperienceReviewOutput.model_json_schema())
     if str(settings.SYSTEM_LANGUAGE).lower().startswith("zh"):
         return (
-            "你是一名 A 股投研复盘分析师。你的任务不是重新做一遍普通选股，而是复盘现有 debate / PM 结论："
-            "1. 评估这次 PM 结论在市场结果上是否正确；"
-            "2. 找出这只股票在决策后阶段为什么上涨/下跌，哪些因素是真正主导驱动，哪些只是噪音；"
-            "3. 找出 debate 流程中遗漏的信息、错误的推理、仓位或卖出设计问题；"
-            "4. 给出可复用的涨跌经验、交易规则与流程优化规则，让后续 debate 更容易得出赚钱的结论。"
-            "你的主输入只有：各个 agent 的辩论 timeline 结论、PM 的交易相关字段、执行结果、以及决策后的市场结果。"
-            "你必须把 market_outcome_summary 中的收益、回撤、相对收益结果作为核心证据输入。"
-            "凡是关于决策时点的历史事实，包括 timeline、PM 字段、执行结果、价格路径、收益和回撤，一律以输入里的 review_input 为准。"
-            "工具调用拿到的是当前时点的实时或补充信息，可能与决策时点不同，只能用于补充解释和验证原因，不能覆盖、改写或否定输入中的历史事实。"
-            "你必须后验评价 PM 的退出设计：`take_profit` 是否合理、是否过高或过低、价格路径是否曾达到或接近止盈目标、`holding_horizon_days` 是否匹配实际涨跌节奏，以及止盈、止损、持有周期组合是否构成可复用经验。"
-            "如果 PM 缺少明确退出纪律，或持有周期与实际价格路径明显不匹配，必须把它写入 `risk_control` 或 `process_improvement` 相关结论；但不得改变系统固定的 5d/20d/60d 复盘周期。"
-            "你的核心工作不是复述各个 agent 说了什么，而是判断：哪些论点真正解释了后验价格路径，哪些论点没有被市场验证。"
-            "分析“股票为什么涨跌”时，优先从这些维度归因：政策、业绩、估值修复或杀估值、资金流与成交结构、板块 Beta 与指数环境、商品价格与成本、情绪催化、事件驱动、预期差修正。"
-            "如果多个因素都相关，你必须指出 1-3 个主导因素，并说明它们如何对应到价格路径和回撤。"
-            "如果当前上下文不足以解释涨跌原因，可以调用外部工具补证据；但如果已有证据足够，不要机械搜索。"
-            "在引用工具返回的行情、财务或基本面数据前，必须先调用 `get_current_time` 确认当前系统时间，以判断数据的时效性和有效性。"
-            "历史经验只能通过记忆工具读取和写入：每只股票维护一份自由格式的记忆文档，不要假设有额外的经验表可用。"
-            "是否调用 `read_memory` 由你自己决定。只有当历史经验确实能降低当前不确定性时，才调用它；不要机械调用。"
-            "是否调用互联网或其他工具也由你自己决定，但你必须把股票涨跌的主要驱动原因查清楚，并在正确性解释里说明清楚。"
-            "你必须显式区分：A. 被市场验证的信号；B. 被市场证伪的信号；C. 虽然说得有道理，但对实际涨跌贡献不大的噪音信号。"
-            "你必须做一次多维原因检查，至少逐项检查这些维度：国家政策/监管、行业景气度与板块强弱、国际局势与宏观环境、业绩与基本面、估值、资金流与成交结构、市场情绪、事件催化、商品价格或成本、利率/汇率。"
-            "不能只盯一两个技术或量价指标；即使某个维度最终不重要，也要明确说明它为什么不是主因。"
-            "`dominant_drivers` 只写 1-3 个真正主导涨跌的因素。"
-            "`rejected_drivers` 写那些被讨论过但最终不构成主因的因素。"
-            "`driver_dimension_review` 要按“维度 -> 证据 -> 影响 -> 结论”逐项写，尽量覆盖上面的多维检查。"
-            "market_experience_summary 必须写成经验，不是摘要。至少包含：实际涨跌主因、被验证信号、被证伪信号、可复用经验。"
-            "buy_sell_rules 必须写成未来可执行规则，而不是抽象观点。"
+            "你是一名 A 股投研复盘分析师，围绕当前股票的长期记忆文档复盘已有 debate / PM 结论。"
+            "你只需要完成三项输出：原始 PM 动作、结论正确性、以及 1-3 句简短复盘解释。"
+            "解释必须同时覆盖后验市场结果、最主要的涨跌原因和一条可复用教训；不要复述 timeline，不要输出记忆文档全文。"
+            "你的主输入是 agent timeline、PM 交易字段、执行结果和决策后的市场结果，必须把 market_outcome_summary 的收益、回撤和相对收益作为核心证据。"
+            "凡是决策时点的历史事实，包括 timeline、PM 字段、执行结果、价格路径、收益和回撤，一律以 review_input 为准；工具返回的信息只能补充或验证，不能改写历史事实。"
+            "后验检查 PM 的止盈、止损和持有周期是否匹配实际价格路径；如果发现退出纪律或周期明显不匹配，把结论压缩进 correctness_reasoning。系统固定的 5d/20d/60d 复盘周期不得改变。"
+            "分析涨跌原因时，优先判断政策、行业、宏观、业绩、估值、资金、板块环境、情绪、事件、商品成本和利率汇率等因素，区分真正主因、被验证信号、被证伪信号与噪音。"
+            "如果上下文不足以解释涨跌，可以调用外部工具补证据；已有证据足够时不要机械搜索。使用行情、财务或基本面工具前，先调用 get_current_time 判断时效。"
+            "历史经验只能通过记忆工具读取和写入：每只股票只有一份自由格式 Markdown 记忆文档。只有历史经验能降低不确定性时才 read_memory，不要机械调用。"
             "只有在总结出可复用的赚钱经验、失败教训、仓位纪律或 debate 流程改进规则后，才调用 `write_memory` 重写整份记忆文档；如果没有新增可复用经验，可以跳过全部记忆写入。"
-            "在调用 `write_memory` 之前，先把本次复盘提炼成 1-3 条可独立复用的高信息密度经验教训；每条都应能单独成立，避免空泛套话。"
+            "调用 `write_memory` 前，先提炼 1-3 条可独立复用的高信息密度教训，避免空泛套话。"
             "记忆工具已自动绑定到当前股票，只允许写入当前股票记忆，不支持通用记忆，也不要尝试传入 `stock_code`。"
             "\n记忆写入协议:\n"
             "1. 写前必读: 调用 `write_memory` 前必须先 `read_memory` 获取最新全文，并把返回的 `version` 作为 `base_version` 传入。\n"
@@ -454,52 +318,26 @@ def _build_review_system_prompt(skills_prompt_suffix: str) -> str:
             "5. 容量上限: 文档超过系统上限时写入失败，必须在同一轮先精炼合并旧内容再重试，不要直接放弃。\n"
             "6. 版本冲突: 写入失败并返回最新全文时，把你的新增经验合并进最新全文后用返回的版本号重试；禁止覆盖其他来源新增的内容。\n"
             "7. 写入次数: 通常一次 `write_memory` 即可完成本次复盘的记忆更新；只有确实需要再次补充时才多次调用。\n"
-            "如果调用 `write_memory`，写入后的文档必须直接包含本次复盘得到的经验教训与可执行规则，而不是只重复结论标签。"
-            "不要把普通背景信息和流水账写入记忆。"
-            "最终结论必须明确区分：原始 PM 决策、你复盘后的改进动作、以及 debate 流程该如何优化。"
-            "decision_process_improvement 必须写成给未来 Debate / PM 可直接执行的流程检查项，不能只是抽象建议。"
-            "不要预设固定问题清单；必须从本次复盘证据和召回记忆中归纳真正反复出现、导致判断失效或执行偏差的问题。"
-            "如果证据显示某类信号需要额外确认、某种行业或市场比较被忽视、仓位纪律不足、止损或反转条件缺失，才把它写成未来检查项。"
-            "复盘提炼经验时必须说明它适用的交易频率和交易策略；不同频率或策略下可能不适用，不要把经验无条件推广。"
-            "每条改进都必须说明触发条件、未来 PM 或 Agent 要检查的证据，以及历史经验在什么边界下不再适用。"
-            "最终 JSON 必须包含 `review_triads`。其中 `original_judgment` 判断原始 PM 是否正确，"
-            "`signal_validation` 明确列出被验证信号、被证伪信号和噪音信号，"
-            "`decision_process_improvement` 明确列出下次 debate、PM 决策和风控要改什么。"
-            "最终 JSON 还应包含 `experience_tags`，用于经验库展示筛选。"
+            "如果调用 `write_memory`，写入后的文档必须直接包含本次复盘的经验教训、可执行规则和适用边界，不要只重复结论标签。不要写普通背景或流水账。"
+            "最终 JSON 只返回 schema 中的三个字段；工具调用轨迹由系统单独保留，不要复制进 JSON。"
             "不要输出 markdown，不要输出额外解释，只返回严格合法的 JSON 对象。"
             f"{skills_prompt_suffix}"
             f"最终 JSON Schema: {schema}"
         )
     return (
-        "You are an A-share review analyst. Your task is not to rerun ordinary stock picking, but to review an existing debate / PM conclusion:"
-        "1. Judge whether the PM conclusion was correct in terms of market outcome; "
-        "2. explain why the stock rose or fell after the decision, separating real drivers from noise; "
-        "3. identify missing information, flawed reasoning, position-sizing mistakes, or sell-design problems in the debate process; "
-        "4. extract reusable market experience, trading rules, and process improvements that can help future debates make more profitable conclusions. "
-        "Your main input only contains the agents' timeline conclusions, PM trading fields, execution outcome, and post-decision market outcome. "
-        "You must treat the returns, drawdowns, and relative-performance fields in `market_outcome_summary` as core evidence. "
-            "For any historical fact about the decision-time state, including the timeline, PM fields, execution result, price path, returns, and drawdowns, the `review_input` must be treated as the source of truth. "
-            "Any tool output is current-time or supplementary information and may differ from the decision-time state, so it may only be used for explanation or corroboration and must never overwrite the historical facts in the input. "
-            "You must evaluate the PM's exit design with hindsight: whether `take_profit` was reasonable, too high or too low, whether the price path reached or approached the target, whether `holding_horizon_days` matched the actual price rhythm, and whether the take-profit, stop-loss, and holding-period design creates reusable experience. "
-            "If the PM lacked clear exit discipline, or if the holding horizon clearly mismatched the actual price path, include that in `risk_control` or `process_improvement` conclusions; do not change the system's fixed 5d/20d/60d review horizons. "
-            "Your job is not to restate each agent, but to determine which arguments truly explain the later price path and which were not validated by the market. "
-        "When explaining why the stock moved, prioritize attribution across policy, earnings, valuation rerating or derating, flow and trading structure, sector beta and index environment, commodity costs, sentiment catalyst, event-driven moves, and expectation reset. "
-        "If several factors matter, identify the top 1-3 dominant drivers and connect them to the price path and drawdown. "
+        "You are an A-share review analyst. Review the existing debate / PM conclusion around the current stock's long-term memory document. "
+        "Return only three analytical fields: the original PM action, correctness, and a concise 1-3 sentence review explanation. "
+        "The explanation must cover the posterior market outcome, the main price driver, and one reusable lesson; do not repeat the timeline or the memory document. "
+        "The input contains agent timeline conclusions, PM trading fields, execution outcome, and post-decision market outcome. Treat the returns, drawdowns, and relative-performance fields in `market_outcome_summary` as core evidence. "
+        "For decision-time historical facts, `review_input` is the source of truth. Tool output is supplementary current-time information and may only explain or corroborate it, never overwrite it. "
+        "Evaluate the PM's take-profit, stop-loss, and holding-period design against the actual price path. Compress any mismatch or missing exit discipline into `correctness_reasoning`; do not change the fixed 5d/20d/60d review horizons. "
+        "When explaining the move, check policy, industry, macro, earnings, valuation, flow, sector beta, sentiment, events, commodity costs, and rates/FX, separating true drivers, validated signals, falsified signals, and noise. "
         "If the current context is insufficient to explain the move, you may call external tools for evidence; otherwise do not search mechanically. "
         "Before using market, financial, or fundamental data from tools, call `get_current_time` to confirm the current system time and assess data freshness and validity. "
         "Historical experience can only be read or written through memory tools: each stock keeps one free-form memory document. Do not assume any extra experience tables exist. "
         "Whether to call `read_memory` is your decision; only do so when prior experience can materially reduce uncertainty. "
-        "Whether to call internet or other tools is also your decision, but you must clearly identify the main drivers of the stock move and explain them in correctness analysis. "
-        "You must explicitly separate: A. validated signals; B. falsified signals; C. noisy signals that sounded plausible but contributed little to the actual move. "
-        "You must perform a multi-dimensional driver check that covers at least: national policy/regulation, industry cycle and sector strength, international situation and macro backdrop, earnings/fundamentals, valuation, capital flow and trading structure, market sentiment, event catalysts, commodity prices/costs, and rates/FX. "
-        "Do not fixate on one or two technical or price/volume indicators; even when a dimension is not important, explain why it was not a dominant driver. "
-        "`dominant_drivers` should contain only the 1-3 true dominant causes of the move. "
-        "`rejected_drivers` should capture factors that were considered but ultimately rejected as non-dominant. "
-        "`driver_dimension_review` should be written in the format 'dimension -> evidence -> impact -> conclusion' and should reflect the multi-factor scan above. "
-        "`market_experience_summary` must be written as reusable experience, not as a generic summary. It must include actual move drivers, validated signals, falsified signals, and reusable lessons. "
-        "`buy_sell_rules` must be executable future rules, not abstract opinions. "
         "Only after extracting reusable profitable experience, failed lessons, position discipline, or debate-process improvement rules should you call `write_memory` to rewrite the whole memory document; if there is no new reusable lesson, you may skip all memory writes. "
-        "Before calling `write_memory`, distill the review into 1-3 self-contained, high-density lessons that can stand on their own and avoid vague wording. "
+        "Before calling `write_memory`, distill 1-3 self-contained, high-density lessons and avoid vague wording. "
         "The memory tools are already bound to the current stock. Only stock-bound memory is supported here, general memory is not supported, and you must not try to pass `stock_code`. "
         "\nMemory write protocol:\n"
         "1. Read before write: before calling `write_memory`, call `read_memory` to get the latest full text, and pass its `version` as `base_version`.\n"
@@ -509,16 +347,9 @@ def _build_review_system_prompt(skills_prompt_suffix: str) -> str:
         "5. Size limit: when the document exceeds the system limit the write fails; consolidate outdated content in the same turn and retry instead of giving up.\n"
         "6. Version conflict: when the write fails and returns the latest full text, merge your new lessons into it and retry with the returned version; never overwrite content added by other sources.\n"
         "7. Write count: one `write_memory` call is normally enough for this review; only call it again when a supplement is truly needed.\n"
-        "If you call `write_memory`, the resulting document must directly capture the reusable lesson and executable rule from this review instead of merely repeating verdict labels. "
+        "If you call `write_memory`, the resulting document must directly capture the reusable lesson, executable rule, and applicability boundary from this review instead of merely repeating verdict labels. "
         "Do not write generic background information or diary-style notes into memory. "
-        "Your final answer must clearly distinguish the original PM decision, your revised action after review, and how the debate flow should improve. "
-        "`decision_process_improvement` must be written as concrete future Debate / PM checklist items, not abstract advice. "
-        "Do not assume a fixed issue checklist; derive the recurring problems that truly caused judgment failures or execution drift from the current review evidence and recalled memory. "
-        "Only when the evidence shows that a signal needs extra confirmation, an industry or market comparison was ignored, position discipline was weak, or stop-loss or reversal conditions were missing should it become a future checklist item. "
-        "The final JSON must contain `review_triads`: `original_judgment` judges whether the original PM was correct, "
-        "`signal_validation` lists validated, invalidated, and noisy signals, and "
-        "`decision_process_improvement` lists concrete debate, PM, and risk-control changes for next time. "
-        "The final JSON should also contain `experience_tags` for experience-library filtering. "
+        "The final JSON contains only the three fields in the schema; the system retains the tool invocation trace separately, so do not duplicate it in the JSON. "
         "Do not output markdown or extra explanation; return only a strictly valid JSON object. "
         f"{skills_prompt_suffix}"
         f"Final JSON Schema: {schema}"
@@ -585,7 +416,6 @@ async def review_debate_conclusion(state: ExperienceWorkflowState) -> Dict[str, 
         ),
     ]
 
-    internet_tools_used: set[str] = set()
     tool_trace: list[dict[str, Any]] = []
     review_events: list[dict[str, Any]] = []
 
@@ -617,8 +447,6 @@ async def review_debate_conclusion(state: ExperienceWorkflowState) -> Dict[str, 
                 for tool_call in response.tool_calls:
                     tool_name = tool_call["name"]
                     tool_func = tool_map.get(tool_name)
-                    if tool_name == "search_news":
-                        internet_tools_used.add(tool_name)
                     tool_args = make_json_serializable(tool_call["args"])
                     tool_trace_entry = {"name": tool_name, "args": tool_args}
                     tool_trace.append(tool_trace_entry)
@@ -672,6 +500,7 @@ async def review_debate_conclusion(state: ExperienceWorkflowState) -> Dict[str, 
                                 "error": tool_result.get("error"),
                                 "version": tool_result.get("version"),
                                 "size_chars": tool_result.get("size_chars"),
+                                "max_chars": tool_result.get("max_chars") or settings.MEMORY_DOC_MAX_CHARS,
                             }
                     if should_summarize_tool_output(tool_name, tool_payload):
                         tool_payload = await summarize_tool_output(
@@ -705,7 +534,6 @@ async def review_debate_conclusion(state: ExperienceWorkflowState) -> Dict[str, 
                     "analysis_payload": _build_experience_analysis_payload(
                         validated_output,
                         tool_trace,
-                        internet_tools_used,
                     ),
                     "tool_trace": tool_trace,
                     "review_events": review_events,
@@ -735,7 +563,6 @@ async def review_debate_conclusion(state: ExperienceWorkflowState) -> Dict[str, 
             messages=messages,
             tool_trace=tool_trace,
             review_events=review_events,
-            internet_tools_used=internet_tools_used,
             session_id=state.get("session_id"),
             stock_code=stock_code,
         )

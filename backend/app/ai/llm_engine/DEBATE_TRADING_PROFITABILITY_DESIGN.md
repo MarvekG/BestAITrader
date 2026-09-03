@@ -131,7 +131,7 @@
 - 最小字段包括：`has_orders`、`has_trades`、`order_count`、`filled_order_count`、`avg_fill_price`、`total_quantity`、`realized_pnl`、`first_order_time`、`latest_order_time`、`first_trade_time`、`latest_trade_time`。
 - 没有订单或成交时必须显式返回空状态，例如 `has_orders=false`、`has_trades=false`，避免 PM 误以为已有交易结果。
 - 上一轮交易信息必须带日期，避免只有价格和数量而没有时间锚点。
-- 不向 PM 注入周期性经验复盘结论；复盘结果仍留在 `experience` 系统内用于后验分析和经验库。
+- 不向 PM 注入周期性经验复盘结论；复盘结果仍留在 `experience` 系统内用于后验分析，经验正文由对应股票的记忆文档保存。
 
 不做：
 

@@ -221,10 +221,8 @@ Service 不负责 prompt 编写和工具调用循环，这些在 `workflow.py` �
 复盘 LLM 必须围绕后验市场结果工作：
 
 - 判断原始 PM 结论是否正确。
-- 找出决策后涨跌的 1-3 个主导因素。
-- 区分被市场验证、被市场证伪和噪音信号。
-- 多维检查政策、行业、宏观、业绩、估值、资金、情绪、事件、商品价格、利率汇率。
-- 输出可执行的买卖规则和 debate 流程改进规则。
+- 找出决策后涨跌的主要原因，并区分被验证、被证伪和噪音信号。
+- 将可复用的驱动判断、买卖规则和 debate 流程改进写入记忆文档，而不是重复塞进最终 JSON。
 - 不能把工具返回的当前信息当作决策时点历史事实。
 
 执行参数：
@@ -255,42 +253,20 @@ Service 不负责 prompt 编写和工具调用循环，这些在 `workflow.py` �
 
 最终 `analysis_payload` 来自 `ExperienceReviewOutput`，并经过 service 归一化。
 
-核心字段：
+最终分析结果只保留面向展示的最小字段：
 
-- `thesis_summary`
-- `recommended_action`
-- `confidence_score`
-- `risk_flags`
-- `memory_evidence_used`
-- `similar_success_patterns`
-- `similar_failure_patterns`
-- `lessons_applied`
-- `market_experience_summary`
-- `dominant_drivers`
-- `rejected_drivers`
-- `driver_dimension_review`
-- `buy_sell_rules`
-- `internet_evidence_used`
-- `debate_correctness`
-- `correctness_score`
-- `correctness_reasoning`
-- `debate_process_issues`
-- `optimization_directions`
-- `improved_debate_rules`
-- `revised_target_position`
-- `revised_stop_loss`
-- `reviewed_pm_decision`
-- `original_pm_decision`
-- `original_target_position`
-- `written_memories`
-- `tool_invocation_summary`
+- `original_pm_decision`：原始 PM 动作或结论。
+- `debate_correctness`：`correct / partially_correct / incorrect / inconclusive`。
+- `correctness_reasoning`：1-3 句后验解释，包含主要涨跌原因和一条可复用教训。
+- `written_memories`：记忆文档写入元数据，不包含文档正文，包含状态、版本、大小、上限和失败原因。
+
+工具调用轨迹不放入 `analysis_payload`，由顶层 `tool_trace` 单独保留，供审计和按需展开查看。
 
 重要口径：
 
-- `market_experience_summary` 必须是可复用经验，不是普通摘要。
-- `buy_sell_rules` 必须写成“触发条件 -> 动作 -> 原因”形式。
+- 完整 Markdown 只通过记忆文档查看器读取，不在经验分析结果中重复展示。
+- 经验规则、驱动证据和流程改进只沉淀在记忆文档中。
 - `debate_correctness` 只能是 `correct / partially_correct / incorrect / inconclusive`。
-- `recommended_action` 只能是 `avoid / watch / buy / add / hold / reduce / sell`。
 
 ## 6. 可观测性
 

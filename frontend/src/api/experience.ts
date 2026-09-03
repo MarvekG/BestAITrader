@@ -45,73 +45,25 @@ export interface ExperienceDebateSession {
 }
 
 export interface ExperienceWrittenMemory {
-  content?: string;
-  memo_session?: string;
-  importance?: string;
-  stock_code?: string;
-  stock_name?: string;
-  status?: string;
-  memory_id?: string;
-  error?: string;
-  evidence_chain?: Record<string, unknown>;
-}
-
-export interface ExperienceSignalReviewItem {
-  signal: string;
-  evidence?: string;
-  impact?: string;
-  lesson?: string;
-}
-
-export interface ExperienceNoiseSignalItem {
-  signal: string;
-  reason?: string;
-}
-
-export interface ExperienceReviewTriads {
-  original_judgment?: {
-    verdict?: string;
-    score?: number;
-    pm_decision?: string;
-    outcome_basis?: string;
-    reasoning?: string;
-  };
-  signal_validation?: {
-    validated_signals?: ExperienceSignalReviewItem[];
-    invalidated_signals?: ExperienceSignalReviewItem[];
-    noise_signals?: ExperienceNoiseSignalItem[];
-  };
-  decision_process_improvement?: {
-    debate_changes?: string[];
-    pm_changes?: string[];
-    risk_control_changes?: string[];
-  };
+  stock_code?: string | null;
+  status?: string | null;
+  version?: number | null;
+  size_chars?: number | null;
+  max_chars?: number | null;
+  error?: string | null;
 }
 
 export interface ExperienceAnalysisPayload extends Record<string, unknown> {
-  recommended_action?: string;
-  confidence_score?: number;
+  original_pm_decision?: string;
   debate_correctness?: string;
   correctness_reasoning?: string;
-  review_triads?: ExperienceReviewTriads;
-  experience_tags?: Record<string, string[]>;
   written_memories?: ExperienceWrittenMemory[];
-  thesis_summary?: string;
-  market_experience_summary?: string;
-  dominant_drivers?: string[];
-  rejected_drivers?: string[];
-  driver_dimension_review?: string[];
-  buy_sell_rules?: string[];
-  debate_process_issues?: string[];
-  optimization_directions?: string[];
-  improved_debate_rules?: string[];
-  memory_evidence_used?: string[];
-  internet_evidence_used?: string[];
 }
 
 export interface ExperienceToolTraceItem extends Record<string, unknown> {
   name?: string;
   args?: unknown;
+  result?: unknown;
 }
 
 export interface ExperienceAnalyzeResponse {
@@ -172,61 +124,6 @@ export interface ExperienceReviewSchedulerConfig {
   max_runs_per_tick: number;
 }
 
-export interface ExperienceLibraryItem {
-  id: string;
-  memory_id?: string | null;
-  review_run_id: string;
-  session_id: string;
-  stock_code?: string | null;
-  stock_name?: string | null;
-  industry?: string | null;
-  strategy?: string | null;
-  review_horizon?: ExperienceReviewHorizon | null;
-  outcome_label?: string | null;
-  correctness?: string | null;
-  importance?: string | null;
-  summary: string;
-  tags: Record<string, string[]>;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ExperienceLibraryListResponse {
-  items: ExperienceLibraryItem[];
-  total: number;
-  page: number;
-  page_size: number;
-  summary: Record<string, number>;
-}
-
-export interface ExperienceLibraryDetail extends ExperienceLibraryItem {
-  review_triads: ExperienceReviewTriads;
-  market_outcome_summary: Record<string, unknown>;
-  memory: ExperienceWrittenMemory;
-}
-
-export interface ExperienceLibraryFilters {
-  stock_code?: string;
-  industry?: string;
-  strategy?: string;
-  review_horizon?: ExperienceReviewHorizon;
-  correctness?: string;
-  importance?: string;
-  tag?: string;
-  keyword?: string;
-  created_from?: string;
-  created_to?: string;
-  page?: number;
-  page_size?: number;
-}
-
-export interface ExperienceLibraryRebuildResponse {
-  created: number;
-  updated: number;
-  skipped: number;
-  failed: number;
-}
-
 export const experienceApi = {
   getSchedulerConfig: async () => {
     return apiClient.get<ExperienceReviewSchedulerConfig>('/experience/scheduler-config');
@@ -272,15 +169,4 @@ export const experienceApi = {
     return apiClient.delete<{ message: string; count: number }>('/experience/review-runs');
   },
 
-  listLibrary: async (filters: ExperienceLibraryFilters = {}) => {
-    return apiClient.get<ExperienceLibraryListResponse>('/experience/library', { params: filters });
-  },
-
-  getLibraryDetail: async (id: string) => {
-    return apiClient.get<ExperienceLibraryDetail>(`/experience/library/${id}`);
-  },
-
-  rebuildLibrary: async () => {
-    return apiClient.post<ExperienceLibraryRebuildResponse>('/experience/library/rebuild');
-  },
 };
