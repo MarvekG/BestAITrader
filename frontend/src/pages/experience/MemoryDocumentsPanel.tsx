@@ -195,7 +195,7 @@ export const MemoryDocumentsPanel: React.FC = () => {
 
       <Drawer
         title={detail ? `${detail.stock_code} - ${detail.stock_name || detail.stock_code}` : activeStockCode || t('memory_documents.detail_title')}
-        width="min(1280px, 90vw)"
+        width="calc(100vw - 240px)"
         placement="right"
         push={false}
         open={activeStockCode !== null}
@@ -220,7 +220,7 @@ export const MemoryDocumentsPanel: React.FC = () => {
         {detail ? (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             <Alert type="info" showIcon message={t('memory_documents.read_only')} />
-            <Descriptions bordered size="small" column={1}>
+            <Descriptions bordered size="small" column={{ xs: 1, sm: 2, lg: 3 }}>
               <Descriptions.Item label={t('memory_documents.stock_code')}>
                 {detail.stock_code}
               </Descriptions.Item>
