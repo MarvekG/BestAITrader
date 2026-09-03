@@ -1,4 +1,3 @@
-from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -8,111 +7,16 @@ from app.ai.experience.schemas import (
     ExperienceAnalyzeRequest,
     ExperienceAnalyzeResponse,
     ExperienceDebateSessionResponse,
-    ExperienceLibraryDetailResponse,
-    ExperienceLibraryListResponse,
-    ExperienceLibraryRebuildResponse,
     ExperienceReviewCandidateListResponse,
     ExperienceReviewSchedulerConfig,
     ExperienceReviewEventResponse,
     ExperienceReviewRunResponse,
 )
-from app.ai.experience.index_service import experience_index_service
 from app.ai.experience.service import experience_service
 from app.models.user import User
 from app.core.security import get_current_user
 
 router = APIRouter()
-
-
-@router.get("/library", response_model=ExperienceLibraryListResponse)
-async def list_experience_library(
-    stock_code: str | None = None,
-    industry: str | None = None,
-    strategy: str | None = None,
-    review_horizon: str | None = None,
-    correctness: str | None = None,
-    importance: str | None = None,
-    tag: str | None = None,
-    keyword: str | None = None,
-    created_from: datetime | None = None,
-    created_to: datetime | None = None,
-    page: int = 1,
-    page_size: int = 20,
-    current_user: User = Depends(get_current_user),
-):
-    """查询当前用户的经验库索引列表。
-
-    Args:
-        stock_code: 股票代码筛选。
-        industry: 行业筛选。
-        strategy: 策略筛选。
-        review_horizon: 复盘周期筛选。
-        correctness: 原始判断正确性筛选。
-        importance: Memory 重要性筛选。
-        tag: 标签筛选。
-        keyword: 摘要关键词筛选。
-        created_from: 创建时间下界。
-        created_to: 创建时间上界。
-        page: 页码。
-        page_size: 每页数量。
-        current_user: 已认证用户依赖。
-
-    Returns:
-        分页后的经验库索引列表。
-    """
-    return await experience_index_service.list_items(
-        user_id=current_user.id,
-        stock_code=stock_code,
-        industry=industry,
-        strategy=strategy,
-        review_horizon=review_horizon,
-        correctness=correctness,
-        importance=importance,
-        tag=tag,
-        keyword=keyword,
-        created_from=created_from,
-        created_to=created_to,
-        page=page,
-        page_size=page_size,
-    )
-
-
-@router.post("/library/rebuild", response_model=ExperienceLibraryRebuildResponse)
-async def rebuild_experience_library(
-    current_user: User = Depends(get_current_user),
-):
-    """从已完成复盘事件重建当前用户的经验库索引。
-
-    Args:
-        current_user: 已认证用户依赖。
-
-    Returns:
-        重建过程的创建、更新、跳过和失败数量。
-    """
-    return await experience_index_service.rebuild_for_user(user_id=current_user.id)
-
-
-@router.get("/library/{index_id}", response_model=ExperienceLibraryDetailResponse)
-async def get_experience_library_detail(
-    index_id: UUID,
-    current_user: User = Depends(get_current_user),
-):
-    """获取一条经验库索引的详情。
-
-    Args:
-        index_id: 经验索引 ID。
-        current_user: 已认证用户依赖。
-
-    Returns:
-        经验索引详情和关联复盘上下文。
-
-    Raises:
-        HTTPException: 当索引不存在时抛出。
-    """
-    detail = await experience_index_service.get_detail(user_id=current_user.id, index_id=index_id)
-    if detail is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=i18n_service.t("experience.library_not_found"))
-    return detail
 
 
 @router.get("/scheduler-config", response_model=ExperienceReviewSchedulerConfig)

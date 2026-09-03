@@ -125,9 +125,8 @@ class Settings(BaseSettings):
     WEBFETCH_BASE_URL: str = "http://webfetch:8010"
     WEBFETCH_TIMEOUT_SECONDS: float = 180.0
 
-    # Experience Cleanup Config
+    # Experience Review Cleanup Config
     EXPERIENCE_CLEANUP_ENABLED: bool = True
-    EXPERIENCE_INDEX_RETENTION_DAYS: int = 7
     EXPERIENCE_REVIEW_EVENT_RETENTION_DAYS: int = 30
     EXPERIENCE_CLEANUP_SCHEDULE_HOUR: int = 3
     EXPERIENCE_CLEANUP_SCHEDULE_MINUTE: int = 30

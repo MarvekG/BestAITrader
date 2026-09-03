@@ -30,7 +30,6 @@ import {
   experienceApi,
   ExperienceAnalyzeResponse,
   ExperienceDebateSession,
-  ExperienceLibraryItem,
   ExperienceReviewCandidate,
   ExperienceReviewEvent,
   ExperienceReviewHorizon,
@@ -38,7 +37,7 @@ import {
   ExperienceReviewSchedulerConfig,
   ExperienceToolTraceItem,
 } from '../api/experience';
-import { ExperienceLibraryPanel } from './experience/ExperienceLibraryPanel';
+import { MemoryDocumentsPanel } from './experience/MemoryDocumentsPanel';
 import { ReviewCandidatePanel } from './experience/ReviewCandidatePanel';
 import { ReviewTriadCards } from './experience/ReviewTriadCards';
 import { WrittenMemoryCards } from './experience/WrittenMemoryCards';
@@ -88,6 +87,10 @@ const getToolName = (payload?: Record<string, unknown> | null) => {
   return typeof toolName === 'string' ? toolName : undefined;
 };
 
+const normalizeTab = (value: string | null) => (
+  value === 'memory' || value === 'library' ? 'memory' : 'analysis'
+);
+
 export const ExperiencePage: React.FC = () => {
   const { t } = useTranslation();
   const { modal } = AntdApp.useApp();
@@ -116,7 +119,7 @@ export const ExperiencePage: React.FC = () => {
   const [runActionLoadingId, setRunActionLoadingId] = React.useState<string | null>(null);
   const [clearingRuns, setClearingRuns] = React.useState(false);
   const [candidatesLoading, setCandidatesLoading] = React.useState(false);
-  const [activeTab, setActiveTab] = React.useState(() => searchParams.get('tab') || 'analysis');
+  const [activeTab, setActiveTab] = React.useState(() => normalizeTab(searchParams.get('tab')));
 
   // Scheduler config state
   type SchedulerConfigFormValues = Omit<ExperienceReviewSchedulerConfig, 'schedule_hour' | 'schedule_minute'> & {
@@ -340,7 +343,7 @@ export const ExperiencePage: React.FC = () => {
     } else {
       nextSearchParams.delete('review_run_id');
     }
-    if (activeTab === 'library') {
+    if (activeTab === 'memory') {
       nextSearchParams.set('tab', activeTab);
     } else {
       nextSearchParams.delete('tab');
@@ -548,18 +551,6 @@ export const ExperiencePage: React.FC = () => {
       },
     });
   }, [loadDebateSessions, loadReviewRuns, message, modal, t]);
-
-  const handleOpenLibraryReview = React.useCallback((item: ExperienceLibraryItem) => {
-    setActiveTab('analysis');
-    setSelectedSessionId(item.session_id);
-    setViewedReviewRunId(item.review_run_id);
-    setLiveReviewRunId(null);
-    setLoadedReviewRunId(null);
-    setAnalyzeResult(null);
-    setPersistedReviewEvents([]);
-    setLiveEvents([]);
-    setLiveToolTrace([]);
-  }, []);
 
   const sessionOptions = debateSessions.map((item) => ({
     value: item.session_id,
@@ -1092,9 +1083,9 @@ export const ExperiencePage: React.FC = () => {
           children: analysisContent,
         },
         {
-          key: 'library',
-          label: t('experience.library_tab'),
-          children: <ExperienceLibraryPanel onOpenReview={handleOpenLibraryReview} />,
+          key: 'memory',
+          label: t('experience.memory_documents_tab'),
+          children: <MemoryDocumentsPanel />,
         },
       ]}
     />

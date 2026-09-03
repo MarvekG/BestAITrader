@@ -106,13 +106,13 @@ PM 同时给出了一组高质量、机器可执行的触发条件——"跌破 
 
 - `experience_review_events` 表为 **0 条**。复盘工作流（`experience/workflow.py`）与自动调度器（`tasks/experience_review_scheduler.py`，每日 18:30，配置已启用）均已实现，但从未产生任何复盘——根因是候选会话不存在：旧会话在满足复盘周期（5d 周期需要决策后 ≥6 个交易日）之前就被删除了，库里仅剩的 2 个会话都是当天的。
 - 数据库仅剩 2 个 session，历史会话已被删除。后果在本次会话中实际发生：PM 写"无历史 PM 决策、无历史可复用规则"，但 `trade_records` 显示此前 AI 以 40.49/40.29 买入过格力——**当初买入的决策逻辑已随会话删除而丢失**，PM 是在不知道"自己为什么套牢"的情况下决定是否止损的。
-- PM 主动跳过了 `recall_memory`（理由："当前证据已足够充分"）。
+- PM 主动跳过了 `read_memory`（理由："当前证据已足够充分"）。
 
 **改进方案。**
 
 1. **会话删除不再摧毁复盘候选**：PM 决策快照与 session 生命周期解耦（删除会话前先落快照表），使复盘调度器始终有候选可扫。
-2. 同股票历史决策沿既有 `same_stock_history` / `previous_pm_decision` 通道注入（代码已实现），快照表保证会话删除后该通道仍有数据；经验记忆的消费仍由 agent 经 `recall_memory` 自主决定，不做强制注入。
-3. 止损触发、持有期到期时**即时触发** experience review（开关可控，结果在前端经验库展示触发来源），不只依赖每日定时扫描。
+2. 同股票历史决策沿既有 `same_stock_history` / `previous_pm_decision` 通道注入（代码已实现），快照表保证会话删除后该通道仍有数据；经验记忆的消费仍由 agent 经 `read_memory` 自主决定，不做强制注入。
+3. 止损触发、持有期到期时**即时触发** experience review（开关可控，结果在前端经验分析和记忆文档查看页可追溯触发来源），不只依赖每日定时扫描。
 
 详细实施方案见第二部分 §4。
 
@@ -373,9 +373,9 @@ for row in pm_rows:
 
 **开关**：`experience_review_scheduler_config`（system_settings，已有 GET/PUT `/experience/scheduler-config` API 管理，api.py:127-148）增加字段 `event_triggered_review_enabled: bool`（默认 true），关闭后止损/到期不触发即时复盘，只保留每日定时扫描。
 
-**前端展示**：事件驱动复盘产生的记录写入既有 `experience_review_events` 与经验库（前端已有经验库列表页，走 `/experience/library`）；记录 payload 增加 `trigger_source: "stop_loss" | "horizon_expired" | "scheduled"`，经验库列表增加"触发来源"列与筛选，让用户能直接看到"哪些复盘是被止损打出来的"。
+**前端展示**：事件驱动复盘产生的记录写入既有 `experience_review_events`，经验正文写入对应股票的 `memory_documents`；记录 payload 增加 `trigger_source: "stop_loss" | "horizon_expired" | "scheduled"`，前端通过复盘事件和记忆文档查看页让用户追溯"哪些复盘是被止损打出来的"。
 
-经验的消费仍走既有 `recall_memory` 工具，由 agent 自主决定是否检索，不做强制注入。
+经验的消费仍走既有 `read_memory` 工具，由 agent 自主决定是否检索，不做强制注入。
 
 **验证方法**：删除一个测试会话→确认快照存在且新辩论的 `same_stock_history` 能读到；给测试持仓写一个必触发的止损价跑一次判定→确认 experience_review_events 产生记录。
 

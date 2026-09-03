@@ -172,61 +172,6 @@ export interface ExperienceReviewSchedulerConfig {
   max_runs_per_tick: number;
 }
 
-export interface ExperienceLibraryItem {
-  id: string;
-  memory_id?: string | null;
-  review_run_id: string;
-  session_id: string;
-  stock_code?: string | null;
-  stock_name?: string | null;
-  industry?: string | null;
-  strategy?: string | null;
-  review_horizon?: ExperienceReviewHorizon | null;
-  outcome_label?: string | null;
-  correctness?: string | null;
-  importance?: string | null;
-  summary: string;
-  tags: Record<string, string[]>;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ExperienceLibraryListResponse {
-  items: ExperienceLibraryItem[];
-  total: number;
-  page: number;
-  page_size: number;
-  summary: Record<string, number>;
-}
-
-export interface ExperienceLibraryDetail extends ExperienceLibraryItem {
-  review_triads: ExperienceReviewTriads;
-  market_outcome_summary: Record<string, unknown>;
-  memory: ExperienceWrittenMemory;
-}
-
-export interface ExperienceLibraryFilters {
-  stock_code?: string;
-  industry?: string;
-  strategy?: string;
-  review_horizon?: ExperienceReviewHorizon;
-  correctness?: string;
-  importance?: string;
-  tag?: string;
-  keyword?: string;
-  created_from?: string;
-  created_to?: string;
-  page?: number;
-  page_size?: number;
-}
-
-export interface ExperienceLibraryRebuildResponse {
-  created: number;
-  updated: number;
-  skipped: number;
-  failed: number;
-}
-
 export const experienceApi = {
   getSchedulerConfig: async () => {
     return apiClient.get<ExperienceReviewSchedulerConfig>('/experience/scheduler-config');
@@ -272,15 +217,4 @@ export const experienceApi = {
     return apiClient.delete<{ message: string; count: number }>('/experience/review-runs');
   },
 
-  listLibrary: async (filters: ExperienceLibraryFilters = {}) => {
-    return apiClient.get<ExperienceLibraryListResponse>('/experience/library', { params: filters });
-  },
-
-  getLibraryDetail: async (id: string) => {
-    return apiClient.get<ExperienceLibraryDetail>(`/experience/library/${id}`);
-  },
-
-  rebuildLibrary: async () => {
-    return apiClient.post<ExperienceLibraryRebuildResponse>('/experience/library/rebuild');
-  },
 };

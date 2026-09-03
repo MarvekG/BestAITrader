@@ -35,6 +35,7 @@ def register_api_routes(app: FastAPI) -> None:
         trading,
     )
     from app.ai.experience.api import router as experience_router
+    from app.ai.memory_documents.api import router as memory_documents_router
     from app.ai.stock_analysis.api import router as stock_analysis_router
     from app.ai.stock_picker.interactive_research.api import router as interactive_stock_picker_router
 
@@ -101,5 +102,11 @@ def register_api_routes(app: FastAPI) -> None:
         experience_router,
         prefix=f"{prefix}/experience",
         tags=["experience"],
+        dependencies=authenticated,
+    )
+    app.include_router(
+        memory_documents_router,
+        prefix=f"{prefix}/memory-documents",
+        tags=["memory-documents"],
         dependencies=authenticated,
     )

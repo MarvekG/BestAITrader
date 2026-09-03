@@ -29,7 +29,6 @@ from app.ai.stock_picker.interactive_research.models import (
 )
 from app.models.stock_indicators import StockIndicators
 from app.models.experience_review_event import ExperienceReviewEvent
-from app.models.experience_index import ExperienceIndex
 from app.models.memory_document import MemoryDocument
 from app.models.market_watch import MarketWatchEvent
 
@@ -58,7 +57,6 @@ __all__ = [
     "StockIndicators",
     "AsyncTask",
     "ExperienceReviewEvent",
-    "ExperienceIndex",
     "MemoryDocument",
     "MarketWatchEvent",
     "InteractiveResearchRun",

@@ -238,7 +238,7 @@ async def test_review_allows_final_json_without_memory_write(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_review_records_write_memory_result_metadata(monkeypatch):
-    """复盘工具轨迹应保留 Memory 写入标识和股票范围，便于经验库索引。"""
+    """复盘工具轨迹应保留记忆写入标识和股票范围，便于结果审计。"""
 
     write_memory_calls = []
 

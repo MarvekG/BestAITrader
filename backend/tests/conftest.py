@@ -138,7 +138,6 @@ def _sqlite_test_tables():
     )
     from app.models.debate_message import DebateMessage
     from app.models.experience_review_event import ExperienceReviewEvent
-    from app.models.experience_index import ExperienceIndex
     from app.models.llm_usage_log import LLMUsageLog
     from app.models.market_watch import MarketWatchEvent
     from app.models.memory_document import MemoryDocument
@@ -167,7 +166,6 @@ def _sqlite_test_tables():
         MarketWatchEvent.__table__,
         DebateMessage.__table__,
         ExperienceReviewEvent.__table__,
-        ExperienceIndex.__table__,
         MemoryDocument.__table__,
         LLMUsageLog.__table__,
         StockBasic.__table__,

@@ -40,7 +40,6 @@ def load_scheduled_tasks() -> ScheduledTaskSnapshot:
     from app.tasks import account_equity_snapshot_scheduler
     from app.tasks import async_task_cleanup_scheduler
     from app.tasks import experience_review_scheduler
-    from app.tasks import experience_index_cleanup_scheduler
     from app.tasks import llm_usage_cleanup_scheduler
     from app.tasks import market_watch_scheduler
     from app.tasks import pending_order_match_scheduler
@@ -55,7 +54,6 @@ def load_scheduled_tasks() -> ScheduledTaskSnapshot:
         stock_analysis_scheduler,
         market_watch_scheduler,
         experience_review_scheduler,
-        experience_index_cleanup_scheduler,
         llm_usage_cleanup_scheduler,
         account_equity_snapshot_scheduler,
         pending_order_match_scheduler,

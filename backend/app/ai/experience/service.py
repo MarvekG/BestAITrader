@@ -20,7 +20,6 @@ from app.ai.experience.horizons import (
     normalize_review_horizon,
     review_status_for_candidate,
 )
-from app.ai.experience.index_service import experience_index_service
 from app.core import database as database_module
 from app.core.i18n import i18n_service
 from app.core.logger import get_logger
@@ -766,19 +765,6 @@ class ExperienceService:
                 message_key="experience.live_messages.completed",
                 payload=completed_payload,
             )
-            try:
-                async with database_module.AsyncSessionLocal() as db:
-                    await experience_index_service.sync_from_review_result(db, user_id=user_id, result=result)
-            except Exception as index_exc:
-                logger.warning(
-                    "experience index sync failed",
-                    extra={
-                        "review_run_id": review_run_id,
-                        "user_id": user_id,
-                        "error": str(index_exc),
-                    },
-                    exc_info=True,
-                )
             return result
         except Exception as exc:
             await self._push_review_update(

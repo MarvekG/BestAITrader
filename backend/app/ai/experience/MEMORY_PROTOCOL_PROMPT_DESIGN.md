@@ -4,7 +4,7 @@
 
 ## 1. 目标
 
-当前系统已经具备 `recall_memory` 和 `write_memory` 工具，但记忆使用主要依赖各角色 prompt 中的原则性说明。这样会导致两个问题：
+当前系统已经具备 `read_memory` 和 `write_memory` 工具，但记忆使用主要依赖各角色 prompt 中的原则性说明。这样会导致两个问题：
 
 - 复盘写入的经验主题不稳定，未来 Debate/PM 不一定按同一主题召回。
 - 多个经验主题容易被揉在一条 Memory 里，召回时难以匹配具体问题。
@@ -21,7 +21,7 @@
 - 不新增 Memory 工具参数。
 - 不在代码中硬编码强制主题检查。
 - 不依赖关键词匹配来判断 Memory 是否合格。
-- 不把 Experience Index 变成经验事实来源。
+- 不把记忆文档正文复制到独立经验索引或其他业务表。
 - 不把所有固定主题合并写成一条超长 Memory。
 
 ## 3. 核心原则
@@ -92,7 +92,7 @@ PM 和有记忆权限的 Debate Agent 不按角色硬性限制召回主题，也
 - `NEUTRAL` / 中性分析师。
 - `PORTFOLIO_MANAGER` / 投资经理。
 
-公共 prompt 只描述“若当前角色可使用记忆工具”时应遵循的统一协议，不在公共 prompt 中列出禁用角色。禁用角色必须在各自角色 prompt 中明确禁止 `recall_memory` 和 `write_memory`，运行时工具绑定也必须与该白名单保持一致。
+公共 prompt 只描述“若当前角色可使用记忆工具”时应遵循的统一协议，不在公共 prompt 中列出禁用角色。禁用角色必须在各自角色 prompt 中明确禁止 `read_memory` 和 `write_memory`，运行时工具绑定也必须与该白名单保持一致。
 
 ### 3.6 固定写入与自主写入并存
 
@@ -248,7 +248,7 @@ Debate 内部写入通常不具备后验结果，因此应避免伪造 `decision
 
 ### 6.1 自主 recall 选择
 
-有记忆权限的 Agent 和 PM 应根据当前任务自主决定是否调用 `recall_memory`。召回主题不按 Agent 角色固定，也不要求每轮检查所有主题。
+有记忆权限的 Agent 和 PM 应根据当前任务自主决定是否调用 `read_memory`。召回主题不按 Agent 角色固定，也不要求每轮检查所有主题。
 
 可选择的召回主题包括：
 
@@ -309,17 +309,17 @@ Query 应同时包含真实股票名和股票代码、主题、策略频率和 2
 
 这部分仍通过提示词要求，不做代码硬校验。
 
-## 8. 与 Experience Index 的关系
+## 8. 与记忆文档查看页的关系
 
-Experience Index 继续只做展示、筛选、统计和跳转。
+复盘事件表只保存运行状态、工具轨迹和结构化审计；经验正文只写入 `memory_documents`，不再同步到独立经验索引。
 
-第一阶段不要求 Experience Index 解析 `[MEMORY_TOPIC: ...]`。如果未来需要更强筛选，可以在不改变 Memory 事实来源的前提下，把主题解析为索引字段。
+经验分析页的“记忆文档”Tab 直接读取当前用户的股票记忆文档：列表接口只返回文档摘要，详情接口返回完整 Markdown。查看页不解析 `[MEMORY_TOPIC: ...]`，也不复制或改写文档正文。
 
 当前阶段：
 
-- Memory 正文是事实来源。
-- `[MEMORY_TOPIC: ...]` 是自然语言协议的一部分。
-- Experience Index 可原样展示 Memory 摘要。
+- `memory_documents.content` 是经验正文唯一来源。
+- `[MEMORY_TOPIC: ...]` 是文档内供模型理解的自然语言协议标记。
+- `experience_tags` 仅作为复盘结果中的结构化分类和审计字段，不驱动独立经验库筛选。
 
 ## 9. 提示词落点
 
@@ -327,9 +327,9 @@ Experience Index 继续只做展示、筛选、统计和跳转。
 
 - `backend/app/ai/llm_engine/prompts/templates.py`
   - 公共 Memory 边界、统一主题、召回协议、写入协议和采纳协议。
-  - 有记忆权限角色不重复描述 `recall_memory` / `write_memory` 细则，统一继承公共协议。
+  - 有记忆权限角色不重复描述 `read_memory` / `write_memory` 细则，统一继承公共协议。
   - PM prompt 只保留 PM 决策职责和 `previous_pm_decision` 对比要求，不重复公共记忆协议。
-  - 禁用记忆角色在各自角色 prompt 中明确禁止 `recall_memory` 和 `write_memory`。
+  - 禁用记忆角色在各自角色 prompt 中明确禁止 `read_memory` 和 `write_memory`。
 - `backend/app/ai/llm_engine/roles.py`
   - `MEMORY_ENABLED_AGENT_NAMES` 只保留可使用记忆的角色。
 - `backend/app/ai/experience/workflow.py`
@@ -355,7 +355,7 @@ Experience Index 继续只做展示、筛选、统计和跳转。
 - 公共 agent prompt 包含固定主题列表。
 - 公共 agent prompt 包含自主 recall 选择和采纳/不采纳说明。
 - 有记忆权限角色 prompt 不重复公共 recall/write 规则。
-- 禁用记忆角色 prompt 明确禁止 `recall_memory` 和 `write_memory`。
+- 禁用记忆角色 prompt 明确禁止 `read_memory` 和 `write_memory`。
 - 运行时只给允许使用记忆的角色绑定 Memory 工具。
 - 复盘 prompt 要求按主题分次 `write_memory`。
 - 复盘 prompt 明确禁止把多个主题揉成一条 Memory。
