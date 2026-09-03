@@ -39,6 +39,7 @@ import {
   ExperienceToolTraceItem,
 } from '../api/experience';
 import { MemoryDocumentsPanel } from './experience/MemoryDocumentsPanel';
+import type { MemoryDocumentOpenRequest } from './experience/MemoryDocumentsPanel';
 import { ReviewCandidatePanel } from './experience/ReviewCandidatePanel';
 import { WrittenMemoryCards } from './experience/WrittenMemoryCards';
 import { WebSocketMessage } from '../services/websocket';
@@ -120,6 +121,8 @@ export const ExperiencePage: React.FC = () => {
   const [clearingRuns, setClearingRuns] = React.useState(false);
   const [candidatesLoading, setCandidatesLoading] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState(() => normalizeTab(searchParams.get('tab')));
+  const [memoryDocumentOpenRequest, setMemoryDocumentOpenRequest] = React.useState<MemoryDocumentOpenRequest | null>(null);
+  const memoryDocumentRequestId = React.useRef(0);
 
   // Scheduler config state
   type SchedulerConfigFormValues = Omit<ExperienceReviewSchedulerConfig, 'schedule_hour' | 'schedule_minute'> & {
@@ -546,6 +549,19 @@ export const ExperiencePage: React.FC = () => {
     || '';
   const analysisDebateCorrectness = analyzeResult?.analysis_payload?.debate_correctness || 'inconclusive';
 
+  const handleOpenMemoryDocument = React.useCallback((stockCode?: string | null) => {
+    const targetStockCode = stockCode || analyzeResult?.stock_code || selectedSession?.stock_code;
+    if (!targetStockCode) {
+      return;
+    }
+    memoryDocumentRequestId.current += 1;
+    setMemoryDocumentOpenRequest({
+      stockCode: targetStockCode,
+      requestId: memoryDocumentRequestId.current,
+    });
+    setActiveTab('memory');
+  }, [analyzeResult?.stock_code, selectedSession?.stock_code]);
+
   const analysisContent = (
     <Space direction="vertical" size={16} style={{ width: '100%' }}>
       <Card>
@@ -784,7 +800,7 @@ export const ExperiencePage: React.FC = () => {
               </Card>
               <WrittenMemoryCards
                 memories={analyzeResult.analysis_payload?.written_memories || []}
-                onOpenDocument={() => setActiveTab('memory')}
+                onOpenDocument={handleOpenMemoryDocument}
               />
             </Space>
           </div>
@@ -962,7 +978,7 @@ export const ExperiencePage: React.FC = () => {
         {
           key: 'memory',
           label: t('experience.memory_documents_tab'),
-          children: <MemoryDocumentsPanel />,
+          children: <MemoryDocumentsPanel openRequest={memoryDocumentOpenRequest} />,
         },
       ]}
     />

@@ -31,9 +31,18 @@ interface SearchValues {
   keyword?: string;
 }
 
+export interface MemoryDocumentOpenRequest {
+  stockCode: string;
+  requestId: number;
+}
+
 const formatDateTime = (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm');
 
-export const MemoryDocumentsPanel: React.FC = () => {
+type Props = {
+  openRequest?: MemoryDocumentOpenRequest | null;
+};
+
+export const MemoryDocumentsPanel: React.FC<Props> = ({ openRequest }) => {
   const { t } = useTranslation();
   const message = useFeedback();
   const [form] = Form.useForm<SearchValues>();
@@ -81,7 +90,7 @@ export const MemoryDocumentsPanel: React.FC = () => {
     void loadCurrentPage(1, pageSize);
   }, [loadCurrentPage, pageSize]);
 
-  const handleInspect = async (stockCode: string) => {
+  const handleInspect = React.useCallback(async (stockCode: string) => {
     setActiveStockCode(stockCode);
     setDetail(null);
     setDetailLoading(true);
@@ -95,7 +104,13 @@ export const MemoryDocumentsPanel: React.FC = () => {
     } finally {
       setDetailLoading(false);
     }
-  };
+  }, [message, t]);
+
+  React.useEffect(() => {
+    if (openRequest?.stockCode) {
+      void handleInspect(openRequest.stockCode);
+    }
+  }, [handleInspect, openRequest]);
 
   const handleCloseDetail = () => {
     setActiveStockCode(null);
