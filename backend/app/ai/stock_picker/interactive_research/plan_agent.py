@@ -5,10 +5,16 @@ from uuid import UUID
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
+from app.ai.agentic.context_compaction import (
+    build_compaction_message,
+    compact_and_apply,
+    create_summary_llm,
+)
 from app.ai.agentic.tool_output_summarizer import should_summarize_tool_output, summarize_tool_output
 from app.ai.agentic.tools import make_json_serializable
 from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_providers.factory import build_chat_model, get_llm_provider
+from app.ai.llm_routing import get_research_usage_lane
 from app.ai.stock_picker.interactive_research.constants import (
     PLAN_ITERATION_BUDGET_INSTRUCTION_EN,
     PLAN_ITERATION_BUDGET_INSTRUCTION_ZH,
@@ -17,9 +23,11 @@ from app.ai.stock_picker.interactive_research.constants import (
 )
 from app.ai.stock_picker.interactive_research.flow_control import FLOW_CONTROL_TOOL_NAME
 from app.ai.stock_picker.interactive_research.persistence import (
+    CONTEXT_SUMMARY_PAYLOAD_KEY,
     append_tool_result_and_progress_record,
     append_tool_start_record,
     load_plan_turn_record,
+    persist_context_summary_record,
     persist_plan_card_record,
 )
 from app.ai.stock_picker.interactive_research.tool_registry import InteractiveResearchToolRegistry, ToolLoaderFactory
@@ -66,6 +74,7 @@ class PlanAgent:
         tool_loader_factory: Optional[ToolLoaderFactory] = None,
         llm_factory: Optional[LLMFactory] = None,
         notification_callback: Optional[PlanAgentNotificationCallback] = None,
+        summary_llm_factory: Optional[LLMFactory] = None,
     ) -> None:
         """初始化计划阶段 Agent。
 
@@ -73,9 +82,11 @@ class PlanAgent:
             tool_loader_factory: 可选工具注册表工厂；测试可注入 fake 工具。
             llm_factory: 可选 LLM 工厂；测试可注入 fake LLM。
             notification_callback: 计划卡写入后的实时通知回调。
+            summary_llm_factory: 可选摘要 LLM 工厂；测试可注入 fake 摘要模型。
         """
         self._tool_loader_factory = tool_loader_factory
         self._llm_factory = llm_factory
+        self._summary_llm_factory = summary_llm_factory
         self._notification_callback = notification_callback
         self._plan_messages: Dict[UUID, List[Any]] = {}
         self._latest_plan_outputs: Dict[UUID, str] = {}
@@ -138,7 +149,11 @@ class PlanAgent:
             "interactive research plan agent tools loaded",
             extra={"run_id": str(run_id), "tool_names": [str(getattr(tool, "name", "")) for tool in tools]},
         )
-        plan_message = await self._invoke_plan_markdown(run_id, messages, tools)
+        plan_message, compaction_summary = await self._invoke_plan_markdown(
+            run_id,
+            messages,
+            tools,
+        )
 
         latest_turn_record = await load_plan_turn_record(run_id)
         if latest_turn_record is None:
@@ -165,7 +180,12 @@ class PlanAgent:
             return
         await self._notify_change(result["notification"])
 
-        self._remember_plan_turn(run_id, effective_history_input, plan_message)
+        self._remember_plan_turn(
+            run_id,
+            effective_history_input,
+            plan_message,
+            compaction_summary=compaction_summary,
+        )
         self._latest_plan_outputs[run_id] = plan_message
         logger.info(
             "interactive research plan card persisted",
@@ -200,18 +220,18 @@ class PlanAgent:
         run_id: UUID,
         content: str,
         *,
-        persisted_messages: List[Dict[str, str]],
+        persisted_messages: List[Dict[str, Any]],
     ) -> List[Any]:
         """构造本轮计划 Agent 消息。
 
         进程内缓存只保存已完成的 user/assistant 历史；本轮 system 和 human 临时拼装，不写入缓存。
-        只有缓存缺失时才从数据库恢复历史，通常发生在服务重启后。
+        只有缓存缺失时才从数据库恢复历史，通常发生在服务重启后；持久化层已截取最新摘要 card
+        及其后的消息。
 
         Args:
             run_id: 当前研究 run ID。
             content: 用户本轮输入。
             persisted_messages: 已持久化的计划阶段消息快照。
-
         Returns:
             本轮调用 LLM 的消息列表。
         """
@@ -220,11 +240,16 @@ class PlanAgent:
         if history is None:
             history = self._restore_plan_messages(persisted_messages)
             self._plan_messages[run_id] = history
-        return [system_message, *history, HumanMessage(content=content)]
+
+        return [
+            system_message,
+            *history,
+            HumanMessage(content=content),
+        ]
 
     def _restore_plan_messages(
         self,
-        persisted_messages: List[Dict[str, str]],
+        persisted_messages: List[Dict[str, Any]],
     ) -> List[Any]:
         """进程缓存缺失时，从已持久化消息重建计划阶段对话缓存。
 
@@ -235,13 +260,22 @@ class PlanAgent:
             截止到上一条计划回复的消息缓存（丢弃尾部尚未回复的用户输入）。
         """
         conversation: List[Any] = []
-        for item in persisted_messages:
-            if item.get("role") == "user":
+        history_items = list(persisted_messages)
+        while (
+            history_items
+            and history_items[-1].get("role") == "user"
+            and history_items[-1].get("message_type") == "user_input"
+        ):
+            history_items.pop()
+
+        for item in history_items:
+            payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+            if payload.get(CONTEXT_SUMMARY_PAYLOAD_KEY):
+                conversation.append(HumanMessage(content=item.get("content") or ""))
+            elif item.get("role") == "user" and item.get("message_type") == "user_input":
                 conversation.append(HumanMessage(content=item.get("content") or ""))
             elif item.get("role") == "assistant" and item.get("message_type") == "plan_card":
                 conversation.append(AIMessage(content=item.get("content") or ""))
-        while conversation and isinstance(conversation[-1], HumanMessage):
-            conversation.pop()
         return conversation
 
     def _remember_plan_turn(
@@ -249,6 +283,8 @@ class PlanAgent:
         run_id: UUID,
         user_content: str,
         assistant_content: str,
+        *,
+        compaction_summary: Optional[str] = None,
     ) -> None:
         """把本轮成功的用户输入和计划回复追加进消息缓存。
 
@@ -256,11 +292,23 @@ class PlanAgent:
             run_id: 当前研究 run ID。
             user_content: 用户本轮输入。
             assistant_content: 计划 Agent 本轮 Markdown 输出。
+            compaction_summary: 本轮生成的摘要；非空时不重复缓存已进入摘要的输入。
         """
+        if compaction_summary:
+            conversation: List[Any] = []
+            conversation.append(build_compaction_message(compaction_summary))
+            conversation.append(AIMessage(content=assistant_content))
+            self._plan_messages[run_id] = conversation
+            return
+
         conversation = self._plan_messages.get(run_id)
         if conversation is not None:
-            conversation.append(HumanMessage(content=user_content))
-            conversation.append(AIMessage(content=assistant_content))
+            conversation.append(
+                HumanMessage(content=user_content)
+            )
+            conversation.append(
+                AIMessage(content=assistant_content)
+            )
 
     def _build_llm(self) -> Any:
         """构造计划阶段使用的 LLM。
@@ -272,20 +320,89 @@ class PlanAgent:
             return self._llm_factory()
         return build_chat_model(model=settings.LLM_MODEL, temperature=0.2)
 
+    def _build_summary_llm(self) -> Any:
+        """构造计划阶段摘要模型。
+
+        Returns:
+            不绑定工具的低温度 chat model。
+        """
+        return create_summary_llm(
+            model_name=settings.LLM_MODEL,
+            llm_factory=self._summary_llm_factory or self._llm_factory,
+        )
+
+    async def _prepare_plan_messages(
+        self,
+        run_id: UUID,
+        messages: List[Any],
+        *,
+        iteration_index: int,
+        compaction_summary: Optional[str],
+    ) -> Optional[str]:
+        """在计划阶段模型调用前执行窗口检查和压缩。
+
+        Args:
+            run_id: 当前研究 run ID。
+            messages: 当前 LLM 消息列表。
+            iteration_index: 当前迭代序号。
+            compaction_summary: 本轮此前生成的摘要。
+
+        Returns:
+            本轮最新生成的摘要；本次未压缩时沿用传入值。
+        """
+        async def record_summary_usage(response: Any) -> None:
+            await self._record_llm_usage(
+                run_id,
+                response,
+                iteration_index,
+                call_kind="context_compaction",
+            )
+
+        outcome = await compact_and_apply(
+            messages,
+            model_name=settings.LLM_MODEL,
+            agent_name="interactive_stock_research_plan",
+            iteration_index=iteration_index,
+            llm_factory=self._build_summary_llm,
+            usage_callback=record_summary_usage,
+        )
+        if outcome.is_compacted:
+            compaction_summary = outcome.summary
+            await self._notify_change(
+                await persist_context_summary_record(
+                    run_id,
+                    summary=compaction_summary or "",
+                    phase="planning",
+                )
+            )
+            logger.info(
+                "interactive research plan context compacted",
+                extra={
+                    "run_id": str(run_id),
+                    "iteration_index": iteration_index,
+                    "before_tokens": outcome.before_tokens,
+                    "after_tokens": outcome.after_tokens,
+                },
+            )
+        return compaction_summary
+
     async def _invoke_plan_markdown(
-        self, run_id: UUID, messages: List[Any], tools: List[Any]
-    ) -> str:
+        self,
+        run_id: UUID,
+        messages: List[Any],
+        tools: List[Any],
+    ) -> tuple[str, Optional[str]]:
         """调用计划阶段 LLM 生成 Markdown 研究计划。
 
         Args:
             run_id: 当前研究 run ID。
             messages: 计划阶段 LLM 消息上下文。
             tools: 可供计划阶段使用的联网工具列表。
-
         Returns:
-            计划 Agent 输出的 Markdown 正文。
+            计划 Agent 输出的 Markdown 正文和本轮最新摘要。
         """
         llm = self._build_llm()
+        compaction_summary: Optional[str] = None
         llm_with_tools = llm.bind_tools(tools) if tools else llm
         tool_map = {str(getattr(tool, "name", "")): tool for tool in tools if getattr(tool, "name", "")}
 
@@ -300,8 +417,19 @@ class PlanAgent:
                     "message_count": len(messages),
                 },
             )
+            compaction_summary = await self._prepare_plan_messages(
+                run_id,
+                messages,
+                iteration_index=iteration_index,
+                compaction_summary=compaction_summary,
+            )
             response = await llm_with_tools.ainvoke(messages)
-            await self._record_llm_usage(run_id, response, iteration_index, call_kind="plan_markdown")
+            await self._record_llm_usage(
+                run_id,
+                response,
+                iteration_index,
+                call_kind="plan_markdown",
+            )
             response, invalid_tool_calls = self._llm_provider.sanitize_tool_call_response_for_replay(response)
             messages.append(response)
 
@@ -317,7 +445,7 @@ class PlanAgent:
                 },
             )
             if not tool_calls and not invalid_tool_calls:
-                return str(getattr(response, "content", "") or "").strip()
+                return str(getattr(response, "content", "") or "").strip(), compaction_summary
 
             for tool_call in tool_calls:
                 await self._execute_tool_call(run_id, tool_map, messages, tool_call, iteration_index, llm)
@@ -331,7 +459,9 @@ class PlanAgent:
                     },
                 )
                 messages.append(
-                    HumanMessage(content=self._llm_provider.build_invalid_tool_call_retry_message(invalid_tool_calls))
+                    HumanMessage(
+                        content=self._llm_provider.build_invalid_tool_call_retry_message(invalid_tool_calls)
+                    )
                 )
 
         logger.warning(
@@ -339,6 +469,12 @@ class PlanAgent:
             extra={"run_id": str(run_id), "iteration_budget": iteration_budget},
         )
         messages.append(HumanMessage(content=_plan_iteration_budget_instruction(iteration_budget)))
+        compaction_summary = await self._prepare_plan_messages(
+            run_id,
+            messages,
+            iteration_index=iteration_budget + 1,
+            compaction_summary=compaction_summary,
+        )
         final_response = await llm.ainvoke(messages)
         await self._record_llm_usage(
             run_id,
@@ -351,7 +487,7 @@ class PlanAgent:
             "interactive research plan agent final no-tools response completed",
             extra={"run_id": str(run_id), "content_length": len(str(getattr(final_response, "content", "") or ""))},
         )
-        return str(getattr(final_response, "content", "") or "").strip()
+        return str(getattr(final_response, "content", "") or "").strip(), compaction_summary
 
     async def _load_tools(self, run_id: UUID) -> List[Any]:
         """加载计划阶段允许使用的联网工具。
@@ -530,8 +666,8 @@ class PlanAgent:
             response: LLM 返回对象。
             iteration_index: 调用迭代序号。
             call_kind: LLM 调用类型。
-
         """
+        cache_lane, api_key_alias = get_research_usage_lane()
         await record_llm_usage(
             response,
             settings.LLM_MODEL,
@@ -541,6 +677,8 @@ class PlanAgent:
             stage="planning",
             call_kind=call_kind,
             iteration_index=iteration_index,
+            cache_lane=cache_lane,
+            api_key_alias=api_key_alias,
         )
 
     async def _notify_change(self, payload: Optional[Dict[str, Any]]) -> None:

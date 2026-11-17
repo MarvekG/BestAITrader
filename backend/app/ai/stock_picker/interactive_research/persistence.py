@@ -34,6 +34,30 @@ def _t(key: str, **kwargs: Any) -> str:
     return i18n_service.t(f"ai_stock_picker.interactive.backend.{key}", **kwargs)
 
 
+PHASE_PLANNING = "planning"
+PHASE_RESEARCH = "research"
+CONTEXT_SUMMARY_PAYLOAD_KEY = "context_summary"
+
+
+def _message_snapshot(message: InteractiveResearchMessage) -> Dict[str, Any]:
+    """把消息 ORM 对象转换为恢复快照。
+
+    Args:
+        message: 聊天消息 ORM 对象。
+
+    Returns:
+        包含恢复所需字段的消息快照。
+    """
+    return {
+        "message_id": str(message.message_id),
+        "sequence_no": int(message.sequence_no),
+        "role": message.role,
+        "message_type": message.message_type,
+        "content": message.content or "",
+        "payload": message.payload or {},
+    }
+
+
 async def create_run_record(
     user_id: int,
     request_data: Dict[str, Any],
@@ -348,7 +372,7 @@ async def load_plan_turn_record(run_id: UUID) -> Optional[Dict[str, Any]]:
         run_id: 研究 run ID。
 
     Returns:
-        run 存在时返回状态、运行配置和历史消息；否则返回 None。
+        run 存在时返回状态、运行配置和恢复消息；否则返回 None。
     """
     async with database_module.AsyncSessionLocal() as db:
         run = await _get_run(db, run_id)
@@ -377,6 +401,7 @@ async def persist_plan_card_record(
         plan_message: 计划 Agent Markdown 输出。
         reason: checkpoint 原因。
         bump_version: 是否递增 run 版本。
+
     Returns:
         写入结果和可推送通知 payload。
     """
@@ -398,6 +423,47 @@ async def persist_plan_card_record(
         return {"persisted": True, "notification": payload}
 
 
+async def persist_context_summary_record(
+    run_id: UUID,
+    *,
+    summary: str,
+    phase: str,
+) -> Optional[Dict[str, Any]]:
+    """把压缩摘要作为普通可见 assistant 消息保存。
+
+    Args:
+        run_id: 研究 run ID。
+        summary: 五栏摘要正文。
+        phase: 摘要对应的 `planning` 或 `research` 阶段。
+
+    Returns:
+        已提交消息的通知 payload；run 不存在或已结束时返回 None。
+    """
+    if phase not in {PHASE_PLANNING, PHASE_RESEARCH}:
+        raise ValueError(f"unsupported context summary phase: {phase}")
+
+    async with database_module.AsyncSessionLocal() as db:
+        run = await _get_run(db, run_id, for_update=True)
+        if run is None or run.status in TERMINAL_RESEARCH_STATUSES:
+            return None
+        if phase == PHASE_PLANNING and run.status != "awaiting_plan_approval":
+            return None
+        if phase == PHASE_RESEARCH and run.current_phase != PHASE_RESEARCH:
+            return None
+        message = await append_message(
+            db,
+            run,
+            role="assistant",
+            message_type="assistant_text",
+            content=summary,
+            payload={CONTEXT_SUMMARY_PAYLOAD_KEY: phase},
+            visible_to_user=True,
+        )
+        notification = _notification_payload(run, message, "assistant_text")
+        await db.commit()
+        return notification
+
+
 async def start_research_run_record(run_id: UUID) -> Optional[Dict[str, Any]]:
     """启动研究 loop 并返回运行快照和通知 payload。
 
@@ -411,6 +477,22 @@ async def start_research_run_record(run_id: UUID) -> Optional[Dict[str, Any]]:
         if run.status in TERMINAL_RESEARCH_STATUSES:
             return None
         queued_messages = await _process_queued_user_inputs(db, run)
+        summary_card = await _load_latest_context_summary(db, run, PHASE_RESEARCH)
+        research_messages: List[Dict[str, Any]] = []
+        if summary_card:
+            queued_ids = {message["message_id"] for message in queued_messages}
+            research_messages = [
+                summary_card,
+                *[
+                    item
+                    for item in await _load_research_user_inputs(
+                        db,
+                        run,
+                        summary_card["sequence_no"],
+                    )
+                    if item["message_id"] not in queued_ids
+                ],
+            ]
         run.status = "researching"
         run.current_stage = "researching"
         run.current_phase = "research"
@@ -441,6 +523,7 @@ async def start_research_run_record(run_id: UUID) -> Optional[Dict[str, Any]]:
             "max_iterations": _max_iterations_from_checkpoint(run),
             "queued_before": queued_messages,
             "plan_conversation": plan_conversation,
+            "research_messages": research_messages,
         }
         await db.commit()
         return {"snapshot": snapshot, "notification": payload}
@@ -630,15 +713,21 @@ async def synthesize_final_message_record(
         return [final_notification, completed_notification]
 
 
-async def pause_for_user_question_record(run_id: UUID, question_content: str) -> Optional[Dict[str, Any]]:
-    """暂停研究并写入追问消息。
+async def pause_for_user_question_record(
+    run_id: UUID,
+    question_content: str,
+    *,
+    compaction_summary: Optional[str] = None,
+) -> Optional[List[Dict[str, Any]]]:
+    """暂停研究并在同一事务写入追问消息和摘要 card。
 
     Args:
         run_id: 研究 run ID。
         question_content: LLM 生成的追问。
+        compaction_summary: 暂停前生成的完整研究摘要。
 
     Returns:
-        通知 payload；run 不存在时返回 None。
+        新增消息的通知 payload 列表；run 不存在时返回 None。
     """
     async with database_module.AsyncSessionLocal() as db:
         run = await _get_run(db, run_id, for_update=True)
@@ -649,6 +738,18 @@ async def pause_for_user_question_record(run_id: UUID, question_content: str) ->
         run.status = "awaiting_user_input"
         run.current_stage = "awaiting_user_input"
         run.version += 1
+        notifications = []
+        if compaction_summary:
+            summary_message = await append_message(
+                db,
+                run,
+                role="assistant",
+                message_type="assistant_text",
+                content=compaction_summary,
+                payload={CONTEXT_SUMMARY_PAYLOAD_KEY: PHASE_RESEARCH},
+                visible_to_user=True,
+            )
+            notifications.append(_notification_payload(run, summary_message, "assistant_text"))
         question = await append_message(
             db,
             run,
@@ -658,10 +759,10 @@ async def pause_for_user_question_record(run_id: UUID, question_content: str) ->
             payload={"reason": "agent_asked_user"},
         )
         run.pending_message_id = question.message_id
+        notifications.append(_notification_payload(run, question, "assistant_question"))
         await write_checkpoint(db, run, reason="agent_asked_user")
-        payload = _notification_payload(run, question, "assistant_question")
         await db.commit()
-        return payload
+        return notifications
 
 
 async def append_assistant_text_record(run_id: UUID, content: str) -> Optional[Dict[str, Any]]:
@@ -830,32 +931,136 @@ async def _lock_user_active_runs(db: AsyncSession, user_id: int) -> None:
     await db.execute(select(func.pg_advisory_xact_lock(user_id)))
 
 
-async def _load_plan_messages(db: AsyncSession, run: InteractiveResearchRun) -> List[Dict[str, str]]:
-    """读取计划阶段可见消息快照。
+async def _load_plan_messages(db: AsyncSession, run: InteractiveResearchRun) -> List[Dict[str, Any]]:
+    """读取最新计划摘要 card 及其后的计划消息。
 
     Args:
         db: 数据库会话。
         run: 当前研究 run。
 
     Returns:
-        用于重建计划对话缓存的消息列表。
+        用于重建计划对话缓存的最新消息后缀。
     """
     persisted = (await db.execute(
         select(InteractiveResearchMessage)
         .where(
             InteractiveResearchMessage.run_id == run.run_id,
             InteractiveResearchMessage.visible_to_user.is_(True),
-            InteractiveResearchMessage.message_type.in_(["user_input", "plan_card"]),
+            InteractiveResearchMessage.message_type.in_(
+                ["user_input", "plan_card", "assistant_text"]
+            ),
         )
         .order_by(InteractiveResearchMessage.sequence_no.asc())
     )).scalars().all()
+    planning_messages = [
+        item
+        for item in persisted
+        if (
+            item.message_type == "user_input"
+            and item.role == "user"
+            and item.parent_message_id is None
+            and not _is_queued_user_input(item)
+        )
+        or (item.message_type == "plan_card" and item.role == "assistant")
+        or _message_summary_phase(item) == PHASE_PLANNING
+    ]
+    latest_summary_sequence = max(
+        (int(item.sequence_no) for item in planning_messages if _is_context_summary(item)),
+        default=None,
+    )
+    if latest_summary_sequence is not None:
+        planning_messages = [
+            item for item in planning_messages if int(item.sequence_no) >= latest_summary_sequence
+        ]
+    return [_message_snapshot(item) for item in planning_messages]
+
+
+async def _load_latest_context_summary(
+    db: AsyncSession,
+    run: InteractiveResearchRun,
+    phase: str,
+) -> Optional[Dict[str, Any]]:
+    """读取指定阶段最新的可见摘要消息。
+
+    Args:
+        db: 数据库会话。
+        run: 当前研究 run。
+        phase: `planning` 或 `research`。
+
+    Returns:
+        最新摘要消息快照；不存在时返回 None。
+    """
+    persisted = (await db.execute(
+        select(InteractiveResearchMessage)
+        .where(
+            InteractiveResearchMessage.run_id == run.run_id,
+            InteractiveResearchMessage.message_type == "assistant_text",
+            InteractiveResearchMessage.visible_to_user.is_(True),
+        )
+        .order_by(InteractiveResearchMessage.sequence_no.desc())
+    )).scalars().all()
+    for message in persisted:
+        if _message_summary_phase(message) == phase:
+            return _message_snapshot(message)
+    return None
+
+
+def _is_context_summary(message: InteractiveResearchMessage) -> bool:
+    """判断消息是否为持久化的摘要 card。"""
+    payload = message.payload if isinstance(message.payload, dict) else {}
+    return (
+        message.message_type == "assistant_text"
+        and payload.get(CONTEXT_SUMMARY_PAYLOAD_KEY) in {PHASE_PLANNING, PHASE_RESEARCH}
+    )
+
+
+def _is_queued_user_input(message: InteractiveResearchMessage) -> bool:
+    """判断用户输入是否属于研究阶段的排队消息。"""
+    payload = message.payload if isinstance(message.payload, dict) else {}
+    return bool(payload.get("queued_user_input"))
+
+
+def _message_summary_phase(message: InteractiveResearchMessage) -> Optional[str]:
+    """读取摘要 card 的阶段标记。"""
+    if not _is_context_summary(message):
+        return None
+    payload = message.payload if isinstance(message.payload, dict) else {}
+    phase = payload.get(CONTEXT_SUMMARY_PAYLOAD_KEY)
+    return str(phase) if phase in {PHASE_PLANNING, PHASE_RESEARCH} else None
+
+
+async def _load_research_user_inputs(
+    db: AsyncSession,
+    run: InteractiveResearchRun,
+    after_sequence_no: Optional[int],
+) -> List[Dict[str, Any]]:
+    """读取最近研究摘要之后的用户输入。
+
+    Args:
+        db: 数据库会话。
+        run: 当前研究 run。
+        after_sequence_no: 最近研究摘要 card 的序号。
+
+    Returns:
+        按序号排列、属于研究阶段且尚未进入摘要的用户输入。
+    """
+    query = select(InteractiveResearchMessage).where(
+        InteractiveResearchMessage.run_id == run.run_id,
+        InteractiveResearchMessage.role == "user",
+        InteractiveResearchMessage.message_type == "user_input",
+        InteractiveResearchMessage.visible_to_user.is_(True),
+        InteractiveResearchMessage.status.in_(["queued", "completed"]),
+    )
+    if after_sequence_no is not None:
+        query = query.where(InteractiveResearchMessage.sequence_no > int(after_sequence_no))
+    persisted = (await db.execute(query.order_by(InteractiveResearchMessage.sequence_no.asc()))).scalars().all()
     return [
-        {"role": item.role, "message_type": item.message_type, "content": item.content or ""}
+        _message_snapshot(item)
         for item in persisted
     ]
 
 
-def _build_plan_conversation_snapshot(plan_messages: List[Dict[str, str]]) -> List[Dict[str, Any]]:
+def _build_plan_conversation_snapshot(plan_messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """构造计划阶段用户输入和计划卡的顺序快照。
 
     Args:
@@ -868,6 +1073,7 @@ def _build_plan_conversation_snapshot(plan_messages: List[Dict[str, str]]) -> Li
     user_round = 0
     plan_round = 0
     for item in plan_messages:
+        payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
         if item.get("role") == "user" and item.get("content"):
             user_round += 1
             plan_conversation.append(
@@ -883,6 +1089,13 @@ def _build_plan_conversation_snapshot(plan_messages: List[Dict[str, str]]) -> Li
                 {
                     "kind": "plan_card",
                     "round": plan_round,
+                    "content": item.get("content") or "",
+                }
+            )
+        elif payload.get(CONTEXT_SUMMARY_PAYLOAD_KEY) == PHASE_PLANNING and item.get("content"):
+            plan_conversation.append(
+                {
+                    "kind": "context_summary",
                     "content": item.get("content") or "",
                 }
             )
@@ -910,7 +1123,13 @@ async def _process_queued_user_inputs(db: AsyncSession, run: InteractiveResearch
     )).scalars().all()
     message_snapshots = []
     for message in queued_messages:
-        message_snapshots.append({"message_id": str(message.message_id), "content": message.content or ""})
+        message_snapshots.append(
+            {
+                "message_id": str(message.message_id),
+                "sequence_no": int(message.sequence_no),
+                "content": message.content or "",
+            }
+        )
         message.status = "completed"
     return message_snapshots
 

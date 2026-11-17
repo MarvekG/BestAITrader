@@ -11,6 +11,8 @@ from app.ai.stock_picker.interactive_research.models import InteractiveResearchM
 from app.ai.stock_picker.interactive_research.persistence import (
     append_tool_start_record,
     fail_run_record,
+    persist_context_summary_record,
+    start_research_run_record,
     synthesize_final_message_record,
 )
 from app.ai.stock_picker.interactive_research.schemas import (
@@ -18,7 +20,9 @@ from app.ai.stock_picker.interactive_research.schemas import (
     InteractiveResearchMessageCreate,
     InteractiveResearchRunCreate,
 )
+from app.ai.stock_picker.interactive_research.plan_agent import PlanAgent
 from app.ai.stock_picker.interactive_research.service import InteractiveResearchService
+from app.core.config import settings
 from app.crud.user import get_password_hash
 from app.models.user import User
 
@@ -70,15 +74,56 @@ class FakeInteractiveResearchToolRegistry:
         return [*self.tools, control_research_flow]
 
 
+class FakeSummaryLLM:
+    """返回固定五栏摘要的 fake 摘要模型。"""
+
+    def __init__(self, *, fail: bool = False):
+        """初始化 fake 摘要模型。
+
+        Args:
+            fail: 是否模拟摘要调用失败。
+        """
+        self.fail = fail
+        self.calls = []
+
+    async def ainvoke(self, messages):
+        """生成可断言的摘要文本。
+
+        Args:
+            messages: 摘要调用消息上下文。
+
+        Returns:
+            五栏 Markdown 摘要。
+        """
+        self.calls.append([str(getattr(message, "content", "") or "") for message in messages])
+        if self.fail:
+            raise RuntimeError("summary unavailable")
+        tool_names = []
+        for message in messages:
+            for tool_call in getattr(message, "tool_calls", None) or []:
+                if isinstance(tool_call, dict) and tool_call.get("name"):
+                    tool_names.append(str(tool_call["name"]))
+        names = ", ".join(sorted(set(tool_names))) or "none"
+        return AIMessage(
+            content=(
+                "## 1. User Goal and Hard Constraints\n- Keep drawdown controlled.\n\n"
+                "## 2. Confirmed Decisions\n- Approved the research plan.\n\n"
+                "## 3. Key Facts\n- Policy catalyst remains valid.\n\n"
+                f"## 4. Current Status\n- Executed tools: {names}. Already executed; do not repeat.\n\n"
+                "## 5. Open Questions and Next Steps\n- SUMMARY_SENTINEL"
+            )
+        )
+
+
 class FakeInteractiveResearchLLM:
     """模拟支持 bind_tools 的 LLM。"""
-
     def __init__(self):
         """初始化 fake LLM。"""
         self.bound_tools = []
         self.research_calls = 0
         self.plan_calls = 0
         self.plan_message_counts = []
+        self.plan_message_snapshots = []
         self.ask_on_first_research = False
         self.asked = False
         self.invalid_final_response_once = False
@@ -88,6 +133,7 @@ class FakeInteractiveResearchLLM:
         self.never_uses_tools = False
         self.plan_uses_tool = False
         self.research_message_snapshots = []
+        self.research_message_types = []
 
     def bind_tools(self, tools):
         """记录绑定工具并返回自身。
@@ -114,6 +160,9 @@ class FakeInteractiveResearchLLM:
         if "planning stage" in first_content or "规划阶段" in first_content:
             self.plan_calls += 1
             self.plan_message_counts.append(len(messages))
+            self.plan_message_snapshots.append(
+                [str(getattr(message, "content", "") or "") for message in messages]
+            )
             if self.plan_uses_tool and self.plan_calls == 1:
                 return AIMessage(
                     content="",
@@ -129,6 +178,7 @@ class FakeInteractiveResearchLLM:
 
         self.research_calls += 1
         self.research_message_snapshots.append([str(getattr(message, "content", "") or "") for message in messages])
+        self.research_message_types.append([type(message).__name__ for message in messages])
         if self.never_uses_tools and self.research_calls <= 10:
             return AIMessage(content="Still thinking without tool calls.")
         if self.ask_on_first_research and not self.asked:
@@ -342,8 +392,11 @@ def _request_data(**overrides):
     return data
 
 
-def _service_with_fake_runner():
+def _service_with_fake_runner(summary_llm=None):
     """构造注入 fake LLM 和 fake 工具的交互式研究服务。
+
+    Args:
+        summary_llm: 可选的 fake 摘要模型。
 
     Returns:
         service、fake LLM 和 fake 工具三元组。
@@ -361,6 +414,7 @@ def _service_with_fake_runner():
         ],
     )
     fake_llm = FakeInteractiveResearchLLM()
+    fake_summary_llm = summary_llm or FakeSummaryLLM()
 
     def tool_loader_factory(state):
         """返回 fake 工具注册表。
@@ -373,8 +427,14 @@ def _service_with_fake_runner():
         """
         return FakeInteractiveResearchToolRegistry([fake_tool])
 
+    service = InteractiveResearchService(
+        tool_loader_factory=tool_loader_factory,
+        llm_factory=lambda: fake_llm,
+        summary_llm_factory=lambda: fake_summary_llm,
+    )
+    service.fake_summary_llm = fake_summary_llm
     return (
-        InteractiveResearchService(tool_loader_factory=tool_loader_factory, llm_factory=lambda: fake_llm),
+        service,
         fake_llm,
         fake_tool,
     )
@@ -494,7 +554,9 @@ async def test_create_run_writes_user_message_plan_card_and_checkpoint(async_db_
     assert "当前完整 PLAN" not in serialized_plan_message["markdown"]
     assert "objective_summary" not in serialized_plan_message["markdown"]
     assert "open_questions" not in serialized_plan_message["markdown"]
-    assert serialized_plan_message["payload"] == {"actions": ["approve", "cancel"]}
+    assert serialized_plan_message["payload"] == {
+        "actions": ["approve", "cancel"],
+    }
     assert "plan_payload" not in run.checkpoint_payload
     assert "llm_usage" not in run.checkpoint_payload
     assert set(service.serialize_run_summary(run)) == {
@@ -1128,3 +1190,241 @@ async def test_delete_interactive_research_run_removes_messages_and_is_user_scop
     assert delete_response.json()["message"]
     assert missing_response.status_code == 404
     assert messages_count == 0
+
+
+@pytest.mark.asyncio
+async def test_plan_compaction_persists_visible_card_and_restores_from_latest_summary(
+    async_db_session,
+    monkeypatch,
+):
+    """计划阶段摘要作为普通可见消息保存，恢复从最新摘要 card 开始。"""
+    user_id = await _create_user_id(async_db_session)
+    service, fake_llm, fake_tool = _service_with_fake_runner()
+    run = await _create_run_with_plan(service, user_id, _request_data())
+    run_id = run.run_id
+
+    monkeypatch.setattr(settings, "LLM_CONTEXT_WINDOW_TOKENS", 5000)
+    monkeypatch.setattr(settings, "LLM_CONTEXT_COMPACTION_TRIGGER_RATIO", 0.1)
+    monkeypatch.setattr(settings, "LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS", 500)
+
+    revise_tasks = FakeBackgroundTasks()
+    second_message = await service.append_user_message(
+        run_id,
+        user_id,
+        "Second planning round: exclude banks",
+        background_tasks=revise_tasks,
+    )
+    await revise_tasks.run_all()
+
+    compacted_run = await service.get_run(run_id, user_id)
+    persisted_messages = await service.get_messages(run_id, user_id)
+    summary_card = next(
+        item
+        for item in persisted_messages
+        if (item.payload or {}).get("context_summary") == "planning"
+    )
+    assert "SUMMARY_SENTINEL" in summary_card.content
+    assert summary_card.visible_to_user is True
+    assert summary_card.sequence_no > second_message.sequence_no
+    assert "context_compaction" not in compacted_run.checkpoint_payload
+
+    monkeypatch.setattr(settings, "LLM_CONTEXT_WINDOW_TOKENS", 200000)
+    monkeypatch.setattr(settings, "LLM_CONTEXT_COMPACTION_TRIGGER_RATIO", 0.75)
+
+    third_tasks = FakeBackgroundTasks()
+    await service.append_user_message(
+        run_id,
+        user_id,
+        "Third planning round: keep only equipment",
+        background_tasks=third_tasks,
+    )
+    restarted_agent = PlanAgent(
+        tool_loader_factory=lambda state: FakeInteractiveResearchToolRegistry([fake_tool]),
+        llm_factory=lambda: fake_llm,
+        summary_llm_factory=lambda: service.fake_summary_llm,
+    )
+    await restarted_agent.execute(
+        run_id,
+        "Third planning round: keep only equipment",
+        history_input="Third planning round: keep only equipment",
+    )
+
+    restored = fake_llm.plan_message_snapshots[-1]
+    assert (
+        restored[0].startswith("你负责交互式 A 股深度研究聊天的规划阶段")
+        or restored[0].startswith("You control the planning stage")
+    )
+    assert restored[1].startswith("## 1.")
+    assert "SUMMARY_SENTINEL" in restored[1]
+    assert sum("Plan updated: exclude banks" in content for content in restored) == 1
+    assert "Find A-share opportunities with policy catalysts" not in "\n".join(restored)
+    assert "Second planning round: exclude banks" not in "\n".join(restored)
+    assert "Third planning round: keep only equipment" in restored[-1]
+
+
+@pytest.mark.asyncio
+async def test_research_ask_summary_card_restores_answer_after_latest_card(
+    async_db_session,
+    monkeypatch,
+):
+    """ASK 摘要写成普通消息 card，恢复时注入摘要之后的用户回答。"""
+    usage_calls = []
+
+    async def fake_record_llm_usage(response, model, role, **kwargs):
+        """记录研究 Agent usage 调用。"""
+        usage_calls.append({"model": model, "role": role, **kwargs})
+
+    monkeypatch.setattr(research_agent_module, "record_llm_usage", fake_record_llm_usage)
+    user_id = await _create_user_id(async_db_session)
+    service, fake_llm, _ = _service_with_fake_runner()
+    fake_llm.ask_on_first_research = True
+    run = await _create_run_with_plan(service, user_id, _request_data())
+    run_id = run.run_id
+
+    await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
+    await _execute_background(monkeypatch, service, async_db_session, run_id)
+
+    paused = await service.get_run(run_id, user_id)
+    assert paused.status == "awaiting_user_input"
+    paused_messages = await service.get_messages(run_id, user_id)
+    summary_card = next(
+        item
+        for item in paused_messages
+        if (item.payload or {}).get("context_summary") == "research"
+    )
+    assert "SUMMARY_SENTINEL" in summary_card.content
+    assert summary_card.visible_to_user is True
+    question = (
+        await async_db_session.execute(
+            select(InteractiveResearchMessage).where(
+                InteractiveResearchMessage.run_id == run_id,
+                InteractiveResearchMessage.message_type == "assistant_question",
+            )
+        )
+    ).scalar_one()
+    assert summary_card.sequence_no < question.sequence_no
+    serialized_checkpoint = service.serialize_run_summary(paused)["checkpoint_payload"]
+    assert "SUMMARY_SENTINEL" not in str(serialized_checkpoint)
+
+    answer = await service.append_user_message(
+        run_id,
+        user_id,
+        "Focus on semiconductor equipment only",
+        background_tasks=FakeBackgroundTasks(),
+    )
+    assert answer.parent_message_id == question.message_id
+
+    from app.ai.stock_picker.interactive_research.persistence import _load_plan_messages
+
+    persisted_run = (
+        await async_db_session.execute(
+            select(InteractiveResearchRun).where(InteractiveResearchRun.run_id == run_id)
+        )
+    ).scalar_one()
+    restored_plan_messages = await _load_plan_messages(async_db_session, persisted_run)
+    assert all(item["message_id"] != str(answer.message_id) for item in restored_plan_messages)
+
+    await _execute_background(monkeypatch, service, async_db_session, run_id)
+    completed = await service.get_run(run_id, user_id)
+    assert completed.status == "completed"
+
+    first_restored_contents = fake_llm.research_message_snapshots[1]
+    first_restored_types = fake_llm.research_message_types[1]
+    joined = "\n".join(first_restored_contents)
+    assert first_restored_types.count("SystemMessage") == 1
+    assert first_restored_types[1] == "HumanMessage"
+    assert first_restored_contents[1].startswith("## 1.")
+    assert "SUMMARY_SENTINEL" in first_restored_contents[1]
+    assert joined.count("Focus on semiconductor equipment only") == 1
+    assert "Find A-share opportunities with policy catalysts" not in joined
+    assert "Plan updated: exclude banks" not in joined
+    assert "第 1 轮用户输入" not in joined
+    assert "Semiconductor policy catalyst continues" not in joined
+
+    compaction_usage = [
+        call for call in usage_calls if call.get("call_kind") == "context_compaction"
+    ]
+    assert compaction_usage
+    assert compaction_usage[0]["model"] == settings.LLM_MODEL
+    assert compaction_usage[0]["role"] == "interactive_stock_research"
+    assert compaction_usage[0]["workflow"] == "interactive_stock_research"
+    assert compaction_usage[0]["stage"] == "agent_loop"
+    assert compaction_usage[0]["cache_lane"] == "research"
+    assert compaction_usage[0]["api_key_alias"] == "research_llm_api_key"
+
+
+@pytest.mark.asyncio
+async def test_context_summary_card_is_visible_in_api_and_websocket(
+    async_db_session,
+    monkeypatch,
+):
+    """摘要 card 作为普通消息出现在 API 与 WebSocket 聊天流。"""
+    from app.websocket import manager as websocket_manager_module
+
+    user_id = await _create_user_id(async_db_session)
+    service, _, _ = _service_with_fake_runner()
+    run = await _create_run_with_plan(service, user_id, _request_data())
+    run_id = run.run_id
+
+    summary_text = "## 1. User Goal\n- SUMMARY_SENTINEL visible summary card"
+    notification = await persist_context_summary_record(
+        run_id,
+        summary=summary_text,
+        phase="planning",
+    )
+    approved = await service.get_run(run_id, user_id)
+    assert "context_compaction" not in approved.checkpoint_payload
+
+    pushed_payload = {}
+
+    async def fake_send_interactive_stock_picker_update(**kwargs):
+        """记录 WebSocket 推送参数。"""
+        pushed_payload.update(kwargs)
+
+    monkeypatch.setattr(
+        websocket_manager_module.ws_manager,
+        "send_interactive_stock_picker_update",
+        fake_send_interactive_stock_picker_update,
+    )
+    await service._push_realtime_update(
+        notification
+    )
+
+    messages = await service.get_messages(run_id, user_id)
+    serialized_card = service.serialize_message(messages[-1])
+    assert serialized_card["message_type"] == "assistant_text"
+    assert serialized_card["content"] == summary_text
+    assert serialized_card["visible_to_user"] is True
+    assert serialized_card["payload"]["context_summary"] == "planning"
+    assert pushed_payload["message"] == summary_text
+    assert pushed_payload["payload"]["message"]["message_type"] == "assistant_text"
+
+
+@pytest.mark.asyncio
+async def test_research_recovery_excludes_queued_input_after_summary_card(async_db_session):
+    """queued 输入通过 queued_before 恢复一次，不与摘要后缀重复。"""
+    user_id = await _create_user_id(async_db_session)
+    service, _, _ = _service_with_fake_runner()
+    run = await _create_run_with_plan(service, user_id, _request_data())
+    run_id = run.run_id
+    await service.process_action(run_id, user_id, "approve", background_tasks=FakeBackgroundTasks())
+
+    queued = await service.append_user_message(
+        run_id,
+        user_id,
+        "Queued research constraint",
+        background_tasks=FakeBackgroundTasks(),
+    )
+    assert queued.status == "queued"
+
+    await persist_context_summary_record(run_id, summary="SUMMARY_SENTINEL", phase="research")
+
+    snapshot = await start_research_run_record(run_id)
+
+    assert [item["message_id"] for item in snapshot["snapshot"]["queued_before"]] == [
+        str(queued.message_id)
+    ]
+    restored_messages = snapshot["snapshot"]["research_messages"]
+    assert len(restored_messages) == 1
+    assert restored_messages[0]["content"] == "SUMMARY_SENTINEL"
+    assert restored_messages[0]["payload"]["context_summary"] == "research"

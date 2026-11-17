@@ -49,23 +49,27 @@ class InteractiveResearchService:
         self,
         tool_loader_factory: Optional[ToolLoaderFactory] = None,
         llm_factory: Optional[LLMFactory] = None,
+        summary_llm_factory: Optional[LLMFactory] = None,
     ) -> None:
         """初始化交互式研究服务。
 
         Args:
             tool_loader_factory: 可选工具注册表工厂；测试可注入 fake 工具。
             llm_factory: 可选 LLM 工厂；测试可注入 fake LLM。
+            summary_llm_factory: 可选摘要 LLM 工厂；测试可注入 fake 摘要模型。
         """
         self._llm_factory = llm_factory
         self._plan_agent = PlanAgent(
             tool_loader_factory=tool_loader_factory,
             llm_factory=llm_factory,
             notification_callback=self._push_realtime_update,
+            summary_llm_factory=summary_llm_factory,
         )
         self._research_agent = InteractiveResearchAgent(
             tool_loader_factory=tool_loader_factory,
             llm_factory=llm_factory,
             notification_callback=self._push_realtime_update,
+            summary_llm_factory=summary_llm_factory,
         )
 
     async def create_run(

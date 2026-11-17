@@ -6,6 +6,9 @@ from pydantic import BaseModel
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from app.ai.json_utils import stable_json_dumps
+from app.ai.agentic.context_compaction import (
+    compact_and_apply,
+)
 from app.ai.agentic.tool_output_summarizer import (
     should_summarize_tool_output,
     summarize_tool_output,
@@ -377,6 +380,62 @@ class BaseAgent(ABC):
             api_key_alias=api_key_alias,
         )
 
+    def _build_summary_llm(self) -> Any:
+        """构造会话压缩摘要模型。
+
+        Returns:
+            禁止绑定工具的低温度 chat model。
+        """
+        return self.llm_provider.build_chat_model(
+            model=self.model_name,
+            temperature=0.1,
+            max_tokens=settings.LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS,
+        )
+
+    async def _prepare_llm_messages(
+        self,
+        messages: list[Any],
+        *,
+        iteration_index: int,
+    ) -> None:
+        """在模型调用前执行上下文窗口检查和压缩。
+
+        Args:
+            messages: 当前 LLM 调用的完整消息列表，会被原地更新。
+            iteration_index: 当前 Agent 迭代序号。
+
+        Raises:
+            ContextCompactionError: 上下文无法安全压缩到窗口内。
+        """
+        async def record_summary_usage(response: Any) -> None:
+            await self._record_llm_usage(
+                response,
+                call_kind="context_compaction",
+                iteration_index=iteration_index,
+            )
+
+        outcome = await compact_and_apply(
+            messages,
+            model_name=self.model_name,
+            agent_name=self.role_name,
+            iteration_index=iteration_index,
+            llm_factory=self._build_summary_llm,
+            usage_callback=record_summary_usage,
+        )
+
+        if outcome.is_compacted:
+            logger.info(
+                "[%s] context compacted before iteration %s",
+                self.role_name,
+                iteration_index,
+                extra={
+                    "role_name": self.role_name,
+                    "before_tokens": outcome.before_tokens,
+                    "after_tokens": outcome.after_tokens,
+                },
+            )
+            return
+
     async def run(
         self,
         static_context: Dict[str, Any],
@@ -406,9 +465,9 @@ class BaseAgent(ABC):
         context_prompt_log = self._format_context_messages_for_prompt_log(context_messages)
 
         if output_model is str:
+            merged_system_prompt = f"{common_system_prompt}\n\n{system_prompt}"
             messages = [
-                SystemMessage(content=common_system_prompt),
-                SystemMessage(content=system_prompt),
+                SystemMessage(content=merged_system_prompt),
                 *context_messages,
             ]
             self.last_prompt = (
@@ -419,10 +478,11 @@ class BaseAgent(ABC):
         else:
             parser = PydanticOutputParser(pydantic_object=output_model)
             format_instructions = parser.get_format_instructions()
+            merged_system_prompt = (
+                f"{common_system_prompt}\n\n{system_prompt}\n\n{format_instructions}"
+            )
             messages = [
-                SystemMessage(content=common_system_prompt),
-                SystemMessage(content=system_prompt),
-                SystemMessage(content=format_instructions),
+                SystemMessage(content=merged_system_prompt),
                 *context_messages,
             ]
             self.last_prompt = (
@@ -444,6 +504,10 @@ class BaseAgent(ABC):
                     f"[{self.role_name}] Starting LLM iteration "
                     f"{i + 1}/{MAX_LLM_ITERATIONS}..."
                 )
+                await self._prepare_llm_messages(
+                    messages,
+                    iteration_index=i + 1,
+                )
                 response = await self.llm_with_tools.ainvoke(messages)
                 await self._record_llm_usage(response, call_kind="agent", iteration_index=i + 1)
 
@@ -457,10 +521,12 @@ class BaseAgent(ABC):
                             f"[{self.role_name}] Final text rejected: insufficient LLM iterations "
                             f"({i + 1}/{min_iterations}). Requesting focused verification."
                         )
-                        messages.append(HumanMessage(content=self._build_min_iterations_feedback(
-                            i + 1,
-                            min_iterations,
-                        )))
+                        messages.append(HumanMessage(
+                            content=self._build_min_iterations_feedback(
+                                i + 1,
+                                min_iterations,
+                            )
+                        ))
                         continue
 
                     if output_model is str:
@@ -474,14 +540,16 @@ class BaseAgent(ABC):
                             f"[{self.role_name}] Final text rejected: {shape_feedback}. "
                             "Requesting the LLM to continue."
                         )
-                        messages.append(HumanMessage(content=(
-                            f"你的上一条回复结构不完整：{shape_feedback}。"
-                            "请继续补全为一份完整的 Markdown 分析报告，补足缺失的章节和内容段落，"
-                            "不要重复已经完成的部分。\n"
-                            f"Your previous reply is structurally incomplete: {shape_feedback}. "
-                            "Please continue the Markdown report, add the missing sections and content paragraphs, "
-                            "and avoid repeating parts that are already complete."
-                        )))
+                        messages.append(HumanMessage(
+                            content=(
+                                f"你的上一条回复结构不完整：{shape_feedback}。"
+                                "请继续补全为一份完整的 Markdown 分析报告，补足缺失的章节和内容段落，"
+                                "不要重复已经完成的部分。\n"
+                                f"Your previous reply is structurally incomplete: {shape_feedback}. "
+                                "Please continue the Markdown report, add the missing sections and content paragraphs, "
+                                "and avoid repeating parts that are already complete."
+                            )
+                        ))
                         continue
                     role_feedback = await self.get_final_output_feedback(final_text)
                     if role_feedback:
@@ -571,7 +639,13 @@ class BaseAgent(ABC):
                 f"[{self.role_name}] Reached max iterations ({MAX_LLM_ITERATIONS}); "
                 "switching to final answer mode without tools."
             )
-            messages.append(HumanMessage(content=self._build_iteration_budget_exceeded_message()))
+            messages.append(HumanMessage(
+                content=self._build_iteration_budget_exceeded_message()
+            ))
+            await self._prepare_llm_messages(
+                messages,
+                iteration_index=MAX_LLM_ITERATIONS + 1,
+            )
             final_response = await self.llm.ainvoke(messages)
             await self._record_llm_usage(
                 final_response,
@@ -605,14 +679,20 @@ class BaseAgent(ABC):
                         f"Requesting JSON-only retry {retry_index + 1}/"
                         f"{STRUCTURED_OUTPUT_RETRY_LIMIT} without tools: {last_error}"
                     )
-                    messages.append(HumanMessage(content=(
-                        "你的上一条最终回复不是合法 JSON，无法被系统解析。"
-                        "不要调用任何工具；请严格按下面的 schema 重新输出一个 JSON 对象，"
-                        "不要输出解释文字或代码围栏。\n"
-                        "Your previous final response was not valid JSON. Do not call any tools. "
-                        "Return one JSON object only, following this schema:\n\n"
-                        f"{parser.get_format_instructions()}"
-                    )))
+                    messages.append(HumanMessage(
+                        content=(
+                            "你的上一条最终回复不是合法 JSON，无法被系统解析。"
+                            "不要调用任何工具；请严格按下面的 schema 重新输出一个 JSON 对象，"
+                            "不要输出解释文字或代码围栏。\n"
+                            "Your previous final response was not valid JSON. Do not call any tools. "
+                            "Return one JSON object only, following this schema:\n\n"
+                            f"{parser.get_format_instructions()}"
+                        )
+                    ))
+                    await self._prepare_llm_messages(
+                        messages,
+                        iteration_index=retry_index + 1,
+                    )
                     retry_response = await self.llm.ainvoke(messages)
                     await self._record_llm_usage(
                         retry_response,

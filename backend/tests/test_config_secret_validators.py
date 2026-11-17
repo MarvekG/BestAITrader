@@ -36,3 +36,44 @@ def test_valid_values_pass(monkeypatch):
     module = _reload_config()
     assert module.settings.SECRET_KEY == "test-secret-key"
     assert module.settings.FIRST_SUPERUSER_PASSWORD == "test-password"
+
+
+def test_context_window_non_positive_rejected(monkeypatch):
+    """上下文窗口必须大于 0。"""
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+    monkeypatch.setenv("FIRST_SUPERUSER_PASSWORD", "test-password")
+    monkeypatch.setenv("LLM_CONTEXT_WINDOW_TOKENS", "0")
+    with pytest.raises(ValidationError) as ei:
+        _reload_config()
+    assert "LLM_CONTEXT_WINDOW_TOKENS" in str(ei.value)
+
+
+def test_context_compaction_trigger_ratio_out_of_range_rejected(monkeypatch):
+    """压缩触发比例必须严格位于 0 和 1 之间。"""
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+    monkeypatch.setenv("FIRST_SUPERUSER_PASSWORD", "test-password")
+    monkeypatch.setenv("LLM_CONTEXT_COMPACTION_TRIGGER_RATIO", "1")
+    with pytest.raises(ValidationError) as ei:
+        _reload_config()
+    assert "LLM_CONTEXT_COMPACTION_TRIGGER_RATIO" in str(ei.value)
+
+
+def test_context_summary_output_non_positive_rejected(monkeypatch):
+    """摘要输出上限必须大于 0。"""
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+    monkeypatch.setenv("FIRST_SUPERUSER_PASSWORD", "test-password")
+    monkeypatch.setenv("LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS", "0")
+    with pytest.raises(ValidationError) as ei:
+        _reload_config()
+    assert "LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS" in str(ei.value)
+
+
+def test_context_summary_output_must_be_less_than_window(monkeypatch):
+    """摘要输出上限必须小于上下文窗口。"""
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key")
+    monkeypatch.setenv("FIRST_SUPERUSER_PASSWORD", "test-password")
+    monkeypatch.setenv("LLM_CONTEXT_WINDOW_TOKENS", "1000")
+    monkeypatch.setenv("LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS", "1000")
+    with pytest.raises(ValidationError) as ei:
+        _reload_config()
+    assert "LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS" in str(ei.value)

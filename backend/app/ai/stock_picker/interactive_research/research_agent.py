@@ -4,11 +4,18 @@ import json
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 from uuid import UUID
 
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
+from app.ai.agentic.context_compaction import (
+    ContextCompactionError,
+    build_compaction_message,
+    compact_and_apply,
+    create_summary_llm,
+)
 from app.ai.agentic.tool_output_summarizer import should_summarize_tool_output, summarize_tool_output
 from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_providers.factory import build_chat_model, get_llm_provider
+from app.ai.llm_routing import get_research_usage_lane
 from app.ai.stock_picker.interactive_research import constants as prompt_constants
 from app.ai.stock_picker.interactive_research.constants import (
     PLAN_CONVERSATION_CONTEXT_HEADER_EN,
@@ -30,6 +37,7 @@ from app.ai.stock_picker.interactive_research.persistence import (
     append_tool_result_and_progress_record,
     append_tool_start_record,
     pause_for_user_question_record,
+    persist_context_summary_record,
     process_queued_user_inputs_record,
     start_research_run_record,
     synthesize_final_message_record,
@@ -80,6 +88,7 @@ class InteractiveResearchAgent:
         tool_loader_factory: Optional[ToolLoaderFactory] = None,
         llm_factory: Optional[LLMFactory] = None,
         notification_callback: Optional[ResearchAgentNotificationCallback] = None,
+        summary_llm_factory: Optional[LLMFactory] = None,
     ) -> None:
         """初始化研究工作流。
 
@@ -87,9 +96,11 @@ class InteractiveResearchAgent:
             tool_loader_factory: 可选工具注册表工厂；测试可注入 fake 工具。
             llm_factory: 可选 LLM 工厂；测试可注入 fake LLM。
             notification_callback: 后台消息写入后的实时通知回调。
+            summary_llm_factory: 可选摘要 LLM 工厂；测试可注入 fake 摘要模型。
         """
         self._tool_loader_factory = tool_loader_factory
         self._llm_factory = llm_factory
+        self._summary_llm_factory = summary_llm_factory
         self._notification_callback = notification_callback
         self._llm_provider = get_llm_provider()
 
@@ -122,6 +133,7 @@ class InteractiveResearchAgent:
             approved_plan,
             run_snapshot["queued_before"],
             run_snapshot.get("plan_conversation", []),
+            research_messages=run_snapshot.get("research_messages") or [],
         )
         tools = await self._load_tools(run_id, run_snapshot["user_id"])
         tool_map = {
@@ -152,6 +164,11 @@ class InteractiveResearchAgent:
                     "iteration_budget": iteration_budget,
                     "message_count": len(messages),
                 },
+            )
+            await self._prepare_research_messages(
+                run_id,
+                messages,
+                iteration_index=iteration_index,
             )
             response = await llm_with_tools.ainvoke(messages)
             await self._record_llm_usage(
@@ -211,7 +228,9 @@ class InteractiveResearchAgent:
                     },
                 )
                 messages.append(
-                    HumanMessage(content=self._llm_provider.build_invalid_tool_call_retry_message(invalid_tool_calls))
+                    HumanMessage(
+                        content=self._llm_provider.build_invalid_tool_call_retry_message(invalid_tool_calls)
+                    )
                 )
 
             if flow_control_calls:
@@ -228,7 +247,11 @@ class InteractiveResearchAgent:
                     },
                 )
                 if decision.status == "ask":
-                    await self._pause_for_user_question(run_id, decision.message)
+                    await self._pause_for_user_question(
+                        run_id,
+                        decision.message,
+                        messages=messages,
+                    )
                     return
                 if decision.status == "done":
                     final_content = decision.message
@@ -242,12 +265,13 @@ class InteractiveResearchAgent:
                 "interactive research agent iteration budget exhausted",
                 extra={"run_id": str(run_id), "iteration_budget": iteration_budget},
             )
-            messages.append(
-                HumanMessage(
-                    content=_iteration_budget_instruction(iteration_budget)
-                )
-            )
+            messages.append(HumanMessage(content=_iteration_budget_instruction(iteration_budget)))
             for retry_index in range(MAX_FLOW_CONTROL_RETRIES + 1):
+                await self._prepare_research_messages(
+                    run_id,
+                    messages,
+                    iteration_index=iteration_budget + 1 + retry_index,
+                )
                 final_response = await llm_with_tools.ainvoke(messages)
                 await self._record_llm_usage(
                     run_id,
@@ -277,7 +301,9 @@ class InteractiveResearchAgent:
                         "interactive research agent final retry used evidence tool",
                         extra={"run_id": str(run_id), "retry_index": retry_index},
                     )
-                    messages.append(HumanMessage(content=_final_must_use_control_tool_retry_message()))
+                    messages.append(
+                        HumanMessage(content=_final_must_use_control_tool_retry_message())
+                    )
                     continue
                 if invalid_tool_calls:
                     logger.warning(
@@ -532,17 +558,74 @@ class InteractiveResearchAgent:
         self,
         run_id: UUID,
         question_content: str,
+        *,
+        messages: List[Any],
     ) -> None:
-        """在 agent 输出 ask 时停止循环并写入问题。
+        """在 agent 输出 ask 时生成暂停摘要并停止循环。
 
         Args:
             run_id: 当前研究 run ID。
             question_content: LLM 生成的用户问题。
+            messages: 当前研究 LLM 消息上下文。
+
+        Raises:
+            ContextCompactionError: 暂停摘要无法生成时抛出，run 不进入等待输入状态。
         """
-        await self._notify_change(await pause_for_user_question_record(run_id, question_content))
+        async def record_summary_usage(response: Any) -> None:
+            await self._record_llm_usage(
+                run_id,
+                response,
+                stage="agent_loop",
+                call_kind="context_compaction",
+                iteration_index=None,
+            )
+
+        try:
+            outcome = await compact_and_apply(
+                messages,
+                model_name=settings.LLM_MODEL,
+                agent_name="interactive_stock_research",
+                iteration_index=None,
+                llm_factory=self._build_summary_llm,
+                force=True,
+                summary_extra_messages=[
+                    HumanMessage(content=_ask_summary_instruction(question_content))
+                ],
+                usage_callback=record_summary_usage,
+            )
+        except ContextCompactionError as exc:
+            logger.error(
+                "interactive research agent resume checkpoint compaction failed",
+                extra={"run_id": str(run_id), "status": exc.status},
+            )
+            raise ContextCompactionError(
+                "resume_checkpoint_compaction_failed",
+                detail=exc.status,
+            ) from exc
+        if not outcome.is_compacted:
+            logger.error(
+                "interactive research agent resume checkpoint compaction failed",
+                extra={"run_id": str(run_id), "status": outcome.status},
+            )
+            raise ContextCompactionError(
+                "resume_checkpoint_compaction_failed",
+                detail=outcome.status,
+            )
+        notifications = await pause_for_user_question_record(
+            run_id,
+            question_content,
+            compaction_summary=outcome.summary,
+        )
+        for notification in notifications or []:
+            await self._notify_change(notification)
         logger.info(
             "interactive research agent paused for user question",
-            extra={"run_id": str(run_id), "question_length": len(question_content)},
+            extra={
+                "run_id": str(run_id),
+                "question_length": len(question_content),
+                "before_tokens": outcome.before_tokens,
+                "after_tokens": outcome.after_tokens,
+            },
         )
 
     async def _append_assistant_text(self, run_id: UUID, content: str) -> None:
@@ -580,8 +663,10 @@ class InteractiveResearchAgent:
         self,
         raw_requirement: str,
         approved_plan: str,
-        queued_messages: List[Dict[str, str]],
+        queued_messages: List[Dict[str, Any]],
         plan_conversation: List[Dict[str, Any]],
+        *,
+        research_messages: Optional[List[Dict[str, Any]]] = None,
     ) -> List[Any]:
         """构造 LLM tool-calling 消息上下文。
 
@@ -590,6 +675,7 @@ class InteractiveResearchAgent:
             approved_plan: 用户确认的研究计划正文。
             queued_messages: 本轮开始前并入上下文的排队用户输入。
             plan_conversation: 计划阶段用户输入和计划卡，按顺序传入研究上下文。
+            research_messages: 最新研究摘要 card 及其后的用户输入。
 
         Returns:
             LangChain 消息列表。
@@ -600,10 +686,20 @@ class InteractiveResearchAgent:
             f"{flow_control_protocol_instruction()}\n"
         )
         messages: List[Any] = [SystemMessage(content=prompt)]
+        if research_messages:
+            for item in research_messages:
+                payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
+                if payload.get("context_summary"):
+                    messages.append(build_compaction_message(item.get("content") or ""))
+                else:
+                    messages.append(HumanMessage(content=item.get("content") or ""))
+            self._append_queued_inputs_to_messages(messages, queued_messages)
+            return messages
+
         if approved_plan:
-            messages.append(SystemMessage(content=approved_plan))
+            messages.append(AIMessage(content=approved_plan))
         if plan_conversation:
-            messages.append(SystemMessage(content=_format_plan_conversation(plan_conversation)))
+            messages.append(HumanMessage(content=_format_plan_conversation(plan_conversation)))
         if queued_messages:
             self._append_queued_inputs_to_messages(messages, queued_messages)
         if len(messages) == 1:
@@ -613,7 +709,7 @@ class InteractiveResearchAgent:
     def _append_queued_inputs_to_messages(
         self,
         messages: List[Any],
-        queued_messages: List[Dict[str, str]],
+        queued_messages: List[Dict[str, Any]],
     ) -> None:
         """把排队用户输入追加到 LLM 上下文。
 
@@ -622,7 +718,9 @@ class InteractiveResearchAgent:
             queued_messages: 已处理的排队用户消息。
         """
         for message in queued_messages:
-            messages.append(HumanMessage(content=f"{_additional_user_input_label()}: {message['content']}"))
+            messages.append(
+                HumanMessage(content=f"{_additional_user_input_label()}: {message['content']}")
+            )
 
     async def _load_tools(self, run_id: UUID, user_id: int) -> List[Any]:
         """加载绑定给 LLM 的非交易工具。
@@ -652,14 +750,73 @@ class InteractiveResearchAgent:
             return self._llm_factory()
         return build_chat_model(model=settings.LLM_MODEL, temperature=0.2)
 
-    async def _record_llm_usage(
+    def _build_summary_llm(self) -> Any:
+        """构造研究阶段摘要模型。
+
+        Returns:
+            不绑定工具的低温度 chat model。
+        """
+        return create_summary_llm(
+            model_name=settings.LLM_MODEL,
+            llm_factory=self._summary_llm_factory or self._llm_factory,
+        )
+
+    async def _prepare_research_messages(
         self,
         run_id: UUID,
+        messages: List[Any],
+        *,
+        iteration_index: int,
+    ) -> None:
+        """在研究阶段模型调用前执行窗口检查和压缩。
+
+        Args:
+            run_id: 当前研究 run ID。
+            messages: 当前 LLM 消息列表。
+            iteration_index: 当前迭代序号。
+        """
+        async def record_summary_usage(response: Any) -> None:
+            await self._record_llm_usage(
+                run_id,
+                response,
+                stage="agent_loop",
+                call_kind="context_compaction",
+                iteration_index=iteration_index,
+            )
+
+        outcome = await compact_and_apply(
+            messages,
+            model_name=settings.LLM_MODEL,
+            agent_name="interactive_stock_research",
+            iteration_index=iteration_index,
+            llm_factory=self._build_summary_llm,
+            usage_callback=record_summary_usage,
+        )
+        if outcome.is_compacted:
+            await self._notify_change(
+                await persist_context_summary_record(
+                    run_id,
+                    summary=outcome.summary or "",
+                    phase="research",
+                )
+            )
+            logger.info(
+                "interactive research agent context compacted",
+                extra={
+                    "iteration_index": iteration_index,
+                    "before_tokens": outcome.before_tokens,
+                    "after_tokens": outcome.after_tokens,
+                },
+            )
+
+    async def _record_llm_usage(
+        self,
+        run_id: Optional[UUID],
         response: Any,
         *,
         stage: str,
         call_kind: str,
-        iteration_index: int,
+        iteration_index: Optional[int],
     ) -> None:
         """记录单次 LLM usage。
 
@@ -670,6 +827,7 @@ class InteractiveResearchAgent:
             call_kind: LLM 调用类型。
             iteration_index: 调用迭代序号。
         """
+        cache_lane, api_key_alias = get_research_usage_lane()
         await record_llm_usage(
             response,
             settings.LLM_MODEL,
@@ -679,6 +837,8 @@ class InteractiveResearchAgent:
             stage=stage,
             call_kind=call_kind,
             iteration_index=iteration_index,
+            cache_lane=cache_lane,
+            api_key_alias=api_key_alias,
         )
 
     def _parse_flow_control_tool_or_retry(
@@ -722,7 +882,9 @@ class InteractiveResearchAgent:
                         content=stable_json_dumps({"error": str(exc)}),
                     )
                 )
-            messages.append(HumanMessage(content=_build_flow_control_retry_message(exc, final_only=final_only)))
+            messages.append(
+                HumanMessage(content=_build_flow_control_retry_message(exc, final_only=final_only))
+            )
             return None
 
     def _iteration_budget(self, max_iterations: int) -> int:
@@ -890,6 +1052,9 @@ def _format_plan_conversation(plan_conversation: List[Dict[str, Any]]) -> str:
         user_template = PLAN_CONVERSATION_USER_LINE_EN
         plan_template = PLAN_CONVERSATION_PLAN_LINE_EN
     for item in plan_conversation:
+        if item.get("kind") == "context_summary":
+            lines.append(item.get("content") or "")
+            continue
         template = plan_template if item.get("kind") == "plan_card" else user_template
         lines.append(template.format(round=item.get("round"), content=item.get("content") or ""))
     return "\n".join(lines)
@@ -944,3 +1109,19 @@ def _additional_user_input_label() -> str:
         当前提示词语言下的补充用户输入标签。
     """
     return prompt_constants.additional_user_input_label()
+
+
+def _ask_summary_instruction(question_content: str) -> str:
+    """构造 ASK 暂停摘要的额外要求。
+
+    Args:
+        question_content: 当前助手问题。
+
+    Returns:
+        要求摘要保留当前问题和依赖约束的说明。
+    """
+    return (
+        "Current assistant question that must be kept in section 5 "
+        "(Open Questions and Next Steps), together with the user constraints it depends on:\n"
+        f"{question_content}"
+    )

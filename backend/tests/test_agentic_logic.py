@@ -1568,5 +1568,102 @@ async def test_llm_engine_agent_retries_when_final_text_is_too_short():
     )
 
 
+@pytest.mark.asyncio
+async def test_base_agent_context_compaction_request_shape_and_usage(monkeypatch):
+    """主调用超窗后只发送 system 和摘要，并记录压缩 usage 标签。"""
+
+    class _FakeTool:
+        name = "query_market_data"
+
+        async def ainvoke(self, args):
+            return "M" * 100000
+
+    first_response = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "id": "tool-1",
+                "name": "query_market_data",
+                "args": {"stock_code": "000001.SZ"},
+            }
+        ],
+        usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+    )
+
+    final_response = AIMessage(
+        content=(
+            "# 研究报告\n\n"
+            "## 核心判断\n"
+            "证据显示当前判断仍需要结合后续数据验证。\n\n"
+            "## 证据梳理\n"
+            "工具结果已经进入摘要，不再作为独立消息发送。\n\n"
+            "## 风险提示\n"
+            "仍需关注数据时效性和样本偏差。\n\n"
+            "## 跟踪计划\n"
+            "后续继续跟踪关键指标和公告变化。"
+        ),
+        tool_calls=[],
+        usage_metadata={"input_tokens": 20, "output_tokens": 40, "total_tokens": 60},
+    )
+
+    main_llm = MagicMock()
+    main_llm.ainvoke = AsyncMock(side_effect=[first_response, final_response])
+    main_llm.bind_tools.return_value = main_llm
+    summary_llm = MagicMock()
+    summary_llm.ainvoke = AsyncMock(
+        return_value=AIMessage(content="## 1. Goal\n- summary\n\n## 2. Notes\n- context")
+    )
+
+    class _CompactionProvider(_FakeLLMProvider):
+        def build_chat_model(self, **kwargs):
+            if kwargs.get("max_tokens") is not None:
+                return summary_llm
+            return main_llm
+
+    provider = _CompactionProvider(main_llm)
+    usage_calls = []
+
+    async def _fake_record_llm_usage(response, model, role, **kwargs):
+        usage_calls.append({"response": response, "model": model, "role": role, **kwargs})
+
+    monkeypatch.setattr(base_agent_module.settings, "LLM_CONTEXT_WINDOW_TOKENS", 50000)
+    monkeypatch.setattr(base_agent_module.settings, "LLM_CONTEXT_COMPACTION_TRIGGER_RATIO", 0.5)
+    monkeypatch.setattr(
+        base_agent_module.settings,
+        "LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS",
+        500,
+    )
+    monkeypatch.setattr(base_agent_module.settings, "DEBATE_AGENT_MIN_ITERATIONS", 1)
+
+    with patch("app.ai.llm_engine.agents.base.get_llm_provider", return_value=provider), \
+         patch("app.ai.llm_engine.agents.base.get_all_tools", return_value=[_FakeTool()]), \
+         patch("app.ai.llm_engine.agents.base.build_memory_tools", return_value=[]), \
+         patch("app.ai.llm_engine.agents.base.get_skills_loader_tools", return_value=[]), \
+         patch("app.ai.llm_engine.agents.base.record_llm_usage", new=_fake_record_llm_usage):
+        agent = _DummyLLMEngineAgent(role_name="Dummy Analyst")
+        result = await agent.run({"stock_code": "000001.SZ"})
+
+    assert result == final_response.content
+    assert main_llm.ainvoke.call_count == 2
+    compacted_messages = main_llm.ainvoke.await_args_list[1].args[0]
+    assert type(compacted_messages[0]).__name__ == "SystemMessage"
+    assert compacted_messages[1].content.startswith("## 1.")
+    assert any(
+        getattr(message, "content", "") == "M" * 100000
+        for message in summary_llm.ainvoke.await_args_list[0].args[0]
+    )
+
+    compaction_usage = [
+        call for call in usage_calls if call.get("call_kind") == "context_compaction"
+    ]
+    assert len(compaction_usage) == 1
+    assert compaction_usage[0]["model"] == agent.model_name
+    assert compaction_usage[0]["role"] == "Dummy Analyst"
+    assert compaction_usage[0]["workflow"] == "debate_analysis"
+    assert compaction_usage[0]["stage"] == "Dummy Analyst"
+    assert compaction_usage[0]["cache_lane"] == "research"
+    assert compaction_usage[0]["api_key_alias"] == "research_llm_api_key"
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

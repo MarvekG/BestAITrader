@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import List, Literal
 
-from pydantic import ConfigDict, field_validator
+from pydantic import ConfigDict, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2].absolute()
@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     LLM_THINKING_MODEL: str = "openai-compatible-thinking"
     LLM_TIMEOUT_SECONDS: float = 240.0
     LLM_MAX_RETRIES: int = 3
+    # Agent 会话上下文压缩；窗口按部署实际模型填写，多别名部署取最小窗口。
+    LLM_CONTEXT_WINDOW_TOKENS: int = 200000
+    LLM_CONTEXT_COMPACTION_TRIGGER_RATIO: float = 0.75
+    LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS: int = 16384
     DEBATE_AGENT_PARALLEL_ENABLED: bool = True
     DEBATE_AGENT_MIN_ITERATIONS: int = 5
     ENABLE_AUTO_TRADE: bool = True
@@ -98,6 +102,36 @@ class Settings(BaseSettings):
         if value < 1 or value > 365:
             raise ValueError("MARKET_WATCH_EVENT_RETENTION_DAYS must be between 1 and 365")
         return value
+
+    @model_validator(mode="after")
+    def _validate_context_compaction_budget(self) -> "Settings":
+        """校验上下文压缩窗口、触发比例和摘要输出上限。
+
+        Returns:
+            校验通过的配置实例。
+
+        Raises:
+            ValueError: 窗口、比例或摘要输出上限关系非法。
+        """
+        if self.LLM_CONTEXT_WINDOW_TOKENS <= 0:
+            raise ValueError("LLM_CONTEXT_WINDOW_TOKENS must be greater than 0")
+        if not 0 < self.LLM_CONTEXT_COMPACTION_TRIGGER_RATIO < 1:
+            raise ValueError(
+                "LLM_CONTEXT_COMPACTION_TRIGGER_RATIO must be greater than 0 and less than 1"
+            )
+        if self.LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS <= 0:
+            raise ValueError(
+                "LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS must be greater than 0"
+            )
+        if (
+            self.LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS
+            >= self.LLM_CONTEXT_WINDOW_TOKENS
+        ):
+            raise ValueError(
+                "LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS must be less than "
+                "LLM_CONTEXT_WINDOW_TOKENS"
+            )
+        return self
 
     MARKET_WATCH_RECENT_DEBATE_LAUNCH_LOOKBACK_HOURS: int = 24
     MARKET_WATCH_EVENT_RETENTION_DAYS: int = 30
