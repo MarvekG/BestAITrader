@@ -1,11 +1,9 @@
 from datetime import date
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.messages.tool import invalid_tool_call
-from app.ai.agentic.tools import get_all_tools
 from app.ai.agentic.memory_tools import build_memory_tools
-from app.ai.llm_providers.litellm import LiteLLMProvider
+from app.ai.agentic.tools import get_all_tools
 from app.ai.llm_engine.agents import base as base_agent_module
 from app.ai.llm_engine.agents.base import BaseAgent
 from app.ai.llm_engine.prompts import templates
@@ -20,6 +18,9 @@ from app.ai.llm_engine.roles import (
     AGENT_NAME_SENTIMENT_ANALYST,
     AGENT_NAME_TECHNICAL_ANALYST,
 )
+from app.ai.llm_providers.litellm import LiteLLMProvider
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages.tool import invalid_tool_call
 
 
 class _FakeLLMProvider(LiteLLMProvider):
@@ -961,8 +962,8 @@ def test_common_system_prompt_describes_whole_document_memory_protocol():
 @pytest.mark.asyncio
 async def test_agentic_tools_new_entities():
     """测试统一市场查询工具可覆盖期货和宏观数据"""
-    from app.ai.agentic.tools import query_market_data
     from app.ai.agentic.tooling.stock_tools import StockTools
+    from app.ai.agentic.tools import query_market_data
 
     mock_data = [{"symbol": "AU2406", "close": 550.0}]
     with patch.object(StockTools, "get_generic_db_data", new=AsyncMock(return_value=mock_data)):
@@ -995,8 +996,8 @@ async def test_agentic_tools_new_entities():
 @pytest.mark.asyncio
 async def test_agentic_tools_analysis_suite():
     """测试统一股票查询工具可覆盖深度分析类数据"""
-    from app.ai.agentic.tools import query_stock_data
     from app.ai.agentic.tooling.stock_tools import StockTools
+    from app.ai.agentic.tools import query_stock_data
 
     mock_insider = [{"stock_code": "600519", "direction": "buy"}]
     mock_pledge = [{"stock_code": "600519", "pledge_ratio": 12.5}]
@@ -1135,8 +1136,8 @@ async def test_get_stock_basic_info_returns_share_fields(async_db_session):
 
 @pytest.mark.asyncio
 async def test_query_stock_data_passes_columns_to_generic_db_data():
-    from app.ai.agentic.tools import query_stock_data
     from app.ai.agentic.tooling.stock_tools import StockTools
+    from app.ai.agentic.tools import query_stock_data
 
     mock_kline = [{"date": "2024-01-02", "close": 10.5}]
 
@@ -1205,7 +1206,7 @@ async def test_query_stock_data_returns_structured_column_error_without_tracebac
 
 @pytest.mark.asyncio
 async def test_query_stock_data_jsonb_report_rejects_nested_metric_columns():
-    from app.ai.agentic.tools import query_stock_data, SUPPORTED_STOCK_QUERY_TYPES
+    from app.ai.agentic.tools import SUPPORTED_STOCK_QUERY_TYPES, query_stock_data
 
     assert "financial" not in SUPPORTED_STOCK_QUERY_TYPES
     assert "income_statement" not in SUPPORTED_STOCK_QUERY_TYPES
@@ -1228,8 +1229,8 @@ async def test_query_stock_data_jsonb_report_rejects_nested_metric_columns():
 
 @pytest.mark.asyncio
 async def test_query_market_data_passes_columns_to_generic_db_data():
-    from app.ai.agentic.tools import query_market_data
     from app.ai.agentic.tooling.stock_tools import StockTools
+    from app.ai.agentic.tools import query_market_data
 
     mock_index_data = [{"date": "2024-01-02", "close": 3210.0}]
     with patch.object(StockTools, "get_generic_db_data", new=AsyncMock(return_value=mock_index_data)) as mock_generic:
@@ -1256,8 +1257,8 @@ async def test_query_market_data_passes_columns_to_generic_db_data():
 
 @pytest.mark.asyncio
 async def test_query_market_data_passes_columns_to_custom_queries():
-    from app.ai.agentic.tools import query_market_data
     from app.ai.agentic.tooling.stock_tools import StockTools
+    from app.ai.agentic.tools import query_market_data
 
     with patch.object(StockTools, "get_generic_db_data", new=AsyncMock(side_effect=[
         [{"trade_date": "2024-01-02", "stock_code": "000001.SZ"}],
@@ -1323,7 +1324,7 @@ async def test_query_stock_data_localizes_financial_report_data_keys():
 @pytest.mark.asyncio
 async def test_agentic_tools_completion_suite():
     """验证统一查询工具覆盖技术指标、大宗交易、板块资金流、市场情绪、基金持仓"""
-    from app.ai.agentic.tools import query_stock_data, query_market_data
+    from app.ai.agentic.tools import query_market_data, query_stock_data
 
     with patch("app.ai.agentic.tooling.stock_tools.StockTools.get_generic_db_data", new_callable=AsyncMock) as mock_generic:
         mock_generic.return_value = [{"indicator": "MACD", "value": 0.5}]
@@ -1399,7 +1400,7 @@ async def test_agentic_tools_completion_suite():
 @pytest.mark.asyncio
 async def test_agentic_tools_final_push_suite():
     """验证统一查询工具覆盖融资融券、指数、舆情、解禁、回购"""
-    from app.ai.agentic.tools import query_stock_data, query_market_data
+    from app.ai.agentic.tools import query_market_data, query_stock_data
 
     with patch("app.ai.agentic.tooling.stock_tools.StockTools.get_generic_db_data", new_callable=AsyncMock) as mock_generic:
         mock_generic.return_value = [{"margin_balance": 1000000}]
@@ -1475,8 +1476,12 @@ async def test_agentic_tools_final_push_suite():
 
 @pytest.mark.asyncio
 async def test_unified_agentic_tools():
-    from app.ai.agentic.tools import query_stock_data, query_market_data, sync_market_data
     from app.ai.agentic.tooling.stock_tools import StockTools
+    from app.ai.agentic.tools import (
+        query_market_data,
+        query_stock_data,
+        sync_market_data,
+    )
 
     with patch.object(StockTools, "check_data_status", new=AsyncMock(return_value={"basic_info": "exists"})), \
          patch.object(

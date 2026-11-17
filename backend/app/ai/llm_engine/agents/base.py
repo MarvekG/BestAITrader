@@ -1,33 +1,34 @@
-from typing import Dict, Any, Type, Optional
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-import re
-from pydantic import BaseModel
-from langchain_core.output_parsers import PydanticOutputParser
-from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
-from app.ai.json_utils import stable_json_dumps
+from typing import Any
+
+import tiktoken
 from app.ai.agentic.context_compaction import (
     compact_and_apply,
+)
+from app.ai.agentic.memory_tools import build_memory_tools
+from app.ai.agentic.skills_loader.runtime import (
+    build_skills_catalog_prompt,
+    get_skills_loader_tools,
 )
 from app.ai.agentic.tool_output_summarizer import (
     should_summarize_tool_output,
     summarize_tool_output,
 )
-from app.ai.llm_routing import get_research_usage_lane
-from app.ai.llm_providers import get_llm_provider
-from app.core.config import settings
 from app.ai.agentic.tools import get_all_tools
-from app.ai.agentic.memory_tools import build_memory_tools
-from app.ai.llm_engine.roles import MEMORY_ENABLED_AGENT_NAMES
-from app.ai.memory_documents import store
-from app.ai.agentic.skills_loader.runtime import (
-    build_skills_catalog_prompt,
-    get_skills_loader_tools,
-)
+from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_engine.prompts import templates
-from app.crud.llm_usage_log import record_llm_usage
+from app.ai.llm_engine.roles import MEMORY_ENABLED_AGENT_NAMES
+from app.ai.llm_providers import get_llm_provider
+from app.ai.llm_routing import get_research_usage_lane
+from app.ai.memory_documents import store
+from app.core.config import settings
 from app.core.logger import get_logger
-import tiktoken
+from app.crud.llm_usage_log import record_llm_usage
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+from langchain_core.output_parsers import PydanticOutputParser
+from pydantic import BaseModel
 
 logger = get_logger(__name__)
 MIN_REPORT_SECTIONS = 3
@@ -67,9 +68,9 @@ class BaseAgent(ABC):
     def __init__(
         self,
         role_name: str,
-        model_name: Optional[str] = None,
+        model_name: str | None = None,
         temperature: float = 0.5,
-        state: Optional[Dict[str, Any]] = None,
+        state: dict[str, Any] | None = None,
     ):
         self.role_name = role_name
         self.model_name = model_name or settings.LLM_MODEL
@@ -107,7 +108,7 @@ class BaseAgent(ABC):
         tools.extend(get_skills_loader_tools())
         return tools
 
-    async def get_final_output_feedback(self, final_content: str) -> Optional[str]:
+    async def get_final_output_feedback(self, final_content: str) -> str | None:
         """在接受最终输出前获取角色级补充指令。
 
         Args:
@@ -125,12 +126,10 @@ class BaseAgent(ABC):
         trading_strategy: str,
     ) -> str:
         """Returns the system prompt for the specific agent role."""
-        pass
 
     @abstractmethod
-    def get_output_model(self) -> Type[BaseModel]:
+    def get_output_model(self) -> type[BaseModel]:
         """Returns the Pydantic model for the expected output."""
-        pass
 
     def _extract_json_from_content(self, text: str) -> str:
         """从 markdown 代码围栏或混合文本中提取纯 JSON。
@@ -209,7 +208,7 @@ class BaseAgent(ABC):
             paragraph_count=paragraph_count,
         )
 
-    def _report_shape_feedback(self, shape: MarkdownReportShape) -> Optional[str]:
+    def _report_shape_feedback(self, shape: MarkdownReportShape) -> str | None:
         missing = []
         if shape.title_count < 1:
             missing.append("缺少一级标题 / missing H1 title")
@@ -307,8 +306,8 @@ class BaseAgent(ABC):
 
     def _build_context_messages(
         self,
-        static_context: Dict[str, Any],
-        context: Dict[str, Any],
+        static_context: dict[str, Any],
+        context: dict[str, Any],
         memory_hint: str = "",
     ) -> list[HumanMessage]:
         """构建传给 Agent 的紧凑上下文消息。
@@ -345,7 +344,7 @@ class BaseAgent(ABC):
         self,
         tool_name: str,
         content: str,
-        tool_args: Optional[Dict[str, Any]] = None,
+        tool_args: dict[str, Any] | None = None,
         iteration_index: int | None = None,
     ) -> str:
         return await summarize_tool_output(
@@ -438,8 +437,8 @@ class BaseAgent(ABC):
 
     async def run(
         self,
-        static_context: Dict[str, Any],
-        context: Optional[Dict[str, Any]] = None,
+        static_context: dict[str, Any],
+        context: dict[str, Any] | None = None,
     ) -> Any:
         """
         Runs the agent with the given context.
@@ -603,7 +602,7 @@ class BaseAgent(ABC):
                                 tool_call_id=tool_call["id"],
                                 content=result_str
                             ))
-                        except Exception as e:
+                        except Exception as e:  # noqa: BLE001 - tool implementations may raise provider-specific exceptions.
                             logger.error(f"[{self.role_name}] Tool {tool_name} failed: {e}")
                             messages.append(ToolMessage(
                                 tool_call_id=tool_call["id"],
@@ -626,8 +625,8 @@ class BaseAgent(ABC):
                             content=self.llm_provider.build_invalid_tool_call_retry_message(invalid_tool_calls)
                         )
                     )
-            except Exception as e:
-                logger.exception(f"[{self.role_name}] Execution error at iteration {i}: {e}")
+            except Exception as e:  # noqa: BLE001 - preserve the agent loop's existing fail-fast behavior.
+                logger.exception(f"[{self.role_name}] Execution error at iteration {i}.")
                 execution_error = e
                 break
 
@@ -705,7 +704,7 @@ class BaseAgent(ABC):
                         # 同样尝试提取纯 JSON
                         cleaned_retry = self._extract_json_from_content(retry_content)
                         return parser.parse(cleaned_retry)
-                    except Exception as retry_error:
+                    except Exception as retry_error:  # noqa: BLE001 - parser implementations may raise varied validation errors.
                         last_error = retry_error
 
                 logger.error(

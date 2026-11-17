@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any
 from uuid import UUID
-
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.ai.agentic.context_compaction import (
     ContextCompactionError,
@@ -12,7 +11,10 @@ from app.ai.agentic.context_compaction import (
     compact_and_apply,
     create_summary_llm,
 )
-from app.ai.agentic.tool_output_summarizer import should_summarize_tool_output, summarize_tool_output
+from app.ai.agentic.tool_output_summarizer import (
+    should_summarize_tool_output,
+    summarize_tool_output,
+)
 from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_providers.factory import build_chat_model, get_llm_provider
 from app.ai.llm_routing import get_research_usage_lane
@@ -42,15 +44,18 @@ from app.ai.stock_picker.interactive_research.persistence import (
     start_research_run_record,
     synthesize_final_message_record,
 )
-from app.ai.stock_picker.interactive_research.tool_registry import InteractiveResearchToolRegistry, ToolLoaderFactory
+from app.ai.stock_picker.interactive_research.tool_registry import (
+    InteractiveResearchToolRegistry,
+    ToolLoaderFactory,
+)
 from app.core.config import settings
 from app.core.i18n import i18n_service
 from app.core.logger import get_logger
 from app.crud.llm_usage_log import record_llm_usage
-
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 LLMFactory = Callable[[], Any]
-ResearchAgentNotificationCallback = Callable[[Dict[str, Any]], Awaitable[None]]
+ResearchAgentNotificationCallback = Callable[[dict[str, Any]], Awaitable[None]]
 DEFAULT_INTERACTIVE_RESEARCH_ITERATIONS = 60
 MIN_INTERACTIVE_RESEARCH_ITERATIONS = 10
 MAX_FLOW_CONTROL_RETRIES = 2
@@ -85,10 +90,10 @@ class InteractiveResearchAgent:
 
     def __init__(
         self,
-        tool_loader_factory: Optional[ToolLoaderFactory] = None,
-        llm_factory: Optional[LLMFactory] = None,
-        notification_callback: Optional[ResearchAgentNotificationCallback] = None,
-        summary_llm_factory: Optional[LLMFactory] = None,
+        tool_loader_factory: ToolLoaderFactory | None = None,
+        llm_factory: LLMFactory | None = None,
+        notification_callback: ResearchAgentNotificationCallback | None = None,
+        summary_llm_factory: LLMFactory | None = None,
     ) -> None:
         """初始化研究工作流。
 
@@ -111,7 +116,7 @@ class InteractiveResearchAgent:
             run_id: 当前研究 run ID。
             approved_plan: 用户确认的研究计划正文。
         """
-        tool_trace: List[Dict[str, Any]] = []
+        tool_trace: list[dict[str, Any]] = []
         run_snapshot = await self._start_research_run(run_id)
         if run_snapshot is None:
             logger.warning("interactive research agent skipped missing run", extra={"run_id": str(run_id)})
@@ -348,7 +353,7 @@ class InteractiveResearchAgent:
             },
         )
 
-    async def _start_research_run(self, run_id: UUID) -> Optional[Dict[str, Any]]:
+    async def _start_research_run(self, run_id: UUID) -> dict[str, Any] | None:
         """把 run 切到研究阶段并记录输入上下文。
 
         Args:
@@ -374,12 +379,12 @@ class InteractiveResearchAgent:
     async def _execute_tool_call(
         self,
         run_id: UUID,
-        tool_map: Dict[str, Any],
-        messages: List[Any],
-        tool_call: Dict[str, Any],
+        tool_map: dict[str, Any],
+        messages: list[Any],
+        tool_call: dict[str, Any],
         iteration_index: int,
         llm: Any,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """执行 LLM 返回的单个工具调用，并同步写消息流。
 
         Args:
@@ -407,7 +412,7 @@ class InteractiveResearchAgent:
             },
         )
         start_message_id = await self._append_tool_start(run_id, tool_name, tool_args, tool_call_id)
-        trace_item: Dict[str, Any] = {"name": tool_name, "args": tool_args, "success": False}
+        trace_item: dict[str, Any] = {"name": tool_name, "args": tool_args, "success": False}
         tool = tool_map.get(tool_name)
         if tool is None:
             result_text = _t("errors.tool_not_allowed", tool_name=tool_name)
@@ -437,7 +442,7 @@ class InteractiveResearchAgent:
                         iteration_index=iteration_index,
                     )
                 trace_item["success"] = _is_successful_tool_result(raw_result, result_text)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - tool and summarizer providers may raise arbitrary errors.
                 result_text = f"Error: {exc}"
                 trace_item["error"] = str(exc)
                 logger.warning(
@@ -475,7 +480,7 @@ class InteractiveResearchAgent:
         return trace_item
 
     async def _append_tool_start(
-        self, run_id: UUID, tool_name: str, tool_args: Dict[str, Any], tool_call_id: str
+        self, run_id: UUID, tool_name: str, tool_args: dict[str, Any], tool_call_id: str
     ) -> str:
         """记录工具开始调用消息。
 
@@ -496,7 +501,7 @@ class InteractiveResearchAgent:
         self,
         run_id: UUID,
         tool_name: str,
-        tool_args: Dict[str, Any],
+        tool_args: dict[str, Any],
         tool_call_id: str,
         start_message_id: str,
         success: bool,
@@ -529,7 +534,7 @@ class InteractiveResearchAgent:
     async def _synthesize_final_message(
         self,
         run_id: UUID,
-        tool_trace: List[Dict[str, Any]],
+        tool_trace: list[dict[str, Any]],
         final_content: str,
         *,
         stopped_by_iteration_limit: bool = False,
@@ -559,7 +564,7 @@ class InteractiveResearchAgent:
         run_id: UUID,
         question_content: str,
         *,
-        messages: List[Any],
+        messages: list[Any],
     ) -> None:
         """在 agent 输出 ask 时生成暂停摘要并停止循环。
 
@@ -637,7 +642,7 @@ class InteractiveResearchAgent:
         """
         await self._notify_change(await append_assistant_text_record(run_id, content))
 
-    async def _process_queued_user_inputs(self, run_id: UUID) -> List[Dict[str, str]]:
+    async def _process_queued_user_inputs(self, run_id: UUID) -> list[dict[str, str]]:
         """处理运行中排队的用户输入消息。
 
         Args:
@@ -649,7 +654,7 @@ class InteractiveResearchAgent:
         return await process_queued_user_inputs_record(run_id)
 
     async def _append_queued_input_status(
-        self, run_id: UUID, queued_messages: List[Dict[str, str]]
+        self, run_id: UUID, queued_messages: list[dict[str, str]]
     ) -> None:
         """记录排队输入已并入下一轮 agent 消息。
 
@@ -663,11 +668,11 @@ class InteractiveResearchAgent:
         self,
         raw_requirement: str,
         approved_plan: str,
-        queued_messages: List[Dict[str, Any]],
-        plan_conversation: List[Dict[str, Any]],
+        queued_messages: list[dict[str, Any]],
+        plan_conversation: list[dict[str, Any]],
         *,
-        research_messages: Optional[List[Dict[str, Any]]] = None,
-    ) -> List[Any]:
+        research_messages: list[dict[str, Any]] | None = None,
+    ) -> list[Any]:
         """构造 LLM tool-calling 消息上下文。
 
         Args:
@@ -685,7 +690,7 @@ class InteractiveResearchAgent:
             f"{_tool_policy_instruction()}\n"
             f"{flow_control_protocol_instruction()}\n"
         )
-        messages: List[Any] = [SystemMessage(content=prompt)]
+        messages: list[Any] = [SystemMessage(content=prompt)]
         if research_messages:
             for item in research_messages:
                 payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
@@ -708,8 +713,8 @@ class InteractiveResearchAgent:
 
     def _append_queued_inputs_to_messages(
         self,
-        messages: List[Any],
-        queued_messages: List[Dict[str, Any]],
+        messages: list[Any],
+        queued_messages: list[dict[str, Any]],
     ) -> None:
         """把排队用户输入追加到 LLM 上下文。
 
@@ -722,7 +727,7 @@ class InteractiveResearchAgent:
                 HumanMessage(content=f"{_additional_user_input_label()}: {message['content']}")
             )
 
-    async def _load_tools(self, run_id: UUID, user_id: int) -> List[Any]:
+    async def _load_tools(self, run_id: UUID, user_id: int) -> list[Any]:
         """加载绑定给 LLM 的非交易工具。
 
         Args:
@@ -764,7 +769,7 @@ class InteractiveResearchAgent:
     async def _prepare_research_messages(
         self,
         run_id: UUID,
-        messages: List[Any],
+        messages: list[Any],
         *,
         iteration_index: int,
     ) -> None:
@@ -811,12 +816,12 @@ class InteractiveResearchAgent:
 
     async def _record_llm_usage(
         self,
-        run_id: Optional[UUID],
+        run_id: UUID | None,
         response: Any,
         *,
         stage: str,
         call_kind: str,
-        iteration_index: Optional[int],
+        iteration_index: int | None,
     ) -> None:
         """记录单次 LLM usage。
 
@@ -843,11 +848,11 @@ class InteractiveResearchAgent:
 
     def _parse_flow_control_tool_or_retry(
         self,
-        messages: List[Any],
-        flow_control_calls: List[Dict[str, Any]],
+        messages: list[Any],
+        flow_control_calls: list[dict[str, Any]],
         *,
         final_only: bool = False,
-    ) -> Optional[FlowControlDecision]:
+    ) -> FlowControlDecision | None:
         """解析流程控制工具调用，失败时把纠错指令加入下一轮上下文。
 
         Args:
@@ -900,7 +905,7 @@ class InteractiveResearchAgent:
 
     async def _notify_change(
         self,
-        payload: Optional[Dict[str, Any]],
+        payload: dict[str, Any] | None,
     ) -> None:
         """推送已持久化变更的实时通知。
 
@@ -973,7 +978,7 @@ def _build_flow_control_retry_message(exc: ValueError, *, final_only: bool = Fal
     )
 
 
-def _flow_control_retry_count(messages: List[Any]) -> int:
+def _flow_control_retry_count(messages: list[Any]) -> int:
     """统计当前上下文中流程控制工具纠错次数。
 
     Args:
@@ -989,7 +994,7 @@ def _flow_control_retry_count(messages: List[Any]) -> int:
     )
 
 
-def _partition_tool_calls(tool_calls: List[Dict[str, Any]]) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+def _partition_tool_calls(tool_calls: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """拆分流程控制工具调用和证据工具调用。
 
     Args:
@@ -1034,7 +1039,7 @@ def _compact_tool_result(result_text: str) -> str:
     return normalized or _t("messages.tool_empty_result")
 
 
-def _format_plan_conversation(plan_conversation: List[Dict[str, Any]]) -> str:
+def _format_plan_conversation(plan_conversation: list[dict[str, Any]]) -> str:
     """格式化计划阶段对话，供研究阶段识别用户修订语义。
 
     Args:

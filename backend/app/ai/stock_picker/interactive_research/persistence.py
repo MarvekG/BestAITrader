@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
+import app.core.database as database_module
 from app.ai.stock_picker.interactive_research.constants import (
     ACTIVE_RESEARCH_STATUSES,
     TERMINAL_RESEARCH_STATUSES,
@@ -16,9 +14,13 @@ from app.ai.stock_picker.interactive_research.models import (
     InteractiveResearchMessage,
     InteractiveResearchRun,
 )
-from app.ai.stock_picker.interactive_research.serializers import serialize_message, serialize_run_summary
-import app.core.database as database_module
+from app.ai.stock_picker.interactive_research.serializers import (
+    serialize_message,
+    serialize_run_summary,
+)
 from app.core.i18n import i18n_service
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def _t(key: str, **kwargs: Any) -> str:
@@ -39,7 +41,7 @@ PHASE_RESEARCH = "research"
 CONTEXT_SUMMARY_PAYLOAD_KEY = "context_summary"
 
 
-def _message_snapshot(message: InteractiveResearchMessage) -> Dict[str, Any]:
+def _message_snapshot(message: InteractiveResearchMessage) -> dict[str, Any]:
     """把消息 ORM 对象转换为恢复快照。
 
     Args:
@@ -60,10 +62,10 @@ def _message_snapshot(message: InteractiveResearchMessage) -> Dict[str, Any]:
 
 async def create_run_record(
     user_id: int,
-    request_data: Dict[str, Any],
+    request_data: dict[str, Any],
     *,
     title: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """创建研究 run 并写入首条用户消息。
 
     Args:
@@ -122,7 +124,7 @@ async def create_run_record(
         return {"run_id": run.run_id, "raw_requirement": run.raw_requirement}
 
 
-async def list_run_records(user_id: int) -> List[InteractiveResearchRun]:
+async def list_run_records(user_id: int) -> list[InteractiveResearchRun]:
     """查询用户研究 run 列表。
 
     Args:
@@ -139,7 +141,7 @@ async def list_run_records(user_id: int) -> List[InteractiveResearchRun]:
         )).scalars().all()
 
 
-async def get_run_record(run_id: UUID, user_id: int) -> Optional[InteractiveResearchRun]:
+async def get_run_record(run_id: UUID, user_id: int) -> InteractiveResearchRun | None:
     """查询用户拥有的单个研究 run。
 
     Args:
@@ -182,8 +184,8 @@ async def append_user_message_record(
     run_id: UUID,
     user_id: int,
     content: str,
-    payload: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """追加用户消息并执行同步状态写入。
 
     Args:
@@ -248,7 +250,7 @@ async def append_user_message_record(
         return {"message": message, "run_status": run_status}
 
 
-async def approve_plan_record(run_id: UUID, user_id: int) -> Dict[str, Any]:
+async def approve_plan_record(run_id: UUID, user_id: int) -> dict[str, Any]:
     """确认计划并把 run 切换到研究中。
 
     Args:
@@ -281,7 +283,7 @@ async def approve_plan_record(run_id: UUID, user_id: int) -> Dict[str, Any]:
         return {"run": run}
 
 
-async def cancel_run_record(run_id: UUID, user_id: int, reason: Optional[str] = None) -> InteractiveResearchRun:
+async def cancel_run_record(run_id: UUID, user_id: int, reason: str | None = None) -> InteractiveResearchRun:
     """取消用户研究 run。
 
     Args:
@@ -317,7 +319,7 @@ async def cancel_run_record(run_id: UUID, user_id: int, reason: Optional[str] = 
         return run
 
 
-async def list_message_records(run_id: UUID, user_id: int, *, visible_only: bool = True) -> List[InteractiveResearchMessage]:
+async def list_message_records(run_id: UUID, user_id: int, *, visible_only: bool = True) -> list[InteractiveResearchMessage]:
     """查询 run 的消息流。
 
     Args:
@@ -365,7 +367,7 @@ async def fail_run_record(run_id: UUID, error_text: str, exception_type: str, ex
         await db.commit()
 
 
-async def load_plan_turn_record(run_id: UUID) -> Optional[Dict[str, Any]]:
+async def load_plan_turn_record(run_id: UUID) -> dict[str, Any] | None:
     """读取计划阶段本轮所需的 run 与历史消息快照。
 
     Args:
@@ -393,7 +395,7 @@ async def persist_plan_card_record(
     plan_message: str,
     reason: str,
     bump_version: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """打开事务写入计划卡。
 
     Args:
@@ -428,7 +430,7 @@ async def persist_context_summary_record(
     *,
     summary: str,
     phase: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """把压缩摘要作为普通可见 assistant 消息保存。
 
     Args:
@@ -464,7 +466,7 @@ async def persist_context_summary_record(
         return notification
 
 
-async def start_research_run_record(run_id: UUID) -> Optional[Dict[str, Any]]:
+async def start_research_run_record(run_id: UUID) -> dict[str, Any] | None:
     """启动研究 loop 并返回运行快照和通知 payload。
 
     Returns:
@@ -478,7 +480,7 @@ async def start_research_run_record(run_id: UUID) -> Optional[Dict[str, Any]]:
             return None
         queued_messages = await _process_queued_user_inputs(db, run)
         summary_card = await _load_latest_context_summary(db, run, PHASE_RESEARCH)
-        research_messages: List[Dict[str, Any]] = []
+        research_messages: list[dict[str, Any]] = []
         if summary_card:
             queued_ids = {message["message_id"] for message in queued_messages}
             research_messages = [
@@ -532,9 +534,9 @@ async def start_research_run_record(run_id: UUID) -> Optional[Dict[str, Any]]:
 async def append_tool_start_record(
     run_id: UUID,
     tool_name: str,
-    tool_args: Dict[str, Any],
+    tool_args: dict[str, Any],
     tool_call_id: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """记录工具开始调用消息。
 
     Args:
@@ -570,13 +572,13 @@ async def append_tool_result_and_progress_record(
     run_id: UUID,
     *,
     tool_name: str,
-    tool_args: Dict[str, Any],
+    tool_args: dict[str, Any],
     tool_call_id: str,
     start_message_id: str,
     success: bool,
     result_text: str,
     result_content: str,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """记录工具结果、进度消息和 checkpoint。
 
     Args:
@@ -647,11 +649,11 @@ async def append_tool_result_and_progress_record(
 async def synthesize_final_message_record(
     run_id: UUID,
     *,
-    tool_trace: List[Dict[str, Any]],
+    tool_trace: list[dict[str, Any]],
     final_content: str,
     stopped_by_iteration_limit: bool,
     iteration_budget: int,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """写入最终答案和完成状态。
 
     Args:
@@ -717,8 +719,8 @@ async def pause_for_user_question_record(
     run_id: UUID,
     question_content: str,
     *,
-    compaction_summary: Optional[str] = None,
-) -> Optional[List[Dict[str, Any]]]:
+    compaction_summary: str | None = None,
+) -> list[dict[str, Any]] | None:
     """暂停研究并在同一事务写入追问消息和摘要 card。
 
     Args:
@@ -765,7 +767,7 @@ async def pause_for_user_question_record(
         return notifications
 
 
-async def append_assistant_text_record(run_id: UUID, content: str) -> Optional[Dict[str, Any]]:
+async def append_assistant_text_record(run_id: UUID, content: str) -> dict[str, Any] | None:
     """追加研究过程中的 assistant 文本。
 
     Args:
@@ -795,7 +797,7 @@ async def append_assistant_text_record(run_id: UUID, content: str) -> Optional[D
         return payload
 
 
-async def process_queued_user_inputs_record(run_id: UUID) -> List[Dict[str, str]]:
+async def process_queued_user_inputs_record(run_id: UUID) -> list[dict[str, str]]:
     """处理运行中排队的用户输入。
 
     Args:
@@ -815,7 +817,7 @@ async def process_queued_user_inputs_record(run_id: UUID) -> List[Dict[str, str]
         return queued_messages
 
 
-async def append_queued_input_status_record(run_id: UUID, queued_messages: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+async def append_queued_input_status_record(run_id: UUID, queued_messages: list[dict[str, str]]) -> dict[str, Any] | None:
     """记录排队输入已并入上下文。
 
     Args:
@@ -844,7 +846,7 @@ async def append_queued_input_status_record(run_id: UUID, queued_messages: List[
         return payload
 
 
-async def build_recent_chat_messages_record(run_id: UUID) -> List[Dict[str, Any]]:
+async def build_recent_chat_messages_record(run_id: UUID) -> list[dict[str, Any]]:
     """构造给 agent 使用的最近聊天消息。
 
     Args:
@@ -874,7 +876,7 @@ async def _get_run(
     run_id: UUID,
     *,
     for_update: bool = False,
-) -> Optional[InteractiveResearchRun]:
+) -> InteractiveResearchRun | None:
     """在当前会话中按 ID 查询 run。
 
     Args:
@@ -899,7 +901,7 @@ async def _get_user_run(
     user_id: int,
     *,
     for_update: bool = False,
-) -> Optional[InteractiveResearchRun]:
+) -> InteractiveResearchRun | None:
     """在当前会话中查询用户拥有的 run。
 
     Args:
@@ -931,7 +933,7 @@ async def _lock_user_active_runs(db: AsyncSession, user_id: int) -> None:
     await db.execute(select(func.pg_advisory_xact_lock(user_id)))
 
 
-async def _load_plan_messages(db: AsyncSession, run: InteractiveResearchRun) -> List[Dict[str, Any]]:
+async def _load_plan_messages(db: AsyncSession, run: InteractiveResearchRun) -> list[dict[str, Any]]:
     """读取最新计划摘要 card 及其后的计划消息。
 
     Args:
@@ -979,7 +981,7 @@ async def _load_latest_context_summary(
     db: AsyncSession,
     run: InteractiveResearchRun,
     phase: str,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """读取指定阶段最新的可见摘要消息。
 
     Args:
@@ -1020,7 +1022,7 @@ def _is_queued_user_input(message: InteractiveResearchMessage) -> bool:
     return bool(payload.get("queued_user_input"))
 
 
-def _message_summary_phase(message: InteractiveResearchMessage) -> Optional[str]:
+def _message_summary_phase(message: InteractiveResearchMessage) -> str | None:
     """读取摘要 card 的阶段标记。"""
     if not _is_context_summary(message):
         return None
@@ -1032,8 +1034,8 @@ def _message_summary_phase(message: InteractiveResearchMessage) -> Optional[str]
 async def _load_research_user_inputs(
     db: AsyncSession,
     run: InteractiveResearchRun,
-    after_sequence_no: Optional[int],
-) -> List[Dict[str, Any]]:
+    after_sequence_no: int | None,
+) -> list[dict[str, Any]]:
     """读取最近研究摘要之后的用户输入。
 
     Args:
@@ -1060,7 +1062,7 @@ async def _load_research_user_inputs(
     ]
 
 
-def _build_plan_conversation_snapshot(plan_messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _build_plan_conversation_snapshot(plan_messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """构造计划阶段用户输入和计划卡的顺序快照。
 
     Args:
@@ -1102,7 +1104,7 @@ def _build_plan_conversation_snapshot(plan_messages: List[Dict[str, Any]]) -> Li
     return plan_conversation
 
 
-async def _process_queued_user_inputs(db: AsyncSession, run: InteractiveResearchRun) -> List[Dict[str, str]]:
+async def _process_queued_user_inputs(db: AsyncSession, run: InteractiveResearchRun) -> list[dict[str, str]]:
     """在当前会话中处理排队用户输入。
 
     Args:
@@ -1136,9 +1138,9 @@ async def _process_queued_user_inputs(db: AsyncSession, run: InteractiveResearch
 
 def _notification_payload(
     run: InteractiveResearchRun,
-    message: Optional[InteractiveResearchMessage],
+    message: InteractiveResearchMessage | None,
     event: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """构造事务提交后可推送的通知 payload。
 
     Args:
@@ -1164,8 +1166,8 @@ async def append_message(
     role: str,
     message_type: str,
     content: str,
-    payload: Optional[Dict[str, Any]] = None,
-    parent_message_id: Optional[UUID] = None,
+    payload: dict[str, Any] | None = None,
+    parent_message_id: UUID | None = None,
     status: str = "completed",
     visible_to_user: bool = True,
 ) -> InteractiveResearchMessage:
@@ -1206,8 +1208,8 @@ async def write_checkpoint(
     run: InteractiveResearchRun,
     *,
     reason: str,
-    extra_payload: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    extra_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """更新 run 的最小恢复 checkpoint。
 
     Args:
@@ -1293,14 +1295,14 @@ async def transition_run(
     run: InteractiveResearchRun,
     *,
     status: str,
-    current_phase: Optional[str] = None,
+    current_phase: str | None = None,
     system_content: str,
-    system_payload: Optional[Dict[str, Any]] = None,
+    system_payload: dict[str, Any] | None = None,
     checkpoint_reason: str,
-    checkpoint_extra: Optional[Dict[str, Any]] = None,
+    checkpoint_extra: dict[str, Any] | None = None,
     clear_pending: bool = False,
     finished: bool = False,
-    error_message: Optional[str] = None,
+    error_message: str | None = None,
 ) -> InteractiveResearchMessage:
     """切换 run 状态，并写入一条系统状态消息和 checkpoint。
 

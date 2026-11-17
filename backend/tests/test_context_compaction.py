@@ -1,6 +1,4 @@
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-
 from app.ai.agentic import context_compaction as context_compaction_module
 from app.ai.agentic.context_compaction import (
     SUMMARY_STATUS_COMPACTED,
@@ -13,6 +11,7 @@ from app.ai.agentic.context_compaction import (
     estimate_context_tokens,
 )
 from app.core.config import settings
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 
 class FakeSummaryModel:

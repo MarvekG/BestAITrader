@@ -1,13 +1,18 @@
 import uuid
 
 import pytest
-from langchain_core.messages import AIMessage
-from sqlalchemy import func, select
-
+from app.ai.stock_picker.interactive_research import (
+    research_agent as research_agent_module,
+)
 from app.ai.stock_picker.interactive_research import service as service_module
-from app.ai.stock_picker.interactive_research import research_agent as research_agent_module
-from app.ai.stock_picker.interactive_research.flow_control import FLOW_CONTROL_TOOL_NAME, control_research_flow
-from app.ai.stock_picker.interactive_research.models import InteractiveResearchMessage, InteractiveResearchRun
+from app.ai.stock_picker.interactive_research.flow_control import (
+    FLOW_CONTROL_TOOL_NAME,
+    control_research_flow,
+)
+from app.ai.stock_picker.interactive_research.models import (
+    InteractiveResearchMessage,
+    InteractiveResearchRun,
+)
 from app.ai.stock_picker.interactive_research.persistence import (
     append_tool_start_record,
     fail_run_record,
@@ -15,16 +20,18 @@ from app.ai.stock_picker.interactive_research.persistence import (
     start_research_run_record,
     synthesize_final_message_record,
 )
+from app.ai.stock_picker.interactive_research.plan_agent import PlanAgent
 from app.ai.stock_picker.interactive_research.schemas import (
     InteractiveResearchActionRequest,
     InteractiveResearchMessageCreate,
     InteractiveResearchRunCreate,
 )
-from app.ai.stock_picker.interactive_research.plan_agent import PlanAgent
 from app.ai.stock_picker.interactive_research.service import InteractiveResearchService
 from app.core.config import settings
 from app.crud.user import get_password_hash
 from app.models.user import User
+from langchain_core.messages import AIMessage
+from sqlalchemy import func, select
 
 
 class FakeInteractiveResearchTool:
@@ -280,8 +287,8 @@ class FakeBackgroundTasks:
 
     async def run_all(self):
         """按加入顺序执行全部后台任务。"""
-        for func, args, kwargs in self.tasks:
-            result = func(*args, **kwargs)
+        for task, args, kwargs in self.tasks:
+            result = task(*args, **kwargs)
             if hasattr(result, "__await__"):
                 await result
 
@@ -293,7 +300,9 @@ async def test_interactive_tool_registry_reuses_agentic_tool_layers_and_filters_
     Args:
         monkeypatch: pytest monkeypatch fixture。
     """
-    from app.ai.stock_picker.interactive_research import tool_registry as registry_module
+    from app.ai.stock_picker.interactive_research import (
+        tool_registry as registry_module,
+    )
 
     loaded_layers = []
 
@@ -539,7 +548,7 @@ async def _create_run_with_plan(service, user_id, request_data):
 async def test_create_run_writes_user_message_plan_card_and_checkpoint(async_db_session):
     """创建 run 只写聊天消息和 checkpoint，不依赖 artifact。"""
     user_id = await _create_user_id(async_db_session)
-    service, fake_llm, _ = _service_with_fake_runner()
+    service, _, _ = _service_with_fake_runner()
 
     run = await _create_run_with_plan(service, user_id, _request_data())
     messages = await service.get_messages(run.run_id, user_id)
@@ -705,7 +714,7 @@ async def test_realtime_update_pushes_markdown_display_message(async_db_session,
     from app.websocket import manager as websocket_manager_module
 
     user_id = await _create_user_id(async_db_session)
-    service, fake_llm, _ = _service_with_fake_runner()
+    service, _, _ = _service_with_fake_runner()
     run = await _create_run_with_plan(service, user_id, _request_data())
     plan_message = (await service.get_messages(run.run_id, user_id))[1]
     pushed_payload = {}

@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Literal
+from typing import Literal
 
 from pydantic import ConfigDict, field_validator, model_validator
 from pydantic_settings import BaseSettings
@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     ENABLE_RUNTIME_EXTENSIONS: bool = True
     ENABLE_OPENAPI_DOCS: bool = True
     INTERACTIVE_RESEARCH_PLAN_MAX_ITERATIONS: int = 5
-    BACKEND_CORS_ORIGINS: List[str] = []
+    BACKEND_CORS_ORIGINS: list[str] = []
 
     @field_validator("SECRET_KEY")
     @classmethod
@@ -137,7 +137,7 @@ class Settings(BaseSettings):
     MARKET_WATCH_EVENT_RETENTION_DAYS: int = 30
 
     # Core Indices Config
-    CORE_INDICES: List[str] = [
+    CORE_INDICES: list[str] = [
         "000300.SH",  # 沪深300: 核心资产, 沪深两市市值最大、流动性最好的300只。 / CSI 300: Core assets, top 300 large cap and high liquidity.
         "000016.SH",  # 上证50: 蓝筹/大盘, 仅限上交所市值最大、流动性最好的50只。 / SSE 50: Blue chips, top 50 strictly in SSE.
         "399006.SZ",  # 创业板指: 科技/创新, 深交所创业板核心股，波动大，成长性强。 / ChiNext: Tech/Innovation, high growth and volatility.

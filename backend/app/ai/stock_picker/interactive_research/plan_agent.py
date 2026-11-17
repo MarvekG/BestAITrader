@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any
 from uuid import UUID
-
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 from app.ai.agentic.context_compaction import (
     build_compaction_message,
     compact_and_apply,
     create_summary_llm,
 )
-from app.ai.agentic.tool_output_summarizer import should_summarize_tool_output, summarize_tool_output
+from app.ai.agentic.tool_output_summarizer import (
+    should_summarize_tool_output,
+    summarize_tool_output,
+)
 from app.ai.agentic.tools import make_json_serializable
 from app.ai.json_utils import stable_json_dumps
 from app.ai.llm_providers.factory import build_chat_model, get_llm_provider
@@ -30,15 +32,18 @@ from app.ai.stock_picker.interactive_research.persistence import (
     persist_context_summary_record,
     persist_plan_card_record,
 )
-from app.ai.stock_picker.interactive_research.tool_registry import InteractiveResearchToolRegistry, ToolLoaderFactory
+from app.ai.stock_picker.interactive_research.tool_registry import (
+    InteractiveResearchToolRegistry,
+    ToolLoaderFactory,
+)
 from app.core.config import settings
 from app.core.i18n import i18n_service
 from app.core.logger import get_logger
 from app.crud.llm_usage_log import record_llm_usage
-
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 LLMFactory = Callable[[], Any]
-PlanAgentNotificationCallback = Callable[[Dict[str, Any]], Awaitable[None]]
+PlanAgentNotificationCallback = Callable[[dict[str, Any]], Awaitable[None]]
 PLAN_AGENT_TOOL_NAMES = {
     "get_current_time",
     "browse_web_page_html",
@@ -71,10 +76,10 @@ class PlanAgent:
 
     def __init__(
         self,
-        tool_loader_factory: Optional[ToolLoaderFactory] = None,
-        llm_factory: Optional[LLMFactory] = None,
-        notification_callback: Optional[PlanAgentNotificationCallback] = None,
-        summary_llm_factory: Optional[LLMFactory] = None,
+        tool_loader_factory: ToolLoaderFactory | None = None,
+        llm_factory: LLMFactory | None = None,
+        notification_callback: PlanAgentNotificationCallback | None = None,
+        summary_llm_factory: LLMFactory | None = None,
     ) -> None:
         """初始化计划阶段 Agent。
 
@@ -88,8 +93,8 @@ class PlanAgent:
         self._llm_factory = llm_factory
         self._summary_llm_factory = summary_llm_factory
         self._notification_callback = notification_callback
-        self._plan_messages: Dict[UUID, List[Any]] = {}
-        self._latest_plan_outputs: Dict[UUID, str] = {}
+        self._plan_messages: dict[UUID, list[Any]] = {}
+        self._latest_plan_outputs: dict[UUID, str] = {}
         self._llm_provider = get_llm_provider()
 
     async def execute(
@@ -97,7 +102,7 @@ class PlanAgent:
         run_id: UUID,
         user_input: str,
         *,
-        history_input: Optional[str] = None,
+        history_input: str | None = None,
         initial: bool = False,
     ) -> None:
         """执行一轮计划 Agent，完成后停下来等待用户确认或补充。
@@ -220,8 +225,8 @@ class PlanAgent:
         run_id: UUID,
         content: str,
         *,
-        persisted_messages: List[Dict[str, Any]],
-    ) -> List[Any]:
+        persisted_messages: list[dict[str, Any]],
+    ) -> list[Any]:
         """构造本轮计划 Agent 消息。
 
         进程内缓存只保存已完成的 user/assistant 历史；本轮 system 和 human 临时拼装，不写入缓存。
@@ -249,8 +254,8 @@ class PlanAgent:
 
     def _restore_plan_messages(
         self,
-        persisted_messages: List[Dict[str, Any]],
-    ) -> List[Any]:
+        persisted_messages: list[dict[str, Any]],
+    ) -> list[Any]:
         """进程缓存缺失时，从已持久化消息重建计划阶段对话缓存。
 
         Args:
@@ -259,7 +264,7 @@ class PlanAgent:
         Returns:
             截止到上一条计划回复的消息缓存（丢弃尾部尚未回复的用户输入）。
         """
-        conversation: List[Any] = []
+        conversation: list[Any] = []
         history_items = list(persisted_messages)
         while (
             history_items
@@ -270,9 +275,7 @@ class PlanAgent:
 
         for item in history_items:
             payload = item.get("payload") if isinstance(item.get("payload"), dict) else {}
-            if payload.get(CONTEXT_SUMMARY_PAYLOAD_KEY):
-                conversation.append(HumanMessage(content=item.get("content") or ""))
-            elif item.get("role") == "user" and item.get("message_type") == "user_input":
+            if payload.get(CONTEXT_SUMMARY_PAYLOAD_KEY) or item.get("role") == "user" and item.get("message_type") == "user_input":
                 conversation.append(HumanMessage(content=item.get("content") or ""))
             elif item.get("role") == "assistant" and item.get("message_type") == "plan_card":
                 conversation.append(AIMessage(content=item.get("content") or ""))
@@ -284,7 +287,7 @@ class PlanAgent:
         user_content: str,
         assistant_content: str,
         *,
-        compaction_summary: Optional[str] = None,
+        compaction_summary: str | None = None,
     ) -> None:
         """把本轮成功的用户输入和计划回复追加进消息缓存。
 
@@ -295,7 +298,7 @@ class PlanAgent:
             compaction_summary: 本轮生成的摘要；非空时不重复缓存已进入摘要的输入。
         """
         if compaction_summary:
-            conversation: List[Any] = []
+            conversation: list[Any] = []
             conversation.append(build_compaction_message(compaction_summary))
             conversation.append(AIMessage(content=assistant_content))
             self._plan_messages[run_id] = conversation
@@ -334,11 +337,11 @@ class PlanAgent:
     async def _prepare_plan_messages(
         self,
         run_id: UUID,
-        messages: List[Any],
+        messages: list[Any],
         *,
         iteration_index: int,
-        compaction_summary: Optional[str],
-    ) -> Optional[str]:
+        compaction_summary: str | None,
+    ) -> str | None:
         """在计划阶段模型调用前执行窗口检查和压缩。
 
         Args:
@@ -389,9 +392,9 @@ class PlanAgent:
     async def _invoke_plan_markdown(
         self,
         run_id: UUID,
-        messages: List[Any],
-        tools: List[Any],
-    ) -> tuple[str, Optional[str]]:
+        messages: list[Any],
+        tools: list[Any],
+    ) -> tuple[str, str | None]:
         """调用计划阶段 LLM 生成 Markdown 研究计划。
 
         Args:
@@ -402,7 +405,7 @@ class PlanAgent:
             计划 Agent 输出的 Markdown 正文和本轮最新摘要。
         """
         llm = self._build_llm()
-        compaction_summary: Optional[str] = None
+        compaction_summary: str | None = None
         llm_with_tools = llm.bind_tools(tools) if tools else llm
         tool_map = {str(getattr(tool, "name", "")): tool for tool in tools if getattr(tool, "name", "")}
 
@@ -489,7 +492,7 @@ class PlanAgent:
         )
         return str(getattr(final_response, "content", "") or "").strip(), compaction_summary
 
-    async def _load_tools(self, run_id: UUID) -> List[Any]:
+    async def _load_tools(self, run_id: UUID) -> list[Any]:
         """加载计划阶段允许使用的联网工具。
 
         Args:
@@ -515,9 +518,9 @@ class PlanAgent:
     async def _execute_tool_call(
         self,
         run_id: UUID,
-        tool_map: Dict[str, Any],
-        messages: List[Any],
-        tool_call: Dict[str, Any],
+        tool_map: dict[str, Any],
+        messages: list[Any],
+        tool_call: dict[str, Any],
         iteration_index: int,
         llm: Any,
     ) -> None:
@@ -565,7 +568,7 @@ class PlanAgent:
                         iteration_index=iteration_index,
                     )
                 success = True
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 - tool and summarizer providers may raise arbitrary errors.
                 result_text = f"Error: {exc}"
                 logger.warning(
                     "interactive research plan agent tool call failed",
@@ -600,7 +603,7 @@ class PlanAgent:
         )
 
     async def _append_tool_start(
-        self, run_id: UUID, tool_name: str, tool_args: Dict[str, Any], tool_call_id: str
+        self, run_id: UUID, tool_name: str, tool_args: dict[str, Any], tool_call_id: str
     ) -> str:
         """记录计划阶段工具开始调用消息并推送。
 
@@ -621,7 +624,7 @@ class PlanAgent:
         self,
         run_id: UUID,
         tool_name: str,
-        tool_args: Dict[str, Any],
+        tool_args: dict[str, Any],
         tool_call_id: str,
         start_message_id: str,
         success: bool,
@@ -681,7 +684,7 @@ class PlanAgent:
             api_key_alias=api_key_alias,
         )
 
-    async def _notify_change(self, payload: Optional[Dict[str, Any]]) -> None:
+    async def _notify_change(self, payload: dict[str, Any] | None) -> None:
         """推送已持久化计划卡的实时通知。
 
         Args:

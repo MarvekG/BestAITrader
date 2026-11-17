@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
 
-from app.ai.stock_picker.interactive_research.models import InteractiveResearchMessage, InteractiveResearchRun
+from app.ai.stock_picker.interactive_research.models import (
+    InteractiveResearchMessage,
+    InteractiveResearchRun,
+)
 from app.ai.stock_picker.interactive_research.persistence import (
     append_user_message_record,
     approve_plan_record,
@@ -16,15 +19,17 @@ from app.ai.stock_picker.interactive_research.persistence import (
     list_run_records,
 )
 from app.ai.stock_picker.interactive_research.plan_agent import PlanAgent
-from app.ai.stock_picker.interactive_research.serializers import serialize_message, serialize_run_summary
-from app.ai.stock_picker.interactive_research.tool_registry import ToolLoaderFactory
 from app.ai.stock_picker.interactive_research.research_agent import (
     InteractiveResearchAgent,
     LLMFactory,
 )
+from app.ai.stock_picker.interactive_research.serializers import (
+    serialize_message,
+    serialize_run_summary,
+)
+from app.ai.stock_picker.interactive_research.tool_registry import ToolLoaderFactory
 from app.core.i18n import i18n_service
 from app.core.logger import get_logger
-
 
 logger = get_logger(__name__)
 
@@ -47,9 +52,9 @@ class InteractiveResearchService:
 
     def __init__(
         self,
-        tool_loader_factory: Optional[ToolLoaderFactory] = None,
-        llm_factory: Optional[LLMFactory] = None,
-        summary_llm_factory: Optional[LLMFactory] = None,
+        tool_loader_factory: ToolLoaderFactory | None = None,
+        llm_factory: LLMFactory | None = None,
+        summary_llm_factory: LLMFactory | None = None,
     ) -> None:
         """初始化交互式研究服务。
 
@@ -75,7 +80,7 @@ class InteractiveResearchService:
     async def create_run(
         self,
         user_id: int,
-        request_data: Dict[str, Any],
+        request_data: dict[str, Any],
         background_tasks: Any,
     ) -> InteractiveResearchRun:
         """创建聊天式研究 run，并异步生成首条计划消息。
@@ -116,7 +121,7 @@ class InteractiveResearchService:
             raise LookupError(_t("errors.run_not_found"))
         return created_run
 
-    async def list_runs(self, user_id: int) -> List[InteractiveResearchRun]:
+    async def list_runs(self, user_id: int) -> list[InteractiveResearchRun]:
         """查询当前用户的研究 run 列表。
 
         Args:
@@ -127,7 +132,7 @@ class InteractiveResearchService:
         """
         return await list_run_records(user_id)
 
-    async def get_run(self, run_id: UUID, user_id: int) -> Optional[InteractiveResearchRun]:
+    async def get_run(self, run_id: UUID, user_id: int) -> InteractiveResearchRun | None:
         """查询当前用户拥有的单个研究 run。
 
         Args:
@@ -157,7 +162,7 @@ class InteractiveResearchService:
         run_id: UUID,
         user_id: int,
         content: str,
-        payload: Optional[Dict[str, Any]] = None,
+        payload: dict[str, Any] | None = None,
         *,
         background_tasks: Any,
     ) -> InteractiveResearchMessage:
@@ -225,8 +230,8 @@ class InteractiveResearchService:
         action: str,
         *,
         background_tasks: Any,
-        content: Optional[str] = None,
-        payload: Optional[Dict[str, Any]] = None,
+        content: str | None = None,
+        payload: dict[str, Any] | None = None,
     ) -> InteractiveResearchRun:
         """执行 run 级动作。
 
@@ -288,7 +293,7 @@ class InteractiveResearchService:
         self,
         run_id: UUID,
         user_id: int,
-        reason: Optional[str] = None,
+        reason: str | None = None,
     ) -> InteractiveResearchRun:
         """取消当前用户的研究 run。
 
@@ -313,7 +318,7 @@ class InteractiveResearchService:
         user_id: int,
         *,
         visible_only: bool = True,
-    ) -> List[InteractiveResearchMessage]:
+    ) -> list[InteractiveResearchMessage]:
         """查询 run 的聊天消息流。
 
         Args:
@@ -326,7 +331,7 @@ class InteractiveResearchService:
         """
         return await list_message_records(run_id, user_id, visible_only=visible_only)
 
-    def serialize_run_summary(self, run: InteractiveResearchRun) -> Dict[str, Any]:
+    def serialize_run_summary(self, run: InteractiveResearchRun) -> dict[str, Any]:
         """序列化 run 摘要。
 
         Args:
@@ -337,7 +342,7 @@ class InteractiveResearchService:
         """
         return serialize_run_summary(run)
 
-    def serialize_message(self, message: InteractiveResearchMessage) -> Dict[str, Any]:
+    def serialize_message(self, message: InteractiveResearchMessage) -> dict[str, Any]:
         """序列化消息。
 
         Args:
@@ -348,7 +353,7 @@ class InteractiveResearchService:
         """
         return serialize_message(message)
 
-    async def _push_realtime_update(self, payload: Dict[str, Any]) -> None:
+    async def _push_realtime_update(self, payload: dict[str, Any]) -> None:
         """通过 WebSocket 推送交互式研究更新。
 
         Args:
@@ -415,7 +420,7 @@ class InteractiveResearchService:
             )
             await self._research_agent.execute(run_id, approved_plan)
             logger.info("interactive research workflow background finished", extra={"run_id": str(run_id)})
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - background task boundary must mark the whole run failed.
             import traceback
 
             logger.error(
@@ -428,7 +433,7 @@ class InteractiveResearchService:
         self,
         run_id: UUID,
         user_input: str,
-        history_input: Optional[str] = None,
+        history_input: str | None = None,
         initial: bool = False,
     ) -> None:
         """后台执行计划 Agent，生成或修订计划卡。
@@ -459,7 +464,7 @@ class InteractiveResearchService:
                 "interactive research plan agent background finished",
                 extra={"run_id": str(run_id), "initial": initial},
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - background task boundary must mark the whole run failed.
             import traceback
 
             logger.error(
