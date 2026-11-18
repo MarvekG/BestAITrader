@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, SecretStr
 from pydantic_settings import BaseSettings
 
 
@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     WEBFETCH_DEFAULT_WAIT_AFTER_MS: int = Field(default=5_000, ge=0)
     WEBFETCH_PATCHRIGHT_HEADLESS: bool = True
     WEBFETCH_CAMOUFOX_HEADLESS: bool = True
+    CLOAKBROWSER_LICENSE_KEY: SecretStr = Field(min_length=1)
 
     model_config = ConfigDict(case_sensitive=True)
 

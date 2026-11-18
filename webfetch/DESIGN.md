@@ -267,6 +267,8 @@ webfetch:
   image: ghcr.io/marvekg/bat.webfetch:latest
   container_name: bat.webfetch
   restart: unless-stopped
+  env_file:
+    - ./webfetch/.env
   environment:
     TZ: Asia/Shanghai
     WEBFETCH_MAX_PAGES: 4
@@ -296,13 +298,15 @@ volumes:
 
 `run.py` 统一封装 Uvicorn 启动参数：固定监听 `0.0.0.0:8010`；开发 Compose 通过 `WEBFETCH_RELOAD=true` 开启 `/app` 热重载，生产 Compose 默认关闭热重载。
 
+`webfetch/.env` 必须提供运行时 `CLOAKBROWSER_LICENSE_KEY`，启动配置会校验该值非空。镜像构建还必须提供另一把不同的 CloakBrowser key：GitHub Actions 从名为 `CLOAKBROWSER_LICENSE_KEY` 的 Actions secret 读取构建 key，并通过 BuildKit secret mount 传给 `python -m cloakbrowser install`。构建 key 只在该 `RUN` 步骤内可读；Dockerfile 不使用 `ARG`/`ENV` 保存它，并会在步骤结束前删除 CloakBrowser 本地授权文件。GitHub Actions 工作流不会打印 secret。
+
 `webfetch_runtime_data` 是唯一持久化卷，浏览器安装文件和运行 cache 都归到该卷：
 
 - Patchright Chromium：`/runtime/browsers/ms-playwright`
 - Camoufox 浏览器、GeoIP 和 fontconfig cache：`/runtime/cache/camoufox`
 - CloakBrowser cache：`/runtime/cloakbrowser/cache`
 
-Patchright Chromium、Camoufox 浏览器和 CloakBrowser Chromium 在镜像构建阶段下载到 `/runtime`。Docker 首次把空的 `webfetch_runtime_data` 命名卷挂载到 `/runtime` 时，会自动把镜像目录内已有内容复制进卷；后续重建容器会复用同一个卷，避免反复下载浏览器安装文件。
+Patchright Chromium、Camoufox 浏览器和 CloakBrowser Chromium 在镜像构建阶段下载到 `/runtime`。CloakBrowser 下载使用构建专用 key；运行时再通过 `webfetch/.env` 提供另一把 key。Docker 首次把空的 `webfetch_runtime_data` 命名卷挂载到 `/runtime` 时，会自动把镜像目录内已有内容复制进卷；后续重建容器会复用同一个卷，避免反复下载浏览器安装文件。
 
 如果 `webfetch_runtime_data` 已经在旧版本中创建且内容为空，Docker 不会再次从新镜像回填；需要删除该卷或手动重新创建后再启动 `webfetch` 服务。
 

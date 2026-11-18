@@ -27,9 +27,6 @@ jobs:
           - component: frontend
             context: ./frontend
             dockerfile: ./frontend/Dockerfile
-          - component: webfetch
-            context: ./webfetch
-            dockerfile: ./webfetch/Dockerfile
           - component: sandbox
             context: ./sandbox
             dockerfile: ./sandbox/Dockerfile
@@ -75,3 +72,60 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           cache-from: type=gha,scope=${{ matrix.component }}
           cache-to: type=gha,mode=max,scope=${{ matrix.component }}
+
+  build-webfetch:
+    name: Build webfetch image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Prepare image name
+        id: image
+        shell: bash
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "name=ghcr.io/${owner}/bat.webfetch" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Require CloakBrowser build license key
+        shell: bash
+        env:
+          CLOAKBROWSER_LICENSE_KEY: ${{ secrets.CLOAKBROWSER_LICENSE_KEY }}
+        run: |
+          if [[ -z "${CLOAKBROWSER_LICENSE_KEY}" ]]; then
+            echo "::error::Configure the CLOAKBROWSER_LICENSE_KEY Actions secret before building the webfetch image."
+            exit 1
+          fi
+
+      - name: Generate Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=latest
+            type=ref,event=tag
+            type=sha,prefix=sha-
+
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./webfetch
+          file: ./webfetch/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          secrets: |
+            cloakbrowser_license_key=${{ secrets.CLOAKBROWSER_LICENSE_KEY }}
+          cache-from: type=gha,scope=webfetch
+          cache-to: type=gha,mode=max,scope=webfetch

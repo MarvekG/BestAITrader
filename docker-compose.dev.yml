@@ -150,12 +150,16 @@ services:
     build:
       context: ./webfetch
       dockerfile: Dockerfile
+      secrets:
+        - cloakbrowser_license_key
     container_name: bat.webfetch
     restart: unless-stopped
     cpus: "4.0"
     mem_limit: 2g
     memswap_limit: 4g
     mem_swappiness: 0
+    env_file:
+      - ./webfetch/.env
     environment:
       TZ: Asia/Shanghai
       WEBFETCH_MAX_PAGES: 4
@@ -277,6 +281,8 @@ volumes:
 
 
 secrets:
+  cloakbrowser_license_key:
+    environment: CLOAKBROWSER_LICENSE_KEY
   litellm_config:
     name: bat.litellm.config
     file: ./litellm/config.yaml

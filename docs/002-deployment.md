@@ -28,6 +28,7 @@ git submodule update --init --recursive
 - LLM API Base URL、API Key、供应商真实模型名：要求兼容 OpenAI `chat/completions` 接口。
 - LiteLLM provider/model 写法：例如 DeepSeek 可填 `deepseek/deepseek-v4-flash`；系统默认暴露固定别名
   `gpt-4o-mini`、`openai-compatible` 和 `openai-compatible-thinking`。
+- CloakBrowser 授权密钥：需要一个 webfetch 运行密钥；镜像构建还需要另一个不同的构建密钥，详见下文。
 
 Tushare、Tavily、NewsAPI 配置不在部署阶段采集。部署完成后进入 UI 系统设置 > 数据源设置填写：
 
@@ -53,9 +54,29 @@ python3 deploy.py
 
 1. 交互式读取初始用户和 LLM 配置。
 2. 调用 OpenAI-compatible `chat/completions` 接口验证 LLM Key 和模型是否可用；验证失败会要求重新输入。
-3. 生成 `backend/.env`、`litellm/config.yaml`。
+3. 交互式隐藏读取 webfetch 运行密钥，并生成 `backend/.env`、`webfetch/.env`、`litellm/config.yaml`。
 4. 执行 `docker compose pull`、`docker compose up -d`、`docker compose ps`。
 5. 检查 backend、sandbox、webfetch 健康状态，并用生成的 LiteLLM master key 调用 `openai-compatible` 模型别名。
+
+### CloakBrowser 构建与运行密钥
+
+CloakBrowser 0.7+ 在下载和运行浏览器时都要求授权。构建与运行必须提供**两个不同的 key**，变量名都为 `CLOAKBROWSER_LICENSE_KEY`，但来源和用途分离：
+
+- **构建 key**：在 GitHub 仓库 `Settings → Secrets and variables → Actions` 添加名为 `CLOAKBROWSER_LICENSE_KEY` 的 Actions secret。发布 Release 时，专用 webfetch job 会将它作为 Docker BuildKit secret 挂载，只供 `python -m cloakbrowser install` 使用。
+- **运行 key**：`deploy.py` 会隐藏读取另一把 key，并写入只供 webfetch 服务读取的 `webfetch/.env`（文件权限 `0600`）。不要复用 GitHub Actions 的构建 key，也不要把 key 写进仓库。
+
+BuildKit secret 不通过 Docker `ARG`/`ENV` 传递，也不会写入镜像配置或镜像层；Dockerfile 只在单个 `RUN --mount=type=secret` 步骤中读取它，并在步骤结束前删除 CloakBrowser 本地授权文件。工作流不打印 secret，并在构建前检查 GitHub Actions secret 是否已配置。
+
+手动配置本地开发环境时：将运行 key 写入 `webfetch/.env`，可参考 `webfetch/.env.example`；构建时仅在当前 shell 临时提供另一把构建 key。不要将运行 key 放在项目根目录的 `.env`，以免被 Compose 误用作构建密钥。
+
+```bash
+read -r -s -p "CloakBrowser build key: " CLOAKBROWSER_LICENSE_KEY
+printf '\n'
+export CLOAKBROWSER_LICENSE_KEY
+docker compose -f docker-compose.dev.yml build webfetch
+unset CLOAKBROWSER_LICENSE_KEY
+docker compose -f docker-compose.dev.yml up -d --no-build webfetch
+```
 
 已有本地配置时，脚本会先询问是否覆盖。确认要覆盖也可以直接运行：
 
