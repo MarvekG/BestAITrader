@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     LLM_TIMEOUT_SECONDS: float = 240.0
     LLM_MAX_RETRIES: int = 3
     # Agent 会话上下文压缩；窗口按部署实际模型填写，多别名部署取最小窗口。
-    LLM_CONTEXT_WINDOW_TOKENS: int = 200000
+    LLM_CONTEXT_WINDOW_TOKENS: int = 1_000_000
     LLM_CONTEXT_COMPACTION_TRIGGER_RATIO: float = 0.75
     LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS: int = 16384
     DEBATE_AGENT_PARALLEL_ENABLED: bool = True
