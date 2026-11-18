@@ -19,7 +19,9 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debia
     && mkdir -p /runtime/browsers/ms-playwright /runtime/cache /runtime/cloakbrowser/cache /runtime/logs \
     && uv pip install --system -i https://mirrors.aliyun.com/pypi/simple/ -r requirements.txt \
     && python -m playwright install-deps chromium \
-    && chown -R webfetch:webfetch /usr/local/lib/python3.12/site-packages/camoufox \
+    && chown -R webfetch:webfetch \
+        /usr/local/lib/python3.12/site-packages/camoufox \
+        /usr/local/lib/python3.12/site-packages/fpgen \
     && chown -R webfetch:webfetch /app /runtime /home/webfetch \
     && rm -rf /var/lib/apt/lists/*
 
