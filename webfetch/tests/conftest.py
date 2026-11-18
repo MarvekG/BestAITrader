@@ -1,6 +1,8 @@
+import os
 from pathlib import Path
 import sys
 
+os.environ.setdefault("CLOAKBROWSER_LICENSE_KEY", "test-runtime-license-key")
 
 WEBFETCH_ROOT = Path(__file__).resolve().parents[1]
 WEBFETCH_ROOT_TEXT = str(WEBFETCH_ROOT)

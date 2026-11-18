@@ -147,6 +147,8 @@ services:
     mem_limit: 2g
     memswap_limit: 4g
     mem_swappiness: 0
+    env_file:
+      - ./webfetch/.env
     environment:
       TZ: Asia/Shanghai
       WEBFETCH_MAX_PAGES: 4
