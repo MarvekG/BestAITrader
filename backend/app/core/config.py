@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     FIRST_SUPERUSER_PASSWORD: str = ""
 
     # Database Config
-    DATABASE_URL: str = "postgresql://tradeuser:tradepassword@postgres:5432/trading"
+    DATABASE_URL: str = "postgresql+psycopg2://tradeuser:tradepassword@postgres:5432/trading"
     ASYNC_DATABASE_URL: str = "postgresql+asyncpg://tradeuser:tradepassword@postgres:5432/trading"
 
     # Redis Config
