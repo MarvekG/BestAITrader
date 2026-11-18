@@ -1,11 +1,9 @@
 from datetime import date
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
-from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.messages.tool import invalid_tool_call
-from app.ai.agentic.tools import get_all_tools
 from app.ai.agentic.memory_tools import build_memory_tools
-from app.ai.llm_providers.litellm import LiteLLMProvider
+from app.ai.agentic.tools import get_all_tools
 from app.ai.llm_engine.agents import base as base_agent_module
 from app.ai.llm_engine.agents.base import BaseAgent
 from app.ai.llm_engine.prompts import templates
@@ -20,6 +18,9 @@ from app.ai.llm_engine.roles import (
     AGENT_NAME_SENTIMENT_ANALYST,
     AGENT_NAME_TECHNICAL_ANALYST,
 )
+from app.ai.llm_providers.litellm import LiteLLMProvider
+from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages.tool import invalid_tool_call
 
 
 class _FakeLLMProvider(LiteLLMProvider):
@@ -961,8 +962,8 @@ def test_common_system_prompt_describes_whole_document_memory_protocol():
 @pytest.mark.asyncio
 async def test_agentic_tools_new_entities():
     """测试统一市场查询工具可覆盖期货和宏观数据"""
-    from app.ai.agentic.tools import query_market_data
     from app.ai.agentic.tooling.stock_tools import StockTools
+    from app.ai.agentic.tools import query_market_data
 
     mock_data = [{"symbol": "AU2406", "close": 550.0}]
     with patch.object(StockTools, "get_generic_db_data", new=AsyncMock(return_value=mock_data)):
@@ -995,8 +996,8 @@ async def test_agentic_tools_new_entities():
 @pytest.mark.asyncio
 async def test_agentic_tools_analysis_suite():
     """测试统一股票查询工具可覆盖深度分析类数据"""
-    from app.ai.agentic.tools import query_stock_data
     from app.ai.agentic.tooling.stock_tools import StockTools
+    from app.ai.agentic.tools import query_stock_data
 
     mock_insider = [{"stock_code": "600519", "direction": "buy"}]
     mock_pledge = [{"stock_code": "600519", "pledge_ratio": 12.5}]
@@ -1135,8 +1136,8 @@ async def test_get_stock_basic_info_returns_share_fields(async_db_session):
 
 @pytest.mark.asyncio
 async def test_query_stock_data_passes_columns_to_generic_db_data():
-    from app.ai.agentic.tools import query_stock_data
     from app.ai.agentic.tooling.stock_tools import StockTools
+    from app.ai.agentic.tools import query_stock_data
 
     mock_kline = [{"date": "2024-01-02", "close": 10.5}]
 
@@ -1205,7 +1206,7 @@ async def test_query_stock_data_returns_structured_column_error_without_tracebac
 
 @pytest.mark.asyncio
 async def test_query_stock_data_jsonb_report_rejects_nested_metric_columns():
-    from app.ai.agentic.tools import query_stock_data, SUPPORTED_STOCK_QUERY_TYPES
+    from app.ai.agentic.tools import SUPPORTED_STOCK_QUERY_TYPES, query_stock_data
 
     assert "financial" not in SUPPORTED_STOCK_QUERY_TYPES
     assert "income_statement" not in SUPPORTED_STOCK_QUERY_TYPES
@@ -1228,8 +1229,8 @@ async def test_query_stock_data_jsonb_report_rejects_nested_metric_columns():
 
 @pytest.mark.asyncio
 async def test_query_market_data_passes_columns_to_generic_db_data():
-    from app.ai.agentic.tools import query_market_data
     from app.ai.agentic.tooling.stock_tools import StockTools
+    from app.ai.agentic.tools import query_market_data
 
     mock_index_data = [{"date": "2024-01-02", "close": 3210.0}]
     with patch.object(StockTools, "get_generic_db_data", new=AsyncMock(return_value=mock_index_data)) as mock_generic:
@@ -1256,8 +1257,8 @@ async def test_query_market_data_passes_columns_to_generic_db_data():
 
 @pytest.mark.asyncio
 async def test_query_market_data_passes_columns_to_custom_queries():
-    from app.ai.agentic.tools import query_market_data
     from app.ai.agentic.tooling.stock_tools import StockTools
+    from app.ai.agentic.tools import query_market_data
 
     with patch.object(StockTools, "get_generic_db_data", new=AsyncMock(side_effect=[
         [{"trade_date": "2024-01-02", "stock_code": "000001.SZ"}],
@@ -1323,7 +1324,7 @@ async def test_query_stock_data_localizes_financial_report_data_keys():
 @pytest.mark.asyncio
 async def test_agentic_tools_completion_suite():
     """验证统一查询工具覆盖技术指标、大宗交易、板块资金流、市场情绪、基金持仓"""
-    from app.ai.agentic.tools import query_stock_data, query_market_data
+    from app.ai.agentic.tools import query_market_data, query_stock_data
 
     with patch("app.ai.agentic.tooling.stock_tools.StockTools.get_generic_db_data", new_callable=AsyncMock) as mock_generic:
         mock_generic.return_value = [{"indicator": "MACD", "value": 0.5}]
@@ -1399,7 +1400,7 @@ async def test_agentic_tools_completion_suite():
 @pytest.mark.asyncio
 async def test_agentic_tools_final_push_suite():
     """验证统一查询工具覆盖融资融券、指数、舆情、解禁、回购"""
-    from app.ai.agentic.tools import query_stock_data, query_market_data
+    from app.ai.agentic.tools import query_market_data, query_stock_data
 
     with patch("app.ai.agentic.tooling.stock_tools.StockTools.get_generic_db_data", new_callable=AsyncMock) as mock_generic:
         mock_generic.return_value = [{"margin_balance": 1000000}]
@@ -1475,8 +1476,12 @@ async def test_agentic_tools_final_push_suite():
 
 @pytest.mark.asyncio
 async def test_unified_agentic_tools():
-    from app.ai.agentic.tools import query_stock_data, query_market_data, sync_market_data
     from app.ai.agentic.tooling.stock_tools import StockTools
+    from app.ai.agentic.tools import (
+        query_market_data,
+        query_stock_data,
+        sync_market_data,
+    )
 
     with patch.object(StockTools, "check_data_status", new=AsyncMock(return_value={"basic_info": "exists"})), \
          patch.object(
@@ -1566,6 +1571,103 @@ async def test_llm_engine_agent_retries_when_final_text_is_too_short():
         and "请继续补全为一份完整的 Markdown 分析报告" in getattr(message, "content", "")
         for message in retry_messages
     )
+
+
+@pytest.mark.asyncio
+async def test_base_agent_context_compaction_request_shape_and_usage(monkeypatch):
+    """主调用超窗后只发送 system 和摘要，并记录压缩 usage 标签。"""
+
+    class _FakeTool:
+        name = "query_market_data"
+
+        async def ainvoke(self, args):
+            return "M" * 100000
+
+    first_response = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "id": "tool-1",
+                "name": "query_market_data",
+                "args": {"stock_code": "000001.SZ"},
+            }
+        ],
+        usage_metadata={"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+    )
+
+    final_response = AIMessage(
+        content=(
+            "# 研究报告\n\n"
+            "## 核心判断\n"
+            "证据显示当前判断仍需要结合后续数据验证。\n\n"
+            "## 证据梳理\n"
+            "工具结果已经进入摘要，不再作为独立消息发送。\n\n"
+            "## 风险提示\n"
+            "仍需关注数据时效性和样本偏差。\n\n"
+            "## 跟踪计划\n"
+            "后续继续跟踪关键指标和公告变化。"
+        ),
+        tool_calls=[],
+        usage_metadata={"input_tokens": 20, "output_tokens": 40, "total_tokens": 60},
+    )
+
+    main_llm = MagicMock()
+    main_llm.ainvoke = AsyncMock(side_effect=[first_response, final_response])
+    main_llm.bind_tools.return_value = main_llm
+    summary_llm = MagicMock()
+    summary_llm.ainvoke = AsyncMock(
+        return_value=AIMessage(content="## 1. Goal\n- summary\n\n## 2. Notes\n- context")
+    )
+
+    class _CompactionProvider(_FakeLLMProvider):
+        def build_chat_model(self, **kwargs):
+            if kwargs.get("max_tokens") is not None:
+                return summary_llm
+            return main_llm
+
+    provider = _CompactionProvider(main_llm)
+    usage_calls = []
+
+    async def _fake_record_llm_usage(response, model, role, **kwargs):
+        usage_calls.append({"response": response, "model": model, "role": role, **kwargs})
+
+    monkeypatch.setattr(base_agent_module.settings, "LLM_CONTEXT_WINDOW_TOKENS", 50000)
+    monkeypatch.setattr(base_agent_module.settings, "LLM_CONTEXT_COMPACTION_TRIGGER_RATIO", 0.5)
+    monkeypatch.setattr(
+        base_agent_module.settings,
+        "LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS",
+        500,
+    )
+    monkeypatch.setattr(base_agent_module.settings, "DEBATE_AGENT_MIN_ITERATIONS", 1)
+
+    with patch("app.ai.llm_engine.agents.base.get_llm_provider", return_value=provider), \
+         patch("app.ai.llm_engine.agents.base.get_all_tools", return_value=[_FakeTool()]), \
+         patch("app.ai.llm_engine.agents.base.build_memory_tools", return_value=[]), \
+         patch("app.ai.llm_engine.agents.base.get_skills_loader_tools", return_value=[]), \
+         patch("app.ai.llm_engine.agents.base.record_llm_usage", new=_fake_record_llm_usage):
+        agent = _DummyLLMEngineAgent(role_name="Dummy Analyst")
+        result = await agent.run({"stock_code": "000001.SZ"})
+
+    assert result == final_response.content
+    assert main_llm.ainvoke.call_count == 2
+    compacted_messages = main_llm.ainvoke.await_args_list[1].args[0]
+    assert type(compacted_messages[0]).__name__ == "SystemMessage"
+    assert compacted_messages[1].content.startswith("## 1.")
+    assert any(
+        getattr(message, "content", "") == "M" * 100000
+        for message in summary_llm.ainvoke.await_args_list[0].args[0]
+    )
+
+    compaction_usage = [
+        call for call in usage_calls if call.get("call_kind") == "context_compaction"
+    ]
+    assert len(compaction_usage) == 1
+    assert compaction_usage[0]["model"] == agent.model_name
+    assert compaction_usage[0]["role"] == "Dummy Analyst"
+    assert compaction_usage[0]["workflow"] == "debate_analysis"
+    assert compaction_usage[0]["stage"] == "Dummy Analyst"
+    assert compaction_usage[0]["cache_lane"] == "research"
+    assert compaction_usage[0]["api_key_alias"] == "research_llm_api_key"
 
 
 if __name__ == "__main__":

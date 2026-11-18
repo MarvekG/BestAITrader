@@ -1,7 +1,7 @@
 from pathlib import Path
-from typing import List, Literal
+from typing import Literal
 
-from pydantic import ConfigDict, field_validator
+from pydantic import ConfigDict, field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2].absolute()
@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     LLM_THINKING_MODEL: str = "openai-compatible-thinking"
     LLM_TIMEOUT_SECONDS: float = 240.0
     LLM_MAX_RETRIES: int = 3
+    # Agent 会话上下文压缩；窗口按部署实际模型填写，多别名部署取最小窗口。
+    LLM_CONTEXT_WINDOW_TOKENS: int = 1_000_000
+    LLM_CONTEXT_COMPACTION_TRIGGER_RATIO: float = 0.75
+    LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS: int = 16384
     DEBATE_AGENT_PARALLEL_ENABLED: bool = True
     DEBATE_AGENT_MIN_ITERATIONS: int = 5
     ENABLE_AUTO_TRADE: bool = True
@@ -57,7 +61,7 @@ class Settings(BaseSettings):
     ENABLE_RUNTIME_EXTENSIONS: bool = True
     ENABLE_OPENAPI_DOCS: bool = True
     INTERACTIVE_RESEARCH_PLAN_MAX_ITERATIONS: int = 5
-    BACKEND_CORS_ORIGINS: List[str] = []
+    BACKEND_CORS_ORIGINS: list[str] = []
 
     @field_validator("SECRET_KEY")
     @classmethod
@@ -99,11 +103,41 @@ class Settings(BaseSettings):
             raise ValueError("MARKET_WATCH_EVENT_RETENTION_DAYS must be between 1 and 365")
         return value
 
+    @model_validator(mode="after")
+    def _validate_context_compaction_budget(self) -> "Settings":
+        """校验上下文压缩窗口、触发比例和摘要输出上限。
+
+        Returns:
+            校验通过的配置实例。
+
+        Raises:
+            ValueError: 窗口、比例或摘要输出上限关系非法。
+        """
+        if self.LLM_CONTEXT_WINDOW_TOKENS <= 0:
+            raise ValueError("LLM_CONTEXT_WINDOW_TOKENS must be greater than 0")
+        if not 0 < self.LLM_CONTEXT_COMPACTION_TRIGGER_RATIO < 1:
+            raise ValueError(
+                "LLM_CONTEXT_COMPACTION_TRIGGER_RATIO must be greater than 0 and less than 1"
+            )
+        if self.LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS <= 0:
+            raise ValueError(
+                "LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS must be greater than 0"
+            )
+        if (
+            self.LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS
+            >= self.LLM_CONTEXT_WINDOW_TOKENS
+        ):
+            raise ValueError(
+                "LLM_CONTEXT_COMPACTION_SUMMARY_OUTPUT_TOKENS must be less than "
+                "LLM_CONTEXT_WINDOW_TOKENS"
+            )
+        return self
+
     MARKET_WATCH_RECENT_DEBATE_LAUNCH_LOOKBACK_HOURS: int = 24
     MARKET_WATCH_EVENT_RETENTION_DAYS: int = 30
 
     # Core Indices Config
-    CORE_INDICES: List[str] = [
+    CORE_INDICES: list[str] = [
         "000300.SH",  # 沪深300: 核心资产, 沪深两市市值最大、流动性最好的300只。 / CSI 300: Core assets, top 300 large cap and high liquidity.
         "000016.SH",  # 上证50: 蓝筹/大盘, 仅限上交所市值最大、流动性最好的50只。 / SSE 50: Blue chips, top 50 strictly in SSE.
         "399006.SZ",  # 创业板指: 科技/创新, 深交所创业板核心股，波动大，成长性强。 / ChiNext: Tech/Innovation, high growth and volatility.
