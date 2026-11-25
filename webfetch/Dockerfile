@@ -27,12 +27,9 @@ RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debia
 
 USER webfetch
 
-RUN --mount=type=secret,id=cloakbrowser_license_key,required=true,mode=0444 \
-    CLOAKBROWSER_LICENSE_KEY="$(cat /run/secrets/cloakbrowser_license_key)" \
-    python -m cloakbrowser install \
+RUN python -m cloakbrowser install \
     && python -m patchright install chromium \
-    && python -m camoufox fetch \
-    && rm -f /home/webfetch/.cloakbrowser/license.key
+    && python -m camoufox fetch
 
 COPY --chown=webfetch:webfetch run.py .
 COPY --chown=webfetch:webfetch config ./config

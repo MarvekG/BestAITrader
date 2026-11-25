@@ -97,16 +97,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Require CloakBrowser build license key
-        shell: bash
-        env:
-          CLOAKBROWSER_LICENSE_KEY: ${{ secrets.CLOAKBROWSER_LICENSE_KEY }}
-        run: |
-          if [[ -z "${CLOAKBROWSER_LICENSE_KEY}" ]]; then
-            echo "::error::Configure the CLOAKBROWSER_LICENSE_KEY Actions secret before building the webfetch image."
-            exit 1
-          fi
-
       - name: Generate Docker metadata
         id: meta
         uses: docker/metadata-action@v6
@@ -125,7 +115,5 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          secrets: |
-            cloakbrowser_license_key=${{ secrets.CLOAKBROWSER_LICENSE_KEY }}
           cache-from: type=gha,scope=webfetch
           cache-to: type=gha,mode=max,scope=webfetch
