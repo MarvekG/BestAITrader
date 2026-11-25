@@ -1,4 +1,5 @@
 import { apiClient } from './client';
+import type { Session } from './session';
 
 export interface DebateThread {
   id: string; // Map from message_id in backend
@@ -32,16 +33,27 @@ export interface PMDecisionRecord {
 
 export type Decision = PMDecisionRecord;
 
+export interface DebateRunRequest {
+  session_id?: string;
+  stock_code: string;
+  simplified?: boolean;
+  trading_frequency: string;
+  trading_strategy: string;
+  sync_before_analysis?: boolean;
+}
+
+export interface DebateRunResponse {
+  task_id: string;
+  session_id: string;
+  status: string;
+  message: string;
+  new_task: boolean;
+  session?: Session;
+}
+
 export const debateApi = {
-  run: (data: {
-    session_id: string;
-    stock_code: string;
-    simplified?: boolean;
-    trading_frequency: string;
-    trading_strategy: string;
-    sync_before_analysis?: boolean;
-  }) =>
-    apiClient.post('/debate/run', data, { timeout: 1800000 }),
+  run: (data: DebateRunRequest) =>
+    apiClient.post<DebateRunResponse>('/debate/run', data, { timeout: 1800000 }),
 
   getHistory: (sessionId: string) =>
     apiClient.get<DebateThread[]>(`/debate/threads/${sessionId}`),
