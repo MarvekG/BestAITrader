@@ -150,8 +150,6 @@ services:
     build:
       context: ./webfetch
       dockerfile: Dockerfile
-      secrets:
-        - cloakbrowser_license_key
     container_name: bat.webfetch
     restart: unless-stopped
     cpus: "4.0"
@@ -166,6 +164,7 @@ services:
       WEBFETCH_ENGINE_ACQUIRE_TIMEOUT_MS: 30000
       WEBFETCH_RELOAD: "true"
       WEBFETCH_RUNTIME_DIR: /runtime
+      CLOAKBROWSER_LICENSE_KEY: ${CLOAKBROWSER_LICENSE_KEY:-}
       CLOAKBROWSER_CACHE_DIR: /runtime/cloakbrowser/cache
       PLAYWRIGHT_BROWSERS_PATH: /runtime/browsers/ms-playwright
       XDG_CACHE_HOME: /runtime/cache
@@ -281,8 +280,6 @@ volumes:
 
 
 secrets:
-  cloakbrowser_license_key:
-    environment: CLOAKBROWSER_LICENSE_KEY
   litellm_config:
     name: bat.litellm.config
     file: ./litellm/config.yaml

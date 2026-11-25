@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     WEBFETCH_DEFAULT_WAIT_AFTER_MS: int = Field(default=5_000, ge=0)
     WEBFETCH_PATCHRIGHT_HEADLESS: bool = True
     WEBFETCH_CAMOUFOX_HEADLESS: bool = True
-    CLOAKBROWSER_LICENSE_KEY: SecretStr = Field(min_length=1)
+    CLOAKBROWSER_LICENSE_KEY: SecretStr | None = None
 
     model_config = ConfigDict(case_sensitive=True)
 

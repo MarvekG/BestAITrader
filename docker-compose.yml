@@ -155,6 +155,7 @@ services:
       WEBFETCH_ENGINE_ACQUIRE_TIMEOUT_MS: 30000
       WEBFETCH_RELOAD: "false"
       WEBFETCH_RUNTIME_DIR: /runtime
+      CLOAKBROWSER_LICENSE_KEY: ${CLOAKBROWSER_LICENSE_KEY:-}
       CLOAKBROWSER_CACHE_DIR: /runtime/cloakbrowser/cache
       PLAYWRIGHT_BROWSERS_PATH: /runtime/browsers/ms-playwright
       XDG_CACHE_HOME: /runtime/cache
