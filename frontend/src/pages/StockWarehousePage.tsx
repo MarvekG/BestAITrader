@@ -32,6 +32,7 @@ import {
 import dayjs, { Dayjs } from 'dayjs';
 import { warehouseApi, StockInfo } from '../api/warehouse';
 import { marketApi } from '../api/market';
+import { sessionApi } from '../api/session';
 import { useSessionStore } from '../store/useSessionStore';
 import { debateApi } from '../api/debate';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -103,7 +104,7 @@ export const StockWarehousePage: React.FC = () => {
 
   const { modal } = AntdApp.useApp();
   const message = useFeedback();
-  const { createSession, setActiveSession } = useSessionStore();
+  const { fetchSessions, setActiveSession } = useSessionStore();
   const navigate = useNavigate();
   const activeTab = searchParams.get('tab') || 'warehouse';
 
@@ -435,7 +436,7 @@ export const StockWarehousePage: React.FC = () => {
         // 批量模式
         const targets = filteredStocks.filter(s => selectedRowKeys.includes(s.stock_code));
         let successCount = 0;
-        let failCount = 0;
+        const failures: Array<{ stockName: string; reason: string }> = [];
 
         message.loading({ content: t('warehouse.batch_process_progress', { current: 0, total: targets.length }), key: 'batch_process' });
 
@@ -443,14 +444,8 @@ export const StockWarehousePage: React.FC = () => {
           const stock = targets[i];
           message.loading({ content: t('warehouse.batch_process_progress_detail', { current: i + 1, total: targets.length, stock_name: stock.stock_name }), key: 'batch_process' });
           try {
-            const session = await createSession(
-              stock.stock_code,
-              stock.stock_name,
-              tradingFrequency,
-              tradingStrategy
-            );
+            // 由后端在并发校验通过后创建会话，避免被拦截时留下 active 空会话。
             await debateApi.run({
-              session_id: session.session_id,
               stock_code: stock.stock_code,
               simplified: false,
               trading_frequency: tradingFrequency,
@@ -459,9 +454,33 @@ export const StockWarehousePage: React.FC = () => {
             });
             successCount++;
           } catch (error) {
-            failCount++;
+            const reason = formatErrorMessage(getApiErrorDetail(error)) || t('common.error');
+            failures.push({ stockName: stock.stock_name, reason });
             console.error(`Failed to batch process stock ${stock.stock_code}:`, error);
           }
+        }
+
+        const failCount = failures.length;
+        void fetchSessions().catch(() => undefined);
+        setSelectedRowKeys([]);
+        fetchStocks();
+
+        if (failCount > 0) {
+          const details = failures
+            .map(({ stockName, reason }) => t('warehouse.batch_process_failure_item', {
+              stock_name: stockName,
+              reason,
+            }))
+            .join(t('warehouse.batch_process_failure_separator'));
+          message.warning({
+            content: t('warehouse.batch_process_partial_failure', {
+              success: successCount,
+              fail: failCount,
+              details,
+            }),
+            key: 'batch_process',
+          });
+          return;
         }
 
         message.success({
@@ -471,27 +490,20 @@ export const StockWarehousePage: React.FC = () => {
           }),
           key: 'batch_process'
         });
-        setSelectedRowKeys([]);
-        fetchStocks();
       } else {
         // 单股模式
         if (!selectedStockForAnalysis) return;
         message.loading({ content: t('warehouse.starting_ai_analysis'), key: 'ai_analysis' });
-        const session = await createSession(
-          selectedStockForAnalysis.stock_code,
-          selectedStockForAnalysis.stock_name,
-          tradingFrequency,
-          tradingStrategy
-        );
-        await debateApi.run({
-          session_id: session.session_id,
+        const result = await debateApi.run({
           stock_code: selectedStockForAnalysis.stock_code,
           simplified: false,
           trading_frequency: tradingFrequency,
           trading_strategy: tradingStrategy,
           sync_before_analysis: syncBeforeAnalysis,
         });
+        const session = result.session ?? await sessionApi.get(result.session_id);
         setActiveSession(session);
+        void fetchSessions();
         message.success({ content: t('common.success'), key: 'ai_analysis' });
         navigate(`/dashboard?session_id=${encodeURIComponent(session.session_id)}`);
       }

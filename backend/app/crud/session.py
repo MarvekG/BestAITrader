@@ -192,8 +192,23 @@ class CRUDSession(CRUDBase[Session, SessionCreate, SessionUpdate]):
             await self._populate_metadata(db, [session])
             return session
 
-    async def delete_owned(self, *, session_id: UUID, user_id: int) -> str | None:
-        """异步删除用户拥有的非 active 会话，返回错误 key 或 None。"""
+    async def delete_owned(
+        self,
+        *,
+        session_id: UUID,
+        user_id: int,
+        allow_active: bool = False,
+    ) -> str | None:
+        """异步删除用户拥有的会话，返回错误 key 或 None。
+
+        Args:
+            session_id: 会话 ID。
+            user_id: 会话所属用户 ID。
+            allow_active: 是否允许删除 active 会话；仅用于清理启动失败的空会话。
+
+        Returns:
+            删除失败时返回错误 key，成功时返回 None。
+        """
         async with database_module.AsyncSessionLocal() as db:
             result = await db.execute(
                 select(Session).where(
@@ -204,7 +219,7 @@ class CRUDSession(CRUDBase[Session, SessionCreate, SessionUpdate]):
             session = result.scalar_one_or_none()
             if session is None:
                 return "not_found"
-            if session.status == "active":
+            if session.status == "active" and not allow_active:
                 return "active"
             await db.execute(update(Position).where(Position.session_id == session_id).values(session_id=None))
             await db.execute(update(Order).where(Order.session_id == session_id).values(session_id=None))

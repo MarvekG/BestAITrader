@@ -7,7 +7,6 @@ from uuid import UUID
 
 from app.core.database import get_async_db
 from app.core.i18n import i18n_service
-from app.core.runtime_settings import get_runtime_settings
 from app.crud.session import crud_session
 from app.ai.llm_engine.debate_concurrency import (
     DebateConcurrencyLimitReached,
@@ -24,9 +23,47 @@ from app.core.logger import logger
 from app.core.security import get_current_user
 from app.models.user import User
 from app.ai.llm_engine.roles import AGENT_ROLE_PORTFOLIO_MANAGER
+from app.schemas.session import SessionCreate, SessionResponse
 from app.tasks.task_manager import task_manager
 
 router = APIRouter()
+
+
+async def _ensure_debate_launch_allowed(stock_code: str) -> None:
+    """校验股票可启动辩论，并把并发限制映射为 HTTP 响应。
+
+    Args:
+        stock_code: 标准股票代码。
+
+    Raises:
+        HTTPException: 股票已有运行中任务或全局并发达到上限。
+    """
+    try:
+        await ensure_debate_launch_available(stock_code)
+    except DebateStockTaskAlreadyRunning as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except DebateConcurrencyLimitReached as exc:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
+
+
+async def _discard_created_session(*, session_id: UUID, user_id: int) -> None:
+    """清理启动失败后遗留的空会话，避免列表出现无法执行的 active 会话。
+
+    Args:
+        session_id: 刚创建的会话 ID。
+        user_id: 会话所属用户 ID。
+    """
+    try:
+        await crud_session.delete_owned(
+            session_id=session_id,
+            user_id=user_id,
+            allow_active=True,
+        )
+    except Exception as exc:
+        logger.exception(
+            "Failed to discard session created for rejected debate launch",
+            extra={"session_id": str(session_id), "user_id": user_id, "error": str(exc)},
+        )
 
 
 @router.post("/run", response_model=Dict[str, Any], status_code=status.HTTP_201_CREATED)
@@ -37,11 +74,13 @@ async def run_debate(
     current_user: User = Depends(get_current_user),
 ):
     """
-    运行辩论流程 (异步后台执行)
+    运行辩论流程 (异步后台执行)。
 
     请求参数:
-        - session_id: 会话ID
+        - session_id: 已有会话 ID；不传时会在并发校验通过后自动创建会话
         - stock_code: 股票代码
+        - trading_frequency: 交易频率
+        - trading_strategy: 交易策略
         - simplified: 是否简化模式(可选,默认False)
     """
     try:
@@ -52,8 +91,6 @@ async def run_debate(
         trading_strategy = request.get("trading_strategy")
         sync_before_analysis = bool(request.get("sync_before_analysis", True))
 
-        if not session_id_str:
-            raise HTTPException(status_code=400, detail="session_id is required")
         if not stock_code:
             raise HTTPException(status_code=400, detail="stock_code is required")
         if not trading_frequency:
@@ -61,73 +98,92 @@ async def run_debate(
         if not trading_strategy:
             raise HTTPException(status_code=400, detail="trading_strategy is required")
 
-        try:
-            session_id = UUID(session_id_str)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid session_id format")
+        created_session = False
+        session = None
 
-        # 检查 session 是否存在且状态为 active
-        session = await crud_session.get_owned(session_id=session_id, user_id=current_user.id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
+        if session_id_str:
+            try:
+                session_id = UUID(session_id_str)
+            except (AttributeError, TypeError, ValueError) as exc:
+                raise HTTPException(status_code=400, detail="Invalid session_id format") from exc
 
-        if session.status != "active":
-            raise HTTPException(
-                status_code=400,
-                detail=i18n_service.t(
-                    "tasks.ai_debate_session_not_active",
-                    session_status=session.status,
-                ),
-            )
+            # 检查 session 是否存在且状态为 active
+            session = await crud_session.get_owned(session_id=session_id, user_id=current_user.id)
+            if not session:
+                raise HTTPException(status_code=404, detail="Session not found")
 
-        # 检查该 session 是否已完成辩论 (检查 DebateMessage 中是否有 portfolio_manager 的报告)
-        existing_decision_result = await db.execute(
-            select(DebateMessage).where(
-                DebateMessage.session_id == session_id,
-                DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
-            )
-        )
-        existing_decision = existing_decision_result.scalar_one_or_none()
-
-        if existing_decision:
-            raise HTTPException(
-                status_code=400,
-                detail=i18n_service.t(
-                    "tasks.ai_debate_session_already_completed",
-                    session_id=str(session_id),
-                ),
-            )
-
-        # 如果有 debate 记录但没有 PM 决策，说明是断点续传/恢复
-        existing_debate_result = await db.execute(
-            select(DebateMessage).where(DebateMessage.session_id == session_id)
-        )
-        existing_debate_msgs = existing_debate_result.scalar_one_or_none()
-
-        if existing_debate_msgs:
-            # 记录日志但不报错
-            logger.info(f"Session {session_id} has existing debate records but no decision. Resuming debate...")
-
-        existing_session_task = await find_running_debate_task_for_session(str(session_id))
-        if existing_session_task:
-            logger.info(
-                "Debate already running for session %s, reusing task %s",
-                session_id,
-                existing_session_task.task_id,
-            )
-            return JSONResponse(
-                status_code=status.HTTP_200_OK,
-                content={
-                    "task_id": existing_session_task.task_id,
-                    "session_id": str(session_id),
-                    "status": existing_session_task.status,
-                    "message": i18n_service.t(
-                        "tasks.ai_analysis_already_running",
-                        task_id=existing_session_task.task_id,
+            if session.status != "active":
+                raise HTTPException(
+                    status_code=400,
+                    detail=i18n_service.t(
+                        "tasks.ai_debate_session_not_active",
+                        session_status=session.status,
                     ),
-                    "new_task": False,
-                },
+                )
+
+            # 检查该 session 是否已完成辩论 (检查 DebateMessage 中是否有 portfolio_manager 的报告)
+            existing_decision_result = await db.execute(
+                select(DebateMessage).where(
+                    DebateMessage.session_id == session_id,
+                    DebateMessage.agent_role == AGENT_ROLE_PORTFOLIO_MANAGER,
+                )
             )
+            existing_decision = existing_decision_result.scalar_one_or_none()
+
+            if existing_decision:
+                raise HTTPException(
+                    status_code=400,
+                    detail=i18n_service.t(
+                        "tasks.ai_debate_session_already_completed",
+                        session_id=str(session_id),
+                    ),
+                )
+
+            # 如果有 debate 记录但没有 PM 决策，说明是断点续传/恢复
+            existing_debate_result = await db.execute(
+                select(DebateMessage).where(DebateMessage.session_id == session_id)
+            )
+            existing_debate_msgs = existing_debate_result.scalar_one_or_none()
+
+            if existing_debate_msgs:
+                # 记录日志但不报错
+                logger.info(f"Session {session_id} has existing debate records but no decision. Resuming debate...")
+
+            existing_session_task = await find_running_debate_task_for_session(str(session_id))
+            if existing_session_task:
+                logger.info(
+                    "Debate already running for session %s, reusing task %s",
+                    session_id,
+                    existing_session_task.task_id,
+                )
+                return JSONResponse(
+                    status_code=status.HTTP_200_OK,
+                    content={
+                        "task_id": existing_session_task.task_id,
+                        "session_id": str(session_id),
+                        "status": existing_session_task.status,
+                        "message": i18n_service.t(
+                            "tasks.ai_analysis_already_running",
+                            task_id=existing_session_task.task_id,
+                        ),
+                        "new_task": False,
+                    },
+                )
+
+            await _ensure_debate_launch_allowed(stock_code)
+        else:
+            # 先校验并发和股票互斥，再创建会话，避免被拦截后留下无法执行的 active 空会话。
+            await _ensure_debate_launch_allowed(stock_code)
+            session = await crud_session.create(
+                obj_in=SessionCreate(
+                    user_id=current_user.id,
+                    stock_code=stock_code,
+                    trading_frequency=trading_frequency,
+                    trading_strategy=trading_strategy,
+                )
+            )
+            session_id = session.session_id
+            created_session = True
 
         task_parameters = {
             "session_id": str(session_id),
@@ -138,8 +194,6 @@ async def run_debate(
         task_parameters["sync_before_analysis"] = sync_before_analysis
 
         try:
-            await ensure_debate_launch_available(stock_code)
-
             # 提交任务到任务管理器
             task_info = await task_manager.submit_task(
                 task_name=format_ai_analysis_task_name(stock_code),
@@ -160,10 +214,10 @@ async def run_debate(
                 # 我们的parameters包含session_id，所以如果同一个session_id再次提交，且allow_concurrent=False，会阻止。
                 # 这正是我们想要的: 同一个session同一时间只能跑一个辩论。
             )
-        except DebateStockTaskAlreadyRunning as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        except DebateConcurrencyLimitReached as exc:
-            raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
+        except Exception:
+            if created_session:
+                await _discard_created_session(session_id=session_id, user_id=current_user.id)
+            raise
 
         if not task_info.get("new_task", True):
             logger.info(
@@ -171,6 +225,8 @@ async def run_debate(
                 session_id,
                 task_info["task_id"],
             )
+            if created_session:
+                await _discard_created_session(session_id=session_id, user_id=current_user.id)
             return JSONResponse(
                 status_code=status.HTTP_200_OK,
                 content={
@@ -185,13 +241,16 @@ async def run_debate(
         # 发送辩论开始状态
         await send_debate_status(str(session_id), "started")
 
-        return {
+        response: Dict[str, Any] = {
             "task_id": task_info["task_id"],
             "session_id": str(session_id),
             "status": "started",
             "message": "AI Analysis started in background",
             "new_task": True,
         }
+        if created_session and session is not None:
+            response["session"] = SessionResponse.model_validate(session).model_dump(mode="json")
+        return response
 
     except HTTPException:
         raise
