@@ -13,6 +13,11 @@ COPY --chown=node:node package*.json ./
 RUN npm install
 
 COPY --chown=node:node . .
+
+# 通过 backend-locales 构建上下文注入后端语言包，直接覆盖前端静态语言包。
+# 仓库根目录手动构建：
+# docker build --build-context backend-locales=./backend/app/locales -f frontend/Dockerfile frontend
+COPY --from=backend-locales --chown=node:node zh.json en.json ./public/locales/
 RUN npm run build
 
 # 使用 5173 端口
