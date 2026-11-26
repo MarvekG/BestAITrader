@@ -9,20 +9,31 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import time
 from typing import Any
 from urllib.parse import urlsplit
 
+import httpx
 from pydantic import BaseModel, Field, field_validator
 
 from app.core.logger import get_logger
 from app.crud.system_setting import system_setting
 
-__all__ = ["get_proxy_url_for_url"]
+__all__ = ["get_proxy_url_for_url", "test_proxy_connection"]
 
 logger = get_logger(__name__)
 
 PROXY_SETTING_KEY = "network.proxy"
 PROXY_SETTING_DESCRIPTION = "Global outbound network proxy"
+PROXY_TEST_DEFAULT_TARGET_URL = "https://www.deepseek.com"
+PROXY_TEST_TIMEOUT_SECONDS = 15.0
+PROXY_TEST_HEADERS = {
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+}
 
 SUPPORTED_PROXY_SCHEMES = {"http", "socks5h"}
 PLAYWRIGHT_PROXY_SCHEMES = {
@@ -99,6 +110,116 @@ class ProxySettings(BaseModel):
             代理 URL 非空时返回 True。
         """
         return bool(self.url)
+
+
+class ProxyTestResult(BaseModel):
+    """代理连通性测试结果。"""
+
+    status: str
+    target_url: str
+    proxy_url: str | None = None
+    http_status: int | None = None
+    elapsed_ms: int = 0
+    final_url: str | None = None
+    error: str | None = None
+
+
+def normalize_proxy_test_target_url(value: str | None) -> str:
+    """校验并补全代理测试使用的目标网址。
+
+    Args:
+        value: 用户输入的测试网址；未带协议时默认补全为 https。
+
+    Returns:
+        规范化后的目标网址。
+
+    Raises:
+        ValueError: 网址为空、协议不支持或缺少主机名。
+    """
+    raw_url = str(value or "").strip()
+    if not raw_url:
+        raise ValueError("test url is required")
+    if "://" not in raw_url:
+        raw_url = f"https://{raw_url}"
+
+    parsed = urlsplit(raw_url)
+    if parsed.scheme.lower() not in {"http", "https"}:
+        raise ValueError("test url scheme must be http or https")
+    if not parsed.hostname:
+        raise ValueError("test url must include a hostname")
+    return raw_url
+
+
+async def test_proxy_connection(
+    proxy_url: str | None,
+    target_url: str | None = None,
+) -> ProxyTestResult:
+    """通过指定代理访问目标网址，验证代理连通性。
+
+    Args:
+        proxy_url: 待测试的代理 URL；为空时测试直连。
+        target_url: 测试目标网址；为空时使用默认测试网址。
+
+    Returns:
+        包含状态码、耗时和错误信息的测试结果。
+
+    Raises:
+        ValueError: 代理 URL 或目标网址不合法。
+    """
+    normalized_proxy = ProxySettings(url=proxy_url or "").url or None
+    normalized_target = normalize_proxy_test_target_url(
+        target_url or PROXY_TEST_DEFAULT_TARGET_URL
+    )
+
+    started_at = time.perf_counter()
+
+    def elapsed_ms() -> int:
+        return int((time.perf_counter() - started_at) * 1000)
+
+    try:
+        async with (
+            httpx.AsyncClient(
+                proxy=normalized_proxy,
+                trust_env=False,
+                timeout=PROXY_TEST_TIMEOUT_SECONDS,
+                follow_redirects=True,
+            ) as client,
+            client.stream(
+                "GET",
+                normalized_target,
+                headers=PROXY_TEST_HEADERS,
+            ) as response,
+        ):
+            http_status = response.status_code
+            final_url = str(response.url)
+    except (httpx.HTTPError, httpx.InvalidURL) as exc:
+        return ProxyTestResult(
+            status="error",
+            target_url=normalized_target,
+            proxy_url=normalized_proxy,
+            elapsed_ms=elapsed_ms(),
+            error=f"{type(exc).__name__}: {exc}"[:500],
+        )
+
+    if http_status >= 400:
+        return ProxyTestResult(
+            status="error",
+            target_url=normalized_target,
+            proxy_url=normalized_proxy,
+            http_status=http_status,
+            elapsed_ms=elapsed_ms(),
+            final_url=final_url,
+            error=f"HTTP {http_status}",
+        )
+
+    return ProxyTestResult(
+        status="success",
+        target_url=normalized_target,
+        proxy_url=normalized_proxy,
+        http_status=http_status,
+        elapsed_ms=elapsed_ms(),
+        final_url=final_url,
+    )
 
 
 _proxy_settings_cache: ProxySettings | None = None

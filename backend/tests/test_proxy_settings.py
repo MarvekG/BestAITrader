@@ -1,3 +1,6 @@
+from typing import ClassVar
+
+import httpx
 import pytest
 
 from app.core import proxy
@@ -95,3 +98,112 @@ def test_proxy_settings_api_round_trip(client, auth_headers):
         headers=auth_headers,
         json={"url": ""},
     )
+
+
+class _FakeStreamResponse:
+    def __init__(self, status_code: int, url: str):
+        self.status_code = status_code
+        self.url = httpx.URL(url)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _FakeAsyncClient:
+    instances: ClassVar[list["_FakeAsyncClient"]] = []
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.requested_url: str | None = None
+        self.requested_headers: dict[str, str] | None = None
+        type(self).instances.append(self)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    def stream(self, method, url, headers=None):
+        self.requested_url = url
+        self.requested_headers = headers
+        return _FakeStreamResponse(200, url)
+
+
+@pytest.mark.asyncio
+async def test_test_proxy_connection_uses_proxy_and_normalizes_target(monkeypatch):
+    """测试代理时使用传入的代理地址，并为裸域名补全 https。"""
+    _FakeAsyncClient.instances.clear()
+    monkeypatch.setattr(proxy.httpx, "AsyncClient", _FakeAsyncClient)
+
+    result = await proxy.test_proxy_connection("http://127.0.0.1:7890", "deepseek.com")
+
+    assert result.status == "success"
+    assert result.proxy_url == "http://127.0.0.1:7890"
+    assert result.target_url == "https://deepseek.com"
+    assert result.http_status == 200
+    assert result.final_url == "https://deepseek.com"
+    fake_client = _FakeAsyncClient.instances[0]
+    assert fake_client.kwargs["proxy"] == "http://127.0.0.1:7890"
+    assert fake_client.kwargs["trust_env"] is False
+    assert fake_client.requested_url == "https://deepseek.com"
+
+
+@pytest.mark.asyncio
+async def test_test_proxy_connection_reports_network_error(monkeypatch):
+    """代理连接失败时返回错误状态而不是抛出异常。"""
+    class _FailingAsyncClient(_FakeAsyncClient):
+        def stream(self, method, url, headers=None):
+            raise httpx.ConnectError(
+                "connection refused",
+                request=httpx.Request(method, url),
+            )
+
+    monkeypatch.setattr(proxy.httpx, "AsyncClient", _FailingAsyncClient)
+
+    result = await proxy.test_proxy_connection("http://127.0.0.1:7890", "https://example.com")
+
+    assert result.status == "error"
+    assert result.http_status is None
+    assert "ConnectError" in (result.error or "")
+
+
+def test_proxy_settings_test_api_returns_result(client, auth_headers, monkeypatch):
+    """代理测试 API 返回代理地址、目标地址和耗时。"""
+    _FakeAsyncClient.instances.clear()
+    monkeypatch.setattr(proxy.httpx, "AsyncClient", _FakeAsyncClient)
+
+    response = client.post(
+        "/api/v1/general/proxy-settings/test",
+        headers=auth_headers,
+        json={"url": "http://127.0.0.1:7890", "target_url": "deepseek.com"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["proxy_url"] == "http://127.0.0.1:7890"
+    assert payload["target_url"] == "https://deepseek.com"
+    assert payload["http_status"] == 200
+    assert payload["elapsed_ms"] >= 0
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"url": "http://127.0.0.1", "target_url": "https://example.com"},
+        {"url": "", "target_url": "ftp://example.com"},
+    ],
+)
+def test_proxy_settings_test_api_rejects_invalid_input(client, auth_headers, payload):
+    """代理测试 API 校验代理地址和目标网址。"""
+    response = client.post(
+        "/api/v1/general/proxy-settings/test",
+        headers=auth_headers,
+        json=payload,
+    )
+
+    assert response.status_code == 400
