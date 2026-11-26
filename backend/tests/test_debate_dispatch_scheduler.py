@@ -27,14 +27,13 @@ async def test_dispatch_queued_debates_uses_safe_dispatcher(monkeypatch) -> None
     """补偿调度通过安全包装触发队列调度。"""
     calls: list[bool] = []
 
-    async def _fake_dispatch() -> int:
+    async def _fake_dispatch() -> None:
         calls.append(True)
-        return 2
 
     monkeypatch.setattr(
         "app.ai.llm_engine.debate_concurrency.dispatch_pending_debate_tasks_safely",
         _fake_dispatch,
     )
 
-    assert await scheduler_module.dispatch_queued_debates() == 2
+    await scheduler_module.dispatch_queued_debates()
     assert calls == [True]
