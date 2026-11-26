@@ -323,6 +323,41 @@ PYTHON_REQUIREMENTS = [
 
 不要在插件中使用同步 HTTP 客户端，例如 `requests`、`httpx.Client`、`urllib.request`。
 
+### 8.1 全局网络代理
+
+系统设置中的「网络代理」保存后会立即生效。插件访问外部网络时必须显式读取代理
+地址并传给 HTTP 客户端，不要依赖 `HTTP_PROXY`、`HTTPS_PROXY` 等环境变量。
+
+插件公共 API 只有一个函数：
+
+```python
+from app.core.proxy import get_proxy_url_for_url
+```
+
+用法：
+
+```python
+proxy_url = get_proxy_url_for_url()          # 返回当前代理地址；未配置时返回 None
+proxy_url = get_proxy_url_for_url(target_url)  # 内部服务或本机地址自动返回 None
+
+async with httpx.AsyncClient(
+    proxy=proxy_url,
+    trust_env=False,
+    timeout=TIMEOUT,
+) as client:
+    response = await client.get(target_url)
+```
+
+说明：
+
+- 代理仅支持 `http://host:port` 和 `socks5h://host:port`，不支持用户名和密码。
+- `socks5h` 由代理端解析域名，适合需要远程 DNS 的场景。
+- 传入 `target_url` 时，数据库、Redis、LiteLLM、webfetch 等内部地址不会走代理。
+- `trust_env=False` 用于避免插件受到部署环境里的代理环境变量影响。
+- `news_plugins/external/` 目录下的插件不会被系统自动注入代理；如需代理，插件代码自行调用上述公共 API。
+- `aiohttp` 只原生支持 HTTP 代理；使用 `socks5h` 时需要额外安装 `aiohttp-socks`
+  并通过它的 connector 建立连接。
+
 如果插件需要 token，优先从运行环境变量读取，或从插件目录下未提交的本地文件读取。不要提交真实 token。
 
 示例：
@@ -347,7 +382,8 @@ def read_token() -> str:
 
 ## 9. 完整插件样例
 
-下面是一个 API 型新闻插件样例。它只依赖标准库和 `httpx`，不引用项目内部配置、日志或业务模块。
+下面是一个 API 型新闻插件样例。它只依赖标准库和 `httpx`；除公共代理 API
+`app.core.proxy.get_proxy_url_for_url` 外，不引用项目内部配置、日志或业务模块。
 
 ```python
 from __future__ import annotations
@@ -357,6 +393,8 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+
+from app.core.proxy import get_proxy_url_for_url
 
 NAME = "内部授权新闻 API"
 PLUGIN_ID = "internal_news"
@@ -415,7 +453,11 @@ async def search(
     }
 
     try:
-        async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+        async with httpx.AsyncClient(
+            proxy=get_proxy_url_for_url(API_URL),
+            trust_env=False,
+            timeout=TIMEOUT,
+        ) as client:
             response = await client.post(
                 API_URL,
                 headers={"Authorization": f"Bearer {token}"},
@@ -502,9 +544,9 @@ Agent 不会选择你的插件：
 
 1. 确认目标新闻源的授权、接口、字段和频率限制。
 2. 设计 `PLUGIN_ID`、`NEWS_TYPES` 和 `KEYWORD_EXAMPLES`。
-3. 实现插件，保持模块 import 轻量，不引用项目内部配置、日志或业务模块。
+3. 实现插件，保持模块 import 轻量；除 `app.core.proxy.get_proxy_url_for_url` 外，不引用项目内部配置、日志或业务模块。
 4. 如果需要 token，使用环境变量或插件自己的本地文件读取。
-5. 联网请求使用 `httpx.AsyncClient` 或 `aiohttp`。
+5. 联网请求使用 `httpx.AsyncClient` 或 `aiohttp`，并通过公共代理 API 显式传入代理地址。
 6. 如果需要抓取多篇详情页，使用 `asyncio.gather` 并发抓取，并用 semaphore 控制并发数。
 7. 如果需要新增第三方依赖，更新本目录的 `requirements.txt`。
 8. 用 mock 响应写测试。

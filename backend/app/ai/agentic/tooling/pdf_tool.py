@@ -11,6 +11,7 @@ from langchain.tools import tool
 from app.ai.agentic.tooling.browser_tool import _normalize_browser_url
 from app.core.config import settings
 from app.core.logger import get_logger
+from app.core.proxy import build_playwright_proxy, get_proxy_url_for_url
 from app.data.pdf_parser import PDFParserService
 
 
@@ -41,9 +42,14 @@ async def _download_pdf_with_webfetch(url: str, timeout: float) -> tuple[str, st
     header_bytes = b""
     bytes_written = 0
 
+    download_payload: dict[str, Any] = {"url": normalized_url, "timeout": timeout}
+    playwright_proxy = build_playwright_proxy(get_proxy_url_for_url(normalized_url))
+    if playwright_proxy:
+        download_payload["proxy"] = playwright_proxy
+
     try:
         async with httpx.AsyncClient(base_url=base_url, timeout=request_timeout) as client:
-            async with client.stream("POST", "/download", json={"url": normalized_url, "timeout": timeout}) as response:
+            async with client.stream("POST", "/download", json=download_payload) as response:
                 response.raise_for_status()
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as pdf_file:
                     pdf_path = pdf_file.name

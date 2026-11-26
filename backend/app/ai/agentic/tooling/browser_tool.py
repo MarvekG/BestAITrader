@@ -8,6 +8,7 @@ from langchain.tools import tool
 
 from app.core.config import settings
 from app.core.logger import get_logger
+from app.core.proxy import build_playwright_proxy, get_proxy_url_for_url
 
 logger = get_logger(__name__)
 
@@ -78,13 +79,17 @@ def _build_webfetch_payload(
     Returns:
         webfetch 服务请求体。
     """
-    return {
+    payload = {
         "url": normalized_url,
         "return_type": content_format,
         "selectors": _normalize_content_selectors(content_selectors),
         "timeout_ms": timeout_ms,
         "wait_after_ms": wait_after_ms,
     }
+    playwright_proxy = build_playwright_proxy(get_proxy_url_for_url(normalized_url))
+    if playwright_proxy:
+        payload["proxy"] = playwright_proxy
+    return payload
 
 
 def _map_webfetch_response(

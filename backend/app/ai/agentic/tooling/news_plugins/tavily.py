@@ -29,6 +29,7 @@ from app.core.config import settings
 from app.core.data_source_config_cache import get_data_source_config_list
 from app.core.data_source_settings import TAVILY_API_KEY_SETTING_KEY
 from app.core.logger import get_logger
+from app.core.proxy import get_proxy_url_for_url
 
 from app.ai.agentic.tooling.news_plugins.base import format_error
 from app.ai.agentic.tooling.news_plugins.provider_clients import ProviderRequestError, request_with_key_failover
@@ -200,7 +201,7 @@ async def search_with_api_keys(
 
     for attempt in range(max_retries):
         try:
-            async with httpx.AsyncClient(timeout=TIMEOUT) as client:
+            async with httpx.AsyncClient(proxy=get_proxy_url_for_url(), trust_env=False, timeout=TIMEOUT) as client:
                 async def request_once(api_key: str) -> httpx.Response:
                     request_payload = {**payload, "api_key": api_key}
                     return await client.post("https://api.tavily.com/search", json=request_payload)

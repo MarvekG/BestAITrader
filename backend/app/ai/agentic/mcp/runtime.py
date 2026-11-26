@@ -3,9 +3,12 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List
 
+import httpx
+
 from app.ai.agentic.mcp.models import MCPServerConfig, MCPToolPreviewRequest
 from app.ai.agentic.mcp.registry import get_enabled_mcp_server_configs, get_mcp_server_config, load_mcp_server_configs, validate_mcp_url
 from app.core.logger import get_logger
+from app.core.proxy import get_proxy_url_for_url
 
 
 logger = get_logger(__name__)
@@ -125,6 +128,37 @@ async def list_mcp_langchain_tools(name: str) -> List[Any]:
         raise MCPRuntimeError(str(exc)) from exc
 
 
+def _build_mcp_http_client_factory(server_url: str) -> Any:
+    """构建带全局代理配置的 MCP HTTP 客户端工厂。
+
+    Args:
+        server_url: MCP Server URL，用于识别内部服务并跳过代理。
+
+    Returns:
+        符合 langchain-mcp-adapters 协议的 httpx 客户端工厂。
+    """
+
+    def factory(
+        *,
+        headers: Dict[str, str] | None = None,
+        timeout: httpx.Timeout | None = None,
+        auth: httpx.Auth | None = None,
+    ) -> httpx.AsyncClient:
+        client_kwargs: Dict[str, Any] = {"trust_env": False}
+        proxy_url = get_proxy_url_for_url(server_url)
+        if proxy_url:
+            client_kwargs["proxy"] = proxy_url
+        if headers is not None:
+            client_kwargs["headers"] = headers
+        if timeout is not None:
+            client_kwargs["timeout"] = timeout
+        if auth is not None:
+            client_kwargs["auth"] = auth
+        return httpx.AsyncClient(**client_kwargs)
+
+    return factory
+
+
 def build_adapter_config(config: Any) -> Dict[str, Any]:
     """构建官方 MCP adapter 的 server 配置。
 
@@ -134,11 +168,13 @@ def build_adapter_config(config: Any) -> Dict[str, Any]:
     Returns:
         `MultiServerMCPClient` 可识别的 server 配置。
     """
-    return {
+    adapter_config: Dict[str, Any] = {
         "transport": "streamable_http",
         "url": config.url,
         **({"headers": {"Authorization": f"Bearer {config.token}"}} if getattr(config, "token", "") else {}),
     }
+    adapter_config["httpx_client_factory"] = _build_mcp_http_client_factory(config.url)
+    return adapter_config
 
 
 async def preview_mcp_tools(request: MCPToolPreviewRequest) -> Dict[str, Any]:

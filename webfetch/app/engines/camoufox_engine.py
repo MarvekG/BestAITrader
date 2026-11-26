@@ -37,6 +37,7 @@ class CamoufoxEngine:
         selectors: list[str],
         timeout_ms: int,
         wait_after_ms: int,
+        proxy: dict[str, str] | None = None,
     ) -> RenderedPage:
         """
         使用 Camoufox 渲染网页。
@@ -46,6 +47,7 @@ class CamoufoxEngine:
             selectors: CSS selector 列表。
             timeout_ms: 页面导航超时时间。
             wait_after_ms: 导航完成后的额外等待时间。
+            proxy: 可选的 Playwright 代理配置。
 
         Returns:
             浏览器渲染结果。
@@ -60,7 +62,10 @@ class CamoufoxEngine:
 
         async with self._limiter.acquire():
             try:
-                async with AsyncCamoufox(headless=self._headless) as browser:
+                async with AsyncCamoufox(
+                    headless=self._headless,
+                    proxy=proxy,
+                ) as browser:
                     context: Any | None = None
                     try:
                         context = await browser.new_context(
@@ -90,13 +95,14 @@ class CamoufoxEngine:
     async def close(self) -> None:
         """关闭 Camoufox 引擎资源。"""
 
-    async def download_pdf(self, url: str, timeout: float) -> DownloadedPdf:
+    async def download_pdf(self, url: str, timeout: float, proxy: dict[str, str] | None = None) -> DownloadedPdf:
         """
         使用 Camoufox request context 下载 PDF。
 
         Args:
             url: 已规范化的 PDF URL。
             timeout: 请求超时时间，单位秒。
+            proxy: 可选的 Playwright 代理配置。
 
         Returns:
             PDF 下载结果。
@@ -111,7 +117,10 @@ class CamoufoxEngine:
 
         async with self._limiter.acquire():
             try:
-                async with AsyncCamoufox(headless=self._headless) as browser:
+                async with AsyncCamoufox(
+                    headless=self._headless,
+                    proxy=proxy,
+                ) as browser:
                     context: Any | None = None
                     try:
                         context = await browser.new_context(

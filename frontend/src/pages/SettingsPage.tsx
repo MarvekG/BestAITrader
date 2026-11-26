@@ -27,8 +27,8 @@ import {
 } from 'antd';
 import type { RcFile, UploadFile } from 'antd/es/upload/interface';
 import type { ColumnsType } from 'antd/es/table';
-import { DataSourceConfigTestKey, runtimeSettingsApi, sourcesApi } from '../api/settings';
-import type { RuntimeSettings } from '../api/settings';
+import { DataSourceConfigTestKey, proxySettingsApi, runtimeSettingsApi, sourcesApi } from '../api/settings';
+import type { ProxySettings, RuntimeSettings } from '../api/settings';
 import { PromptStats, UsageBreakdownEntry, promptApi } from '../api/prompt';
 import { testingApi } from '../api/testing';
 import type {
@@ -155,6 +155,7 @@ const formatApiOutput = (value: unknown): string => {
 const SETTINGS_TAB_KEYS = new Set([
   'datasources',
   'runtime',
+  'network',
   'prompts',
   'news_plugins',
   'mcp',
@@ -249,6 +250,9 @@ export const SettingsPage: React.FC = () => {
   const [runtimeSettingsForm] = Form.useForm<RuntimeSettingsFormValues>();
   const [runtimeSettingsLoading, setRuntimeSettingsLoading] = useState(false);
   const [runtimeSettingsSaving, setRuntimeSettingsSaving] = useState(false);
+  const [proxySettingsForm] = Form.useForm<ProxySettings>();
+  const [proxySettingsLoading, setProxySettingsLoading] = useState(false);
+  const [proxySettingsSaving, setProxySettingsSaving] = useState(false);
   const [tushareLoading, setTushareLoading] = useState(false);
   const [dataSourceTestLoading, setDataSourceTestLoading] = useState<Partial<Record<DataSourceConfigTestKey, boolean>>>({});
   const [dataSourceTestOutputs, setDataSourceTestOutputs] = useState<Partial<Record<DataSourceConfigTestKey, string>>>({});
@@ -1445,6 +1449,18 @@ export const SettingsPage: React.FC = () => {
     }
   }, [message, runtimeSettingsForm, t]);
 
+  const loadProxySettings = useCallback(async () => {
+    setProxySettingsLoading(true);
+    try {
+      const settings = await proxySettingsApi.getProxySettings();
+      proxySettingsForm.setFieldsValue(settings);
+    } catch (error) {
+      message.error(getApiErrorMessage(error, t('settings.proxy_load_failed')));
+    } finally {
+      setProxySettingsLoading(false);
+    }
+  }, [message, proxySettingsForm, t]);
+
   const loadPrompts = useCallback(async () => {
     try {
       const data = await promptApi.getAllPrompts();
@@ -1457,6 +1473,7 @@ export const SettingsPage: React.FC = () => {
   useEffect(() => {
     loadTushareConfig();
     loadRuntimeSettings();
+    loadProxySettings();
     loadPrompts();
     loadStats();
     loadNewsPlugins();
@@ -1471,6 +1488,7 @@ export const SettingsPage: React.FC = () => {
     loadNewsPlugins,
     loadNewsTestTools,
     loadPrompts,
+    loadProxySettings,
     loadRuntimeSettings,
     loadSkillPrompt,
     loadSkills,
@@ -1503,6 +1521,21 @@ export const SettingsPage: React.FC = () => {
       message.error(getApiErrorMessage(error, t('settings.runtime_save_failed')));
     } finally {
       setRuntimeSettingsSaving(false);
+    }
+  };
+
+  const handleSaveProxySettings = async (values: ProxySettings) => {
+    setProxySettingsSaving(true);
+    try {
+      const updated = await proxySettingsApi.updateProxySettings({
+        url: values.url?.trim() || '',
+      });
+      proxySettingsForm.setFieldsValue(updated);
+      message.success(t('settings.proxy_saved'));
+    } catch (error) {
+      message.error(getApiErrorMessage(error, t('settings.proxy_save_failed')));
+    } finally {
+      setProxySettingsSaving(false);
     }
   };
 
@@ -1856,6 +1889,53 @@ export const SettingsPage: React.FC = () => {
                   </Form.Item>
                   <Form.Item>
                     <Button type="primary" htmlType="submit" loading={runtimeSettingsSaving}>
+                      {t('settings.save_config')}
+                    </Button>
+                  </Form.Item>
+                </Form>
+              </Spin>
+            </Card>
+          )
+        },
+        {
+          key: 'network',
+          label: t('settings.network_proxy'),
+          children: (
+            <Card
+              title={t('settings.network_proxy')}
+              extra={(
+                <Button onClick={() => void loadProxySettings()} loading={proxySettingsLoading}>
+                  {t('settings.refresh_proxy_settings')}
+                </Button>
+              )}
+            >
+              <Spin spinning={proxySettingsLoading}>
+                <Alert
+                  type="info"
+                  showIcon
+                  message={t('settings.network_proxy_tip')}
+                  description={t('settings.network_proxy_plugin_tip')}
+                  style={{ marginBottom: 16 }}
+                />
+                <Form
+                  form={proxySettingsForm}
+                  layout="vertical"
+                  onFinish={handleSaveProxySettings}
+                  initialValues={{ url: '' }}
+                >
+                  <Form.Item
+                    label={t('settings.proxy_url')}
+                    name="url"
+                    extra={t('settings.proxy_url_tip')}
+                  >
+                    <Input
+                      placeholder={t('settings.proxy_url_placeholder')}
+                      style={dataSourceInputStyle}
+                      allowClear
+                    />
+                  </Form.Item>
+                  <Form.Item>
+                    <Button type="primary" htmlType="submit" loading={proxySettingsSaving}>
                       {t('settings.save_config')}
                     </Button>
                   </Form.Item>

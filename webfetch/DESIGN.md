@@ -75,6 +75,7 @@ POST /fetch
 | `return_type` | enum | 否 | `markdown` | `html` 或 `markdown` |
 | `timeout_ms` | int | 否 | `60000` | 页面导航超时时间 |
 | `wait_after_ms` | int | 否 | `5000` | 导航完成后等待 JS 渲染时间 |
+| `proxy` | object | 否 | 空 | Playwright 代理配置，仅支持 `{"server": "http://host:port"}` 或 `{"server": "socks5://host:port"}`，不支持认证 |
 
 请求示例：
 
@@ -86,7 +87,8 @@ POST /fetch
   "engine": "cloakbrowser",
   "return_type": "markdown",
   "timeout_ms": 60000,
-  "wait_after_ms": 5000
+  "wait_after_ms": 5000,
+  "proxy": {"server": "http://127.0.0.1:7890"}
 }
 ```
 

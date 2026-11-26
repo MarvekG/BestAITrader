@@ -22,6 +22,10 @@ export interface RuntimeSettings {
   ai_debate_max_concurrent: number;
 }
 
+export interface ProxySettings {
+  url: string;
+}
+
 interface DataSourceConfigResponse {
   config: DataSourceConfig;
 }
@@ -48,5 +52,15 @@ export const runtimeSettingsApi = {
 
   updateRuntimeSettings: async (settings: RuntimeSettings) => {
     return apiClient.put<RuntimeSettings>('/general/runtime-settings', settings);
+  }
+};
+
+export const proxySettingsApi = {
+  getProxySettings: async () => {
+    return apiClient.get<ProxySettings>('/general/proxy-settings');
+  },
+
+  updateProxySettings: async (settings: ProxySettings) => {
+    return apiClient.put<ProxySettings>('/general/proxy-settings', settings);
   }
 };
