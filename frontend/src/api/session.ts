@@ -6,6 +6,7 @@ export interface Session {
   stock_code: string;
   stock_name: string;
   status: 'active' | 'completed' | 'failed';
+  task_status?: 'pending' | 'running' | null;
   created_at: string;
   updated_at: string;
   ended_at?: string | null;

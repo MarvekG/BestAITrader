@@ -32,6 +32,7 @@ class CRUDSession(CRUDBase[Session, SessionCreate, SessionUpdate]):
         name_map = {code: name for code, name in basics_result.all()}
         session_ids = {str(session.session_id) for session in session_list}
         ended_at_map = {}
+        active_task_status_map: dict[str, str] = {}
 
         async_task_result = await db.execute(
             select(AsyncTask).where(
@@ -47,6 +48,21 @@ class CRUDSession(CRUDBase[Session, SessionCreate, SessionUpdate]):
             current_ended_at = ended_at_map.get(task_session_id)
             if current_ended_at is None or task.completed_at > current_ended_at:
                 ended_at_map[task_session_id] = task.completed_at
+
+        active_task_result = await db.execute(
+            select(AsyncTask).where(
+                AsyncTask.task_type == "ai_analysis",
+                AsyncTask.status.in_(("pending", "running")),
+            )
+        )
+        for task in active_task_result.scalars().all():
+            parameters = task.parameters if isinstance(task.parameters, dict) else {}
+            task_session_id = parameters.get("session_id")
+            if task_session_id not in session_ids:
+                continue
+            if active_task_status_map.get(task_session_id) == "running":
+                continue
+            active_task_status_map[task_session_id] = task.status
 
         debate_result = await db.execute(
             select(DebateMessage.session_id, DebateMessage.created_at).where(
@@ -64,6 +80,7 @@ class CRUDSession(CRUDBase[Session, SessionCreate, SessionUpdate]):
         for session in session_list:
             setattr(session, "stock_name", name_map.get(session.stock_code, session.stock_code))
             setattr(session, "ended_at", ended_at_map.get(str(session.session_id)))
+            setattr(session, "task_status", active_task_status_map.get(str(session.session_id)))
 
     async def create(self, *, obj_in: SessionCreate) -> Session:
         """异步创建分析会话并初始化关联账户/持仓。"""

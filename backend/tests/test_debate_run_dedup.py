@@ -157,7 +157,7 @@ async def test_run_debate_rejects_same_stock_even_for_different_user(client, tes
     )
 
     assert response.status_code == 400
-    assert "股票 000001.SZ 已有 AI 分析任务正在运行" in response.json()["detail"]
+    assert "股票 000001.SZ 已有 AI 分析任务正在排队或运行" in response.json()["detail"]
     async with test_db() as db:
         count = (await db.execute(select(func.count()).select_from(AsyncTask).where(AsyncTask.task_type == "ai_analysis"))).scalar_one()
     assert count == 1

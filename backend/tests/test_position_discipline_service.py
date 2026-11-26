@@ -63,7 +63,7 @@ async def _add_stock_warehouse(db, user_id):
 
 
 @pytest.mark.asyncio
-async def test_position_discipline_debate_respects_global_concurrency_limit(
+async def test_position_discipline_debate_queues_when_running_limit_reached(
     async_db_session,
     monkeypatch,
     async_create_user,
@@ -106,10 +106,15 @@ async def test_position_discipline_debate_respects_global_concurrency_limit(
         background_tasks=None,
     )
 
-    assert result["status"] == "skipped"
-    assert result["reason"] == "concurrency_limit"
+    assert result["status"] == "launched"
     count = await async_db_session.scalar(select(func.count()).select_from(AsyncTask))
-    assert count == 1
+    assert count == 2
+    queued_task = await async_db_session.scalar(
+        select(AsyncTask).where(AsyncTask.status == "pending")
+    )
+    assert queued_task is not None
+    assert queued_task.parameters["stock_code"] == "000002.SZ"
+    assert queued_task.parameters["discipline_trigger"]["trigger_type"] == "stop_loss"
 
 
 @pytest.mark.asyncio

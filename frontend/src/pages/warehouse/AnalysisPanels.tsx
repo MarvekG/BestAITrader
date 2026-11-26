@@ -284,9 +284,19 @@ export const DebateManagementPanel: React.FC<DebateManagementPanelProps> = ({ is
     {
       title: t('session.col_status'),
       dataIndex: 'status',
-      render: (status: string) => {
-        const color = status === 'active' ? 'green' : 'default';
-        return <Tag color={color}>{status.toUpperCase()}</Tag>;
+      render: (status: string, record: Session) => {
+        const queued = status === 'active' && record.task_status === 'pending';
+        const color = queued ? 'orange' : status === 'active' ? 'green' : status === 'failed' ? 'red' : 'default';
+        const label = queued
+          ? t('session.status_queued')
+          : status === 'active'
+            ? t('session.status_active')
+            : status === 'completed'
+              ? t('session.status_completed')
+              : status === 'failed'
+                ? t('session.status_failed')
+                : status.toUpperCase();
+        return <Tag color={color}>{label}</Tag>;
       },
     },
     {

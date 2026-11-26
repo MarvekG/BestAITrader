@@ -510,10 +510,12 @@
     "market_data": "市场数据",
     "status_active": "进行中",
     "status_completed": "已完成",
+    "status_queued": "排队中",
     "messages": {
       "debate_started": "辩论已开始",
       "debate_completed": "辩论已完成！",
       "debate_error": "发生辩论错误",
+      "debate_queued": "辩论已加入队列，等待执行...",
       "request_sent": "辩论请求已发送，等待 AI 响应..."
     }
   },
@@ -1084,6 +1086,10 @@
     "col_id": "ID",
     "col_stock": "股票",
     "col_status": "状态",
+    "status_active": "进行中",
+    "status_completed": "已完成",
+    "status_failed": "失败",
+    "status_queued": "排队中",
     "col_source": "来源",
     "col_created": "创建时间",
     "col_ended": "结束时间",
@@ -1498,8 +1504,8 @@
     "runtime_saved": "运行参数已保存",
     "runtime_load_failed": "加载运行参数失败",
     "runtime_save_failed": "保存运行参数失败",
-    "ai_debate_max_concurrent": "AI投研辩论最大并发数",
-    "ai_debate_max_concurrent_tip": "限制同时处于等待或运行中的 AI投研辩论任务数量。默认 5，用于控制 LLM 和数据源资源消耗。",
+    "ai_debate_max_concurrent": "AI投研辩论最大运行并发数",
+    "ai_debate_max_concurrent_tip": "限制同时运行中的 AI投研辩论任务数量；超出的任务按提交顺序排队。默认 5，用于控制 LLM 和数据源资源消耗。",
     "ai_debate_max_concurrent_required": "请输入 AI投研辩论最大并发数",
     "ai_debate_max_concurrent_range": "并发数必须在 1 到 100 之间",
     "automation": "自动化任务",
@@ -1959,9 +1965,9 @@
   "tasks": {
     "submission_success": "异步任务提交成功，任务ID: {task_id}",
     "already_in_progress": "任务已在进行中，任务ID: {task_id}",
-    "ai_debate_concurrency_limit_reached": "AI投研辩论并发数已达上限（{running_count}/{max_concurrent}），请等待当前辩论完成后再试。",
-    "ai_analysis_stock_already_running": "股票 {stock_code} 已有 AI 分析任务正在运行（任务ID: {task_id}），请等待当前任务完成后再试。",
-    "ai_analysis_already_running": "AI 分析任务已在运行，任务ID: {task_id}",
+    "ai_analysis_queued": "AI 分析任务已排队，任务ID: {task_id}",
+    "ai_analysis_stock_already_running": "股票 {stock_code} 已有 AI 分析任务正在排队或运行（任务ID: {task_id}），请等待当前任务完成后再试。",
+    "ai_analysis_already_running": "AI 分析任务已在排队或运行，任务ID: {task_id}",
     "ai_debate_session_not_active": "当前会话状态为 {session_status}，只有 active 状态的会话可以启动辩论。",
     "ai_debate_session_already_completed": "会话 {session_id} 已完成辩论，不能在同一会话中重复启动。",
     "names": {

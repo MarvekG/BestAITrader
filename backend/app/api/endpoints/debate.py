@@ -9,7 +9,6 @@ from app.core.database import get_async_db
 from app.core.i18n import i18n_service
 from app.crud.session import crud_session
 from app.ai.llm_engine.debate_concurrency import (
-    DebateConcurrencyLimitReached,
     DebateStockTaskAlreadyRunning,
     find_running_debate_task_for_session,
     format_ai_analysis_task_name,
@@ -30,20 +29,18 @@ router = APIRouter()
 
 
 async def _ensure_debate_launch_allowed(stock_code: str) -> None:
-    """校验股票可启动辩论，并把并发限制映射为 HTTP 响应。
+    """校验股票可入队新的辩论任务。
 
     Args:
         stock_code: 标准股票代码。
 
     Raises:
-        HTTPException: 股票已有运行中任务或全局并发达到上限。
+        HTTPException: 股票已有排队中或运行中的任务。
     """
     try:
         await ensure_debate_launch_available(stock_code)
     except DebateStockTaskAlreadyRunning as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except DebateConcurrencyLimitReached as exc:
-        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)) from exc
 
 
 async def _discard_created_session(*, session_id: UUID, user_id: int) -> None:
@@ -167,12 +164,13 @@ async def run_debate(
                             task_id=existing_session_task.task_id,
                         ),
                         "new_task": False,
+                        "queued": existing_session_task.status == "pending",
                     },
                 )
 
             await _ensure_debate_launch_allowed(stock_code)
         else:
-            # 先校验并发和股票互斥，再创建会话，避免被拦截后留下无法执行的 active 空会话。
+            # 先校验股票互斥，再创建会话，避免同一股票重复入队时留下无法执行的 active 空会话。
             await _ensure_debate_launch_allowed(stock_code)
             session = await crud_session.create(
                 obj_in=SessionCreate(
@@ -209,10 +207,8 @@ async def run_debate(
                     "trading_strategy": trading_strategy,
                     "sync_before_analysis": sync_before_analysis,
                 },
-                # 其实可以并行,但前端可能乱。这里暂设为False，或者True?
-                # 这里的allow_concurrent是针对task_type + parameters.
-                # 我们的parameters包含session_id，所以如果同一个session_id再次提交，且allow_concurrent=False，会阻止。
-                # 这正是我们想要的: 同一个session同一时间只能跑一个辩论。
+                # 辩论任务统一由调度器按 running 上限启动；超出部分保持 pending 排队。
+                defer_dispatch=True,
             )
         except Exception:
             if created_session:
@@ -235,20 +231,26 @@ async def run_debate(
                     "status": task_info["status"],
                     "message": task_info["message"],
                     "new_task": False,
+                    "queued": task_info["status"] == "pending",
                 },
             )
 
-        # 发送辩论开始状态
-        await send_debate_status(str(session_id), "started")
-
+        queued = task_info["status"] == "pending"
         response: Dict[str, Any] = {
             "task_id": task_info["task_id"],
             "session_id": str(session_id),
-            "status": "started",
-            "message": "AI Analysis started in background",
+            "status": task_info["status"],
+            "message": (
+                i18n_service.t("tasks.ai_analysis_queued", task_id=task_info["task_id"])
+                if queued
+                else "AI Analysis started in background"
+            ),
             "new_task": True,
+            "queued": queued,
         }
         if created_session and session is not None:
+            # 新建会话的响应需要带上任务状态，前端据此显示“排队中”。
+            setattr(session, "task_status", task_info["status"])
             response["session"] = SessionResponse.model_validate(session).model_dump(mode="json")
         return response
 

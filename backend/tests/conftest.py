@@ -308,6 +308,18 @@ def sqlite_test_schema(sqlite_async_test_engine):
     _run_async(_drop_async_schema())
 
 
+@pytest.fixture(autouse=True)
+def reset_debate_dispatcher_state():
+    """在每个测试前后清空进程内辩论调度状态。"""
+    from app.ai.llm_engine.debate_concurrency import reset_debate_dispatcher_state as reset_state
+
+    reset_state()
+    try:
+        yield
+    finally:
+        reset_state()
+
+
 @pytest.fixture
 def test_db(sqlite_test_schema, sqlite_async_session_factory):
     from app.core.config import settings

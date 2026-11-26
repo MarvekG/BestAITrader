@@ -62,6 +62,7 @@ class TaskManager:
         task_func: Callable[..., Any] | None = None,
         task_args: tuple = (),
         task_kwargs: dict[str, Any] | None = None,
+        defer_dispatch: bool = False,
     ) -> Dict[str, Any]:
         """异步提交任务并可直接投递到后台 runner。
 
@@ -75,6 +76,7 @@ class TaskManager:
             task_func: Optional function submitted to AsyncTaskRunner when a new task is created.
             task_args: Positional args for task_func.
             task_kwargs: Keyword args for task_func.
+            defer_dispatch: Whether to leave the task pending and let the debate dispatcher start it.
 
         Returns:
             Dictionary with task_id, task_name, status, and message
@@ -136,6 +138,14 @@ class TaskManager:
                 await db.rollback()
                 raise
 
+        if defer_dispatch:
+            # 直接提供 task_func 的路径在此触发一次调度；使用外部 launcher 的路径由 launcher 触发。
+            if task_func is not None:
+                from app.ai.llm_engine.debate_concurrency import dispatch_pending_debate_tasks
+
+                await dispatch_pending_debate_tasks()
+            return task_info
+
         if task_func is not None:
             from app.tasks.async_task_runner import async_task_runner
 
@@ -165,6 +175,7 @@ class TaskManager:
         result: Optional[Dict[str, Any]] = None,
         error_message: Optional[str] = None,
         notification_result: Optional[Dict[str, Any]] = None,
+        notify_dispatcher: bool = True,
     ) -> None:
         """异步更新任务状态并发布通知。
 
@@ -174,6 +185,7 @@ class TaskManager:
             result: Task result
             error_message: Error message (if failed)
             notification_result: Optional smaller result payload for real-time notifications.
+            notify_dispatcher: Whether to notify the debate dispatcher after the update.
         """
         async with database_module.AsyncSessionLocal() as db:
             query_result = await db.execute(select(AsyncTask).where(AsyncTask.task_id == task_id))
@@ -197,6 +209,7 @@ class TaskManager:
                 task.error_message = error_message
 
             task_name = task.task_name
+            task_type = task.task_type
             task_user_id = task.user_id
             await db.commit()
         logger.info(f"Task {task_id} status updated to {status}")
@@ -216,6 +229,21 @@ class TaskManager:
             await redis_client.publish("task_notifications", json.dumps(message))
         except Exception as e:
             logger.error(f"Failed to publish task update to Redis: {e}")
+
+        if (
+            notify_dispatcher
+            and task_type == "ai_analysis"
+            and status in {"running", "completed", "failed"}
+        ):
+            from app.ai.llm_engine.debate_concurrency import notify_debate_task_status
+
+            try:
+                await notify_debate_task_status(task_id, status)
+            except Exception as exc:
+                logger.error(
+                    "Failed to notify debate dispatcher",
+                    extra={"task_id": task_id, "status": status, "error": str(exc)},
+                )
 
     async def get_task_status(
         self, task_id: str, user_id: int | None = None

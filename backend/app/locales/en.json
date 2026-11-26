@@ -510,10 +510,12 @@
     "market_data": "Market Data",
     "status_active": "Active",
     "status_completed": "Completed",
+    "status_queued": "Queued",
     "messages": {
       "debate_started": "Debate started",
       "debate_completed": "Debate completed!",
       "debate_error": "Debate error occurred",
+      "debate_queued": "Debate queued, waiting to start...",
       "request_sent": "Debate request sent, waiting for AI..."
     }
   },
@@ -1084,6 +1086,10 @@
     "col_id": "ID",
     "col_stock": "Stock",
     "col_status": "Status",
+    "status_active": "Active",
+    "status_completed": "Completed",
+    "status_failed": "Failed",
+    "status_queued": "Queued",
     "col_source": "Source",
     "col_created": "Created At",
     "col_ended": "Ended At",
@@ -1498,8 +1504,8 @@
     "runtime_saved": "Runtime settings saved",
     "runtime_load_failed": "Failed to load runtime settings",
     "runtime_save_failed": "Failed to save runtime settings",
-    "ai_debate_max_concurrent": "AI Research Debate Max Concurrency",
-    "ai_debate_max_concurrent_tip": "Limits the number of AI research debate tasks that can be pending or running at the same time. Default is 5, used to control LLM and data-source resource usage.",
+    "ai_debate_max_concurrent": "AI Research Debate Max Running Concurrency",
+    "ai_debate_max_concurrent_tip": "Limits the number of AI research debate tasks running at the same time. Extra tasks are queued in submission order. Default is 5, used to control LLM and data-source resource usage.",
     "ai_debate_max_concurrent_required": "Enter the AI research debate max concurrency",
     "ai_debate_max_concurrent_range": "Concurrency must be between 1 and 100",
     "automation": "Automation",
@@ -1959,9 +1965,9 @@
   "tasks": {
     "submission_success": "Async task submitted successfully, Task ID: {task_id}",
     "already_in_progress": "Task already in progress, Task ID: {task_id}",
-    "ai_debate_concurrency_limit_reached": "AI research debate concurrency limit reached ({running_count}/{max_concurrent}). Please wait for running debates to complete.",
-    "ai_analysis_stock_already_running": "An AI analysis task for stock {stock_code} is already running (Task ID: {task_id}). Please wait for it to complete.",
-    "ai_analysis_already_running": "AI analysis is already running, Task ID: {task_id}",
+    "ai_analysis_queued": "AI analysis task queued, Task ID: {task_id}",
+    "ai_analysis_stock_already_running": "An AI analysis task for stock {stock_code} is already queued or running (Task ID: {task_id}). Please wait for it to complete.",
+    "ai_analysis_already_running": "AI analysis task is already queued or running, Task ID: {task_id}",
     "ai_debate_session_not_active": "Session status is {session_status}. Only active sessions can start debates.",
     "ai_debate_session_already_completed": "Session {session_id} already has a completed debate. Cannot start another debate in the same session.",
     "names": {

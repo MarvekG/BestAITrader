@@ -45,8 +45,8 @@ def test_runtime_settings_reject_invalid_concurrency(client, auth_headers) -> No
 
 
 @pytest.mark.asyncio
-async def test_debate_run_rejects_when_global_concurrency_limit_reached(client, auth_headers, async_db_session) -> None:
-    """AI 投研辩论达到全局并发上限时拒绝新任务。"""
+async def test_debate_run_queues_when_running_limit_reached(client, auth_headers, async_db_session) -> None:
+    """AI 投研辩论达到运行并发上限时，新任务进入 pending 队列而不是被拒绝。"""
     client.put(
         "/api/v1/general/runtime-settings",
         headers=auth_headers,
@@ -78,7 +78,12 @@ async def test_debate_run_rejects_when_global_concurrency_limit_reached(client, 
             task_type="ai_analysis",
             status="running",
             allow_concurrent=False,
-            parameters={"session_id": str(existing_session_id), "stock_code": "000001"},
+            parameters={
+                "session_id": str(existing_session_id),
+                "stock_code": "000001",
+                "trading_frequency": "daily",
+                "trading_strategy": "value",
+            },
             user_id=user.id,
         ),
     ])
@@ -95,6 +100,17 @@ async def test_debate_run_rejects_when_global_concurrency_limit_reached(client, 
         },
     )
 
-    assert response.status_code == 429
-    detail = response.json()["detail"]
-    assert "1/1" in detail
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["status"] == "pending"
+    assert payload["queued"] is True
+
+    tasks = (
+        await async_db_session.execute(
+            select(AsyncTask).where(AsyncTask.task_type == "ai_analysis")
+        )
+    ).scalars().all()
+    assert len(tasks) == 2
+    queued_task = next(task for task in tasks if task.status == "pending")
+    assert queued_task.parameters["stock_code"] == "000002"
+    assert queued_task.parameters["session_id"] == str(new_session_id)

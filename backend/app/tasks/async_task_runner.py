@@ -185,6 +185,7 @@ class AsyncTaskRunner:
                     task_id,
                     "failed",
                     error_message="System reload or shutdown, task cancelled",
+                    notify_dispatcher=False,
                 )
         if tasks_to_cancel:
             await asyncio.gather(*tasks_to_cancel, return_exceptions=True)
@@ -255,6 +256,7 @@ class AsyncTaskRunner:
         result: Any | None = None,
         error_message: str | None = None,
         persist_status: bool = True,
+        notify_dispatcher: bool = True,
     ) -> None:
         """
         更新任务状态，兼容没有任务表记录的调度器任务。
@@ -265,18 +267,23 @@ class AsyncTaskRunner:
             result: 可选任务结果。
             error_message: 可选错误信息。
             persist_status: 是否把任务状态写入异步任务表。
+            notify_dispatcher: 是否通知辩论调度器继续取队首任务。
         """
         if not persist_status:
             return
 
         from app.tasks.task_manager import task_manager
 
-        await task_manager.update_task_status(
-            task_id=task_id,
-            status=status,
-            result=result,
-            error_message=error_message,
-        )
+        status_kwargs: dict[str, Any] = {
+            "task_id": task_id,
+            "status": status,
+            "result": result,
+            "error_message": error_message,
+        }
+        if not notify_dispatcher:
+            # 仅在需要抑制调度时传参，保持普通状态更新与既有测试替身兼容。
+            status_kwargs["notify_dispatcher"] = False
+        await task_manager.update_task_status(**status_kwargs)
 
     @staticmethod
     def _resolve_failure(result: Any) -> tuple[bool, str | None]:

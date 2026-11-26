@@ -100,10 +100,8 @@ def _is_due(user_id: int, interval_seconds: int, now: datetime) -> bool:
 
 
 def _launch_debate_task(**launch_kwargs: Any) -> None:
-    """从后台扫描调度 AI 复议辩论。"""
-    from app.ai.llm_engine.runner import run_analysis_task
+    """从后台扫描触发辩论队列调度。"""
+    from app.ai.llm_engine.debate_concurrency import dispatch_pending_debate_tasks
 
-    asyncio.create_task(
-        run_analysis_task(**launch_kwargs),
-        name=f"position-discipline-analysis-{launch_kwargs['task_id']}",
-    )
+    _ = launch_kwargs
+    asyncio.create_task(dispatch_pending_debate_tasks(), name="position-discipline-debate-dispatch")

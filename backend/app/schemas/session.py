@@ -36,6 +36,8 @@ class SessionResponse(SessionBase):
     ended_at: Optional[datetime] = None
     status: str
     stock_name: Optional[str] = None
+    # 当前排队中或运行中的 AI 分析任务状态；无活动任务时为 None。
+    task_status: Optional[str] = None
 
     # 关联数据ID
     data_snapshot_id: Optional[UUID] = None

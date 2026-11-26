@@ -106,6 +106,18 @@ export const DashboardPage: React.FC = () => {
     }
   }, [activeSessionId, setActiveSession]);
 
+  // 排队中的任务需要轮询刷新，避免 WebSocket “started” 事件在页面连接前丢失后一直显示排队中。
+  useEffect(() => {
+    if (!isRouteSessionActive || activeSession?.task_status !== 'pending') {
+      return;
+    }
+    void refreshActiveSession();
+    const intervalId = window.setInterval(() => {
+      void refreshActiveSession();
+    }, 5000);
+    return () => window.clearInterval(intervalId);
+  }, [activeSession?.task_status, isRouteSessionActive, refreshActiveSession]);
+
   // WebSocket连接（增强版：支持自动重连和心跳）
   useEffect(() => {
     if (!isRouteSessionActive || !activeSessionId) return;
@@ -175,6 +187,7 @@ export const DashboardPage: React.FC = () => {
               message.loading({ content: t('dashboard.messages.debate_started'), key: debateProgressMessageKey, duration: 0 });
               setDebateMessages([]);
               setMessageCount(0);
+              void refreshActiveSession();
             } else if (data.status === 'completed') {
               message.success({ content: t('dashboard.messages.debate_completed'), key: debateProgressMessageKey });
               setLoading(false);
@@ -274,7 +287,7 @@ export const DashboardPage: React.FC = () => {
 
     setLoading(true);
     try {
-      await debateApi.run({
+      const response = await debateApi.run({
         session_id: activeSession.session_id,
         stock_code: activeSession.stock_code,
         simplified: false,
@@ -282,7 +295,14 @@ export const DashboardPage: React.FC = () => {
         trading_strategy: activeSession.trading_strategy,
       });
 
-      message.loading({ content: t('dashboard.messages.request_sent'), key: debateProgressMessageKey, duration: 0 });
+      message.loading({
+        content: response.queued
+          ? t('dashboard.messages.debate_queued')
+          : t('dashboard.messages.request_sent'),
+        key: debateProgressMessageKey,
+        duration: 0,
+      });
+      void refreshActiveSession();
       // 注意: 这里不设置setLoading(false), 而是等待WebSocket通知完成
     } catch (error) {
       console.error(error);
@@ -338,8 +358,20 @@ export const DashboardPage: React.FC = () => {
                   text={wsConnected ? "Live" : "Offline"}
                 />
                 <Badge
-                  status={activeSession.status === 'active' ? 'processing' : 'default'}
-                  text={activeSession.status === 'active' ? t('dashboard.status_active') : t('dashboard.status_completed')}
+                  status={
+                    activeSession.status !== 'active'
+                      ? 'default'
+                      : activeSession.task_status === 'pending'
+                        ? 'warning'
+                        : 'processing'
+                  }
+                  text={
+                    activeSession.status !== 'active'
+                      ? t('dashboard.status_completed')
+                      : activeSession.task_status === 'pending'
+                        ? t('dashboard.status_queued')
+                        : t('dashboard.status_active')
+                  }
                   style={{ marginLeft: 8, fontSize: 12, opacity: 0.8 }}
                 />
               </div>

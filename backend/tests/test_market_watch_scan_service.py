@@ -156,7 +156,11 @@ def test_market_watch_llm_usage_observability_uses_dedicated_lane() -> None:
 
 
 @pytest.mark.asyncio
-async def test_market_watch_debate_launch_respects_global_concurrency_limit(async_db_session, test_db, monkeypatch) -> None:
+async def test_market_watch_debate_launch_queues_when_running_limit_reached(
+    async_db_session,
+    test_db,
+    monkeypatch,
+) -> None:
     user = User(username="market_watch_limit", email="market_watch_limit@example.com", password_hash="x")
     async_db_session.add(user)
     await async_db_session.commit()
@@ -195,9 +199,15 @@ async def test_market_watch_debate_launch_respects_global_concurrency_limit(asyn
         background_tasks=None,
     )
 
-    assert response["status"] == "skipped"
-    assert response["reason"] == "concurrency_limit"
-    assert await async_db_session.scalar(select(func.count()).select_from(AsyncTask)) == 1
+    assert response["status"] == "launched"
+    assert await async_db_session.scalar(select(func.count()).select_from(AsyncTask)) == 2
+    queued_task = await async_db_session.scalar(
+        select(AsyncTask).where(AsyncTask.status == "pending")
+    )
+    assert queued_task is not None
+    assert queued_task.parameters["stock_code"] == "000002.SZ"
+    assert queued_task.parameters["trigger_reason"] == "test"
+    assert queued_task.parameters["evidence_summary"] == "test"
 
 
 def test_build_watch_ai_payload_sorts_stock_lists_for_cache_stability() -> None:
@@ -1272,8 +1282,12 @@ async def test_scan_successful_launch_writes_audit_and_returns_session_and_task_
         "stock_code",
         "trading_frequency",
         "trading_strategy",
+        "trigger_reason",
+        "evidence_summary",
         "sync_before_analysis",
     }
+    assert task.parameters["trigger_reason"]
+    assert task.parameters["evidence_summary"]
     assert task.parameters["sync_before_analysis"] is True
     assert task.parameters["trading_frequency"] == "日内交易 (Day Trading)"
     assert task.parameters["trading_strategy"] == "趋势追踪 (Trend Following)"
