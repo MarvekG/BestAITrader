@@ -22,6 +22,7 @@ class FakeEngine:
         selectors: list[str],
         timeout_ms: int,
         wait_after_ms: int,
+        proxy: dict[str, str] | None = None,
     ) -> RenderedPage:
         """
         返回固定渲染结果并记录调用参数。
@@ -31,18 +32,20 @@ class FakeEngine:
             selectors: CSS selector 列表。
             timeout_ms: 页面导航超时时间。
             wait_after_ms: 导航后等待时间。
+            proxy: 可选的 Playwright 代理配置。
 
         Returns:
             固定渲染页面。
         """
-        self.calls.append(
-            {
-                "url": url,
-                "selectors": selectors,
-                "timeout_ms": timeout_ms,
-                "wait_after_ms": wait_after_ms,
-            }
-        )
+        call = {
+            "url": url,
+            "selectors": selectors,
+            "timeout_ms": timeout_ms,
+            "wait_after_ms": wait_after_ms,
+        }
+        if proxy is not None:
+            call["proxy"] = proxy
+        self.calls.append(call)
         return RenderedPage(
             final_url="https://example.com/final",
             status=200,
@@ -64,6 +67,7 @@ class TimeoutEngine:
         selectors: list[str],
         timeout_ms: int,
         wait_after_ms: int,
+        proxy: dict[str, str] | None = None,
     ) -> RenderedPage:
         """
         模拟等待引擎并发额度超时。
@@ -73,6 +77,7 @@ class TimeoutEngine:
             selectors: CSS selector 列表。
             timeout_ms: 页面导航超时时间。
             wait_after_ms: 导航后等待时间。
+            proxy: 可选的 Playwright 代理配置。
 
         Returns:
             不会返回。
@@ -93,18 +98,22 @@ class FakePdfEngine:
         """初始化调用记录。"""
         self.calls: list[dict[str, object]] = []
 
-    async def download_pdf(self, url: str, timeout: float) -> DownloadedPdf:
+    async def download_pdf(self, url: str, timeout: float, proxy: dict[str, str] | None = None) -> DownloadedPdf:
         """
         返回固定 PDF 内容并记录调用参数。
 
         Args:
             url: 已规范化 URL。
             timeout: 下载超时时间，单位秒。
+            proxy: 可选的 Playwright 代理配置。
 
         Returns:
             固定 PDF 下载结果。
         """
-        self.calls.append({"url": url, "timeout": timeout})
+        call = {"url": url, "timeout": timeout}
+        if proxy is not None:
+            call["proxy"] = proxy
+        self.calls.append(call)
         return DownloadedPdf(
             final_url="https://example.com/final.pdf",
             status=200,
@@ -190,6 +199,30 @@ def test_fetch_converts_markdown_in_thread(monkeypatch) -> None:
     assert args[0] == "<main><h1>Example</h1><p>正文</p><p>广告内容结束</p></main>"
     assert args[1] == "Example"
     assert args[2] == "https://example.com/final"
+
+
+def test_fetch_passes_proxy_to_engine() -> None:
+    """抓取请求把代理地址传给渲染引擎。"""
+    fake_engine = FakeEngine()
+    original_engine = engine_registry._engines[EngineType.CLOAKBROWSER]
+    engine_registry._engines[EngineType.CLOAKBROWSER] = fake_engine
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/fetch",
+                json={
+                    "url": "https://example.com/page",
+                    "engine": "cloakbrowser",
+                    "return_type": "html",
+                    "wait_after_ms": 0,
+                    "proxy": {"server": "socks5://127.0.0.1:1080"},
+                },
+            )
+    finally:
+        engine_registry._engines[EngineType.CLOAKBROWSER] = original_engine
+
+    assert response.status_code == 200
+    assert fake_engine.calls[0]["proxy"] == {"server": "socks5://127.0.0.1:1080"}
 
 
 def test_fetch_returns_html() -> None:

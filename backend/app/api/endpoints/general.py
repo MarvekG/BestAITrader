@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.core.i18n import i18n_service
+from app.core.proxy import ProxySettings, get_proxy_settings, update_proxy_settings
 from app.core.runtime_settings import RuntimeSettings, get_runtime_settings, update_runtime_settings
 from app.core.security import get_current_user
 from app.core.system_language import (
@@ -100,6 +101,40 @@ async def update_system_language(
         language=language,
         supported_languages=list(SUPPORTED_SYSTEM_LANGUAGES),
     )
+
+
+@router.get("/proxy-settings", response_model=ProxySettings)
+async def read_proxy_settings(
+    current_user: User = Depends(get_current_user),
+) -> ProxySettings:
+    """Get the global outbound proxy settings.
+
+    Args:
+        current_user: Authenticated user.
+
+    Returns:
+        Current global proxy settings.
+    """
+    del current_user
+    return await get_proxy_settings(refresh=True)
+
+
+@router.put("/proxy-settings", response_model=ProxySettings)
+async def save_proxy_settings(
+    payload: ProxySettings,
+    current_user: User = Depends(get_current_user),
+) -> ProxySettings:
+    """Update the global outbound proxy settings.
+
+    Args:
+        payload: Proxy settings update payload.
+        current_user: Authenticated user.
+
+    Returns:
+        Updated global proxy settings.
+    """
+    del current_user
+    return await update_proxy_settings(payload)
 
 
 @router.get("/runtime-settings", response_model=RuntimeSettings)

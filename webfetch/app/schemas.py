@@ -1,4 +1,5 @@
 from enum import StrEnum
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -18,6 +19,55 @@ class ReturnType(StrEnum):
     MARKDOWN = "markdown"
 
 
+def _normalize_playwright_proxy(value: object) -> dict[str, str] | None:
+    """
+    校验并规范化浏览器代理配置。
+
+    Args:
+        value: 后端传入的 Playwright 代理配置。
+
+    Returns:
+        只包含 server 字段的代理配置；未配置时返回 None。
+
+    Raises:
+        ValueError: 代理配置结构或 server 值非法。
+    """
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError("proxy must be an object")
+
+    extra_keys = set(value) - {"server"}
+    if extra_keys:
+        raise ValueError("proxy authentication and extra options are not supported")
+
+    server = str(value.get("server") or "").strip()
+    if not server:
+        raise ValueError("proxy server is required")
+
+    parsed = urlsplit(server)
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "socks5"}:
+        raise ValueError("proxy server scheme must be http or socks5")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("proxy authentication is not supported")
+    if not parsed.hostname:
+        raise ValueError("proxy server must include a hostname")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("proxy server port is invalid") from exc
+    if port is None:
+        raise ValueError("proxy server must include a port")
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        raise ValueError("proxy server must not include path, query, or fragment")
+
+    hostname = parsed.hostname
+    if ":" in hostname:
+        hostname = f"[{hostname}]"
+    return {"server": f"{scheme}://{hostname}:{port}"}
+
+
 class FetchRequest(BaseModel):
     """网页抓取请求体。"""
 
@@ -28,8 +78,15 @@ class FetchRequest(BaseModel):
     return_type: ReturnType = ReturnType.MARKDOWN
     timeout_ms: int | None = Field(default=None, ge=1_000, le=300_000)
     wait_after_ms: int | None = Field(default=None, ge=0, le=120_000)
+    proxy: dict[str, str] | None = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("proxy", mode="before")
+    @classmethod
+    def _validate_proxy(cls, value: object) -> dict[str, str] | None:
+        """校验浏览器代理配置。"""
+        return _normalize_playwright_proxy(value)
 
     @field_validator("selectors", "markdown_clean_regexes", mode="before")
     @classmethod
@@ -78,5 +135,12 @@ class PdfDownloadRequest(BaseModel):
     url: str = Field(min_length=1)
     engine: EngineType = EngineType.CLOAKBROWSER
     timeout: float | None = Field(default=None, ge=1.0, le=300.0)
+    proxy: dict[str, str] | None = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("proxy", mode="before")
+    @classmethod
+    def _validate_proxy(cls, value: object) -> dict[str, str] | None:
+        """校验浏览器代理配置。"""
+        return _normalize_playwright_proxy(value)

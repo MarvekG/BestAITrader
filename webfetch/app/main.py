@@ -242,6 +242,7 @@ async def fetch_page(request: FetchRequest) -> FetchResponse:
             selectors=request.selectors,
             timeout_ms=timeout_ms,
             wait_after_ms=wait_after_ms,
+            proxy=request.proxy,
         )
     except EngineLimiterTimeoutError as exc:
         logger.warning(
@@ -359,7 +360,11 @@ async def download_file(request: PdfDownloadRequest) -> StreamingResponse:
     )
 
     try:
-        downloaded = await engine_registry.get_pdf_downloader(request.engine).download_pdf(normalized_url, timeout)
+        downloaded = await engine_registry.get_pdf_downloader(request.engine).download_pdf(
+            normalized_url,
+            timeout,
+            proxy=request.proxy,
+        )
     except EngineLimiterTimeoutError as exc:
         logger.warning(
             "webfetch pdf download limited",

@@ -4,6 +4,8 @@ import pytest
 
 from app.ai.agentic.tooling import browser_tool
 from app.ai.agentic.tooling.browser_tool import browse_web_page_html, render_web_page_html
+from app.core import proxy
+from app.core.proxy import ProxySettings
 
 
 def _webfetch_response(
@@ -228,6 +230,31 @@ async def test_render_web_page_html_returns_error_when_webfetch_request_fails() 
         "content_source": "rendered_dom_html",
     }
     log_exception.assert_called_once()
+
+
+def test_webfetch_payload_uses_global_proxy_only_for_external_urls() -> None:
+    """网页抓取请求为外部地址附加代理，内部地址保持直连。"""
+    proxy._proxy_settings_cache = ProxySettings(url="http://127.0.0.1:7890")
+    try:
+        external_payload = browser_tool._build_webfetch_payload(
+            "https://example.com/news",
+            "markdown",
+            60_000,
+            0,
+            None,
+        )
+        internal_payload = browser_tool._build_webfetch_payload(
+            "http://127.0.0.1:8000/health",
+            "markdown",
+            60_000,
+            0,
+            None,
+        )
+    finally:
+        proxy._proxy_settings_cache = None
+
+    assert external_payload["proxy"] == {"server": "http://127.0.0.1:7890"}
+    assert "proxy" not in internal_payload
 
 
 def test_browse_web_page_html_tool_metadata() -> None:

@@ -77,6 +77,12 @@ async def lifespan(app: Any):
     await initialize_database()
     logger.info("Database initialization completed")
     try:
+        from app.core.proxy import initialize_proxy_settings
+
+        await initialize_proxy_settings()
+    except Exception as exc:
+        logger.warning(f"Failed to initialize global proxy settings: {exc}")
+    try:
         from app.core.system_language import load_persisted_system_language
 
         language = await load_persisted_system_language()

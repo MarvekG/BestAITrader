@@ -69,6 +69,7 @@ class BrowserEngine(Protocol):
         selectors: list[str],
         timeout_ms: int,
         wait_after_ms: int,
+        proxy: dict[str, str] | None = None,
     ) -> RenderedPage:
         """
         渲染指定 URL 并返回页面内容。
@@ -78,6 +79,7 @@ class BrowserEngine(Protocol):
             selectors: CSS selector 列表。
             timeout_ms: 页面导航超时时间。
             wait_after_ms: 导航完成后的额外等待时间。
+            proxy: 可选的 Playwright 代理配置。
 
         Returns:
             浏览器渲染结果。
@@ -90,13 +92,14 @@ class BrowserEngine(Protocol):
 class PdfDownloadEngine(BrowserEngine, Protocol):
     """支持 PDF 下载的浏览器引擎协议。"""
 
-    async def download_pdf(self, url: str, timeout: float) -> DownloadedPdf:
+    async def download_pdf(self, url: str, timeout: float, proxy: dict[str, str] | None = None) -> DownloadedPdf:
         """
         下载 PDF 并返回原始内容。
 
         Args:
             url: 已规范化的 PDF URL。
             timeout: 下载超时时间，单位秒。
+            proxy: 可选的 Playwright 代理配置。
 
         Returns:
             PDF 下载结果。

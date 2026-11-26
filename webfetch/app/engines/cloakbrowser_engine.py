@@ -28,15 +28,18 @@ class CloakBrowserEngine:
         Args:
             limiter: 共享页面并发限流器。
         """
-        self._browser_context: Any | None = None
+        self._browser_contexts: dict[str | None, Any] = {}
         self._browser_context_lock = asyncio.Lock()
         self._limiter = limiter
         self._active_pages: set[Any] = set()
         self._browser_context_closing_reason: str | None = None
 
-    async def _launch_default_browser_context(self) -> Any:
+    async def _launch_default_browser_context(self, proxy: dict[str, str] | None) -> Any:
         """
         启动默认 CloakBrowser context。
+
+        Args:
+            proxy: 可选的 Playwright 代理配置。
 
         Returns:
             CloakBrowser context。
@@ -45,14 +48,18 @@ class CloakBrowserEngine:
 
         return await launch_context_async(
             headless=True,
+            proxy=proxy,
             viewport=DEFAULT_VIEWPORT,
             locale=DEFAULT_LOCALE,
             timezone=DEFAULT_TIMEZONE,
         )
 
-    async def _get_or_launch_browser_context_locked(self) -> Any:
+    async def _get_or_launch_browser_context_locked(self, proxy: dict[str, str] | None) -> Any:
         """
         在锁内获取或启动 CloakBrowser context。
+
+        Args:
+            proxy: 可选的 Playwright 代理配置。
 
         Returns:
             可复用的 CloakBrowser context。
@@ -62,9 +69,10 @@ class CloakBrowserEngine:
         """
         if self._browser_context_closing_reason:
             raise RuntimeError(f"CloakBrowser context is closing: {self._browser_context_closing_reason}")
-        if self._browser_context is None:
-            self._browser_context = await self._launch_default_browser_context()
-        return self._browser_context
+        context_key = proxy.get("server") if proxy else None
+        if context_key not in self._browser_contexts:
+            self._browser_contexts[context_key] = await self._launch_default_browser_context(proxy)
+        return self._browser_contexts[context_key]
 
     async def _close_browser_page(self, page: Any, reason: str | None = None) -> None:
         """
@@ -83,9 +91,12 @@ class CloakBrowserEngine:
             await page.close()
 
     @asynccontextmanager
-    async def _open_browser_page(self) -> AsyncIterator[Any]:
+    async def _open_browser_page(self, proxy: dict[str, str] | None = None) -> AsyncIterator[Any]:
         """
         打开一个 CloakBrowser 页面并在退出时关闭。
+
+        Args:
+            proxy: 可选的 Playwright 代理配置。
 
         Yields:
             CloakBrowser 页面对象。
@@ -93,7 +104,7 @@ class CloakBrowserEngine:
         page = None
         async with self._limiter.acquire():
             async with self._browser_context_lock:
-                context = await self._get_or_launch_browser_context_locked()
+                context = await self._get_or_launch_browser_context_locked(proxy)
                 page = await context.new_page()
                 self._active_pages.add(page)
             try:
@@ -121,6 +132,7 @@ class CloakBrowserEngine:
         selectors: list[str],
         timeout_ms: int,
         wait_after_ms: int,
+        proxy: dict[str, str] | None = None,
     ) -> RenderedPage:
         """
         使用 CloakBrowser 渲染网页。
@@ -130,11 +142,12 @@ class CloakBrowserEngine:
             selectors: CSS selector 列表。
             timeout_ms: 页面导航超时时间。
             wait_after_ms: 导航完成后的额外等待时间。
+            proxy: 可选的 Playwright 代理配置。
 
         Returns:
             浏览器渲染结果。
         """
-        async with self._open_browser_page() as page:
+        async with self._open_browser_page(proxy) as page:
             response = await page.goto(url, wait_until=DEFAULT_WAIT_UNTIL, timeout=timeout_ms)
             if wait_after_ms:
                 await page.wait_for_timeout(wait_after_ms)
@@ -149,13 +162,14 @@ class CloakBrowserEngine:
                 selected_element_count=selected_element_count,
             )
 
-    async def download_pdf(self, url: str, timeout: float) -> DownloadedPdf:
+    async def download_pdf(self, url: str, timeout: float, proxy: dict[str, str] | None = None) -> DownloadedPdf:
         """
         使用 CloakBrowser request context 下载 PDF。
 
         Args:
             url: 已规范化的 PDF URL。
             timeout: 请求超时时间，单位秒。
+            proxy: 可选的 Playwright 代理配置。
 
         Returns:
             PDF 下载结果。
@@ -165,7 +179,7 @@ class CloakBrowserEngine:
         """
         async with self._limiter.acquire():
             async with self._browser_context_lock:
-                context = await self._get_or_launch_browser_context_locked()
+                context = await self._get_or_launch_browser_context_locked(proxy)
             response = await context.request.get(url, timeout=timeout_seconds_to_ms(timeout))
 
         status = response.status
@@ -196,15 +210,15 @@ class CloakBrowserEngine:
             reason: 资源关闭原因。
         """
         async with self._browser_context_lock:
-            context = self._browser_context
-            self._browser_context = None
+            contexts = list(self._browser_contexts.values())
+            self._browser_contexts = {}
             self._browser_context_closing_reason = reason
 
         try:
             await self._close_active_pages(reason)
-            if context is not None:
+            for context in contexts:
                 await context.close()
         finally:
             async with self._browser_context_lock:
-                if self._browser_context is None:
+                if not self._browser_contexts:
                     self._browser_context_closing_reason = None
