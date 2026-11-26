@@ -26,6 +26,21 @@ export interface ProxySettings {
   url: string;
 }
 
+export interface ProxyTestResult {
+  status: 'success' | 'error';
+  target_url: string;
+  proxy_url?: string | null;
+  http_status?: number | null;
+  elapsed_ms: number;
+  final_url?: string | null;
+  error?: string | null;
+}
+
+export interface ProxyTestRequest {
+  url: string;
+  target_url: string;
+}
+
 interface DataSourceConfigResponse {
   config: DataSourceConfig;
 }
@@ -62,5 +77,9 @@ export const proxySettingsApi = {
 
   updateProxySettings: async (settings: ProxySettings) => {
     return apiClient.put<ProxySettings>('/general/proxy-settings', settings);
+  },
+
+  testProxySettings: async (request: ProxyTestRequest) => {
+    return apiClient.post<ProxyTestResult>('/general/proxy-settings/test', request);
   }
 };

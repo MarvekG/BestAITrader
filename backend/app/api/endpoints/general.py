@@ -1,10 +1,18 @@
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.i18n import i18n_service
-from app.core.proxy import ProxySettings, get_proxy_settings, update_proxy_settings
+from app.core.proxy import (
+    PROXY_TEST_DEFAULT_TARGET_URL,
+    ProxySettings,
+    ProxyTestResult,
+    get_proxy_settings,
+    normalize_proxy_test_target_url,
+    test_proxy_connection,
+    update_proxy_settings,
+)
 from app.core.runtime_settings import RuntimeSettings, get_runtime_settings, update_runtime_settings
 from app.core.security import get_current_user
 from app.core.system_language import (
@@ -32,6 +40,13 @@ class SystemLanguageResponse(BaseModel):
 
 class RuntimeSettingsUpdate(RuntimeSettings):
     """Runtime settings update payload."""
+
+
+class ProxySettingsTestRequest(BaseModel):
+    """代理连通性测试请求。"""
+
+    url: str = Field(default="", max_length=2048)
+    target_url: str = Field(default=PROXY_TEST_DEFAULT_TARGET_URL, max_length=2048)
 
 
 @router.get("/i18n/{lang}", response_model=Dict[str, Any])
@@ -135,6 +150,38 @@ async def save_proxy_settings(
     """
     del current_user
     return await update_proxy_settings(payload)
+
+
+@router.post("/proxy-settings/test", response_model=ProxyTestResult)
+async def test_proxy_settings(
+    payload: ProxySettingsTestRequest,
+    current_user: User = Depends(get_current_user),
+) -> ProxyTestResult:
+    """测试通过指定代理访问外部网址的连通性。
+
+    Args:
+        payload: 待测试的代理地址和目标网址。
+        current_user: 当前登录用户。
+
+    Returns:
+        代理连通性测试结果。
+
+    Raises:
+        HTTPException: 代理地址或目标网址不合法。
+    """
+    del current_user
+    try:
+        proxy_url = ProxySettings(url=payload.url).url
+        if not proxy_url:
+            raise ValueError("proxy url is required")
+        target_url = normalize_proxy_test_target_url(payload.target_url)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+    return await test_proxy_connection(proxy_url, target_url)
 
 
 @router.get("/runtime-settings", response_model=RuntimeSettings)

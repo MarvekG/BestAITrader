@@ -166,6 +166,8 @@ const SETTINGS_TAB_KEYS = new Set([
 
 const formatPercent = (value?: number): string => `${((value || 0) * 100).toFixed(2)}%`;
 
+const DEFAULT_PROXY_TEST_TARGET_URL = 'https://www.deepseek.com';
+
 type UsageRoleRow = {
   role: string;
   calls: number;
@@ -253,6 +255,9 @@ export const SettingsPage: React.FC = () => {
   const [proxySettingsForm] = Form.useForm<ProxySettings>();
   const [proxySettingsLoading, setProxySettingsLoading] = useState(false);
   const [proxySettingsSaving, setProxySettingsSaving] = useState(false);
+  const [proxyTestTargetUrl, setProxyTestTargetUrl] = useState(DEFAULT_PROXY_TEST_TARGET_URL);
+  const [proxyTestLoading, setProxyTestLoading] = useState(false);
+  const [proxyTestOutput, setProxyTestOutput] = useState('');
   const [tushareLoading, setTushareLoading] = useState(false);
   const [dataSourceTestLoading, setDataSourceTestLoading] = useState<Partial<Record<DataSourceConfigTestKey, boolean>>>({});
   const [dataSourceTestOutputs, setDataSourceTestOutputs] = useState<Partial<Record<DataSourceConfigTestKey, string>>>({});
@@ -1539,6 +1544,41 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  const handleTestProxySettings = async () => {
+    const proxyUrl = String(proxySettingsForm.getFieldValue('url') ?? '').trim();
+    if (!proxyUrl) {
+      message.warning(t('settings.proxy_test_url_required'));
+      return;
+    }
+    const targetUrl = proxyTestTargetUrl.trim();
+    if (!targetUrl) {
+      message.warning(t('settings.proxy_test_target_required'));
+      return;
+    }
+
+    setProxyTestLoading(true);
+    try {
+      const result = await proxySettingsApi.testProxySettings({
+        url: proxyUrl,
+        target_url: targetUrl,
+      });
+      setProxyTestOutput(formatApiOutput(result));
+      if (result.status === 'success') {
+        message.success(t('settings.proxy_test_success'));
+      } else {
+        message.warning(t('settings.proxy_test_failed'));
+      }
+    } catch (error) {
+      const responseData = getApiErrorResponseData(error);
+      setProxyTestOutput(formatApiOutput(
+        responseData || { error: getApiErrorMessage(error, t('common.error')) },
+      ));
+      message.error(t('settings.proxy_test_failed'));
+    } finally {
+      setProxyTestLoading(false);
+    }
+  };
+
   const handleTestDataSourceConfig = async (key: DataSourceConfigTestKey) => {
     setDataSourceTestLoading((prev) => ({ ...prev, [key]: true }));
     try {
@@ -1934,6 +1974,29 @@ export const SettingsPage: React.FC = () => {
                       allowClear
                     />
                   </Form.Item>
+                  <Form.Item
+                    label={t('settings.proxy_test_target_url')}
+                    extra={t('settings.proxy_test_target_url_tip')}
+                  >
+                    <Space.Compact style={dataSourceInputStyle}>
+                      <Input
+                        value={proxyTestTargetUrl}
+                        onChange={(event) => setProxyTestTargetUrl(event.target.value)}
+                        placeholder={t('settings.proxy_test_target_url_placeholder')}
+                        allowClear
+                        onPressEnter={(event) => {
+                          event.preventDefault();
+                          void handleTestProxySettings();
+                        }}
+                      />
+                      <Button onClick={() => void handleTestProxySettings()} loading={proxyTestLoading}>
+                        {t('settings.proxy_test_button')}
+                      </Button>
+                    </Space.Compact>
+                  </Form.Item>
+                  {proxyTestOutput && (
+                    <pre style={diagnosticPanelStyle}>{proxyTestOutput}</pre>
+                  )}
                   <Form.Item>
                     <Button type="primary" htmlType="submit" loading={proxySettingsSaving}>
                       {t('settings.save_config')}

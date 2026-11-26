@@ -33,6 +33,7 @@ PUBLIC_HTTP_PATHS = {
         ("get", "/api/v1/mcp/servers"),
         ("get", "/api/v1/general/language"),
         ("get", "/api/v1/general/proxy-settings"),
+        ("post", "/api/v1/general/proxy-settings/test"),
         ("get", "/api/v1/memory-documents"),
     ],
 )
