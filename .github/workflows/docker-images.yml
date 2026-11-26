@@ -27,6 +27,7 @@ jobs:
           - component: frontend
             context: ./frontend
             dockerfile: ./frontend/Dockerfile
+            build_contexts: backend-locales=./backend/app/locales
           - component: sandbox
             context: ./sandbox
             dockerfile: ./sandbox/Dockerfile
@@ -67,6 +68,7 @@ jobs:
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.dockerfile }}
+          build-contexts: ${{ matrix.build_contexts }}
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}

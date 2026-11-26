@@ -15,7 +15,8 @@ i18n
         debug: false,
 
         backend: {
-            loadPath: '/api/v1/general/i18n/{{lng}}',
+            // 使用随前端发布的静态语言包，后端语言文件变更后重新构建即可。
+            loadPath: '/locales/{{lng}}.json',
         },
 
         interpolation: {

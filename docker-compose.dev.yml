@@ -214,6 +214,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      additional_contexts:
+        backend-locales: ./backend/app/locales
     container_name: bat.frontend
     restart: unless-stopped
     mem_limit: 2g
@@ -225,6 +227,7 @@ services:
     volumes:
       - ./frontend:/app # FOR DEBUG
       - /app/node_modules
+      - ./backend/app/locales:/app/public/locales:ro # Use backend locale files directly in dev
     healthcheck:
       test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:5173/" ]
       interval: 1m
