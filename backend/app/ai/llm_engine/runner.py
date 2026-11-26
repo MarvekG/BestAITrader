@@ -74,7 +74,7 @@ async def _update_task_status(
         await db.commit()
 
 
-async def _update_session_status(session_id: str, status: str):
+async def update_session_status(session_id: str, status: str):
     """异步更新会话状态。
 
     Args:
@@ -231,7 +231,7 @@ async def run_analysis_task(
                 error_message=error_message
             )
             if session_id:
-                await _update_session_status(session_id, "failed")
+                await update_session_status(session_id, "failed")
                 await send_debate_status(session_id, "error")
             return {"status": "failed", "error": error_message, "result": final_state}
         else:
@@ -242,7 +242,7 @@ async def run_analysis_task(
                 result=final_state
             )
             if session_id:
-                await _update_session_status(session_id, "completed")
+                await update_session_status(session_id, "completed")
                 await send_debate_status(session_id, "completed")
             return final_state
 
@@ -256,7 +256,7 @@ async def run_analysis_task(
         )
         if session_id:
             try:
-                await _update_session_status(session_id, "failed")
+                await update_session_status(session_id, "failed")
                 await send_debate_status(session_id, "error")
             except Exception as ws_err:
                 logger.error(f"Failed to send error status via WS: {ws_err}")

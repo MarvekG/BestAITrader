@@ -9,7 +9,6 @@ from fastapi import BackgroundTasks
 from sqlalchemy import select
 
 from app.ai.llm_engine.debate_concurrency import (
-    DebateConcurrencyLimitReached,
     DebateStockTaskAlreadyRunning,
     ensure_debate_launch_available,
     format_ai_analysis_task_name,
@@ -209,13 +208,6 @@ async def _handle_position_discipline_trigger(
             "stock_code": item["stock_code"],
             "task_id": exc.task_id,
         }
-    except DebateConcurrencyLimitReached as exc:
-        return {
-            "status": "skipped",
-            "reason": "concurrency_limit",
-            "stock_code": item["stock_code"],
-            "error": str(exc),
-        }
     if launch.get("status") == "failed":
         return {"stock_code": item["stock_code"], **launch}
 
@@ -284,14 +276,6 @@ async def _create_and_schedule_position_discipline_debate(
         ),
     )
     session_id = str(session.session_id)
-    task_parameters = {
-        "session_id": session_id,
-        "stock_code": stock_code,
-        "trading_frequency": trading_frequency,
-        "trading_strategy": trading_strategy,
-        "discipline_trigger": discipline_trigger,
-        "sync_before_analysis": True,
-    }
     launch_kwargs = {
         "session_id": session_id,
         "stock_code": stock_code,
@@ -305,11 +289,11 @@ async def _create_and_schedule_position_discipline_debate(
     task_info = await task_manager.submit_task(
         task_name=format_ai_analysis_task_name(stock_code),
         task_type="ai_analysis",
-        parameters=task_parameters,
+        parameters=dict(launch_kwargs),
         allow_concurrent=False,
         user_id=user_id,
         task_func=run_analysis_task if debate_launcher is None else None,
-        task_kwargs=launch_kwargs if debate_launcher is None else None,
+        defer_dispatch=True,
     )
     task_id = task_info["task_id"]
 

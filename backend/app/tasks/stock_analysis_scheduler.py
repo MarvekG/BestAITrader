@@ -7,7 +7,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.llm_engine.debate_concurrency import (
-    DebateConcurrencyLimitReached,
     DebateStockTaskAlreadyRunning,
     ensure_debate_launch_available,
     find_running_debate_task_for_stock,
@@ -238,10 +237,7 @@ async def _launch_analysis(
                     task_name=format_ai_analysis_task_name(stock.stock_code),
                     task_type="ai_analysis",
                     parameters={
-                        "session_id": str(session.session_id),
-                        "stock_code": stock.stock_code,
-                        "trading_frequency": session.trading_frequency,
-                        "trading_strategy": session.trading_strategy,
+                        **launch_kwargs,
                         "source": AUTO_ANALYSIS_SOURCE,
                         "warehouse_id": stock.id,
                         "user_id": stock.user_id,
@@ -249,11 +245,11 @@ async def _launch_analysis(
                     allow_concurrent=False,
                     user_id=stock.user_id,
                     task_func=run_analysis_task,
-                    task_kwargs=launch_kwargs,
+                    defer_dispatch=True,
                 )
                 if not task_info.get("new_task", True):
                     return None
-            except (DebateConcurrencyLimitReached, DebateStockTaskAlreadyRunning) as exc:
+            except DebateStockTaskAlreadyRunning as exc:
                 logger.info("Auto analysis skipped for %s: %s", stock.stock_code, exc)
                 stock.last_auto_analysis_error = str(exc)[:1000]
                 db.add(stock)

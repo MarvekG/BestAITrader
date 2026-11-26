@@ -48,6 +48,7 @@ export interface DebateRunResponse {
   status: string;
   message: string;
   new_task: boolean;
+  queued?: boolean;
   session?: Session;
 }
 

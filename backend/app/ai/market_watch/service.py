@@ -13,7 +13,6 @@ from fastapi import BackgroundTasks
 from sqlalchemy import select
 
 from app.ai.llm_engine.debate_concurrency import (
-    DebateConcurrencyLimitReached,
     DebateStockTaskAlreadyRunning,
     ensure_debate_launch_available,
     find_running_debate_task_for_stock,
@@ -829,28 +828,6 @@ async def _maybe_launch_debate(
             reason="existing_task",
         )
         return {"status": "skipped", "reason": "existing_task", "stock_code": stock_code, "task_id": exc.task_id}
-    except DebateConcurrencyLimitReached as exc:
-        logger.info(
-            "Market watch debate launch skipped",
-            extra={
-                "user_id": user_id,
-                "stock_code": stock_code,
-                "reason": "concurrency_limit",
-                "running_count": exc.running_count,
-                "max_concurrent": exc.max_concurrent,
-            },
-        )
-        await _audit_debate_skip(
-            user_id=user_id,
-            decision=decision,
-            reason="concurrency_limit",
-        )
-        return {
-            "status": "skipped",
-            "reason": "concurrency_limit",
-            "stock_code": stock_code,
-            "error": str(exc),
-        }
     except LaunchSchedulingError as exc:
         logger.exception(
             "Market watch debate launch scheduling failed",
@@ -1013,13 +990,6 @@ async def _create_and_schedule_debate(
         ),
     )
     session_id = str(session.session_id)
-    task_parameters = {
-        "session_id": session_id,
-        "stock_code": stock_code,
-        "trading_frequency": trading_frequency,
-        "trading_strategy": trading_strategy,
-        "sync_before_analysis": True,
-    }
     launch_kwargs = {
         "session_id": session_id,
         "stock_code": stock_code,
@@ -1032,11 +1002,11 @@ async def _create_and_schedule_debate(
     task_info = await task_manager.submit_task(
         task_name=format_ai_analysis_task_name(stock_code),
         task_type="ai_analysis",
-        parameters=task_parameters,
+        parameters=dict(launch_kwargs),
         allow_concurrent=False,
         user_id=user_id,
         task_func=run_analysis_task if debate_launcher is None else None,
-        task_kwargs=launch_kwargs if debate_launcher is None else None,
+        defer_dispatch=True,
     )
     task_id = task_info["task_id"]
 

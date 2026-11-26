@@ -133,4 +133,8 @@ async def save_runtime_settings(
         Updated system runtime settings.
     """
     del current_user
-    return await update_runtime_settings(payload)
+    settings = await update_runtime_settings(payload)
+    from app.ai.llm_engine.debate_concurrency import dispatch_pending_debate_tasks_safely
+
+    await dispatch_pending_debate_tasks_safely()
+    return settings

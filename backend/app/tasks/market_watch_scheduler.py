@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -139,10 +138,8 @@ def _is_due(user_id: int, interval_seconds: int, now: datetime) -> bool:
 
 
 def _launch_debate_task(**launch_kwargs: Any) -> None:
-    """Schedule an AI analysis task from a background market watch scan."""
-    from app.ai.llm_engine.runner import run_analysis_task
+    """Trigger the debate dispatcher after a background market watch scan queues a task."""
+    from app.ai.llm_engine.debate_concurrency import schedule_debate_dispatch
 
-    asyncio.create_task(
-        run_analysis_task(**launch_kwargs),
-        name=f"market-watch-analysis-{launch_kwargs['task_id']}",
-    )
+    _ = launch_kwargs
+    schedule_debate_dispatch(name="market-watch-debate-dispatch")

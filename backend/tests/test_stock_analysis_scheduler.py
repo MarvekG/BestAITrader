@@ -120,8 +120,11 @@ async def test_auto_analysis_task_records_owner_user_id(async_db_session, monkey
     async def _noop_analysis(**_kwargs):
         return None
 
+    from app.ai.llm_engine import debate_concurrency
+
     monkeypatch.setattr(stock_analysis_scheduler, "sync_stock_data_before_analysis", _noop_sync)
     monkeypatch.setattr(stock_analysis_scheduler, "run_analysis_task", _noop_analysis)
+    monkeypatch.setattr(debate_concurrency, "run_analysis_task", _noop_analysis)
 
     launch_info = await stock_analysis_scheduler._launch_analysis(stock.id, datetime(2026, 5, 11, 9, 40))
 
@@ -132,7 +135,7 @@ async def test_auto_analysis_task_records_owner_user_id(async_db_session, monkey
 
 
 @pytest.mark.asyncio
-async def test_auto_analysis_respects_global_debate_concurrency_limit(async_db_session, monkeypatch):
+async def test_auto_analysis_queues_when_running_limit_reached(async_db_session, monkeypatch):
     user = User(username="auto_analysis_limit", email="auto_analysis_limit@example.com", password_hash="hash")
     async_db_session.add(user)
     await async_db_session.commit()
@@ -161,7 +164,13 @@ async def test_auto_analysis_respects_global_debate_concurrency_limit(async_db_s
 
     launch_info = await stock_analysis_scheduler._launch_analysis(stock.id, datetime(2026, 5, 11, 9, 40))
 
-    assert launch_info is None
-    assert await async_db_session.scalar(select(func.count()).select_from(AsyncTask)) == 1
+    assert launch_info is not None
+    assert await async_db_session.scalar(select(func.count()).select_from(AsyncTask)) == 2
+    queued_task = await async_db_session.scalar(
+        select(AsyncTask).where(AsyncTask.task_id == launch_info["task_id"])
+    )
+    assert queued_task is not None
+    assert queued_task.status == "pending"
     await async_db_session.refresh(stock)
-    assert "AI投研辩论并发数已达上限" in stock.last_auto_analysis_error
+    assert stock.last_auto_analysis_task_id == launch_info["task_id"]
+    assert stock.last_auto_analysis_error is None
