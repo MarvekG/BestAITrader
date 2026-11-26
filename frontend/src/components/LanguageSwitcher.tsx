@@ -5,19 +5,22 @@ import { Globe } from 'lucide-react';
 import { systemApi } from '../api/system';
 import type { AppLanguage } from '../i18n/language';
 import { normalizeLanguage, storeLanguage } from '../i18n/language';
+import { getAuthToken } from '../services/authSession';
 import { useFeedback } from '../hooks/useFeedback';
 
 interface LanguageSwitcherProps {
     block?: boolean;
+    syncWithBackend?: boolean;
 }
 
-const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ block = false }) => {
+const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ block = false, syncWithBackend = true }) => {
     const { t, i18n } = useTranslation();
     const message = useFeedback();
     const [language, setLanguage] = React.useState<AppLanguage>(
         normalizeLanguage(i18n.resolvedLanguage || i18n.language)
     );
     const [loading, setLoading] = React.useState(false);
+    const canSyncWithBackend = syncWithBackend && Boolean(getAuthToken());
 
     const applyLanguage = React.useCallback(
         async (nextLanguage: AppLanguage) => {
@@ -33,6 +36,10 @@ const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ block = false }) =>
     }, [i18n.language, i18n.resolvedLanguage]);
 
     React.useEffect(() => {
+        if (!canSyncWithBackend) {
+            return;
+        }
+
         let mounted = true;
 
         systemApi
@@ -52,7 +59,7 @@ const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ block = false }) =>
         return () => {
             mounted = false;
         };
-    }, [applyLanguage]);
+    }, [applyLanguage, canSyncWithBackend]);
 
     const changeLanguage = async (value: AppLanguage) => {
         const previousLanguage = language;
@@ -60,6 +67,11 @@ const LanguageSwitcher: React.FC<LanguageSwitcherProps> = ({ block = false }) =>
 
         setLoading(true);
         await applyLanguage(nextLanguage);
+
+        if (!canSyncWithBackend) {
+            setLoading(false);
+            return;
+        }
 
         try {
             const response = await systemApi.updateLanguage(nextLanguage);

@@ -93,7 +93,7 @@ export const Login: React.FC = () => {
     }}>
       <div style={{ position: 'absolute', right: 24, top: 24, display: 'flex', alignItems: 'center', gap: 12 }}>
         <ThemeSwitcher />
-        <LanguageSwitcher />
+        <LanguageSwitcher syncWithBackend={false} />
       </div>
       <Card
         style={{ width: 400, maxWidth: 'calc(100vw - 32px)', background: colorBgContainer, border: `1px solid ${colorBorderSecondary}` }}
@@ -113,6 +113,7 @@ export const Login: React.FC = () => {
             <Input
               prefix={<UserOutlined style={{ color: colorTextQuaternary }} />}
               placeholder={t('auth.username')}
+              autoComplete="username"
               size="large"
             />
           </Form.Item>
@@ -120,6 +121,7 @@ export const Login: React.FC = () => {
             <Input.Password
               prefix={<LockOutlined style={{ color: colorTextQuaternary }} />}
               placeholder={t('auth.password')}
+              autoComplete="current-password"
               size="large"
             />
           </Form.Item>
