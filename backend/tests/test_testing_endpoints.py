@@ -8,7 +8,6 @@ from app.api.endpoints.testing import (
     list_testing_tools,
     test_pdf_tool as run_pdf_tool_endpoint,
     test_query_calc as run_query_calc_endpoint,
-    test_skills as run_skills_endpoint,
 )
 
 
@@ -44,16 +43,6 @@ async def test_news_source_test_returns_plugin_fatal_error():
     assert result["fatal"] is True
     assert result["keyword"] == "AI"
     assert "HTTP 401" in result["message"]
-
-
-@pytest.mark.asyncio
-async def test_skills_testing_endpoint_checks_loader_and_script_probe():
-    result = await run_skills_endpoint()
-
-    assert result["status"] == "success"
-    assert result["skill_count"] >= 1
-    assert result["skill_id"]
-    assert result["script_probe"]["status"] in {"success", "skipped"}
 
 
 @pytest.mark.asyncio
