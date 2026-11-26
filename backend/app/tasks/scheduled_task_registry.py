@@ -39,6 +39,7 @@ def load_scheduled_tasks() -> ScheduledTaskSnapshot:
     """
     from app.tasks import account_equity_snapshot_scheduler
     from app.tasks import async_task_cleanup_scheduler
+    from app.tasks import debate_dispatch_scheduler
     from app.tasks import experience_review_scheduler
     from app.tasks import llm_usage_cleanup_scheduler
     from app.tasks import market_watch_scheduler
@@ -52,6 +53,7 @@ def load_scheduled_tasks() -> ScheduledTaskSnapshot:
     for module in (
         async_task_cleanup_scheduler,
         stock_analysis_scheduler,
+        debate_dispatch_scheduler,
         market_watch_scheduler,
         experience_review_scheduler,
         llm_usage_cleanup_scheduler,

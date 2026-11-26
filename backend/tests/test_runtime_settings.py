@@ -114,3 +114,90 @@ async def test_debate_run_queues_when_running_limit_reached(client, auth_headers
     queued_task = next(task for task in tasks if task.status == "pending")
     assert queued_task.parameters["stock_code"] == "000002"
     assert queued_task.parameters["session_id"] == str(new_session_id)
+
+
+@pytest.mark.asyncio
+async def test_runtime_settings_increase_dispatches_queued_tasks(
+    client,
+    auth_headers,
+    async_db_session,
+    monkeypatch,
+) -> None:
+    """提高运行并发上限后应立即调度排队中的任务。"""
+    client.put(
+        "/api/v1/general/runtime-settings",
+        headers=auth_headers,
+        json={"ai_debate_max_concurrent": 1},
+    )
+
+    user = (await async_db_session.execute(select(User))).scalars().first()
+    running_session_id = uuid4()
+    queued_session_id = uuid4()
+    running_task = AsyncTask(
+        task_name="AI Analysis - 000001",
+        task_type="ai_analysis",
+        status="running",
+        allow_concurrent=False,
+        parameters={
+            "session_id": str(running_session_id),
+            "stock_code": "000001",
+            "trading_frequency": "daily",
+            "trading_strategy": "value",
+        },
+        user_id=user.id,
+    )
+    queued_task = AsyncTask(
+        task_name="AI Analysis - 000002",
+        task_type="ai_analysis",
+        status="pending",
+        allow_concurrent=False,
+        parameters={
+            "session_id": str(queued_session_id),
+            "stock_code": "000002",
+            "trading_frequency": "daily",
+            "trading_strategy": "value",
+        },
+        user_id=user.id,
+    )
+    async_db_session.add_all([
+        Session(
+            session_id=running_session_id,
+            user_id=user.id,
+            stock_code="000001",
+            trading_frequency="daily",
+            trading_strategy="value",
+            status="active",
+        ),
+        Session(
+            session_id=queued_session_id,
+            user_id=user.id,
+            stock_code="000002",
+            trading_frequency="daily",
+            trading_strategy="value",
+            status="active",
+        ),
+        running_task,
+        queued_task,
+    ])
+    await async_db_session.commit()
+
+    submitted: list[str] = []
+
+    def _fake_submit_task(*, task_id, task_func, task_kwargs, respect_global_limit):
+        assert respect_global_limit is False
+        submitted.append(task_id)
+        return True
+
+    monkeypatch.setattr(
+        "app.tasks.async_task_runner.async_task_runner.submit_task",
+        _fake_submit_task,
+    )
+
+    response = client.put(
+        "/api/v1/general/runtime-settings",
+        headers=auth_headers,
+        json={"ai_debate_max_concurrent": 2},
+    )
+
+    assert response.status_code == 200
+    assert submitted == [queued_task.task_id]
