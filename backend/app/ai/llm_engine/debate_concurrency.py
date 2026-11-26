@@ -19,6 +19,7 @@ DEBATE_FINISHED_STATUSES = ("completed", "failed")
 
 _dispatch_locks: dict[int, asyncio.Lock] = {}
 _dispatched_task_ids: set[str] = set()
+_background_dispatch_tasks: set[asyncio.Task[None]] = set()
 
 
 def _get_dispatch_lock() -> asyncio.Lock:
@@ -204,95 +205,157 @@ async def _list_pending_debate_tasks(*, limit: int, exclude_ids: set[str]) -> li
         return list(result.scalars().all())
 
 
-async def _mark_task_failed(task_id: str, error_message: str) -> None:
-    """把调度失败的任务标记为 failed，避免任务永久停留在 pending。
+async def _mark_task_failed(task: AsyncTask, error_message: str) -> None:
+    """把调度失败的任务标记为 failed，并同步会话失败状态。
 
     Args:
-        task_id: 异步任务 ID。
+        task: 调度失败的 AI 分析异步任务。
         error_message: 调度失败原因。
     """
+    from app.ai.llm_engine.runner import update_session_status
+    from app.api.endpoints.debate_ws import send_debate_status
     from app.tasks.task_manager import task_manager
 
-    await task_manager.update_task_status(
-        task_id=task_id,
-        status="failed",
-        error_message=error_message,
-        notify_dispatcher=False,
-    )
+    try:
+        await task_manager.update_task_status(
+            task_id=task.task_id,
+            status="failed",
+            error_message=error_message,
+            notify_dispatcher=False,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to mark debate task failed",
+            extra={"task_id": task.task_id},
+        )
+        return
+
+    parameters = task.parameters if isinstance(task.parameters, dict) else {}
+    session_id = parameters.get("session_id")
+    if not session_id:
+        return
+    try:
+        await update_session_status(str(session_id), "failed")
+        await send_debate_status(str(session_id), "error")
+    except Exception:
+        logger.exception(
+            "Failed to mark debate session failed after dispatch failure",
+            extra={"task_id": task.task_id, "session_id": str(session_id)},
+        )
 
 
 async def _prune_dispatched_task_ids() -> None:
-    """清理已结束或已删除任务在调度集合中的残留记录。"""
+    """清理已结束、已开始运行或已删除任务在调度集合中的残留记录。"""
     if not _dispatched_task_ids:
         return
     async with database_module.AsyncSessionLocal() as db:
         result = await db.execute(
             select(AsyncTask.task_id).where(
                 AsyncTask.task_id.in_(list(_dispatched_task_ids)),
-                AsyncTask.status.in_(DEBATE_ACTIVE_STATUSES),
+                AsyncTask.status == "pending",
             )
         )
-        active_ids = set(result.scalars().all())
-    _dispatched_task_ids.intersection_update(active_ids)
+        pending_ids = set(result.scalars().all())
+    _dispatched_task_ids.intersection_update(pending_ids)
 
 
 async def dispatch_pending_debate_tasks() -> int:
     """按 FIFO 顺序启动排队中的辩论任务，直到达到运行并发上限。
 
+    调度失败的任务会立即标记为 failed，并继续尝试后续任务，避免队首无效
+    任务长期阻塞队列。
+
     Returns:
         本次实际提交到后台运行器的任务数量。
     """
     dispatched_count = 0
+    attempted_task_ids: set[str] = set()
     async with _get_dispatch_lock():
-        await _prune_dispatched_task_ids()
-        max_concurrent = (await get_runtime_settings()).ai_debate_max_concurrent
-        running_count = await count_running_debate_tasks()
-        available = max_concurrent - running_count - len(_dispatched_task_ids)
-        if available <= 0:
-            return 0
+        while True:
+            await _prune_dispatched_task_ids()
+            max_concurrent = (await get_runtime_settings()).ai_debate_max_concurrent
+            running_count = await count_running_debate_tasks()
+            available = max_concurrent - running_count - len(_dispatched_task_ids)
+            if available <= 0:
+                break
 
-        pending_tasks = await _list_pending_debate_tasks(
-            limit=available,
-            exclude_ids=set(_dispatched_task_ids),
-        )
-        for task in pending_tasks:
-            try:
-                task_kwargs = build_debate_task_kwargs(task)
-            except ValueError as exc:
-                logger.error(
-                    "Failed to build debate task kwargs",
-                    extra={"task_id": task.task_id, "error": str(exc)},
-                )
-                await _mark_task_failed(task.task_id, str(exc))
-                continue
+            pending_tasks = await _list_pending_debate_tasks(
+                limit=available,
+                exclude_ids=set(_dispatched_task_ids) | attempted_task_ids,
+            )
+            if not pending_tasks:
+                break
 
-            _dispatched_task_ids.add(task.task_id)
-            error_message = "Failed to submit debate task to async task runner"
-            try:
-                from app.tasks.async_task_runner import async_task_runner
+            for task in pending_tasks:
+                attempted_task_ids.add(task.task_id)
+                try:
+                    task_kwargs = build_debate_task_kwargs(task)
+                except ValueError as exc:
+                    logger.error(
+                        "Failed to build debate task kwargs",
+                        extra={"task_id": task.task_id, "error": str(exc)},
+                    )
+                    await _mark_task_failed(task, str(exc))
+                    continue
 
-                submitted = async_task_runner.submit_task(
-                    task_id=task.task_id,
-                    task_func=run_analysis_task,
-                    task_kwargs=task_kwargs,
-                )
-            except Exception as exc:
-                logger.exception(
-                    "Failed to dispatch debate task",
-                    extra={"task_id": task.task_id},
-                )
-                submitted = False
-                error_message = str(exc)
+                _dispatched_task_ids.add(task.task_id)
+                error_message = "Failed to submit debate task to async task runner"
+                try:
+                    from app.tasks.async_task_runner import async_task_runner
 
-            if submitted:
-                dispatched_count += 1
-                logger.info("Debate task dispatched", extra={"task_id": task.task_id})
-                continue
+                    submitted = async_task_runner.submit_task(
+                        task_id=task.task_id,
+                        task_func=run_analysis_task,
+                        task_kwargs=task_kwargs,
+                        respect_global_limit=False,
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "Failed to dispatch debate task",
+                        extra={"task_id": task.task_id},
+                    )
+                    submitted = False
+                    error_message = str(exc)
 
-            _dispatched_task_ids.discard(task.task_id)
-            await _mark_task_failed(task.task_id, error_message)
+                if submitted:
+                    dispatched_count += 1
+                    logger.info("Debate task dispatched", extra={"task_id": task.task_id})
+                    continue
+
+                _dispatched_task_ids.discard(task.task_id)
+                await _mark_task_failed(task, error_message)
 
     return dispatched_count
+
+
+def is_debate_task_dispatched(task_id: str) -> bool:
+    """判断任务是否已提交给后台运行器但尚未进入 running。
+
+    Args:
+        task_id: 异步任务 ID。
+
+    Returns:
+        已提交给运行器时返回 True。
+    """
+    return task_id in _dispatched_task_ids
+
+
+def schedule_debate_dispatch(*, name: str) -> None:
+    """在后台触发一次辩论队列调度，并记录未处理异常。
+
+    Args:
+        name: asyncio 任务名称，便于排查调度来源。
+    """
+
+    async def _run() -> None:
+        try:
+            await dispatch_pending_debate_tasks()
+        except Exception:
+            logger.exception("Failed to dispatch pending debate tasks")
+
+    task = asyncio.create_task(_run(), name=name)
+    _background_dispatch_tasks.add(task)
+    task.add_done_callback(_background_dispatch_tasks.discard)
 
 
 async def notify_debate_task_status(task_id: str, status: str) -> None:
@@ -313,4 +376,5 @@ async def notify_debate_task_status(task_id: str, status: str) -> None:
 def reset_debate_dispatcher_state() -> None:
     """清空进程内调度状态，仅供测试使用。"""
     _dispatched_task_ids.clear()
+    _background_dispatch_tasks.clear()
     _dispatch_locks.clear()

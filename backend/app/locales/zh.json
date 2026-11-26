@@ -510,6 +510,7 @@
     "market_data": "市场数据",
     "status_active": "进行中",
     "status_completed": "已完成",
+    "status_failed": "失败",
     "status_queued": "排队中",
     "messages": {
       "debate_started": "辩论已开始",
@@ -1505,7 +1506,7 @@
     "runtime_load_failed": "加载运行参数失败",
     "runtime_save_failed": "保存运行参数失败",
     "ai_debate_max_concurrent": "AI投研辩论最大运行并发数",
-    "ai_debate_max_concurrent_tip": "限制同时运行中的 AI投研辩论任务数量；超出的任务按提交顺序排队。默认 5，用于控制 LLM 和数据源资源消耗。",
+    "ai_debate_max_concurrent_tip": "限制同时运行中的 AI投研辩论任务数量；超出的任务按提交顺序排队，服务重启后排队任务不会恢复。默认 5，用于控制 LLM 和数据源资源消耗。",
     "ai_debate_max_concurrent_required": "请输入 AI投研辩论最大并发数",
     "ai_debate_max_concurrent_range": "并发数必须在 1 到 100 之间",
     "automation": "自动化任务",

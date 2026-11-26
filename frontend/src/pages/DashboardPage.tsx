@@ -101,14 +101,30 @@ export const DashboardPage: React.FC = () => {
       const session = await sessionApi.get(activeSessionId);
       setActiveSession(session);
       window.dispatchEvent(new CustomEvent(debateSessionsRefreshEvent));
+      if (session.status === 'failed') {
+        setLoading(false);
+        setIsDebateCompleted(false);
+        message.error({ content: t('dashboard.messages.debate_error'), key: debateProgressMessageKey });
+      } else if (session.status === 'completed') {
+        setLoading(false);
+        setIsDebateCompleted(true);
+        message.success({ content: t('dashboard.messages.debate_completed'), key: debateProgressMessageKey });
+      } else if (session.task_status === 'running') {
+        message.loading({ content: t('dashboard.messages.debate_started'), key: debateProgressMessageKey, duration: 0 });
+      }
     } catch (error) {
       console.error('Failed to refresh active session:', error);
     }
-  }, [activeSessionId, setActiveSession]);
+  }, [activeSessionId, message, setActiveSession, t]);
 
-  // 排队中的任务需要轮询刷新，避免 WebSocket “started” 事件在页面连接前丢失后一直显示排队中。
+  const shouldPollSession = isRouteSessionActive && (
+    activeSession?.task_status === 'pending'
+    || (!wsConnected && (loading || activeSession?.task_status === 'running'))
+  );
+
+  // 排队或 WebSocket 断线时轮询刷新，避免 started/completed 事件丢失后一直显示排队中或加载中。
   useEffect(() => {
-    if (!isRouteSessionActive || activeSession?.task_status !== 'pending') {
+    if (!shouldPollSession || !activeSessionId) {
       return;
     }
     void refreshActiveSession();
@@ -116,7 +132,7 @@ export const DashboardPage: React.FC = () => {
       void refreshActiveSession();
     }, 5000);
     return () => window.clearInterval(intervalId);
-  }, [activeSession?.task_status, isRouteSessionActive, refreshActiveSession]);
+  }, [activeSessionId, refreshActiveSession, shouldPollSession]);
 
   // WebSocket连接（增强版：支持自动重连和心跳）
   useEffect(() => {
@@ -344,6 +360,14 @@ export const DashboardPage: React.FC = () => {
     );
   }
 
+  const sessionStatusBadge = activeSession.status === 'failed'
+    ? { status: 'error' as const, text: t('dashboard.status_failed') }
+    : activeSession.status === 'completed'
+      ? { status: 'default' as const, text: t('dashboard.status_completed') }
+      : activeSession.task_status === 'pending'
+        ? { status: 'warning' as const, text: t('dashboard.status_queued') }
+        : { status: 'processing' as const, text: t('dashboard.status_active') };
+
   return (
     <div style={{ height: '100%' }}>
       <Row gutter={0} style={{ height: '100%' }}>
@@ -358,20 +382,8 @@ export const DashboardPage: React.FC = () => {
                   text={wsConnected ? "Live" : "Offline"}
                 />
                 <Badge
-                  status={
-                    activeSession.status !== 'active'
-                      ? 'default'
-                      : activeSession.task_status === 'pending'
-                        ? 'warning'
-                        : 'processing'
-                  }
-                  text={
-                    activeSession.status !== 'active'
-                      ? t('dashboard.status_completed')
-                      : activeSession.task_status === 'pending'
-                        ? t('dashboard.status_queued')
-                        : t('dashboard.status_active')
-                  }
+                  status={sessionStatusBadge.status}
+                  text={sessionStatusBadge.text}
                   style={{ marginLeft: 8, fontSize: 12, opacity: 0.8 }}
                 />
               </div>

@@ -10,6 +10,8 @@ from sqlalchemy import select
 
 from app.core.request_context import get_request_id
 from app.models.async_task import AsyncTask
+from app.models.session import Session
+from app.models.user import User
 from app.tasks.async_task_runner import AsyncTaskRunner
 from app.tasks.task_manager import TaskManager
 
@@ -127,6 +129,42 @@ async def test_async_task_runner_awaits_partial_async_task(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_task_runner_can_bypass_global_limit(monkeypatch) -> None:
+    """辩论调度器可绕过运行器全局信号量，按自身并发上限启动任务。"""
+    blocker_started = asyncio.Event()
+    release_blocker = asyncio.Event()
+    bypass_completed = asyncio.Event()
+
+    async def _blocker() -> dict[str, str]:
+        blocker_started.set()
+        await release_blocker.wait()
+        return {"status": "ok"}
+
+    async def _bypass() -> dict[str, str]:
+        bypass_completed.set()
+        return {"status": "ok"}
+
+    async def _ignore_status(**kwargs):
+        del kwargs
+
+    monkeypatch.setattr("app.tasks.task_manager.task_manager.update_task_status", _ignore_status)
+
+    runner = AsyncTaskRunner(max_concurrent_tasks=1)
+    runner.submit_task(task_id="task-blocker", task_func=_blocker)
+    await blocker_started.wait()
+
+    runner.submit_task(
+        task_id="task-bypass",
+        task_func=_bypass,
+        respect_global_limit=False,
+    )
+
+    await asyncio.wait_for(bypass_completed.wait(), timeout=1)
+    release_blocker.set()
+    await runner.wait_for_all()
+
+
+@pytest.mark.asyncio
 async def test_async_task_runner_stop_all_waits_for_cancelled_tasks(monkeypatch) -> None:
     entered = asyncio.Event()
     cancelled = asyncio.Event()
@@ -235,3 +273,46 @@ async def test_cleanup_zombie_tasks_marks_pending_and_running_failed(async_db_se
     }
     assert all(task.error_message == "Task interrupted by server restart" for task in tasks)
     assert all(task.completed_at is not None for task in tasks)
+
+
+@pytest.mark.asyncio
+async def test_cleanup_zombie_tasks_marks_analysis_session_failed(async_db_session) -> None:
+    """重启清理 AI 分析任务时同步把会话标记为失败。"""
+    manager = TaskManager()
+    user = User(username="zombie_session", email="zombie_session@example.com", password_hash="hash")
+    async_db_session.add(user)
+    await async_db_session.commit()
+    await async_db_session.refresh(user)
+
+    session = Session(
+        user_id=user.id,
+        stock_code="000001.SZ",
+        trading_frequency="daily",
+        trading_strategy="value",
+        status="active",
+    )
+    async_db_session.add(session)
+    await async_db_session.commit()
+    await async_db_session.refresh(session)
+
+    async_db_session.add(
+        AsyncTask(
+            task_id="queued-analysis-task",
+            task_name="AI Analysis - 000001.SZ",
+            task_type="ai_analysis",
+            status="pending",
+            allow_concurrent=False,
+            parameters={
+                "session_id": str(session.session_id),
+                "stock_code": "000001.SZ",
+                "trading_frequency": "daily",
+                "trading_strategy": "value",
+            },
+        )
+    )
+    await async_db_session.commit()
+
+    assert await manager.cleanup_zombie_tasks() == 1
+
+    await async_db_session.refresh(session)
+    assert session.status == "failed"

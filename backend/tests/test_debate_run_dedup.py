@@ -53,7 +53,7 @@ async def test_run_debate_defaults_to_sync_before_analysis(client, test_db, monk
 
     assert response.status_code == 201
     assert submitted["parameters"]["sync_before_analysis"] is True
-    assert submitted["task_kwargs"]["sync_before_analysis"] is True
+    assert submitted["defer_dispatch"] is True
 
 
 async def _create_authenticated_user(client, session_factory, username: str):

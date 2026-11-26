@@ -237,10 +237,7 @@ async def _launch_analysis(
                     task_name=format_ai_analysis_task_name(stock.stock_code),
                     task_type="ai_analysis",
                     parameters={
-                        "session_id": str(session.session_id),
-                        "stock_code": stock.stock_code,
-                        "trading_frequency": session.trading_frequency,
-                        "trading_strategy": session.trading_strategy,
+                        **launch_kwargs,
                         "source": AUTO_ANALYSIS_SOURCE,
                         "warehouse_id": stock.id,
                         "user_id": stock.user_id,
@@ -248,7 +245,6 @@ async def _launch_analysis(
                     allow_concurrent=False,
                     user_id=stock.user_id,
                     task_func=run_analysis_task,
-                    task_kwargs=launch_kwargs,
                     defer_dispatch=True,
                 )
                 if not task_info.get("new_task", True):

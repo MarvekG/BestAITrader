@@ -7,6 +7,7 @@ ingestors where they already use ``run_in_executor``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import inspect
 import logging
@@ -40,6 +41,7 @@ class AsyncTaskRunner:
         *,
         request_id: str | None = None,
         persist_status: bool = True,
+        respect_global_limit: bool = True,
     ) -> bool:
         """
         提交后台任务到当前事件循环执行。
@@ -51,6 +53,8 @@ class AsyncTaskRunner:
             task_kwargs: 任务关键字参数。
             request_id: 任务执行期间绑定的请求 ID，未传入时复用当前请求上下文。
             persist_status: 是否把任务状态写入异步任务表。
+            respect_global_limit: 是否受运行器全局并发信号量限制。辩论任务由
+                调度器按运行时并发上限控制，可关闭该限制。
 
         Returns:
             是否提交成功。
@@ -63,7 +67,15 @@ class AsyncTaskRunner:
 
         try:
             task = asyncio.create_task(
-                self._run_task(task_id, task_func, task_args, task_kwargs, request_id, persist_status)
+                self._run_task(
+                    task_id,
+                    task_func,
+                    task_args,
+                    task_kwargs,
+                    request_id,
+                    persist_status,
+                    respect_global_limit,
+                )
             )
             self._active_tasks[task_id] = task
             task.add_done_callback(lambda completed_task: self._cleanup_task(task_id, completed_task))
@@ -87,6 +99,7 @@ class AsyncTaskRunner:
         task_kwargs: dict[str, Any],
         request_id: str,
         persist_status: bool,
+        respect_global_limit: bool,
     ) -> None:
         """
         在受限并发环境中执行任务并更新任务状态。
@@ -98,8 +111,10 @@ class AsyncTaskRunner:
             task_kwargs: 任务关键字参数。
             request_id: 任务执行期间绑定的请求 ID。
             persist_status: 是否把任务状态写入异步任务表。
+            respect_global_limit: 是否受运行器全局并发信号量限制。
         """
-        async with self._semaphore:
+        limit_context = self._semaphore if respect_global_limit else contextlib.nullcontext()
+        async with limit_context:
             request_token = set_request_id(request_id)
             try:
                 await self._update_status(task_id, "running", persist_status=persist_status)

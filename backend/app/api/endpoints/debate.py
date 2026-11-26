@@ -13,6 +13,7 @@ from app.ai.llm_engine.debate_concurrency import (
     find_running_debate_task_for_session,
     format_ai_analysis_task_name,
     ensure_debate_launch_available,
+    is_debate_task_dispatched,
 )
 from app.ai.llm_engine.runner import run_analysis_task  # 使用新的 LLM Engine
 from app.api.endpoints.debate_ws import send_debate_status
@@ -200,13 +201,6 @@ async def run_debate(
                 allow_concurrent=False,
                 user_id=current_user.id,
                 task_func=run_analysis_task,
-                task_kwargs={
-                    "session_id": str(session_id),
-                    "stock_code": stock_code,
-                    "trading_frequency": trading_frequency,
-                    "trading_strategy": trading_strategy,
-                    "sync_before_analysis": sync_before_analysis,
-                },
                 # 辩论任务统一由调度器按 running 上限启动；超出部分保持 pending 排队。
                 defer_dispatch=True,
             )
@@ -235,11 +229,12 @@ async def run_debate(
                 },
             )
 
-        queued = task_info["status"] == "pending"
+        task_status = task_info["status"]
+        queued = task_status == "pending" and not is_debate_task_dispatched(task_info["task_id"])
         response: Dict[str, Any] = {
             "task_id": task_info["task_id"],
             "session_id": str(session_id),
-            "status": task_info["status"],
+            "status": task_status,
             "message": (
                 i18n_service.t("tasks.ai_analysis_queued", task_id=task_info["task_id"])
                 if queued
@@ -250,7 +245,7 @@ async def run_debate(
         }
         if created_session and session is not None:
             # 新建会话的响应需要带上任务状态，前端据此显示“排队中”。
-            setattr(session, "task_status", task_info["status"])
+            setattr(session, "task_status", task_status)
             response["session"] = SessionResponse.model_validate(session).model_dump(mode="json")
         return response
 

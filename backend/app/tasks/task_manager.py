@@ -3,8 +3,9 @@ import json
 import logging
 from collections.abc import Callable
 from typing import Any, Dict, Optional
+from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import database as database_module
@@ -144,6 +145,9 @@ class TaskManager:
                 from app.ai.llm_engine.debate_concurrency import dispatch_pending_debate_tasks
 
                 await dispatch_pending_debate_tasks()
+                latest_task = await self.get_task_status(task_id=task_info["task_id"])
+                if latest_task:
+                    task_info["status"] = latest_task["status"]
             return task_info
 
         if task_func is not None:
@@ -331,9 +335,13 @@ class TaskManager:
     async def cleanup_zombie_tasks(self) -> int:
         """异步清理服务重启前遗留的运行中任务和陈旧待运行任务。
 
+        关联的 AI 分析会话也会同步标记为失败，避免会话停留在 active。
+
         Returns:
             被标记为失败的任务数量。
         """
+        from app.models.session import Session as AnalysisSession
+
         now = datetime.now()
         async with database_module.AsyncSessionLocal() as db:
             result = await db.execute(
@@ -342,10 +350,30 @@ class TaskManager:
                 )
             )
             zombie_tasks = result.scalars().all()
+            session_ids: set[UUID] = set()
             for task in zombie_tasks:
                 task.status = "failed"
                 task.error_message = "Task interrupted by server restart"
                 task.completed_at = now
+                if task.task_type != "ai_analysis":
+                    continue
+                parameters = task.parameters if isinstance(task.parameters, dict) else {}
+                session_id = parameters.get("session_id")
+                if not session_id:
+                    continue
+                try:
+                    session_ids.add(UUID(str(session_id)))
+                except ValueError:
+                    logger.warning(
+                        "Ignoring invalid session id on zombie task",
+                        extra={"task_id": task.task_id, "session_id": str(session_id)},
+                    )
+            if session_ids:
+                await db.execute(
+                    update(AnalysisSession)
+                    .where(AnalysisSession.session_id.in_(session_ids))
+                    .values(status="failed")
+                )
             if zombie_tasks:
                 await db.commit()
             return len(zombie_tasks)

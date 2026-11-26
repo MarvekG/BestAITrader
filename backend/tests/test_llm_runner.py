@@ -70,7 +70,7 @@ async def test_run_analysis_task_binds_session_user_context(monkeypatch, test_db
 
     monkeypatch.setattr(runner_module.database_module, "AsyncSessionLocal", test_db)
     monkeypatch.setattr(runner_module, "_update_task_status", AsyncMock())
-    monkeypatch.setattr(runner_module, "_update_session_status", AsyncMock())
+    monkeypatch.setattr(runner_module, "update_session_status", AsyncMock())
     monkeypatch.setattr(runner_module, "create_analyst_workflow", lambda: _FakeWorkflow())
     monkeypatch.setattr(debate_ws_module, "send_debate_status", _fake_send_debate_status)
     clear_current_user_id()
@@ -135,7 +135,7 @@ async def test_run_analysis_task_passes_session_user_to_pre_sync(monkeypatch, te
 
     monkeypatch.setattr(runner_module.database_module, "AsyncSessionLocal", test_db)
     monkeypatch.setattr(runner_module, "_update_task_status", AsyncMock())
-    monkeypatch.setattr(runner_module, "_update_session_status", AsyncMock())
+    monkeypatch.setattr(runner_module, "update_session_status", AsyncMock())
     monkeypatch.setattr(runner_module, "create_analyst_workflow", lambda: _FakeWorkflow())
     monkeypatch.setattr(debate_ws_module, "send_debate_status", _fake_send_debate_status)
     monkeypatch.setattr("app.tasks.analysis_data_sync.sync_stock_data_before_analysis", _fake_sync)
@@ -190,7 +190,7 @@ async def test_run_analysis_task_passes_trigger_reason_to_initial_state(monkeypa
 
     monkeypatch.setattr(runner_module.database_module, "AsyncSessionLocal", test_db)
     monkeypatch.setattr(runner_module, "_update_task_status", AsyncMock())
-    monkeypatch.setattr(runner_module, "_update_session_status", AsyncMock())
+    monkeypatch.setattr(runner_module, "update_session_status", AsyncMock())
     monkeypatch.setattr(runner_module, "create_analyst_workflow", lambda: _FakeWorkflow())
     monkeypatch.setattr(debate_ws_module, "send_debate_status", _fake_send_debate_status)
 
@@ -256,7 +256,7 @@ async def test_run_analysis_task_passes_discipline_trigger_to_initial_state(monk
     }
     monkeypatch.setattr(runner_module.database_module, "AsyncSessionLocal", test_db)
     monkeypatch.setattr(runner_module, "_update_task_status", AsyncMock())
-    monkeypatch.setattr(runner_module, "_update_session_status", AsyncMock())
+    monkeypatch.setattr(runner_module, "update_session_status", AsyncMock())
     monkeypatch.setattr(runner_module, "create_analyst_workflow", lambda: _FakeWorkflow())
     monkeypatch.setattr(debate_ws_module, "send_debate_status", _fake_send_debate_status)
 
@@ -289,7 +289,7 @@ async def test_run_analysis_task_returns_soft_failure_when_workflow_has_errors(m
 
     monkeypatch.setattr(runner_module, "_resolve_session_user_id", AsyncMock(return_value=None))
     monkeypatch.setattr(runner_module, "_update_task_status", AsyncMock())
-    monkeypatch.setattr(runner_module, "_update_session_status", AsyncMock())
+    monkeypatch.setattr(runner_module, "update_session_status", AsyncMock())
     monkeypatch.setattr(runner_module, "create_analyst_workflow", lambda: _FakeWorkflow())
     monkeypatch.setattr(debate_ws_module, "send_debate_status", _fake_send_debate_status)
 

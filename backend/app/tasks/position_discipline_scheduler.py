@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -101,7 +100,7 @@ def _is_due(user_id: int, interval_seconds: int, now: datetime) -> bool:
 
 def _launch_debate_task(**launch_kwargs: Any) -> None:
     """从后台扫描触发辩论队列调度。"""
-    from app.ai.llm_engine.debate_concurrency import dispatch_pending_debate_tasks
+    from app.ai.llm_engine.debate_concurrency import schedule_debate_dispatch
 
     _ = launch_kwargs
-    asyncio.create_task(dispatch_pending_debate_tasks(), name="position-discipline-debate-dispatch")
+    schedule_debate_dispatch(name="position-discipline-debate-dispatch")

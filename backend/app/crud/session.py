@@ -20,7 +20,7 @@ from app.schemas.session import SessionCreate, SessionUpdate
 
 class CRUDSession(CRUDBase[Session, SessionCreate, SessionUpdate]):
     async def _populate_metadata(self, db, sessions: Iterable[Session]) -> None:
-        """补齐会话响应需要的股票名称和结束时间。"""
+        """补齐会话响应需要的股票名称、结束时间和活动任务状态。"""
         session_list = list(sessions)
         if not session_list:
             return
@@ -35,34 +35,28 @@ class CRUDSession(CRUDBase[Session, SessionCreate, SessionUpdate]):
         active_task_status_map: dict[str, str] = {}
 
         async_task_result = await db.execute(
-            select(AsyncTask).where(
+            select(AsyncTask.status, AsyncTask.parameters, AsyncTask.completed_at).where(
                 AsyncTask.task_type == "ai_analysis",
-                AsyncTask.completed_at.isnot(None),
+                or_(
+                    AsyncTask.completed_at.isnot(None),
+                    AsyncTask.status.in_(("pending", "running")),
+                ),
             )
         )
-        for task in async_task_result.scalars().all():
-            parameters = task.parameters if isinstance(task.parameters, dict) else {}
-            task_session_id = parameters.get("session_id")
-            if task_session_id not in session_ids or task.completed_at is None:
-                continue
-            current_ended_at = ended_at_map.get(task_session_id)
-            if current_ended_at is None or task.completed_at > current_ended_at:
-                ended_at_map[task_session_id] = task.completed_at
-
-        active_task_result = await db.execute(
-            select(AsyncTask).where(
-                AsyncTask.task_type == "ai_analysis",
-                AsyncTask.status.in_(("pending", "running")),
-            )
-        )
-        for task in active_task_result.scalars().all():
-            parameters = task.parameters if isinstance(task.parameters, dict) else {}
+        for task_status, parameters, completed_at in async_task_result.all():
+            parameters = parameters if isinstance(parameters, dict) else {}
             task_session_id = parameters.get("session_id")
             if task_session_id not in session_ids:
                 continue
+            if completed_at is not None:
+                current_ended_at = ended_at_map.get(task_session_id)
+                if current_ended_at is None or completed_at > current_ended_at:
+                    ended_at_map[task_session_id] = completed_at
+            if task_status not in ("pending", "running"):
+                continue
             if active_task_status_map.get(task_session_id) == "running":
                 continue
-            active_task_status_map[task_session_id] = task.status
+            active_task_status_map[task_session_id] = task_status
 
         debate_result = await db.execute(
             select(DebateMessage.session_id, DebateMessage.created_at).where(
