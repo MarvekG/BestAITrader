@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Awaitable, Callable
 from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, HTTPException, status
@@ -195,6 +196,33 @@ def _build_plugin_test_result(results: list[dict[str, Any]]) -> Dict[str, Any]:
     return {"status": "success", "data": results}
 
 
+async def _test_plugin_api_keys(
+    api_keys: list[str],
+    query: str,
+    search_with_api_keys: Callable[..., Awaitable[list[dict[str, Any]]]],
+) -> Dict[str, Any]:
+    """
+    并行测试新闻插件的 API Key 列表。
+
+    Args:
+        api_keys: API Key 列表。
+        query: 测试查询词。
+        search_with_api_keys: 使用指定 Key 执行搜索的异步函数。
+
+    Returns:
+        包含每个 Key 测试结果的响应体，结果顺序与 api_keys 一致。
+    """
+
+    async def test_one(index: int, api_key: str) -> Dict[str, Any]:
+        results = await search_with_api_keys([api_key], query, limit=1)
+        return _attach_key_context(_build_plugin_test_result(results), index, api_key)
+
+    tested_results = await asyncio.gather(
+        *(test_one(index, api_key) for index, api_key in enumerate(api_keys, start=1))
+    )
+    return {"status": "completed", "results": list(tested_results)}
+
+
 def _build_tushare_test_result(data: Any) -> Dict[str, Any]:
     """
     将 Tushare 查询结果转换为配置测试响应。
@@ -267,17 +295,7 @@ async def test_tavily_config_key(request: Optional[DataSourceConfigTestRequest] 
         raw_api_keys = data_source_config.get(TAVILY_API_KEY_SETTING_KEY, [])
     api_keys = raw_api_keys if isinstance(raw_api_keys, list) else []
     api_keys = api_keys or [""]
-    return {
-        "status": "completed",
-        "results": [
-            _attach_key_context(
-                _build_plugin_test_result(await tavily.search_with_api_keys([api_key], query or "AI", limit=1)),
-                index,
-                api_key,
-            )
-            for index, api_key in enumerate(api_keys, start=1)
-        ],
-    }
+    return await _test_plugin_api_keys(api_keys, query or "AI", tavily.search_with_api_keys)
 
 
 @router.post("/config/test/newsapi", response_model=Dict[str, Any])
@@ -300,13 +318,4 @@ async def test_newsapi_config_key(request: Optional[DataSourceConfigTestRequest]
         raw_api_keys = data_source_config.get(NEWS_API_KEY_SETTING_KEY, [])
     api_keys = raw_api_keys if isinstance(raw_api_keys, list) else []
     api_keys = api_keys or [""]
-    results = []
-    for index, api_key in enumerate(api_keys, start=1):
-        results.append(
-            _attach_key_context(
-                _build_plugin_test_result(await newsapi.search_with_api_keys([api_key], query or "AI", limit=1)),
-                index,
-                api_key,
-            )
-        )
-    return {"status": "completed", "results": results}
+    return await _test_plugin_api_keys(api_keys, query or "AI", newsapi.search_with_api_keys)
