@@ -142,9 +142,9 @@ class TaskManager:
         if defer_dispatch:
             # 直接提供 task_func 的路径在此触发一次调度；使用外部 launcher 的路径由 launcher 触发。
             if task_func is not None:
-                from app.ai.llm_engine.debate_concurrency import dispatch_pending_debate_tasks
+                from app.ai.llm_engine.debate_concurrency import dispatch_pending_debate_tasks_safely
 
-                await dispatch_pending_debate_tasks()
+                await dispatch_pending_debate_tasks_safely()
                 latest_task = await self.get_task_status(task_id=task_info["task_id"])
                 if latest_task:
                     task_info["status"] = latest_task["status"]

@@ -35,6 +35,7 @@ export const DashboardPage: React.FC = () => {
   const [activeDashboardTab, setActiveDashboardTab] = useState('1');
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptsRef = useRef(0);
+  const userStartedDebateRef = useRef(false);
   const maxReconnectAttempts = 5;
   const heartbeatIntervalRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
   const activeSessionId = activeSession?.session_id;
@@ -91,6 +92,7 @@ export const DashboardPage: React.FC = () => {
     setMessageCount(0);
     setDebateMessages([]);
     setIsDebateCompleted(false);
+    userStartedDebateRef.current = false;
   }, [activeSessionId]);
 
   const refreshActiveSession = React.useCallback(async () => {
@@ -102,14 +104,16 @@ export const DashboardPage: React.FC = () => {
       setActiveSession(session);
       window.dispatchEvent(new CustomEvent(debateSessionsRefreshEvent));
       if (session.status === 'failed') {
+        userStartedDebateRef.current = false;
         setLoading(false);
         setIsDebateCompleted(false);
         message.error({ content: t('dashboard.messages.debate_error'), key: debateProgressMessageKey });
       } else if (session.status === 'completed') {
+        userStartedDebateRef.current = false;
         setLoading(false);
         setIsDebateCompleted(true);
         message.success({ content: t('dashboard.messages.debate_completed'), key: debateProgressMessageKey });
-      } else if (session.task_status === 'running') {
+      } else if (session.task_status === 'running' && userStartedDebateRef.current) {
         message.loading({ content: t('dashboard.messages.debate_started'), key: debateProgressMessageKey, duration: 0 });
       }
     } catch (error) {
@@ -205,11 +209,13 @@ export const DashboardPage: React.FC = () => {
               setMessageCount(0);
               void refreshActiveSession();
             } else if (data.status === 'completed') {
+              userStartedDebateRef.current = false;
               message.success({ content: t('dashboard.messages.debate_completed'), key: debateProgressMessageKey });
               setLoading(false);
               setIsDebateCompleted(true);
               void refreshActiveSession();
             } else if (data.status === 'error') {
+              userStartedDebateRef.current = false;
               message.error({ content: t('dashboard.messages.debate_error'), key: debateProgressMessageKey });
               setLoading(false);
               void refreshActiveSession();
@@ -302,6 +308,7 @@ export const DashboardPage: React.FC = () => {
     }
 
     setLoading(true);
+    userStartedDebateRef.current = true;
     try {
       const response = await debateApi.run({
         session_id: activeSession.session_id,
@@ -322,6 +329,7 @@ export const DashboardPage: React.FC = () => {
       // 注意: 这里不设置setLoading(false), 而是等待WebSocket通知完成
     } catch (error) {
       console.error(error);
+      userStartedDebateRef.current = false;
       const errorMsg = getApiErrorMessage(error, t('common.error'));
       message.error({ content: errorMsg, key: debateProgressMessageKey });
       setLoading(false); // 只有API调用失败时才在这里重置

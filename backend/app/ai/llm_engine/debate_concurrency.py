@@ -328,6 +328,19 @@ async def dispatch_pending_debate_tasks() -> int:
     return dispatched_count
 
 
+async def dispatch_pending_debate_tasks_safely() -> int:
+    """触发一次队列调度，调度异常只记录日志，不影响调用方主流程。
+
+    Returns:
+        本次实际提交到后台运行器的任务数量；调度异常时返回 0。
+    """
+    try:
+        return await dispatch_pending_debate_tasks()
+    except Exception:
+        logger.exception("Failed to dispatch pending debate tasks")
+        return 0
+
+
 def is_debate_task_dispatched(task_id: str) -> bool:
     """判断任务是否已提交给后台运行器但尚未进入 running。
 
@@ -348,10 +361,7 @@ def schedule_debate_dispatch(*, name: str) -> None:
     """
 
     async def _run() -> None:
-        try:
-            await dispatch_pending_debate_tasks()
-        except Exception:
-            logger.exception("Failed to dispatch pending debate tasks")
+        await dispatch_pending_debate_tasks_safely()
 
     task = asyncio.create_task(_run(), name=name)
     _background_dispatch_tasks.add(task)

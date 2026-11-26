@@ -225,7 +225,10 @@ async def run_debate(
                     "status": task_info["status"],
                     "message": task_info["message"],
                     "new_task": False,
-                    "queued": task_info["status"] == "pending",
+                    "queued": (
+                        task_info["status"] == "pending"
+                        and not is_debate_task_dispatched(task_info["task_id"])
+                    ),
                 },
             )
 

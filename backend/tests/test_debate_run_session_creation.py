@@ -215,3 +215,42 @@ async def test_run_debate_discards_session_when_task_submission_fails(
 
     assert response.status_code == 500
     assert await _get_session_count(async_db_session) == 0
+
+
+@pytest.mark.asyncio
+async def test_run_debate_keeps_queued_task_when_dispatch_fails(
+    client,
+    auth_headers,
+    async_db_session,
+    monkeypatch,
+) -> None:
+    """调度触发异常时不应让已提交任务变成孤立记录，请求仍返回排队状态。"""
+
+    async def _failing_dispatch():
+        raise RuntimeError("dispatch unavailable")
+
+    monkeypatch.setattr(
+        "app.ai.llm_engine.debate_concurrency.dispatch_pending_debate_tasks",
+        _failing_dispatch,
+    )
+
+    response = client.post(
+        "/api/v1/debate/run",
+        headers=auth_headers,
+        json={
+            "stock_code": "600519.SH",
+            "trading_frequency": "daily",
+            "trading_strategy": "value",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = response.json()
+    assert payload["status"] == "pending"
+    assert payload["queued"] is True
+
+    task = (await async_db_session.execute(select(AsyncTask))).scalars().one()
+    assert task.status == "pending"
+    session = (await async_db_session.execute(select(Session))).scalars().one()
+    assert session.status == "active"
+    assert task.parameters["session_id"] == str(session.session_id)
