@@ -444,9 +444,21 @@ async def _create_pm_decision(async_db_session, user, session, *, created_at=dat
 
 
 @pytest.mark.asyncio
-async def test_build_debate_review_context_uses_buy_fill_price_as_entry(async_db_session):
+async def test_build_debate_review_context_returns_raw_data_only(async_db_session):
     user, session = await _create_user_and_session(async_db_session)
     await _create_stock_and_klines(async_db_session, count=21)
+    async_db_session.add_all(
+        [
+            IndexDaily(
+                index_code="000300.SH",
+                trade_date=date(2026, 1, 1) + timedelta(days=index),
+                open=1000 + index * 10,
+                close=1000 + index * 10,
+            )
+            for index in range(21)
+        ]
+    )
+    await async_db_session.commit()
     pm_message = await _create_pm_decision(async_db_session, user, session)
     async_db_session.add_all(
         [
@@ -457,14 +469,6 @@ async def test_build_debate_review_context_uses_buy_fill_price_as_entry(async_db
                 quantity=100,
                 fill_price=8.0,
                 trade_time=datetime(2026, 1, 1, 15, 5),
-            ),
-            TradeRecord(
-                session_id=session.session_id,
-                stock_code=session.stock_code,
-                action="buy",
-                quantity=300,
-                fill_price=12.0,
-                trade_time=datetime(2026, 1, 1, 15, 6),
             ),
             TradeRecord(
                 session_id=session.session_id,
@@ -490,86 +494,57 @@ async def test_build_debate_review_context_uses_buy_fill_price_as_entry(async_db
             market_day_count=21,
         )
 
-    market_outcome = context["market_outcome_summary"]
-    assert context["pm_decision"]["take_profit"] == 12.0
-    assert context["pm_decision"]["holding_horizon_days"] == 20
-    assert market_outcome["entry_price"] == 11.0
-    assert market_outcome["entry_price_source"] == "trade_fill_price"
-    assert market_outcome["close_20d_return"] == pytest.approx((30.5 / 11.0) - 1)
-
-
-@pytest.mark.asyncio
-async def test_build_debate_review_context_falls_back_to_decision_day_close_without_buy_trade(async_db_session):
-    user, session = await _create_user_and_session(async_db_session)
-    await _create_stock_and_klines(async_db_session, count=21)
-    pm_message = await _create_pm_decision(async_db_session, user, session)
-    async_db_session.add(
-        TradeRecord(
-            session_id=session.session_id,
-            stock_code=session.stock_code,
-            action="sell",
-            quantity=100,
-            fill_price=99.0,
-            trade_time=datetime(2026, 1, 2, 10, 0),
-        )
-    )
-    await async_db_session.commit()
-
-    async with experience_service_module.database_module.AsyncSessionLocal() as db:
-        context = await experience_service._build_debate_review_context(
-            db,
-            session_obj=session,
-            stock_name="Ping An Bank",
-            industry="Bank",
-            debate_messages=[pm_message],
-            pm_message=pm_message,
-            review_horizon="20d",
-            market_day_count=21,
-        )
+    assert "execution_summary" not in context
+    assert context["orders"] == []
+    assert context["trades"][0]["action"] == "buy"
+    assert context["trades"][0]["quantity"] == 100
+    assert context["trades"][0]["fill_price"] == 8.0
 
     market_outcome = context["market_outcome_summary"]
-    assert market_outcome["entry_price"] == 10.5
-    assert market_outcome["entry_price_source"] == "decision_day_close"
+    assert set(market_outcome) == {
+        "stock_code",
+        "decision_date",
+        "selected_horizon",
+        "data_range",
+        "time_range",
+        "review_window",
+        "latest_window",
+        "holding_window",
+        "benchmark_window",
+    }
+    assert "entry_price" not in market_outcome
+    assert "selected_horizon_outcome" not in market_outcome
+    assert "horizon_returns" not in market_outcome
+
+    review_window = market_outcome["review_window"]
+    assert review_window["trading_days"] == 21
+    assert review_window["rows"][0] == {
+        "date": "2026-01-01",
+        "open": 10.0,
+        "high": 11.0,
+        "low": 9.5,
+        "close": 10.5,
+        "volume": None,
+        "turnover": None,
+    }
+    assert review_window["rows"][-1]["close"] == 30.5
+
+    holding_window = market_outcome["holding_window"]
+    assert holding_window["deadline_date"] == "2026-01-21"
+    assert holding_window["reached"] is True
+    assert holding_window["trading_days"] == 21
+
+    assert market_outcome["benchmark_window"]["trading_days"] == 21
+    assert market_outcome["data_range"]["review"]["trading_days"] == 21
+    assert market_outcome["data_range"]["holding"]["trading_days"] == 21
+    assert market_outcome["time_range"] == {
+        "start_date": "2026-01-01",
+        "end_date": "2026-01-21",
+    }
 
 
 @pytest.mark.asyncio
-async def test_build_market_outcome_summary_includes_latest_and_holding_horizon(async_db_session):
-    stock_code = "000001.SZ"
-    await _create_stock_and_klines(async_db_session, stock_code=stock_code, count=21)
-
-    async with experience_service_module.database_module.AsyncSessionLocal() as db:
-        market_outcome = await experience_service._build_market_outcome_summary(
-            db,
-            stock_code=stock_code,
-            industry="Bank",
-            decision_time=datetime(2026, 1, 1, 15, 0),
-            review_horizon="20d",
-            market_day_count=21,
-            holding_horizon_days=20,
-        )
-
-    expected_return = (30.5 / 10.5) - 1
-    latest = market_outcome["latest_outcome"]
-    assert latest["trade_date"] == "2026-01-21"
-    assert latest["close"] == pytest.approx(30.5)
-    assert latest["absolute_return"] == pytest.approx(expected_return)
-    assert latest["recent_trading_days"] == 21
-    assert latest["recent_max_drawdown"] == pytest.approx(0.0)
-    assert latest["recent_peak_close"] == pytest.approx(30.5)
-    assert latest["recent_trough_close"] == pytest.approx(10.5)
-    assert latest["trading_days_since_decision"] == 20
-    assert "data_age_days" not in latest
-
-    holding = market_outcome["holding_horizon_outcome"]
-    assert holding["available"] is True
-    assert holding["horizon_days"] == 20
-    assert holding["deadline_date"] == "2026-01-21"
-    assert holding["trade_date"] == "2026-01-21"
-    assert holding["absolute_return"] == pytest.approx(expected_return)
-
-
-@pytest.mark.asyncio
-async def test_build_market_outcome_summary_latest_uses_recent_rows_for_old_decision(async_db_session):
+async def test_build_market_outcome_summary_returns_raw_review_and_latest_windows(async_db_session):
     stock_code = "000001.SZ"
     await _create_stock_and_klines(async_db_session, stock_code=stock_code, count=200)
 
@@ -577,25 +552,55 @@ async def test_build_market_outcome_summary_latest_uses_recent_rows_for_old_deci
         market_outcome = await experience_service._build_market_outcome_summary(
             db,
             stock_code=stock_code,
-            industry="Bank",
             decision_time=datetime(2026, 1, 1, 15, 0),
             review_horizon="60d",
-            market_day_count=200,
         )
 
-    latest = market_outcome["latest_outcome"]
-    assert latest["trade_date"] == "2026-07-19"
-    assert latest["close"] == pytest.approx(209.5)
-    assert latest["absolute_return"] == pytest.approx((209.5 / 10.5) - 1)
-    assert latest["recent_trading_days"] == 30
-    assert latest["recent_peak_close"] == pytest.approx(209.5)
-    assert latest["recent_trough_close"] == pytest.approx(180.5)
-    assert latest["trading_days_since_decision"] == 199
-    assert market_outcome["close_60d_return"] == pytest.approx((70.5 / 10.5) - 1)
+    review_window = market_outcome["review_window"]
+    assert review_window["horizon"] == "60d"
+    assert review_window["start_date"] == "2026-01-01"
+    assert review_window["end_date"] == "2026-03-02"
+    assert review_window["trading_days"] == 61
+    assert len(review_window["rows"]) == 61
+
+    latest_window = market_outcome["latest_window"]
+    assert latest_window["trading_days"] == 30
+    assert latest_window["start_date"] == "2026-06-20"
+    assert latest_window["end_date"] == "2026-07-19"
+    assert latest_window["rows"][-1]["close"] == 209.5
+
+    assert market_outcome["data_range"]["latest"]["trading_days"] == 30
+    assert market_outcome["time_range"] == {
+        "start_date": "2026-01-01",
+        "end_date": "2026-07-19",
+    }
+    assert "close_60d_return" not in market_outcome
+    assert "max_drawdown_60d" not in market_outcome
 
 
 @pytest.mark.asyncio
-async def test_build_market_outcome_summary_uses_index_daily_for_relative_returns(async_db_session):
+async def test_build_market_outcome_summary_marks_unreached_holding_window(async_db_session):
+    stock_code = "000001.SZ"
+    await _create_stock_and_klines(async_db_session, stock_code=stock_code, count=21)
+
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        market_outcome = await experience_service._build_market_outcome_summary(
+            db,
+            stock_code=stock_code,
+            decision_time=datetime(2026, 1, 1, 15, 0),
+            review_horizon="20d",
+            holding_horizon_days=60,
+        )
+
+    holding_window = market_outcome["holding_window"]
+    assert holding_window["deadline_date"] == "2026-03-02"
+    assert holding_window["reached"] is False
+    assert holding_window["end_date"] == "2026-01-21"
+    assert holding_window["trading_days"] == 21
+
+
+@pytest.mark.asyncio
+async def test_build_market_outcome_summary_returns_raw_benchmark_rows(async_db_session):
     stock_code = "000001.SZ"
     await _create_stock_and_klines(async_db_session, stock_code=stock_code, count=21)
     async_db_session.add_all(
@@ -603,6 +608,7 @@ async def test_build_market_outcome_summary_uses_index_daily_for_relative_return
             IndexDaily(
                 index_code="000300.SH",
                 trade_date=date(2026, 1, 1) + timedelta(days=index),
+                open=1000 + index * 10,
                 close=1000 + index * 10,
             )
             for index in range(21)
@@ -614,21 +620,28 @@ async def test_build_market_outcome_summary_uses_index_daily_for_relative_return
         market_outcome = await experience_service._build_market_outcome_summary(
             db,
             stock_code=stock_code,
-            industry="Bank",
             decision_time=datetime(2026, 1, 1, 15, 0),
             review_horizon="20d",
-            market_day_count=21,
         )
 
-    stock_return = (30.5 / 10.5) - 1
-    index_return = (1200 / 1000) - 1
-    expected_relative = stock_return - index_return
-    assert market_outcome["relative_return_vs_index"] == pytest.approx(expected_relative)
-    assert market_outcome["latest_outcome"]["relative_return_vs_index"] == pytest.approx(expected_relative)
+    benchmark_window = market_outcome["benchmark_window"]
+    assert benchmark_window["index_code"] == "000300.SH"
+    assert benchmark_window["trading_days"] == 21
+    assert benchmark_window["rows"][0] == {
+        "date": "2026-01-01",
+        "open": 1000.0,
+        "high": None,
+        "low": None,
+        "close": 1000.0,
+        "volume": None,
+    }
+    assert benchmark_window["rows"][-1]["close"] == 1200.0
+    assert market_outcome["data_range"]["benchmark"]["index_code"] == "000300.SH"
+    assert "relative_return_vs_index" not in market_outcome
 
 
 @pytest.mark.asyncio
-async def test_build_market_outcome_summary_returns_empty_when_kline_closes_missing(async_db_session):
+async def test_build_market_outcome_summary_returns_empty_when_rows_are_insufficient(async_db_session):
     stock_code = "000003.SZ"
     async_db_session.add(
         StockBasic(
@@ -659,10 +672,8 @@ async def test_build_market_outcome_summary_returns_empty_when_kline_closes_miss
         market_outcome = await experience_service._build_market_outcome_summary(
             db,
             stock_code=stock_code,
-            industry="Bank",
             decision_time=datetime(2026, 1, 1, 15, 0),
             review_horizon="5d",
-            market_day_count=3,
         )
 
     assert market_outcome == {}

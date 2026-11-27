@@ -123,16 +123,20 @@ LangGraph 内部只有两个节点：
 | `pm_decision` | 最新 PM 决策、置信度、仓位、止损、价格区间和执行计划。 |
 | `debate_timeline` | 各 Agent 报告按时间排序后的结论文本。 |
 | `agent_position_summary` | 各角色最近几次 decision 摘要。 |
-| `execution_summary` | 订单、成交、均价、费用和已实现盈亏摘要。 |
-| `market_outcome_summary` | 决策后的固定周期、PM 持有期和最近 30 根日 K 的最新表现，包含收益、近期回撤、指数/行业相对收益。 |
+| `orders` | 数据库原始订单记录，不包含聚合指标。 |
+| `trades` | 数据库原始成交记录，不包含聚合指标。 |
+| `market_outcome_summary` | 数据库原始日 K 和沪深300日 K 窗口，不包含任何计算指标。 |
 
-`market_outcome_summary` 中同时保留三个口径：
+`market_outcome_summary` 只提供原始数据和范围元数据：
 
-- `selected_horizon_outcome`：用户选择的 5d/20d/60d 周期切片。
-- `holding_horizon_outcome`：按 PM 的 `holding_horizon_days` 自然日到期日计算的持有期结果。
-- `latest_outcome`：最近 30 根日 K 的最新收盘、相对入场收益、近期回撤/峰谷、距决策交易日数和相对收益；更长历史由模型按需查询。
+- `data_range`：`review`、`latest`、`holding`、`benchmark` 四个窗口的起止日期和交易日数。
+- `time_range`：本次返回的全部数据的总起止日期。
+- `review_window`：决策日到所选复盘日的原始日 K；5D 含 6 根、20D 含 21 根、60D 含 61 根。
+- `latest_window`：最新最多 30 根原始日 K，只用于后续验证，不用于重算所选周期。
+- `holding_window`：存在 `holding_horizon_days` 时，从决策日到持有期到期后第一个交易日的原始日 K，并给出 `reached`。
+- `benchmark_window`：沪深300（`000300.SH`）原始日 K，只包含上述窗口出现过的相同交易日。
 
-复盘提示词要求把最新事实与固定周期结果结合分析，但 `debate_correctness` 仍以所选周期和 PM 持有期为主，最新结果只用于补充后续验证、解释涨跌和提炼教训。若数据缺失或明显落后，提示词要求模型先用 `get_current_time` 判断，再按需通过 `sync_market_data` 同步并用 `query_stock_data` 核对，不再由工作流代码强制拦截最终 JSON。
+系统不提供收益、回撤、相对收益、入场价、持有期结果或成交聚合值。复盘提示词要求模型基于原始行自行计算，优先使用 `execute_python_sandboxed` 或 `query_and_calculate`。入场价规则：有买入成交时用 `trades` 成交价，没有成交时用决策日次日开盘价。`debate_correctness` 仍以所选周期和 PM 持有期为主，最新窗口只用于补充后续验证、解释涨跌和提炼教训。若数据缺失或明显落后，提示词要求模型先用 `get_current_time` 判断，再按需通过 `sync_market_data` 同步并用 `query_stock_data` 核对。
 
 ### 3.2 工作流状态
 

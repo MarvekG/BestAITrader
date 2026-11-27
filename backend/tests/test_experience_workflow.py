@@ -100,14 +100,18 @@ def test_review_system_prompt_keeps_memory_protocol_and_compact_output(monkeypat
 
     assert "只需要完成三项输出" in prompt
     assert "充分调研是硬性要求" in prompt
-    assert "`selected_horizon_outcome`" in prompt
-    assert "`holding_horizon_outcome`" in prompt
-    assert "`latest_outcome`" in prompt
     assert "`sync_market_data`" in prompt
     assert "最新交易日" in prompt
     assert "以所选复盘周期和 PM 原持有期为主" in prompt
     assert "不改变所选周期的主判定口径" in prompt
-    assert "`latest_outcome` 只覆盖最近 30 根日 K" in prompt
+    assert "系统只提供数据库原始数据" in prompt
+    assert "`data_range`" in prompt
+    assert "`time_range`" in prompt
+    assert "`review_window`" in prompt
+    assert "`holding_window`" in prompt
+    assert "`latest_window`" in prompt
+    assert "`benchmark_window`" in prompt
+    assert "`orders`/`trades`" in prompt
     assert "data_age_days" not in prompt
     assert "不要输出记忆文档全文" in prompt
     assert "才调用 `write_memory` 重写整份记忆文档" in prompt
@@ -137,14 +141,18 @@ def test_review_system_prompt_keeps_memory_protocol_and_compact_output(monkeypat
 
     assert "Return only three analytical fields" in english_prompt
     assert "Thorough research is mandatory" in english_prompt
-    assert "`selected_horizon_outcome`" in english_prompt
-    assert "`holding_horizon_outcome`" in english_prompt
-    assert "`latest_outcome`" in english_prompt
     assert "`sync_market_data`" in english_prompt
     assert "latest trading-day" in english_prompt
     assert "Judge `debate_correctness` mainly on the selected review horizon" in english_prompt
     assert "must not change the primary verdict" in english_prompt
-    assert "`latest_outcome` covers only the most recent 30 daily bars" in english_prompt
+    assert "raw database rows only" in english_prompt
+    assert "`data_range`" in english_prompt
+    assert "`time_range`" in english_prompt
+    assert "`review_window`" in english_prompt
+    assert "`holding_window`" in english_prompt
+    assert "`latest_window`" in english_prompt
+    assert "`benchmark_window`" in english_prompt
+    assert "`orders`/`trades`" in english_prompt
     assert "data_age_days" not in english_prompt
     assert "do not repeat the timeline or the memory document" in english_prompt
     assert "Only after extracting reusable profitable experience" in english_prompt
@@ -240,7 +248,7 @@ async def test_review_allows_final_json_when_latest_snapshot_is_stale(monkeypatc
             "full_context": {
                 "pm_decision": {"decision": "buy"},
                 "market_outcome_summary": {
-                    "latest_outcome": {"available": True, "trade_date": "2026-09-01"},
+                    "latest_window": {"end_date": "2026-09-01", "rows": []},
                 },
             },
         }
