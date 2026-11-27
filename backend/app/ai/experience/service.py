@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import json
-from statistics import mean
 from typing import Any, Dict, List
 from uuid import UUID
 import uuid
@@ -26,7 +25,7 @@ from app.core.i18n import i18n_service
 from app.core.logger import get_logger
 from app.core.utils.converters import safe_float, safe_isoformat
 from app.ai.experience.workflow import create_experience_workflow
-from app.models.data_storage import KlineData, StockBasic
+from app.models.data_storage import IndexDaily, KlineData, StockBasic
 from app.models.debate_message import DebateMessage
 from app.models.experience_review_event import ExperienceReviewEvent
 from app.models.order import Order
@@ -44,6 +43,9 @@ CORRECTNESS_BUCKETS = {"correct", "partially_correct", "incorrect", "inconclusiv
 ACTIVE_REVIEW_STATUSES = {"started", "running"}
 STALE_REVIEW_TIMEOUT = timedelta(hours=2)
 PM_AGENT_ROLE = "portfolio_manager"
+REVIEW_DECISION_WINDOW_MAX_ROWS = 130
+REVIEW_LATEST_OUTCOME_ROWS = 30
+REVIEW_BENCHMARK_INDEX_CODE = "000300.SH"
 
 
 def _normalize_confidence(value: Any) -> float:
@@ -76,31 +78,6 @@ def _extract_original_conclusion(message: DebateMessage) -> str:
     if message.reasoning and str(message.reasoning).strip():
         return str(message.reasoning).strip()
     return ""
-
-
-def _weighted_buy_fill_price(trades: List[TradeRecord]) -> float | None:
-    """计算买入成交记录的加权均价。
-
-    Args:
-        trades: 当前 Debate session 关联的成交记录列表。
-
-    Returns:
-        有买入成交时返回按成交股数加权的均价；没有有效买入成交时返回 None。
-    """
-    total_quantity = 0
-    total_amount = 0.0
-    for trade in trades:
-        if str(trade.action or "").lower() != "buy":
-            continue
-        quantity = int(trade.quantity or 0)
-        fill_price = safe_float(trade.fill_price)
-        if quantity <= 0 or fill_price is None or fill_price <= 0:
-            continue
-        total_quantity += quantity
-        total_amount += quantity * fill_price
-    if total_quantity <= 0:
-        return None
-    return total_amount / total_quantity
 
 
 class ExperienceService:
@@ -1181,7 +1158,7 @@ class ExperienceService:
             market_day_count: 决策后可用的日 K 样本数量。
 
         Returns:
-            包含会话、PM 决策、辩论时间线、执行摘要和市场结果的复盘上下文。
+            包含会话、PM 决策、辩论时间线、原始订单/成交和原始行情数据的复盘上下文。
         """
         pm_record = (
             await db.execute(select(PMDecisionRecord).where(PMDecisionRecord.session_id == session_obj.session_id))
@@ -1215,15 +1192,12 @@ class ExperienceService:
             )
 
         target_position = safe_float(pm_record.target_position if pm_record else 0.0, 0.0)
-        buy_fill_price = _weighted_buy_fill_price(trades)
         market_outcome = await self._build_market_outcome_summary(
             db=db,
             stock_code=session_obj.stock_code,
-            industry=industry,
             decision_time=pm_message.created_at,
             review_horizon=review_horizon,
-            market_day_count=market_day_count,
-            entry_price_override=buy_fill_price,
+            holding_horizon_days=pm_record.holding_horizon_days if pm_record else None,
         )
 
         return {
@@ -1252,7 +1226,8 @@ class ExperienceService:
                 role: decisions[-3:]
                 for role, decisions in grouped_positions.items()
             },
-            "execution_summary": self._build_execution_summary(orders, trades),
+            "orders": self._serialize_orders(orders),
+            "trades": self._serialize_trades(trades),
             "market_outcome_summary": market_outcome,
         }
 
@@ -1349,221 +1324,313 @@ class ExperienceService:
         db: AsyncSession,
         *,
         stock_code: str,
-        industry: str | None,
         decision_time: datetime | None,
         review_horizon: ReviewHorizon = "20d",
-        market_day_count: int = 0,
-        entry_price_override: float | None = None,
+        holding_horizon_days: int | None = None,
     ) -> Dict[str, Any]:
-        """构建决策后行情结果摘要。
+        """构建决策后的原始行情数据摘要。
 
         Args:
             db: 数据库会话。
             stock_code: 股票代码。
-            industry: 股票所属行业。
             decision_time: PM 决策时间。
             review_horizon: 当前选择的复盘周期。
-            market_day_count: 决策后可用的日 K 样本数量。
-            entry_price_override: 实际买入成交均价；存在时优先作为收益计算入口价。
+            holding_horizon_days: PM 声明的持有或复议天数，按自然日换算到期日。
 
         Returns:
-            包含所选周期收益、各周期收益、回撤和相对收益的行情结果摘要。
+            包含复盘窗口、最新窗口、持有窗口和沪深300原始日线的字典；不包含计算指标。
         """
         if not decision_time:
             return {}
 
-        snapshot_day = decision_time.date()
-        rows = (
+        decision_date = decision_time.date()
+        required_rows = HORIZON_REQUIRED_MARKET_DAYS[review_horizon]
+        review_rows = (
             await db.execute(
-                select(KlineData.date, KlineData.open, KlineData.close, KlineData.high, KlineData.low)
+                select(
+                    KlineData.date,
+                    KlineData.open,
+                    KlineData.high,
+                    KlineData.low,
+                    KlineData.close,
+                    KlineData.volume,
+                    KlineData.turnover,
+                )
                 .where(
                     KlineData.stock_code == stock_code,
                     KlineData.freq == "D",
-                    KlineData.date >= snapshot_day,
+                    KlineData.date >= decision_date,
                 )
                 .order_by(KlineData.date.asc())
-                .limit(130)
+                .limit(required_rows)
             )
         ).all()
-        if not rows:
+        if len(review_rows) < required_rows:
             return {}
 
-        closes = [float(item.close) for item in rows if item.close is not None]
-        highs = [float(item.high) for item in rows if item.high is not None]
-        lows = [float(item.low) for item in rows if item.low is not None]
-        entry_price = entry_price_override if entry_price_override and entry_price_override > 0 else (
-            closes[0] if closes else None
-        )
-        if not entry_price:
-            return {}
-        entry_price_source = (
-            "trade_fill_price"
-            if entry_price_override and entry_price_override > 0
-            else "decision_day_close"
-        )
-
-        def compute_return(index: int) -> float | None:
-            if not closes or len(closes) <= index:
-                return None
-            target = closes[index]
-            return (target / entry_price) - 1 if target is not None else None
-
-        def compute_drawdown(limit: int) -> float | None:
-            if len(closes) <= limit:
-                return None
-            subset = closes[: limit + 1]
-            if not subset:
-                return None
-            peak = subset[0]
-            max_dd = 0.0
-            for price in subset:
-                if price > peak:
-                    peak = price
-                if peak > 0:
-                    max_dd = min(max_dd, (price / peak) - 1)
-            return max_dd
-
-        index_rows = (
-            await db.execute(
-                select(KlineData.close)
-                .where(
-                    KlineData.stock_code == "000300.SH",
-                    KlineData.freq == "D",
-                    KlineData.date >= snapshot_day,
-                )
-                .order_by(KlineData.date.asc())
-                .limit(21)
+        latest_rows = list(
+            reversed(
+                (
+                    await db.execute(
+                        select(
+                            KlineData.date,
+                            KlineData.open,
+                            KlineData.high,
+                            KlineData.low,
+                            KlineData.close,
+                            KlineData.volume,
+                            KlineData.turnover,
+                        )
+                        .where(
+                            KlineData.stock_code == stock_code,
+                            KlineData.freq == "D",
+                            KlineData.date >= decision_date,
+                        )
+                        .order_by(KlineData.date.desc())
+                        .limit(REVIEW_LATEST_OUTCOME_ROWS)
+                    )
+                ).all()
             )
-        ).all()
-        index_closes = [float(item.close) for item in index_rows if item.close is not None]
-        relative_return_vs_index = None
-        if len(index_closes) > 20:
-            index_return_20 = (index_closes[20] / index_closes[0]) - 1
-            stock_return_20 = compute_return(20)
-            if stock_return_20 is not None:
-                relative_return_vs_index = stock_return_20 - index_return_20
-
-        relative_return_vs_industry = await self._compute_relative_vs_industry(
-            db=db,
-            stock_code=stock_code,
-            industry=industry,
-            snapshot_day=snapshot_day,
-            stock_return=compute_return(20),
         )
+        if not latest_rows:
+            return {}
 
-        horizon_returns = {
-            "5d": {
-                "available": compute_return(5) is not None,
-                "close_return": compute_return(5),
-                "max_drawdown": compute_drawdown(5),
-            },
-            "20d": {
-                "available": compute_return(20) is not None,
-                "close_return": compute_return(20),
-                "max_drawdown": compute_drawdown(20),
-                "relative_return_vs_index": relative_return_vs_index,
-                "relative_return_vs_industry": relative_return_vs_industry,
-            },
-            "60d": {
-                "available": compute_return(60) is not None,
-                "close_return": compute_return(60),
-                "max_drawdown": compute_drawdown(60),
-            },
-        }
-        selected = horizon_returns[review_horizon]
-        return {
-            "entry_date": rows[0].date.isoformat() if rows else None,
-            "entry_price": entry_price,
-            "entry_price_source": entry_price_source,
-            "market_day_count": market_day_count,
-            "selected_horizon": review_horizon,
-            "selected_horizon_outcome": {
-                "horizon": review_horizon,
-                "absolute_return": selected.get("close_return"),
-                "max_drawdown": selected.get("max_drawdown"),
-                "relative_return_vs_index": selected.get("relative_return_vs_index"),
-                "relative_return_vs_industry": selected.get("relative_return_vs_industry"),
-            },
-            "horizon_returns": horizon_returns,
-            "close_5d_return": compute_return(5),
-            "close_20d_return": compute_return(20),
-            "close_60d_return": compute_return(60),
-            "max_drawdown_20d": compute_drawdown(20),
-            "max_drawdown_60d": compute_drawdown(60),
-            "relative_return_vs_index": relative_return_vs_index,
-            "relative_return_vs_industry": relative_return_vs_industry,
-            "sample_closes": closes[:20],
-            "sample_highs": highs[:20],
-            "sample_lows": lows[:20],
-        }
-
-    async def _compute_relative_vs_industry(
-        self,
-        db: AsyncSession,
-        *,
-        stock_code: str,
-        industry: str | None,
-        snapshot_day: datetime.date,
-        stock_return: float | None,
-    ) -> float | None:
-        if not industry or stock_return is None:
-            return None
-
-        peer_codes = [
-            code
-            for code, in (
+        holding_rows: List[Any] = []
+        holding_deadline: date | None = None
+        if holding_horizon_days and holding_horizon_days > 0:
+            holding_deadline = decision_date + timedelta(days=holding_horizon_days)
+            estimated_holding_rows = int(holding_horizon_days * 5 / 7) + 10
+            holding_fetch_limit = max(
+                required_rows,
+                min(REVIEW_DECISION_WINDOW_MAX_ROWS, estimated_holding_rows),
+            )
+            raw_holding_rows = (
                 await db.execute(
-                    select(StockBasic.stock_code)
-                    .where(StockBasic.industry == industry, StockBasic.stock_code != stock_code)
-                    .limit(40)
+                    select(
+                        KlineData.date,
+                        KlineData.open,
+                        KlineData.high,
+                        KlineData.low,
+                        KlineData.close,
+                        KlineData.volume,
+                        KlineData.turnover,
+                    )
+                    .where(
+                        KlineData.stock_code == stock_code,
+                        KlineData.freq == "D",
+                        KlineData.date >= decision_date,
+                    )
+                    .order_by(KlineData.date.asc())
+                    .limit(holding_fetch_limit)
                 )
             ).all()
-        ]
-        if not peer_codes:
-            return None
+            for row in raw_holding_rows:
+                holding_rows.append(row)
+                if row.date >= holding_deadline:
+                    break
 
-        rows = (
-            await db.execute(
-                select(KlineData.stock_code, KlineData.close)
-                .where(
-                    KlineData.stock_code.in_(peer_codes),
-                    KlineData.freq == "D",
-                    KlineData.date >= snapshot_day,
+        all_dates = sorted(
+            {
+                row.date
+                for row in [*review_rows, *latest_rows, *holding_rows]
+            }
+        )
+        benchmark_rows = []
+        if all_dates:
+            benchmark_rows = (
+                await db.execute(
+                    select(
+                        IndexDaily.trade_date,
+                        IndexDaily.open,
+                        IndexDaily.high,
+                        IndexDaily.low,
+                        IndexDaily.close,
+                        IndexDaily.volume,
+                    )
+                    .where(
+                        IndexDaily.index_code == REVIEW_BENCHMARK_INDEX_CODE,
+                        IndexDaily.trade_date.in_(all_dates),
+                    )
+                    .order_by(IndexDaily.trade_date.asc())
                 )
-                .order_by(KlineData.stock_code.asc(), KlineData.date.asc())
-            )
-        ).all()
-        buckets: dict[str, list[float]] = defaultdict(list)
-        for peer_code, close in rows:
-            if close is not None:
-                buckets[peer_code].append(float(close))
-        peer_returns: List[float] = []
-        for prices in buckets.values():
-            if len(prices) > 20 and prices[0] > 0:
-                peer_returns.append((prices[20] / prices[0]) - 1)
-        if not peer_returns:
-            return None
-        return stock_return - mean(peer_returns)
+            ).all()
 
-    def _build_execution_summary(self, orders: List[Order], trades: List[TradeRecord]) -> Dict[str, Any]:
-        filled_orders = [item for item in orders if item.status == "filled"]
-        fill_prices = [value for value in (safe_float(item.fill_price) for item in trades) if value is not None]
-        return {
-            "order_count": len(orders),
-            "filled_order_count": len(filled_orders),
-            "trade_count": len(trades),
-            "actions": [str(item.action or "").lower() for item in trades[-10:]],
-            "avg_fill_price": mean(fill_prices) if fill_prices else None,
-            "total_quantity": sum(int(item.quantity or 0) for item in trades),
-            "total_fees": sum(safe_float(item.total_fees, 0.0) for item in trades),
-            "realized_pnl": sum(
-                safe_float(item.realized_pnl, 0.0)
-                for item in orders
-                if getattr(item, "realized_pnl", None) is not None
-            ),
-            "latest_trade_time": safe_isoformat(trades[-1].trade_time if trades else None),
-            "latest_order_time": safe_isoformat(orders[-1].created_at if orders else None),
+        def serialize_stock_rows(rows: List[Any]) -> List[Dict[str, Any]]:
+            return [
+                {
+                    "date": row.date.isoformat(),
+                    "open": float(row.open) if row.open is not None else None,
+                    "high": float(row.high) if row.high is not None else None,
+                    "low": float(row.low) if row.low is not None else None,
+                    "close": float(row.close) if row.close is not None else None,
+                    "volume": float(row.volume) if row.volume is not None else None,
+                    "turnover": float(row.turnover) if row.turnover is not None else None,
+                }
+                for row in rows
+            ]
+
+        def serialize_index_rows(rows: List[Any]) -> List[Dict[str, Any]]:
+            return [
+                {
+                    "date": row.trade_date.isoformat(),
+                    "open": float(row.open) if row.open is not None else None,
+                    "high": float(row.high) if row.high is not None else None,
+                    "low": float(row.low) if row.low is not None else None,
+                    "close": float(row.close) if row.close is not None else None,
+                    "volume": float(row.volume) if row.volume is not None else None,
+                }
+                for row in rows
+            ]
+
+        review_window = {
+            "horizon": review_horizon,
+            "decision_date": decision_date.isoformat(),
+            "start_date": review_rows[0].date.isoformat(),
+            "end_date": review_rows[-1].date.isoformat(),
+            "trading_days": len(review_rows),
+            "rows": serialize_stock_rows(review_rows),
         }
+        latest_window = {
+            "start_date": latest_rows[0].date.isoformat(),
+            "end_date": latest_rows[-1].date.isoformat(),
+            "trading_days": len(latest_rows),
+            "rows": serialize_stock_rows(latest_rows),
+        }
+        holding_window = None
+        if holding_deadline is not None:
+            reached = bool(holding_rows and holding_rows[-1].date >= holding_deadline)
+            holding_window = {
+                "deadline_date": holding_deadline.isoformat(),
+                "start_date": holding_rows[0].date.isoformat() if holding_rows else None,
+                "end_date": holding_rows[-1].date.isoformat() if holding_rows else None,
+                "trading_days": len(holding_rows),
+                "reached": reached,
+                "rows": serialize_stock_rows(holding_rows),
+            }
+        benchmark_window = {
+            "index_code": REVIEW_BENCHMARK_INDEX_CODE,
+            "start_date": (
+                benchmark_rows[0].trade_date.isoformat() if benchmark_rows else None
+            ),
+            "end_date": (
+                benchmark_rows[-1].trade_date.isoformat() if benchmark_rows else None
+            ),
+            "trading_days": len(benchmark_rows),
+            "rows": serialize_index_rows(benchmark_rows),
+        }
+        data_range = {
+            "review": {
+                "start_date": review_window["start_date"],
+                "end_date": review_window["end_date"],
+                "trading_days": review_window["trading_days"],
+            },
+            "latest": {
+                "start_date": latest_window["start_date"],
+                "end_date": latest_window["end_date"],
+                "trading_days": latest_window["trading_days"],
+            },
+            "holding": (
+                {
+                    "start_date": holding_window["start_date"],
+                    "end_date": holding_window["end_date"],
+                    "trading_days": holding_window["trading_days"],
+                }
+                if holding_window is not None
+                else None
+            ),
+            "benchmark": {
+                "index_code": benchmark_window["index_code"],
+                "start_date": benchmark_window["start_date"],
+                "end_date": benchmark_window["end_date"],
+                "trading_days": benchmark_window["trading_days"],
+            },
+        }
+        time_range = {
+            "start_date": all_dates[0].isoformat(),
+            "end_date": all_dates[-1].isoformat(),
+        }
+        return {
+            "stock_code": stock_code,
+            "decision_date": decision_date.isoformat(),
+            "selected_horizon": review_horizon,
+            "data_range": data_range,
+            "time_range": time_range,
+            "review_window": review_window,
+            "latest_window": latest_window,
+            "holding_window": holding_window,
+            "benchmark_window": benchmark_window,
+        }
+
+    def _serialize_orders(self, orders: List[Order]) -> List[Dict[str, Any]]:
+        """序列化原始订单记录。
+
+        Args:
+            orders: 当前 Debate session 关联的订单列表。
+
+        Returns:
+            仅包含数据库原始字段的订单字典列表。
+        """
+        return [
+            {
+                "order_id": str(order.order_id),
+                "action": order.action,
+                "order_type": order.order_type,
+                "price": float(order.price) if order.price is not None else None,
+                "shares": int(order.shares) if order.shares is not None else None,
+                "status": order.status,
+                "filled_shares": (
+                    int(order.filled_shares) if order.filled_shares is not None else None
+                ),
+                "avg_fill_price": (
+                    float(order.avg_fill_price) if order.avg_fill_price is not None else None
+                ),
+                "realized_pnl": (
+                    float(order.realized_pnl) if order.realized_pnl is not None else None
+                ),
+                "created_at": safe_isoformat(order.created_at),
+                "filled_at": safe_isoformat(order.filled_at),
+                "source": order.source,
+            }
+            for order in orders
+        ]
+
+    def _serialize_trades(self, trades: List[TradeRecord]) -> List[Dict[str, Any]]:
+        """序列化原始成交记录。
+
+        Args:
+            trades: 当前 Debate session 关联的成交列表。
+
+        Returns:
+            仅包含数据库原始字段的成交字典列表。
+        """
+        return [
+            {
+                "trade_id": str(trade.trade_id),
+                "order_id": str(trade.order_id) if trade.order_id else None,
+                "action": trade.action,
+                "quantity": int(trade.quantity) if trade.quantity is not None else None,
+                "fill_price": (
+                    float(trade.fill_price) if trade.fill_price is not None else None
+                ),
+                "commission": (
+                    float(trade.commission) if trade.commission is not None else None
+                ),
+                "stamp_duty": (
+                    float(trade.stamp_duty) if trade.stamp_duty is not None else None
+                ),
+                "transfer_fee": (
+                    float(trade.transfer_fee) if trade.transfer_fee is not None else None
+                ),
+                "total_fees": (
+                    float(trade.total_fees) if trade.total_fees is not None else None
+                ),
+                "net_amount": (
+                    float(trade.net_amount) if trade.net_amount is not None else None
+                ),
+                "trade_time": safe_isoformat(trade.trade_time),
+            }
+            for trade in trades
+        ]
 
     def _normalize_action(self, value: Any) -> str:
         text = str(value or "").strip().lower()

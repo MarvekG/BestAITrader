@@ -39,11 +39,11 @@ class ExperienceReviewOutput(BaseModel):
     )
     debate_correctness: str = Field(
         pattern="^(correct|partially_correct|incorrect|inconclusive)$",
-        description="原始 PM 结论相对后验市场结果的正确性。 / Correctness of the original PM conclusion against the posterior market outcome."
+        description="原始 PM 结论在所选复盘周期和 PM 持有期内的正确性；最新交易日结果只作补充。 / Correctness of the original PM conclusion over the selected review horizon and the PM holding horizon; the latest trading-day outcome is supporting context."
     )
     correctness_reasoning: str = Field(
         default="",
-        description="用 1-3 句说明原始结论为何正确、部分正确或错误，并提炼最重要的涨跌原因与可复用教训。不要重复记忆文档全文。 / In 1-3 concise sentences, explain why the original conclusion was correct, partially correct, or incorrect, and state the key price driver and reusable lesson. Do not repeat the memory document."
+        description="用 2-4 句说明所选复盘周期和 PM 原持有期内的判断是否正确，再补充最新交易日的后续验证、主要涨跌原因和可复用教训。`debate_correctness` 以所选周期和 PM 持有期为主，最新交易日结果只作补充。不要重复记忆文档全文。 / In 2-4 concise sentences, explain whether the decision was correct over the selected review horizon and the PM holding horizon, then add the latest trading-day follow-through, key price driver, and reusable lesson. Judge correctness mainly on the selected horizon and the holding horizon; treat the latest outcome as supporting context. Do not repeat the memory document."
     )
 
 
@@ -267,7 +267,8 @@ async def fetch_full_context(state: ExperienceWorkflowState) -> Dict[str, Any]:
             "session": review_context.get("session") or {},
             "pm_decision": review_context.get("pm_decision") or {},
             "debate_timeline": review_context.get("debate_timeline") or [],
-            "execution_summary": review_context.get("execution_summary") or {},
+            "orders": review_context.get("orders") or [],
+            "trades": review_context.get("trades") or [],
             "market_outcome_summary": review_context.get("market_outcome_summary") or {},
         }
         await _push_review_update(
@@ -299,13 +300,19 @@ def _build_review_system_prompt(skills_prompt_suffix: str) -> str:
     if str(settings.SYSTEM_LANGUAGE).lower().startswith("zh"):
         return (
             "你是一名 A 股投研复盘分析师，围绕当前股票的长期记忆文档复盘已有 debate / PM 结论。"
-            "你只需要完成三项输出：原始 PM 动作、结论正确性、以及 1-3 句简短复盘解释。"
-            "解释必须同时覆盖后验市场结果、最主要的涨跌原因和一条可复用教训；不要复述 timeline，不要输出记忆文档全文。"
-            "你的主输入是 agent timeline、PM 交易字段、执行结果和决策后的市场结果，必须把 market_outcome_summary 的收益、回撤和相对收益作为核心证据。"
-            "凡是决策时点的历史事实，包括 timeline、PM 字段、执行结果、价格路径、收益和回撤，一律以 review_input 为准；工具返回的信息只能补充或验证，不能改写历史事实。"
-            "后验检查 PM 的止盈、止损和持有周期是否匹配实际价格路径；如果发现退出纪律或周期明显不匹配，把结论压缩进 correctness_reasoning。系统固定的 5d/20d/60d 复盘周期不得改变。"
+            "你只需要完成三项输出：原始 PM 动作、结论正确性、以及 2-4 句简短复盘解释。"
+            "解释必须同时覆盖所选复盘周期、PM 原持有期和最新交易日的后验结果，以及最主要的涨跌原因和一条可复用教训；不要复述 timeline，不要输出记忆文档全文。"
+            "你的主输入是 agent timeline、PM 交易字段、`orders`/`trades` 原始订单成交，以及 `market_outcome_summary` 中的 `review_window`、`holding_window`、`latest_window` 和 `benchmark_window` 原始行情。"
+            "充分调研是硬性要求：不能只看固定窗口或记忆文档。必须核对最新交易日行情、决策后关键价格路径、止盈止损、持有期到期状态，以及 60d 之后到最新交易日的走势，并在需要时用新闻、政策、行业、资金或财务工具交叉验证。"
+            "决策时点的历史事实，包括 timeline、PM 字段、`orders`/`trades` 和原始价格路径，一律以 review_input 为准，不要用工具返回改写这些原始数据。最新行情、财务、新闻等当前事实以 `latest_window` 和工具返回为准，可以用它们评估历史决策的后续结果，但不得用旧窗口结果否定最新事实。收益、回撤和相对收益由你基于原始数据自行计算。"
+            "`debate_correctness` 以所选复盘周期和 PM 原持有期为主，判断决策当时及持有期内的判断是否正确；最新交易日结果只用于补充后续验证、解释涨跌和提炼教训，不改变所选周期的主判定口径。如果最新结果与所选周期结论明显冲突，在 correctness_reasoning 中说明日期、价格和差异；止损/止盈若在 PM 持有期内触发，应计入持有期判断，持有期之后才触发则只作后续验证，不改写主判定。"
+            "后验检查 PM 的止盈、止损和持有周期是否匹配实际价格路径；如果发现退出纪律或周期明显不匹配，把结论压缩进 correctness_reasoning。系统固定的 5d/20d/60d 复盘周期保留，但不得以固定周期为由忽略最新数据。"
+            "系统只提供数据库原始数据，不提供任何计算好的收益、回撤、相对收益或持有期结果。所有计算都必须由你基于 `review_window`、`holding_window`、`latest_window`、`benchmark_window` 的原始行自行完成。需要数据库数据的计算，优先使用 `query_and_calculate`：先调用 `get_database_schema` 确认表字段，传入 `columns` 和合适的 `limit`，让工具直接查库并计算，减少手工转录数据导致的错误；禁止先把 `review_input` 或数据库中的数值手工抄进 `execute_python_sandboxed`，后者只用于对工具已经返回的结果做二次纯算术。不要心算。"
+            "`data_range` 和 `time_range` 只描述本次原始数据的覆盖范围，用来判断数据是否完整或落后，不要把它们当成收益或结果。`review_window` 是决策日到所选复盘日（第 5/20/60 个交易日）的原始日 K：5D 含 6 根、20D 含 21 根、60D 含 61 根。`holding_window` 是决策日到 PM 持有期到期后第一个交易日的原始日 K。`latest_window` 是最新最多 30 根原始日 K，只用于后续验证，不得和 `review_window` 混用。"
+            "入场价规则：有买入成交时以 `trades` 的成交价为准；没有成交时以决策日次日开盘价为准。`orders`/`trades` 是原始订单和成交，成交均价、费用和已实现盈亏由你自行计算。指数相对收益使用 `benchmark_window` 的沪深300原始行，按相同交易日对齐；缺少对应日期时不得补前值或后值。"
+            "需要更长路径时，先用 `get_current_time` 判断时效，必要时用 `sync_market_data` 同步当前股票的 `daily_kline` 或 `realtime`，再用 `query_stock_data` 查询。"
             "分析涨跌原因时，优先判断政策、行业、宏观、业绩、估值、资金、板块环境、情绪、事件、商品成本和利率汇率等因素，区分真正主因、被验证信号、被证伪信号与噪音。"
-            "如果上下文不足以解释涨跌，可以调用外部工具补证据；已有证据足够时不要机械搜索。使用行情、财务或基本面工具前，先调用 get_current_time 判断时效。"
+            "即使最新行情快照可用，也要充分调研：至少核对最新交易日行情，并在需要时调用新闻、政策、行业、资金或财务工具交叉验证。避免机械搜索，但关键证据缺失时不得跳过调研。"
             "历史经验只能通过记忆工具读取和写入：每只股票只有一份自由格式 Markdown 记忆文档。只有历史经验能降低不确定性时才 read_memory，不要机械调用。"
             "只有在总结出可复用的赚钱经验、失败教训、仓位纪律或 debate 流程改进规则后，才调用 `write_memory` 重写整份记忆文档；如果没有新增可复用经验，可以跳过全部记忆写入。"
             "调用 `write_memory` 前，先提炼 1-3 条可独立复用的高信息密度教训，避免空泛套话。"
@@ -326,13 +333,16 @@ def _build_review_system_prompt(skills_prompt_suffix: str) -> str:
         )
     return (
         "You are an A-share review analyst. Review the existing debate / PM conclusion around the current stock's long-term memory document. "
-        "Return only three analytical fields: the original PM action, correctness, and a concise 1-3 sentence review explanation. "
-        "The explanation must cover the posterior market outcome, the main price driver, and one reusable lesson; do not repeat the timeline or the memory document. "
-        "The input contains agent timeline conclusions, PM trading fields, execution outcome, and post-decision market outcome. Treat the returns, drawdowns, and relative-performance fields in `market_outcome_summary` as core evidence. "
-        "For decision-time historical facts, `review_input` is the source of truth. Tool output is supplementary current-time information and may only explain or corroborate it, never overwrite it. "
-        "Evaluate the PM's take-profit, stop-loss, and holding-period design against the actual price path. Compress any mismatch or missing exit discipline into `correctness_reasoning`; do not change the fixed 5d/20d/60d review horizons. "
+        "Return only three analytical fields: the original PM action, correctness, and a concise 2-4 sentence review explanation. "
+        "The explanation must cover the selected review horizon, the PM holding horizon, and the latest trading-day outcome, plus the main price driver and one reusable lesson; do not repeat the timeline or the memory document. "
+        "The input contains agent timeline conclusions, PM trading fields, raw `orders`/`trades`, and raw market rows in `market_outcome_summary`: `review_window`, `holding_window`, `latest_window`, and `benchmark_window`. "
+        "Thorough research is mandatory: do not review only fixed windows or memory documents. Check the latest trading-day quote, the key post-decision price path, stop-loss/take-profit triggers, holding-horizon expiry, and the move after 60d through the latest trading day; cross-check with news, policy, industry, flow, or financial tools when needed. "
+        "For decision-time historical facts, including the timeline, PM fields, raw `orders`/`trades`, and raw price rows, `review_input` is the source of truth; do not let tool output rewrite those raw facts. Current-time facts such as the latest market, financial, or news data must come from `latest_window` and tool results and may be used to evaluate what happened after the historical decision; never let an old fixed-window result override newer facts. Returns, drawdowns, and relative returns are your own calculations from the raw rows. "
+        "The 5d/20d/60d periods remain fixed review slices. Judge `debate_correctness` mainly on the selected review horizon and the PM holding horizon: whether the decision was correct at the time and over the intended holding period. The latest trading-day outcome is supporting evidence for follow-through, driver analysis, and lessons; it must not change the primary verdict. If the latest outcome conflicts with the selected-horizon conclusion, state the date, price, and difference in `correctness_reasoning`. Stop-loss/take-profit triggers inside the PM holding period count toward the holding-period verdict; triggers after the holding period are follow-through evidence only and must not rewrite the primary verdict. "
+        "Evaluate the PM's take-profit, stop-loss, and holding-period design against the actual price path. Compress any mismatch or missing exit discipline into `correctness_reasoning`; keep the fixed 5d/20d/60d review horizons, but never use them as a reason to ignore newer data. "
+        "The system provides raw database rows only: no precomputed returns, drawdowns, relative returns, or holding-period results. Compute everything yourself from the raw rows in `review_window`, `holding_window`, `latest_window`, and `benchmark_window`. For any calculation that needs database data, prefer `query_and_calculate`: first call `get_database_schema` to confirm table fields, pass `columns` and a suitable `limit`, and let the tool query the database and compute directly to avoid transcription errors. Do not copy values from `review_input` or the database into `execute_python_sandboxed` by hand; use it only for secondary pure arithmetic on results already returned by tools. Do not use mental arithmetic. `data_range` and `time_range` describe only the coverage of the raw data; use them to judge completeness and freshness, not as returns or results. `review_window` is the raw daily bars from the decision day to the selected review day (the 5th/20th/60th trading day): 6 bars for 5D, 21 for 20D, and 61 for 60D. `holding_window` runs from the decision day to the first trading day after the PM holding deadline. `latest_window` is the latest 30 raw daily bars for follow-through only; do not mix it with `review_window`. Entry price rule: use `trades` fill prices when actual buys exist; otherwise use the next trading day's open. `orders`/`trades` are raw rows; compute average fill, fees, and realized PnL yourself. Benchmark relative returns use the CSI 300 raw rows in `benchmark_window` on the same trading dates; never fill missing index dates forward or backward. For a longer path, first check freshness with `get_current_time`, refresh with `sync_market_data` when needed, then query with `query_stock_data`. "
         "When explaining the move, check policy, industry, macro, earnings, valuation, flow, sector beta, sentiment, events, commodity costs, and rates/FX, separating true drivers, validated signals, falsified signals, and noise. "
-        "If the current context is insufficient to explain the move, you may call external tools for evidence; otherwise do not search mechanically. "
+        "Even when a latest market snapshot is available, research thoroughly: at minimum verify the latest trading-day quote and cross-check with news, policy, industry, flow, or financial tools when needed. Avoid mechanical searches, but never skip research when key evidence is missing. "
         "Before using market, financial, or fundamental data from tools, call `get_current_time` to confirm the current system time and assess data freshness and validity. "
         "Historical experience can only be read or written through memory tools: each stock keeps one free-form memory document. Do not assume any extra experience tables exist. "
         "Whether to call `read_memory` is your decision; only do so when prior experience can materially reduce uncertainty. "
@@ -402,7 +412,7 @@ async def review_debate_conclusion(state: ExperienceWorkflowState) -> Dict[str, 
         HumanMessage(
             content=stable_json_dumps(
                 {
-                    "task": "Review one existing debate conclusion. Focus on why the stock actually rose/fell after the PM decision, what reusable price-move experience can be extracted, and how the debate flow should improve.",
+                    "task": "Review one existing debate conclusion using the selected horizon, PM holding horizon, and latest trading-day outcome. Focus on why the stock actually rose/fell after the PM decision, what reusable price-move experience can be extracted, and how the debate flow should improve.",
                     "session_id": state.get("session_id"),
                     "stock_code": stock_code,
                     "stock_name": stock_name,

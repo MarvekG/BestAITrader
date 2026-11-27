@@ -123,8 +123,20 @@ LangGraph 内部只有两个节点：
 | `pm_decision` | 最新 PM 决策、置信度、仓位、止损、价格区间和执行计划。 |
 | `debate_timeline` | 各 Agent 报告按时间排序后的结论文本。 |
 | `agent_position_summary` | 各角色最近几次 decision 摘要。 |
-| `execution_summary` | 订单、成交、均价、费用和已实现盈亏摘要。 |
-| `market_outcome_summary` | 决策后的股票表现、回撤、指数超额和行业相对表现。 |
+| `orders` | 数据库原始订单记录，不包含聚合指标。 |
+| `trades` | 数据库原始成交记录，不包含聚合指标。 |
+| `market_outcome_summary` | 数据库原始日 K 和沪深300日 K 窗口，不包含任何计算指标。 |
+
+`market_outcome_summary` 只提供原始数据和范围元数据：
+
+- `data_range`：`review`、`latest`、`holding`、`benchmark` 四个窗口的起止日期和交易日数。
+- `time_range`：本次返回的全部数据的总起止日期。
+- `review_window`：决策日到所选复盘日的原始日 K；5D 含 6 根、20D 含 21 根、60D 含 61 根。
+- `latest_window`：最新最多 30 根原始日 K，只用于后续验证，不用于重算所选周期。
+- `holding_window`：存在 `holding_horizon_days` 时，从决策日到持有期到期后第一个交易日的原始日 K，并给出 `reached`。
+- `benchmark_window`：沪深300（`000300.SH`）原始日 K，只包含上述窗口出现过的相同交易日。
+
+系统不提供收益、回撤、相对收益、入场价、持有期结果或成交聚合值。复盘提示词要求模型基于原始行自行计算：需要数据库数据时优先使用 `query_and_calculate`，先 `get_database_schema` 确认字段并传 `columns`/`limit`；禁止把 `review_input` 或数据库数值手工抄进 `execute_python_sandboxed`，后者只用于对工具返回结果做二次纯算术。入场价规则：有买入成交时用 `trades` 成交价，没有成交时用决策日次日开盘价。`debate_correctness` 仍以所选周期和 PM 持有期为主，最新窗口只用于补充后续验证、解释涨跌和提炼教训。若数据缺失或明显落后，提示词要求模型先用 `get_current_time` 判断，再按需通过 `sync_market_data` 同步并用 `query_stock_data` 核对。
 
 ### 3.2 工作流状态
 
@@ -257,7 +269,7 @@ Service 不负责 prompt 编写和工具调用循环，这些在 `workflow.py` �
 
 - `original_pm_decision`：原始 PM 动作或结论。
 - `debate_correctness`：`correct / partially_correct / incorrect / inconclusive`。
-- `correctness_reasoning`：1-3 句后验解释，包含主要涨跌原因和一条可复用教训。
+- `correctness_reasoning`：2-4 句后验解释，覆盖所选周期、PM 持有期和最新交易日结果，并包含主要涨跌原因和一条可复用教训；`debate_correctness` 以所选周期和 PM 持有期为主。
 - `written_memories`：记忆文档写入元数据，不包含文档正文，包含状态、版本、大小、上限和失败原因。
 
 工具调用轨迹不放入 `analysis_payload`，由顶层 `tool_trace` 单独保留，供审计和按需展开查看。

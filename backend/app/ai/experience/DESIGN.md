@@ -56,7 +56,7 @@ reviewed
 failed
 ```
 
-同一个 session 可以分别执行 5D、20D、60D 复盘。20D 是默认优先周期，5D 适合早期纠错，60D 适合中期逻辑验证。
+同一个 session 可以分别执行 5D、20D、60D 复盘。20D 是默认优先周期，5D 适合早期纠错，60D 适合中期逻辑验证。每次复盘还必须结合 PM 原持有期和截至最新交易日的 `latest_window`，不得只依据固定窗口下结论；但 `debate_correctness` 仍以所选周期和 PM 持有期为主，`latest_window` 提供最近最多 30 根原始日 K，用于补充后续验证。系统只提供原始行情、订单和成交数据，收益、回撤、相对收益和持有期结果由模型自行计算；入场价规则为有买入成交时用成交价，没有成交时用决策日次日开盘。
 
 复盘 API 挂载在 `/api/v1/experience`：
 
@@ -76,7 +76,7 @@ failed
 
 ### 5.1 原始判断
 
-综合绝对收益、基准相对收益、行业相对收益、最大回撤、PM 置信度、目标仓位和交易周期，输出 `correct`、`partially_correct`、`incorrect` 或 `inconclusive`，并解释原因。
+综合绝对收益、沪深300相对收益、最大回撤、PM 置信度、目标仓位和交易周期，输出 `correct`、`partially_correct`、`incorrect` 或 `inconclusive`，并解释原因。
 
 ### 5.2 信号验证
 

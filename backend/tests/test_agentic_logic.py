@@ -957,6 +957,9 @@ def test_common_system_prompt_describes_whole_document_memory_protocol():
     assert "`write_memory` 为整文档替换" in prompt
     assert "写入前必须先 `read_memory` 获取最新全文和版本号" in prompt
     assert "recall_memory" not in prompt
+    assert "需要数据库数据的计算" in prompt
+    assert "优先使用 `query_and_calculate`" in prompt
+    assert "禁止先把数据库数据" in prompt
 
 
 @pytest.mark.asyncio
