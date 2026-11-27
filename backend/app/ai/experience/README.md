@@ -53,7 +53,8 @@ API 挂载在 `/api/v1/experience`：
 - `POST /analyze`：校验并入队，返回 `202` + `review_run_id` + 队列位置。
 - `GET /debate-sessions`
 - `GET /review-events/{session_id}`
-- `GET /review-runs`
+- `GET /review-runs?page=1&page_size=20&status=completed`：分页返回运行摘要、总数和活跃任务数，支持状态过滤。
+- `POST /review-runs/batch-delete`：批量删除非活跃任务。
 - `GET /review-run-events/{review_run_id}`
 - `GET /review-run-result/{review_run_id}`
 - `DELETE /review-runs/{review_run_id}`
@@ -206,7 +207,7 @@ Service 不负责 prompt 编写和工具调用循环，这些在 `workflow.py` �
 - 同一 `session_id + review_horizon` 在 queued/running 期间唯一；同一 `user_id + stock_code` 只限制同一时刻最多一条 `running`，允许同股票多条 `queued` 排队。
 - worker 领取时跳过已有同股票 `running` 的任务，先去执行其他股票；同股票任务串行执行。
 - 调度器只负责入队，`max_runs_per_tick` 限制每轮入队候选数；同股票任务可以继续入队，由队列串行执行。
-- 启动时 queued 任务继续执行；中断的 running 任务标记 failed。
+- 启动时 queued 任务继续执行；中断的 running 任务标记 failed。若 worker 刚把 run 置为 running、尚未写入 started 事件就退出，启动清理会根据 run 表补判孤儿任务并标记 failed。
 
 ### 4.2 Market Outcome
 

@@ -23,11 +23,13 @@
 
 ## 常用命令
 - 后端定向测试：`PYTHONPATH=backend pytest backend/tests/test_api_auth_required.py`。
+- 后端静态检查（至少覆盖本次改动文件）：`.venv/bin/ruff check --select E,F,C90 --line-length 120 --config 'lint.mccabe.max-complexity=15' <files>` 与 `.venv/bin/flake8 --max-complexity=15 <files>`。
 - 前端质量门禁：`cd frontend && npm run lint && npm run typecheck && npm run build`。
 - 开发环境启动：`docker compose -f docker-compose.dev.yml up -d`。
 - 配置变更后重建服务：`docker compose -f docker-compose.dev.yml up -d --force-recreate <service>`。
 
 ## 编码约定
+- Python 函数圈复杂度不得超过 15；新增或修改的 Python 代码必须通过 Ruff 和 Flake8 检查。
 - Python 使用 3.11+、PEP 8、绝对导入、`logging`，不使用 `print`、裸 `except`、`eval`、`exec`。
 - 代码标识符、字符串常量、日志和异常信息中不得使用中文；测试断言可按业务需要使用中文。
 - 新增或修改公共 Python 函数时补中文 Google 风格 docstring。

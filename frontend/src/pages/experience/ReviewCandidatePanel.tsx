@@ -1,5 +1,5 @@
 import React from 'react';
-import { Button, Card, Empty, List, Segmented, Space, Tag, Typography } from 'antd';
+import { Button, Card, Empty, List, Pagination, Segmented, Space, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useTranslation } from 'react-i18next';
 
@@ -16,35 +16,39 @@ const horizonColorMap: Record<ExperienceReviewHorizon, string> = {
 type Props = {
   candidates: ExperienceReviewCandidate[];
   loading: boolean;
+  total: number;
+  page: number;
+  pageSize: number;
+  horizonFilter: ExperienceReviewHorizon | 'all';
   selectedSessionId?: string;
   selectedHorizon?: ExperienceReviewHorizon;
   running: boolean;
   onSelect: (candidate: ExperienceReviewCandidate, horizon: ExperienceReviewHorizon) => void;
   onRun: (candidate: ExperienceReviewCandidate, horizon: ExperienceReviewHorizon) => void;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+  onHorizonFilterChange: (value: ExperienceReviewHorizon | 'all') => void;
 };
+
+const pageSizeOptions = [10, 20, 50, 100];
 
 export const ReviewCandidatePanel: React.FC<Props> = ({
   candidates,
   loading,
+  total,
+  page,
+  pageSize,
+  horizonFilter,
   selectedSessionId,
   selectedHorizon,
   running,
   onSelect,
   onRun,
+  onPageChange,
+  onPageSizeChange,
+  onHorizonFilterChange,
 }) => {
   const { t } = useTranslation();
-  const [horizonFilter, setHorizonFilter] = React.useState<ExperienceReviewHorizon | 'all'>('all');
-  const visibleCandidates = React.useMemo(() => {
-    if (horizonFilter === 'all') {
-      return candidates;
-    }
-    return candidates.filter((item) => (
-      item.eligible_horizons.includes(horizonFilter)
-      || item.latest_completed_horizons.includes(horizonFilter)
-      || item.active_horizons.includes(horizonFilter)
-      || item.failed_horizons.includes(horizonFilter)
-    ));
-  }, [candidates, horizonFilter]);
 
   return (
     <Card
@@ -60,15 +64,15 @@ export const ReviewCandidatePanel: React.FC<Props> = ({
             { label: t('experience.review_horizons.20d'), value: '20d' },
             { label: t('experience.review_horizons.60d'), value: '60d' },
           ]}
-          onChange={(value) => setHorizonFilter(value as ExperienceReviewHorizon | 'all')}
+          onChange={(value) => onHorizonFilterChange(value as ExperienceReviewHorizon | 'all')}
         />
       )}
     >
       <div className="experience-scroll-panel experience-review-candidate-scroll">
-        {visibleCandidates.length ? (
+        {candidates.length ? (
           <List
             size="small"
-            dataSource={visibleCandidates}
+            dataSource={candidates}
             renderItem={(item) => {
               const readyHorizons = item.eligible_horizons.filter(
                 (horizon) => !item.latest_completed_horizons.includes(horizon) && !item.active_horizons.includes(horizon),
@@ -127,6 +131,25 @@ export const ReviewCandidatePanel: React.FC<Props> = ({
           <Empty description={t('experience.no_review_candidates')} />
         )}
       </div>
+      {total > 0 ? (
+        <Pagination
+          size="small"
+          current={page}
+          pageSize={pageSize}
+          total={total}
+          showSizeChanger
+          pageSizeOptions={pageSizeOptions}
+          showTotal={(value) => t('experience.review_candidates_total', { total: value })}
+          onChange={(nextPage, nextPageSize) => {
+            if (nextPageSize !== pageSize) {
+              onPageSizeChange(nextPageSize);
+              return;
+            }
+            onPageChange(nextPage);
+          }}
+          style={{ marginTop: 12, textAlign: 'right' }}
+        />
+      ) : null}
     </Card>
   );
 };

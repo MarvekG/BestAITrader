@@ -435,6 +435,112 @@ def test_analyze_endpoint_returns_queued_response(client, auth_headers, monkeypa
     assert payload["queue_position"] == 1
 
 
+def test_review_runs_endpoint_passes_pagination(client, auth_headers, monkeypatch):
+    from app.ai.experience.service import experience_service
+
+    captured: dict[str, object] = {}
+
+    async def fake_list_review_runs(*, user_id, page=1, page_size=20, status_filter=None):
+        captured.update(
+            user_id=user_id,
+            page=page,
+            page_size=page_size,
+            status_filter=status_filter,
+        )
+        return {
+            "items": [],
+            "total": 0,
+            "page": page,
+            "page_size": page_size,
+            "active_count": 0,
+        }
+
+    monkeypatch.setattr(experience_service, "list_review_runs", fake_list_review_runs)
+
+    response = client.get(
+        "/api/v1/experience/review-runs?page=2&page_size=10&status=completed",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [],
+        "total": 0,
+        "page": 2,
+        "page_size": 10,
+        "active_count": 0,
+    }
+    assert captured["page"] == 2
+    assert captured["page_size"] == 10
+    assert captured["status_filter"] == "completed"
+
+
+def test_review_candidates_endpoint_passes_pagination(client, auth_headers, monkeypatch):
+    from app.ai.experience.service import experience_service
+
+    captured: dict[str, object] = {}
+
+    async def fake_list_review_candidates(*, user_id, page=1, page_size=20, horizon=None):
+        captured.update(
+            user_id=user_id,
+            page=page,
+            page_size=page_size,
+            horizon=horizon,
+        )
+        return {
+            "items": [],
+            "summary": {},
+            "total": 0,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    monkeypatch.setattr(
+        experience_service,
+        "list_review_candidates",
+        fake_list_review_candidates,
+    )
+
+    response = client.get(
+        "/api/v1/experience/review-candidates?page=2&page_size=10&horizon=20d",
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "items": [],
+        "summary": {},
+        "total": 0,
+        "page": 2,
+        "page_size": 10,
+    }
+    assert captured["page"] == 2
+    assert captured["page_size"] == 10
+    assert captured["horizon"] == "20d"
+
+
+def test_batch_delete_review_runs_endpoint(client, auth_headers, monkeypatch):
+    from app.ai.experience.service import experience_service
+
+    captured: dict[str, object] = {}
+
+    async def fake_delete_review_runs(*, user_id, review_run_ids):
+        captured.update(user_id=user_id, review_run_ids=review_run_ids)
+        return {"deleted": 1, "skipped_active": 1, "missing": 1}
+
+    monkeypatch.setattr(experience_service, "delete_review_runs", fake_delete_review_runs)
+
+    response = client.post(
+        "/api/v1/experience/review-runs/batch-delete",
+        headers=auth_headers,
+        json={"review_run_ids": ["run-1", "run-2", "run-3"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 1, "skipped_active": 1, "missing": 1}
+    assert captured["review_run_ids"] == ["run-1", "run-2", "run-3"]
+
+
 def test_scheduler_config_api_defaults_and_updates(client, auth_headers):
     response = client.get("/api/v1/experience/scheduler-config", headers=auth_headers)
 

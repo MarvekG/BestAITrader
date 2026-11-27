@@ -3,6 +3,7 @@ import {
   App as AntdApp,
   Button,
   Card,
+  Checkbox,
   Col,
   Collapse,
   Descriptions,
@@ -11,6 +12,7 @@ import {
   Form,
   InputNumber,
   List,
+  Pagination,
   Row,
   Select,
   Space,
@@ -74,6 +76,13 @@ const longTextStyle: React.CSSProperties = {
   wordBreak: 'break-word',
 };
 
+const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+const REVIEW_RUNS_POLL_INTERVAL_MS = 30000;
+const REVIEW_RUNS_REFRESH_DEBOUNCE_MS = 2000;
+
+type ReviewRunStatusFilter = 'all' | 'queued' | 'running' | 'completed' | 'failed';
+
 type ExperienceReviewUpdateData = Partial<ExperienceReviewEvent> & {
   debate_session_id?: string;
   timestamp?: string;
@@ -103,6 +112,13 @@ export const ExperiencePage: React.FC = () => {
   );
   const [sessionsLoading, setSessionsLoading] = React.useState(false);
   const [runsLoading, setRunsLoading] = React.useState(false);
+  const [runsPage, setRunsPage] = React.useState(1);
+  const [runsPageSize, setRunsPageSize] = React.useState(DEFAULT_PAGE_SIZE);
+  const [runsTotal, setRunsTotal] = React.useState(0);
+  const [runsStatusFilter, setRunsStatusFilter] = React.useState<ReviewRunStatusFilter>('all');
+  const [activeReviewCount, setActiveReviewCount] = React.useState(0);
+  const [selectedRunIds, setSelectedRunIds] = React.useState<string[]>([]);
+  const [batchDeleting, setBatchDeleting] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [debateSessions, setDebateSessions] = React.useState<ExperienceDebateSession[]>([]);
   const [reviewRuns, setReviewRuns] = React.useState<ExperienceReviewRun[]>([]);
@@ -120,6 +136,10 @@ export const ExperiencePage: React.FC = () => {
   const [runActionLoadingId, setRunActionLoadingId] = React.useState<string | null>(null);
   const [clearingRuns, setClearingRuns] = React.useState(false);
   const [candidatesLoading, setCandidatesLoading] = React.useState(false);
+  const [candidatesPage, setCandidatesPage] = React.useState(1);
+  const [candidatesPageSize, setCandidatesPageSize] = React.useState(DEFAULT_PAGE_SIZE);
+  const [candidatesTotal, setCandidatesTotal] = React.useState(0);
+  const [candidateHorizonFilter, setCandidateHorizonFilter] = React.useState<ExperienceReviewHorizon | 'all'>('all');
   const [activeTab, setActiveTab] = React.useState(() => normalizeTab(searchParams.get('tab')));
   const [memoryDocumentOpenRequest, setMemoryDocumentOpenRequest] = React.useState<MemoryDocumentOpenRequest | null>(null);
   const memoryDocumentRequestId = React.useRef(0);
@@ -287,52 +307,202 @@ export const ExperiencePage: React.FC = () => {
     void loadDebateSessions();
   }, [loadDebateSessions]);
 
-  const loadReviewRuns = React.useCallback(async () => {
-    setRunsLoading(true);
-    try {
-      const data = await experienceApi.listReviewRuns();
-      setReviewRuns(data);
-    } catch {
-      setReviewRuns([]);
-    } finally {
-      setRunsLoading(false);
+  const loadReviewRuns = React.useCallback(async (
+    page: number,
+    options?: { background?: boolean },
+  ) => {
+    const background = options?.background ?? false;
+    if (!background) {
+      setRunsLoading(true);
     }
-  }, []);
+    try {
+      const data = await experienceApi.listReviewRuns({
+        page,
+        page_size: runsPageSize,
+        status: runsStatusFilter === 'all' ? undefined : runsStatusFilter,
+      });
+      setReviewRuns(data.items || []);
+      setRunsTotal(data.total || 0);
+      setActiveReviewCount(data.active_count || 0);
+      if (data.page !== page) {
+        setRunsPage(data.page);
+      }
+    } catch {
+      if (!background) {
+        setReviewRuns([]);
+        setRunsTotal(0);
+        setActiveReviewCount(0);
+      }
+    } finally {
+      if (!background) {
+        setRunsLoading(false);
+      }
+    }
+  }, [runsPageSize, runsStatusFilter]);
 
   React.useEffect(() => {
-    void loadReviewRuns();
-  }, [loadReviewRuns]);
+    void loadReviewRuns(runsPage);
+  }, [loadReviewRuns, runsPage]);
 
-  const hasActiveReviewRun = React.useMemo(
-    () => reviewRuns.some((item) => ['queued', 'started', 'running'].includes(item.status)),
-    [reviewRuns],
-  );
+  const hasActiveReviewRun = activeReviewCount > 0;
 
   React.useEffect(() => {
     if (!hasActiveReviewRun) {
       return undefined;
     }
     const timer = window.setInterval(() => {
-      void loadReviewRuns();
-    }, 5000);
+      if (document.visibilityState === 'hidden') {
+        return;
+      }
+      void loadReviewRuns(runsPage, { background: true });
+    }, REVIEW_RUNS_POLL_INTERVAL_MS);
     return () => window.clearInterval(timer);
-  }, [hasActiveReviewRun, loadReviewRuns]);
+  }, [hasActiveReviewRun, loadReviewRuns, runsPage]);
+
+  const runsRefreshTimerRef = React.useRef<number | null>(null);
+  const scheduleReviewRunsRefresh = React.useCallback(() => {
+    if (runsRefreshTimerRef.current !== null) {
+      return;
+    }
+    runsRefreshTimerRef.current = window.setTimeout(() => {
+      runsRefreshTimerRef.current = null;
+      void loadReviewRuns(runsPage, { background: true });
+    }, REVIEW_RUNS_REFRESH_DEBOUNCE_MS);
+  }, [loadReviewRuns, runsPage]);
+
+  React.useEffect(() => () => {
+    if (runsRefreshTimerRef.current !== null) {
+      window.clearTimeout(runsRefreshTimerRef.current);
+      runsRefreshTimerRef.current = null;
+    }
+  }, [runsPage]);
+
+  React.useEffect(() => {
+    setSelectedRunIds((prev) => {
+      if (!prev.length) {
+        return prev;
+      }
+      const visibleIds = new Set(reviewRuns.map((item) => item.review_run_id));
+      const next = prev.filter((id) => visibleIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [reviewRuns]);
+
+  const visibleRunIds = React.useMemo(
+    () => reviewRuns.map((item) => item.review_run_id),
+    [reviewRuns],
+  );
+  const allVisibleRunsSelected = visibleRunIds.length > 0
+    && visibleRunIds.every((id) => selectedRunIds.includes(id));
+
+  const toggleRunSelection = React.useCallback((reviewRunId: string) => {
+    setSelectedRunIds((prev) => (
+      prev.includes(reviewRunId)
+        ? prev.filter((id) => id !== reviewRunId)
+        : [...prev, reviewRunId]
+    ));
+  }, []);
+
+  const toggleSelectAllVisible = React.useCallback(() => {
+    setSelectedRunIds(allVisibleRunsSelected ? [] : visibleRunIds);
+  }, [allVisibleRunsSelected, visibleRunIds]);
+
+  const handleRunsPaginationChange = React.useCallback((
+    nextPage: number,
+    nextPageSize: number,
+  ) => {
+    setSelectedRunIds([]);
+    if (nextPageSize !== runsPageSize) {
+      setRunsPageSize(nextPageSize);
+      setRunsPage(1);
+      return;
+    }
+    setRunsPage(nextPage);
+  }, [runsPageSize]);
+
+  const handleRunsStatusFilterChange = React.useCallback((value: ReviewRunStatusFilter) => {
+    setSelectedRunIds([]);
+    setRunsStatusFilter(value);
+    setRunsPage(1);
+  }, []);
+
+  const handleBatchDeleteReviewRuns = React.useCallback(() => {
+    if (!selectedRunIds.length) {
+      return;
+    }
+    const idsToDelete = [...selectedRunIds];
+    modal.confirm({
+      title: t('experience.batch_delete_confirm_title'),
+      content: t('experience.batch_delete_confirm_desc', { count: idsToDelete.length }),
+      okText: t('common.confirm'),
+      cancelText: t('common.cancel'),
+      okType: 'danger',
+      onOk: async () => {
+        setBatchDeleting(true);
+        try {
+          const res = await experienceApi.batchDeleteReviewRuns({
+            review_run_ids: idsToDelete,
+          });
+          message.success(t('experience.batch_delete_success', { deleted: res.deleted }));
+          if (res.skipped_active > 0) {
+            message.info(t('experience.batch_delete_skipped_active', { count: res.skipped_active }));
+          }
+          if (res.missing > 0) {
+            message.info(t('experience.batch_delete_missing', { count: res.missing }));
+          }
+          setSelectedRunIds([]);
+          void loadReviewRuns(runsPage);
+          await loadDebateSessions();
+        } catch (error) {
+          const detail = getApiErrorDetail(error);
+          message.error(formatErrorMessage(detail) || t('common.error'));
+        } finally {
+          setBatchDeleting(false);
+        }
+      },
+    });
+  }, [loadDebateSessions, loadReviewRuns, message, modal, runsPage, selectedRunIds, t]);
 
   const loadReviewCandidates = React.useCallback(async () => {
     setCandidatesLoading(true);
     try {
-      const data = await experienceApi.listReviewCandidates();
+      const data = await experienceApi.listReviewCandidates({
+        page: candidatesPage,
+        page_size: candidatesPageSize,
+        horizon: candidateHorizonFilter === 'all' ? undefined : candidateHorizonFilter,
+      });
       setReviewCandidates(data.items || []);
+      setCandidatesTotal(data.total || 0);
+      if (data.page !== candidatesPage) {
+        setCandidatesPage(data.page);
+      }
     } catch {
       setReviewCandidates([]);
+      setCandidatesTotal(0);
     } finally {
       setCandidatesLoading(false);
     }
-  }, []);
+  }, [candidateHorizonFilter, candidatesPage, candidatesPageSize]);
 
   React.useEffect(() => {
     void loadReviewCandidates();
   }, [loadReviewCandidates]);
+
+  const handleCandidatesPageChange = React.useCallback((page: number) => {
+    setCandidatesPage(page);
+  }, []);
+
+  const handleCandidatesPageSizeChange = React.useCallback((pageSize: number) => {
+    setCandidatesPageSize(pageSize);
+    setCandidatesPage(1);
+  }, []);
+
+  const handleCandidateHorizonChange = React.useCallback((
+    value: ExperienceReviewHorizon | 'all',
+  ) => {
+    setCandidateHorizonFilter(value);
+    setCandidatesPage(1);
+  }, []);
 
   const loadCompletedReviewResult = React.useCallback(async (reviewRunId: string) => {
     try {
@@ -411,7 +581,24 @@ export const ExperiencePage: React.FC = () => {
         setLiveReviewRunId(messageRunId);
       }
       setLiveEvents((prev) => [...prev, data as ExperienceReviewEvent]);
-      void loadReviewRuns();
+      if (messageRunId) {
+        setReviewRuns((prev) => prev.map((item) => {
+          if (item.review_run_id !== messageRunId) {
+            return item;
+          }
+          return {
+            ...item,
+            status: data.status || item.status,
+            stage: data.stage || item.stage,
+            message_key: data.message_key ?? item.message_key,
+            message_params: data.message_params || item.message_params,
+            updated_at: data.timestamp || item.updated_at,
+          };
+        }));
+      }
+      if (data.status === 'completed' || data.status === 'failed') {
+        scheduleReviewRunsRefresh();
+      }
       if (data.status === 'completed' && messageRunId) {
         void loadCompletedReviewResult(messageRunId);
       }
@@ -468,7 +655,11 @@ export const ExperiencePage: React.FC = () => {
       setLiveReviewRunId(result.review_run_id);
       setLoadedReviewRunId(null);
       setLiveToolTrace([]);
-      void loadReviewRuns();
+      if (runsPage === 1) {
+        void loadReviewRuns(1, { background: true });
+      } else {
+        setRunsPage(1);
+      }
       void loadDebateSessions();
       void loadReviewCandidates();
       message.success(
@@ -531,7 +722,13 @@ export const ExperiencePage: React.FC = () => {
             setLiveEvents([]);
             setLiveToolTrace([]);
           }
-          await Promise.all([loadReviewRuns(), loadDebateSessions()]);
+          const nextPage = reviewRuns.length === 1 && runsPage > 1 ? runsPage - 1 : runsPage;
+          if (nextPage !== runsPage) {
+            setRunsPage(nextPage);
+          } else {
+            void loadReviewRuns(nextPage);
+          }
+          await loadDebateSessions();
         } catch (error) {
           const detail = getApiErrorDetail(error);
           message.error(formatErrorMessage(detail) || t('common.error'));
@@ -540,7 +737,7 @@ export const ExperiencePage: React.FC = () => {
         }
       },
     });
-  }, [loadDebateSessions, loadReviewRuns, message, modal, t, viewedReviewRunId]);
+  }, [loadDebateSessions, loadReviewRuns, message, modal, reviewRuns.length, runsPage, t, viewedReviewRunId]);
 
   React.useEffect(() => {
     if (!viewedReviewRunId || !reviewRuns.length || runActionLoadingId === viewedReviewRunId) {
@@ -579,7 +776,15 @@ export const ExperiencePage: React.FC = () => {
           setPersistedReviewEvents([]);
           setLiveEvents([]);
           setLiveToolTrace([]);
-          await Promise.all([loadReviewRuns(), loadDebateSessions()]);
+          setReviewRuns([]);
+          setRunsTotal(0);
+          setActiveReviewCount(0);
+          if (runsPage !== 1) {
+            setRunsPage(1);
+          } else {
+            void loadReviewRuns(1, { background: true });
+          }
+          await loadDebateSessions();
         } catch (error) {
           const detail = getApiErrorDetail(error);
           message.error(formatErrorMessage(detail) || t('common.error'));
@@ -588,7 +793,7 @@ export const ExperiencePage: React.FC = () => {
         }
       },
     });
-  }, [loadDebateSessions, loadReviewRuns, message, modal, t]);
+  }, [loadDebateSessions, loadReviewRuns, message, modal, runsPage, t]);
 
   const sessionOptions = debateSessions.map((item) => ({
     value: item.session_id,
@@ -684,9 +889,16 @@ export const ExperiencePage: React.FC = () => {
       <ReviewCandidatePanel
         candidates={reviewCandidates}
         loading={candidatesLoading}
+        total={candidatesTotal}
+        page={candidatesPage}
+        pageSize={candidatesPageSize}
+        horizonFilter={candidateHorizonFilter}
         selectedSessionId={selectedSessionId}
         selectedHorizon={selectedReviewHorizon}
         running={loading}
+        onPageChange={handleCandidatesPageChange}
+        onPageSizeChange={handleCandidatesPageSizeChange}
+        onHorizonFilterChange={handleCandidateHorizonChange}
         onSelect={(candidate, horizon) => {
           setSelectedSessionId(candidate.session_id);
           setSelectedReviewHorizon(horizon);
@@ -707,15 +919,47 @@ export const ExperiencePage: React.FC = () => {
         title={t('experience.review_runs')}
         loading={runsLoading}
         extra={(
-          <Button
-            danger
-            icon={<DeleteOutlined />}
-            disabled={!reviewRuns.length}
-            loading={clearingRuns}
-            onClick={handleClearReviewRuns}
-          >
-            {t('experience.clear_runs')}
-          </Button>
+          <Space wrap>
+            <Select
+              size="small"
+              value={runsStatusFilter}
+              style={{ width: 130 }}
+              onChange={(value) => handleRunsStatusFilterChange(value as ReviewRunStatusFilter)}
+              options={[
+                { value: 'all', label: t('experience.review_status_filter_all') },
+                { value: 'queued', label: t('experience.review_status_filter_queued') },
+                { value: 'running', label: t('experience.review_status_filter_running') },
+                { value: 'completed', label: t('experience.review_status_filter_completed') },
+                { value: 'failed', label: t('experience.review_status_filter_failed') },
+              ]}
+            />
+            <Checkbox
+              checked={allVisibleRunsSelected}
+              indeterminate={selectedRunIds.length > 0 && !allVisibleRunsSelected}
+              disabled={!reviewRuns.length}
+              onChange={toggleSelectAllVisible}
+            >
+              {t('experience.select_all_page')}
+            </Checkbox>
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              disabled={!selectedRunIds.length}
+              loading={batchDeleting}
+              onClick={handleBatchDeleteReviewRuns}
+            >
+              {t('experience.batch_delete_runs', { count: selectedRunIds.length })}
+            </Button>
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              disabled={!reviewRuns.length}
+              loading={clearingRuns}
+              onClick={handleClearReviewRuns}
+            >
+              {t('experience.clear_runs')}
+            </Button>
+          </Space>
         )}
       >
         <div className="experience-scroll-panel experience-review-runs-scroll">
@@ -745,9 +989,14 @@ export const ExperiencePage: React.FC = () => {
                     </Button>,
                   ]}
                 >
-                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
-                    <Space wrap>
-                      <Tag>{item.stock_code}</Tag>
+                  <Space align="start" style={{ width: '100%' }}>
+                    <Checkbox
+                      checked={selectedRunIds.includes(item.review_run_id)}
+                      onChange={() => toggleRunSelection(item.review_run_id)}
+                    />
+                    <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                      <Space wrap>
+                        <Tag>{item.stock_code}</Tag>
                       {item.stock_name ? <Tag>{item.stock_name}</Tag> : null}
                       {item.recommended_action ? (
                         <Tag color={actionColorMap[item.recommended_action] || 'default'}>
@@ -761,9 +1010,10 @@ export const ExperiencePage: React.FC = () => {
                       ) : null}
                       <Tag color={getRunStatusColor(item.status)}>{item.status}</Tag>
                     </Space>
-                    <Text type="secondary">
-                      {renderEventMessage(item)} · {dayjs(item.updated_at).format('YYYY-MM-DD HH:mm')}
-                    </Text>
+                      <Text type="secondary">
+                        {renderEventMessage(item)} · {dayjs(item.created_at).format('YYYY-MM-DD HH:mm')}
+                      </Text>
+                    </Space>
                   </Space>
                 </List.Item>
               )}
@@ -772,6 +1022,19 @@ export const ExperiencePage: React.FC = () => {
             <Empty description={t('experience.no_review_runs')} />
           )}
         </div>
+        {runsTotal > 0 ? (
+          <Pagination
+            size="small"
+            current={runsPage}
+            pageSize={runsPageSize}
+            total={runsTotal}
+            showSizeChanger
+            pageSizeOptions={PAGE_SIZE_OPTIONS}
+            showTotal={(total) => t('experience.review_runs_total', { total })}
+            onChange={handleRunsPaginationChange}
+            style={{ marginTop: 12, textAlign: 'right' }}
+          />
+        ) : null}
       </Card>
 
       {analyzeResult ? (
