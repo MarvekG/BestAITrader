@@ -8,11 +8,12 @@ from app.ai.experience.schemas import (
     ExperienceAnalyzeResponse,
     ExperienceDebateSessionResponse,
     ExperienceReviewCandidateListResponse,
+    ExperienceReviewQueuedResponse,
     ExperienceReviewSchedulerConfig,
     ExperienceReviewEventResponse,
     ExperienceReviewRunResponse,
 )
-from app.ai.experience.service import experience_service
+from app.ai.experience.service import ExperienceReviewConflict, experience_service
 from app.models.user import User
 from app.core.security import get_current_user
 
@@ -62,48 +63,39 @@ async def update_scheduler_config(
     return config
 
 
-@router.post("/analyze", response_model=ExperienceAnalyzeResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/analyze",
+    response_model=ExperienceReviewQueuedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
 async def analyze_debate_with_experience(
     payload: ExperienceAnalyzeRequest,
     current_user: User = Depends(get_current_user),
 ):
-    """为已完成的辩论会话发起经验复盘。
+    """将已完成的辩论会话加入经验复盘队列。
 
     Args:
         payload: 包含会话 ID 和可选复盘周期的复盘请求。
         current_user: 已认证用户依赖。
 
     Returns:
-        序列化后的经验复盘结果。
+        排队中的复盘运行摘要。
 
     Raises:
-        HTTPException: 当请求的会话或复盘周期无效时抛出。
+        HTTPException: 当会话/周期无效，或同会话、同股票已有任务时抛出。
     """
     try:
-        result = await experience_service.analyze(
+        result = await experience_service.enqueue_review(
             user_id=current_user.id,
             session_id=payload.session_id,
             review_horizon=payload.review_horizon,
         )
+    except ExperienceReviewConflict as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    return ExperienceAnalyzeResponse(
-        review_run_id=result.get("review_run_id"),
-        review_horizon=result.get("review_horizon"),
-        market_day_count=result.get("market_day_count"),
-        session_id=result["session_id"],
-        stock_code=result["stock_code"],
-        stock_name=result.get("stock_name"),
-        industry=result.get("industry"),
-        style_bucket=result["style_bucket"],
-        trading_frequency=result.get("trading_frequency"),
-        trading_strategy=result.get("trading_strategy"),
-        analysis_date=result["analysis_date"],
-        reviewed_at=result["reviewed_at"],
-        analysis_payload=result.get("analysis_payload") or {},
-        tool_trace=result.get("tool_trace") or [],
-    )
+    return ExperienceReviewQueuedResponse(**result)
 
 
 @router.get("/review-candidates", response_model=ExperienceReviewCandidateListResponse)

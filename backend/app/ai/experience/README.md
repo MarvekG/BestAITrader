@@ -42,7 +42,7 @@ flowchart TD
 | [`workflow.py`](./workflow.py) | LangGraph 复盘工作流、LLM 工具循环、结构化输出和记忆写入约束。 |
 | [`schemas.py`](./schemas.py) | 请求、复盘结果、事件和 run 列表响应结构。 |
 | [`experience_review_event.py`](../../models/experience_review_event.py) | 复盘事件表模型。 |
-| [`experience_review_scheduler.py`](../../tasks/experience_review_scheduler.py) | 盘后自动扫描可复盘 session 并发起经验复盘。 |
+| [`experience_review_scheduler.py`](../../tasks/experience_review_scheduler.py) | 盘后自动扫描可复盘 session，并把到期复盘加入全局队列。 |
 
 ## 2. 端到端流程
 
@@ -50,7 +50,7 @@ flowchart TD
 
 API 挂载在 `/api/v1/experience`：
 
-- `POST /analyze`
+- `POST /analyze`：校验并入队，返回 `202` + `review_run_id` + 队列位置。
 - `GET /debate-sessions`
 - `GET /review-events/{session_id}`
 - `GET /review-runs`
@@ -62,7 +62,8 @@ API 挂载在 `/api/v1/experience`：
 前端入口是 `/experience` 页面。运行中事件通过 `experience_review_update` WebSocket 推送。
 
 后台入口是 `ExperienceReviewScheduler`。自动复盘默认关闭，可在系统设置页开启并配置执行时间、单次最大任务数
-和候选扫描数量。默认执行时间为每天 18:30（Asia/Shanghai）。
+和候选扫描数量。默认执行时间为每天 18:30（Asia/Shanghai）。调度器只负责入队，实际执行由全局 worker 池按
+`EXPERIENCE_REVIEW_MAX_CONCURRENT`（默认 3）并发消费。
 
 ### 2.2 发起条件
 
@@ -90,7 +91,7 @@ API 挂载在 `/api/v1/experience`：
 
 ```mermaid
 flowchart TD
-    Start([START]) --> Analyze["ExperienceService.analyze"]
+    Start([START]) --> Analyze["ExperienceService.enqueue_review"]
     Analyze --> BuildContext["build_debate_review_context"]
     BuildContext --> Fetch["fetch_full_context"]
     Fetch -->|errors| End([END])
@@ -184,10 +185,11 @@ run 列表和 run 结果都从同一个事件表聚合。删除 review run 本�
 `ExperienceService` 负责非 LLM 逻辑：
 
 - 校验发起条件。
-- 防止同一 session 并发复盘。
-- 清理重启中断或超时 stale run。
+- 将手动/API/调度触发统一写入 `experience_review_runs` 队列。
+- 防止同一 session 以及同一用户同一股票并发排队/运行。
+- 清理重启中断或超时 stale run；保留 queued 任务继续消费。
 - 构造 `debate_review_context`。
-- 持久化 started / completed / failed / tool_call 事件。
+- 持久化 queued / started / completed / failed / tool_call 事件。
 - 推送 WebSocket 更新。
 - 归一化 `analysis_payload`。
 - 查询 run、event、result。
@@ -195,18 +197,27 @@ run 列表和 run 结果都从同一个事件表聚合。删除 review run 本�
 
 Service 不负责 prompt 编写和工具调用循环，这些在 `workflow.py` 中。
 
+### 4.1.1 Queue 与全局并发
+
+- `POST /analyze` 只做校验和入队，返回 `202` 与 `review_run_id`，不阻塞等待复盘完成。
+- `experience_review_runs.status` 使用 `queued/running/completed/failed`。
+- `EXPERIENCE_REVIEW_MAX_CONCURRENT` 控制进程内 worker 数量，当前默认 `3`。当前部署按单 backend 实例保证全局 N；多实例部署时每个进程各有 N 个 worker，需要额外的 DB slot/Redis 分布式信号量才能严格全局 N。
+- worker 使用 `FOR UPDATE SKIP LOCKED` 按 `created_at` FIFO 领取 queued 任务；超过并发上限的任务只保留在队列中。
+- 同一 `session_id` 以及同一 `user_id + stock_code` 在 queued/running 期间由 partial unique index 保证唯一。
+- 调度器只负责入队，`max_runs_per_tick` 限制每轮入队候选数；同股票已有 queued/running 任务时跳过，留到下一次调度。
+- 启动时 queued 任务继续执行；中断的 running 任务标记 failed。
+
 ### 4.2 Market Outcome
 
-市场结果从 PM 决策时间开始读取目标股票日 K：
+市场结果只提供数据库原始数据，不提供计算指标：
 
-- 决策日价格。
-- 5 日、20 日、60 日收益。
-- 20 日、60 日最大回撤。
-- 相对沪深 300 的 20 日超额收益。
-- 相同行业样本下的 20 日相对收益。
-- 前 20 个交易日的收盘、最高、最低价样本。
+- `data_range` / `time_range`：数据窗口和总覆盖范围。
+- `review_window`：决策日到所选复盘日的原始日 K，5D/20D/60D 分别为 6/21/61 根。
+- `latest_window`：最新最多 30 根原始日 K，只用于后续验证。
+- `holding_window`：PM 持有期到期后的原始路径。
+- `benchmark_window`：沪深 300 在相同交易日的原始日 K。
 
-这些字段是复盘的事实基准。工具拿到的当前信息只能补充解释，不能覆盖输入里的历史事实。
+收益、回撤、相对收益和持有期结果由复盘 LLM 基于原始行自行计算。工具拿到的当前信息只能补充解释，不能覆盖输入里的历史原始事实。
 
 ### 4.3 Workflow
 
@@ -301,7 +312,7 @@ Service 不负责 prompt 编写和工具调用循环，这些在 `workflow.py` �
 - `result`
 - `error`
 
-应用启动时会调用 `cleanup_interrupted_review_runs()`，把仍处于 `started / running` 的旧 run 标记为 failed。查询列表时也会清理超过 2 小时的 stale run。
+应用启动时会调用 `cleanup_interrupted_review_runs()`，把仍处于 `started / running` 的旧 run 标记为 failed，保留 `queued` run 由 worker 继续消费。查询列表时也会清理超过 2 小时的 stale run。
 
 ## 7. 前端契约
 

@@ -187,7 +187,7 @@ export const ExperiencePage: React.FC = () => {
   );
   const activeReviewRun = React.useMemo(
     () => reviewRuns.find(
-      (item) => item.session_id === selectedSessionId && ['started', 'running'].includes(item.status),
+      (item) => item.session_id === selectedSessionId && ['queued', 'started', 'running'].includes(item.status),
     ) ?? null,
     [reviewRuns, selectedSessionId],
   );
@@ -302,6 +302,21 @@ export const ExperiencePage: React.FC = () => {
     void loadReviewRuns();
   }, [loadReviewRuns]);
 
+  const hasActiveReviewRun = React.useMemo(
+    () => reviewRuns.some((item) => ['queued', 'started', 'running'].includes(item.status)),
+    [reviewRuns],
+  );
+
+  React.useEffect(() => {
+    if (!hasActiveReviewRun) {
+      return undefined;
+    }
+    const timer = window.setInterval(() => {
+      void loadReviewRuns();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [hasActiveReviewRun, loadReviewRuns]);
+
   const loadReviewCandidates = React.useCallback(async () => {
     setCandidatesLoading(true);
     try {
@@ -317,6 +332,27 @@ export const ExperiencePage: React.FC = () => {
   React.useEffect(() => {
     void loadReviewCandidates();
   }, [loadReviewCandidates]);
+
+  const loadCompletedReviewResult = React.useCallback(async (reviewRunId: string) => {
+    try {
+      const result = await experienceApi.getReviewRunResult(reviewRunId);
+      if (result) {
+        setAnalyzeResult(result);
+      }
+    } catch {
+      // 运行列表和事件仍可展示状态，结果加载失败不覆盖当前页面。
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!viewedReviewRunId || analyzeResult) {
+      return;
+    }
+    const run = reviewRuns.find((item) => item.review_run_id === viewedReviewRunId);
+    if (run?.status === 'completed') {
+      void loadCompletedReviewResult(viewedReviewRunId);
+    }
+  }, [analyzeResult, loadCompletedReviewResult, reviewRuns, viewedReviewRunId]);
 
   React.useEffect(() => {
     const nextSearchParams = new URLSearchParams(searchParams);
@@ -364,6 +400,9 @@ export const ExperiencePage: React.FC = () => {
       if (!selectedSessionId || messageSessionId !== selectedSessionId) {
         return;
       }
+      if (viewedReviewRunId && messageRunId && viewedReviewRunId !== messageRunId) {
+        return;
+      }
       if (liveReviewRunId && messageRunId && liveReviewRunId !== messageRunId) {
         return;
       }
@@ -372,6 +411,9 @@ export const ExperiencePage: React.FC = () => {
       }
       setLiveEvents((prev) => [...prev, data as ExperienceReviewEvent]);
       void loadReviewRuns();
+      if (data.status === 'completed' && messageRunId) {
+        void loadCompletedReviewResult(messageRunId);
+      }
       if (data.stage === 'tool_call') {
         const payload = data.payload || {};
         const toolName = getToolName(payload);
@@ -396,7 +438,7 @@ export const ExperiencePage: React.FC = () => {
       return;
     }
     const targetActiveReviewRun = reviewRuns.find(
-      (item) => item.session_id === targetSessionId && ['started', 'running'].includes(item.status),
+      (item) => item.session_id === targetSessionId && ['queued', 'started', 'running'].includes(item.status),
     );
     if (targetActiveReviewRun) {
       message.warning(t('experience.active_review_exists', { review_run_id: targetActiveReviewRun.review_run_id }));
@@ -416,15 +458,19 @@ export const ExperiencePage: React.FC = () => {
         session_id: targetSessionId,
         review_horizon: targetHorizon,
       });
-      setAnalyzeResult(result);
-      setViewedReviewRunId(result.review_run_id || null);
-      setLiveReviewRunId(result.review_run_id || null);
-      setLoadedReviewRunId(result.review_run_id || null);
-      setLiveToolTrace(result.tool_trace || []);
+      setAnalyzeResult(null);
+      setViewedReviewRunId(result.review_run_id);
+      setLiveReviewRunId(result.review_run_id);
+      setLoadedReviewRunId(null);
+      setLiveToolTrace([]);
       void loadReviewRuns();
       void loadDebateSessions();
       void loadReviewCandidates();
-      message.success(t('experience.analyze_success'));
+      message.success(
+        t('experience.analyze_queued', {
+          position: result.queue_position,
+        }),
+      );
     } catch (error) {
       const detail = getApiErrorDetail(error);
       setAnalyzeResult(null);

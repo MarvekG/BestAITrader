@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.experience.horizons import ReviewHorizon
 from app.ai.experience.horizons import eligible_horizons
 from app.ai.experience.horizons import normalize_review_horizon
-from app.ai.experience.service import experience_service
+from app.ai.experience.service import ExperienceReviewConflict, experience_service
 from app.core import database as database_module
 from app.core.logger import get_logger
 from app.crud.system_setting import system_setting
@@ -34,7 +34,7 @@ EXPERIENCE_REVIEW_CANDIDATE_LOOKBACK = 200
 EXPERIENCE_REVIEW_MAX_RUNS_PER_TICK = 2
 EXPERIENCE_REVIEW_CONFIG_KEY = "experience_review_scheduler_config"
 EXPERIENCE_REVIEW_TIMEZONE = ZoneInfo("Asia/Shanghai")
-EXPERIENCE_REVIEW_BLOCKING_STATUSES = {"started", "running", "completed", "failed"}
+EXPERIENCE_REVIEW_BLOCKING_STATUSES = {"queued", "started", "running", "completed", "failed"}
 
 
 DEFAULT_EXPERIENCE_REVIEW_CONFIG: dict[str, Any] = {
@@ -274,12 +274,12 @@ async def run_due_reviews() -> dict[str, Any]:
 
     launched: list[dict[str, Any]] = []
     for candidate in candidates:
-        result = await _launch_review(candidate)
+        result = await _enqueue_review(candidate)
         if result:
             launched.append(result)
 
     if launched:
-        logger.info("Launched %s experience review task(s): %s", len(launched), launched)
+        logger.info("Enqueued %s experience review task(s): %s", len(launched), launched)
     return {"launched": len(launched), "items": launched}
 
 
@@ -360,32 +360,43 @@ async def _load_due_sessions(
     return candidates
 
 
-async def _launch_review(candidate: ExperienceReviewCandidate) -> dict[str, Any] | None:
-    """运行一个调度触发的经验复盘。
+async def _enqueue_review(candidate: ExperienceReviewCandidate) -> dict[str, Any] | None:
+    """将一个调度触发的经验复盘加入全局队列。
 
     Args:
         candidate: 调度器选中的到期复盘候选项。
 
     Returns:
-        复盘成功时返回启动元数据，否则返回 ``None``。
+        入队成功时返回队列元数据；同股票/同会话冲突时跳过并返回 ``None``。
     """
     try:
-        result = await experience_service.analyze(
+        result = await experience_service.enqueue_review(
             user_id=candidate.user_id,
             session_id=candidate.session_id,
             review_horizon=candidate.review_horizon,
         )
         return {
             "review_run_id": result.get("review_run_id"),
+            "status": result.get("status"),
+            "queue_position": result.get("queue_position"),
             "session_id": str(candidate.session_id),
             "user_id": candidate.user_id,
             "stock_code": candidate.stock_code,
             "market_day_count": candidate.market_day_count,
             "review_horizon": candidate.review_horizon,
         }
+    except ExperienceReviewConflict as exc:
+        logger.info(
+            "Scheduled experience review deferred: session=%s stock=%s run=%s reason=%s",
+            candidate.session_id,
+            candidate.stock_code,
+            exc.review_run_id,
+            exc,
+        )
+        return None
     except Exception as exc:
         logger.exception(
-            "Scheduled experience review failed for session=%s stock=%s: %s",
+            "Scheduled experience review enqueue failed for session=%s stock=%s: %s",
             candidate.session_id,
             candidate.stock_code,
             exc,

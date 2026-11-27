@@ -145,6 +145,15 @@ async def lifespan(app: Any):
     except Exception as e:
         logger.error(f"Failed to reset interrupted experience review runs: {e}")
 
+    # Start experience review workers after interrupted runs are cleaned up.
+    try:
+        from app.core.config import settings
+        from app.ai.experience.queue import experience_review_queue
+        if settings.EXPERIENCE_REVIEW_QUEUE_ENABLED:
+            await experience_review_queue.start()
+    except Exception as e:
+        logger.error(f"Failed to start experience review queue: {e}")
+
     # Start async system scheduler after interrupted runs are cleaned up
     try:
         from app.tasks.async_scheduler import async_task_scheduler
@@ -165,6 +174,13 @@ async def lifespan(app: Any):
         logger.info("Data refresh scheduler stopped")
     except Exception as e:
         logger.error(f"Failed to stop data refresh scheduler: {e}")
+
+    # Stop experience review workers before closing shared resources.
+    try:
+        from app.ai.experience.queue import experience_review_queue
+        await experience_review_queue.stop()
+    except Exception as e:
+        logger.error(f"Failed to stop experience review queue: {e}")
 
     # Stop async system scheduler before closing shared resources
     try:

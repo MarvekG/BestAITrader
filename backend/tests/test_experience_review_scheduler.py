@@ -2,11 +2,13 @@ from datetime import date, datetime, timedelta
 import uuid
 
 import pytest
+from sqlalchemy import func, select
 
 from app.ai.llm_engine.roles import AGENT_ROLE_PORTFOLIO_MANAGER
 from app.models.data_storage import KlineData, StockBasic
 from app.models.debate_message import DebateMessage
 from app.models.experience_review_event import ExperienceReviewEvent
+from app.models.experience_review_run import ExperienceReviewRun
 from app.models.pm_decision import PMDecisionRecord
 from app.models.session import Session as DebateSession
 from app.models.user import User
@@ -328,11 +330,15 @@ async def test_run_due_reviews_skips_when_scheduler_is_disabled(
     await update_experience_review_scheduler_config({"enabled": False})
     calls = []
 
-    async def fake_analyze(*, user_id, session_id, review_horizon=None):
+    async def fake_enqueue(*, user_id, session_id, review_horizon=None):
         calls.append((user_id, session_id, review_horizon))
-        return {"review_run_id": "review-1"}
+        return {
+            "review_run_id": "review-1",
+            "status": "queued",
+            "queue_position": 1,
+        }
 
-    monkeypatch.setattr(scheduler_module.experience_service, "analyze", fake_analyze)
+    monkeypatch.setattr(scheduler_module.experience_service, "enqueue_review", fake_enqueue)
 
     result = await scheduler_module.run_due_reviews()
 
@@ -354,17 +360,79 @@ async def test_run_due_reviews_invokes_experience_service_for_due_session(
     await update_experience_review_scheduler_config({"enabled": True})
     calls = []
 
-    async def fake_analyze(*, user_id, session_id, review_horizon=None):
+    async def fake_enqueue(*, user_id, session_id, review_horizon=None):
         calls.append((user_id, session_id, review_horizon))
-        return {"review_run_id": "review-1"}
+        return {
+            "review_run_id": "review-1",
+            "status": "queued",
+            "queue_position": 1,
+        }
 
-    monkeypatch.setattr(scheduler_module.experience_service, "analyze", fake_analyze)
+    monkeypatch.setattr(scheduler_module.experience_service, "enqueue_review", fake_enqueue)
 
     result = await scheduler_module.run_due_reviews()
 
     assert result["launched"] == 1
     assert result["items"][0]["review_run_id"] == "review-1"
+    assert result["items"][0]["status"] == "queued"
     assert calls == [(user.id, session.session_id, "5d")]
+
+
+@pytest.mark.asyncio
+async def test_run_due_reviews_defers_same_stock_second_session(async_db_session):
+    user = await _create_user(async_db_session)
+    await _create_stock(async_db_session)
+    first_session = await _create_completed_session(async_db_session, user)
+    second_session = await _create_completed_session(async_db_session, user)
+    pm_created_at = datetime(2026, 1, 1, 15, 0)
+    await _create_pm_message(async_db_session, first_session, pm_created_at)
+    await _create_pm_message(async_db_session, second_session, pm_created_at)
+    await _create_daily_klines(async_db_session)
+    await update_experience_review_scheduler_config(
+        {"enabled": True, "max_runs_per_tick": 2}
+    )
+
+    result = await scheduler_module.run_due_reviews()
+
+    assert result["launched"] == 1
+    run_count = await async_db_session.scalar(
+        select(func.count()).select_from(ExperienceReviewRun)
+    )
+    assert run_count == 1
+
+
+def test_analyze_endpoint_returns_queued_response(client, auth_headers, monkeypatch):
+    from app.ai.experience.service import experience_service
+
+    session_id = uuid.uuid4()
+    review_run_id = str(uuid.uuid4())
+
+    async def fake_enqueue(*, user_id, session_id, review_horizon=None):
+        return {
+            "review_run_id": review_run_id,
+            "status": "queued",
+            "queue_position": 1,
+            "session_id": session_id,
+            "stock_code": "600519.SH",
+            "stock_name": "贵州茅台",
+            "review_horizon": review_horizon or "20d",
+            "market_day_count": 21,
+            "created_at": datetime(2026, 1, 1, 15, 0),
+        }
+
+    monkeypatch.setattr(experience_service, "enqueue_review", fake_enqueue)
+
+    response = client.post(
+        "/api/v1/experience/analyze",
+        headers=auth_headers,
+        json={"session_id": str(session_id), "review_horizon": "20d"},
+    )
+
+    assert response.status_code == 202
+    payload = response.json()
+    assert payload["review_run_id"] == review_run_id
+    assert payload["status"] == "queued"
+    assert payload["queue_position"] == 1
 
 
 def test_scheduler_config_api_defaults_and_updates(client, auth_headers):
