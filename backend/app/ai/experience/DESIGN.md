@@ -56,7 +56,7 @@ reviewed
 failed
 ```
 
-同一个 session 可以分别执行 5D、20D、60D 复盘。20D 是默认优先周期，5D 适合早期纠错，60D 适合中期逻辑验证。
+同一个 session 可以分别执行 5D、20D、60D 复盘。20D 是默认优先周期，5D 适合早期纠错，60D 适合中期逻辑验证。每次复盘还必须结合 PM 原持有期和截至最新可用交易日的 `latest_outcome`，不得只依据固定窗口下结论；但 `debate_correctness` 仍以所选周期和 PM 持有期为主，`latest_outcome` 只覆盖最近 30 根日 K，用于补充后续验证。
 
 复盘 API 挂载在 `/api/v1/experience`：
 

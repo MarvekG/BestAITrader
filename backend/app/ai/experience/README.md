@@ -124,7 +124,15 @@ LangGraph 内部只有两个节点：
 | `debate_timeline` | 各 Agent 报告按时间排序后的结论文本。 |
 | `agent_position_summary` | 各角色最近几次 decision 摘要。 |
 | `execution_summary` | 订单、成交、均价、费用和已实现盈亏摘要。 |
-| `market_outcome_summary` | 决策后的股票表现、回撤、指数超额和行业相对表现。 |
+| `market_outcome_summary` | 决策后的固定周期、PM 持有期和最近 30 根日 K 的最新表现，包含收益、近期回撤、指数/行业相对收益。 |
+
+`market_outcome_summary` 中同时保留三个口径：
+
+- `selected_horizon_outcome`：用户选择的 5d/20d/60d 周期切片。
+- `holding_horizon_outcome`：按 PM 的 `holding_horizon_days` 自然日到期日计算的持有期结果。
+- `latest_outcome`：最近 30 根日 K 的最新收盘、相对入场收益、近期回撤/峰谷、距决策交易日数和相对收益；更长历史由模型按需查询。
+
+复盘提示词要求把最新事实与固定周期结果结合分析，但 `debate_correctness` 仍以所选周期和 PM 持有期为主，最新结果只用于补充后续验证、解释涨跌和提炼教训。若数据缺失或明显落后，提示词要求模型先用 `get_current_time` 判断，再按需通过 `sync_market_data` 同步并用 `query_stock_data` 核对，不再由工作流代码强制拦截最终 JSON。
 
 ### 3.2 工作流状态
 
@@ -257,7 +265,7 @@ Service 不负责 prompt 编写和工具调用循环，这些在 `workflow.py` �
 
 - `original_pm_decision`：原始 PM 动作或结论。
 - `debate_correctness`：`correct / partially_correct / incorrect / inconclusive`。
-- `correctness_reasoning`：1-3 句后验解释，包含主要涨跌原因和一条可复用教训。
+- `correctness_reasoning`：2-4 句后验解释，覆盖所选周期、PM 持有期和最新交易日结果，并包含主要涨跌原因和一条可复用教训；`debate_correctness` 以所选周期和 PM 持有期为主。
 - `written_memories`：记忆文档写入元数据，不包含文档正文，包含状态、版本、大小、上限和失败原因。
 
 工具调用轨迹不放入 `analysis_payload`，由顶层 `tool_trace` 单独保留，供审计和按需展开查看。

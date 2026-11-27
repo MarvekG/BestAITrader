@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import json
 from statistics import mean
 from typing import Any, Dict, List
@@ -26,7 +26,7 @@ from app.core.i18n import i18n_service
 from app.core.logger import get_logger
 from app.core.utils.converters import safe_float, safe_isoformat
 from app.ai.experience.workflow import create_experience_workflow
-from app.models.data_storage import KlineData, StockBasic
+from app.models.data_storage import IndexDaily, KlineData, StockBasic
 from app.models.debate_message import DebateMessage
 from app.models.experience_review_event import ExperienceReviewEvent
 from app.models.order import Order
@@ -44,6 +44,9 @@ CORRECTNESS_BUCKETS = {"correct", "partially_correct", "incorrect", "inconclusiv
 ACTIVE_REVIEW_STATUSES = {"started", "running"}
 STALE_REVIEW_TIMEOUT = timedelta(hours=2)
 PM_AGENT_ROLE = "portfolio_manager"
+REVIEW_DECISION_WINDOW_ROWS = 61
+REVIEW_DECISION_WINDOW_MAX_ROWS = 130
+REVIEW_LATEST_OUTCOME_ROWS = 30
 
 
 def _normalize_confidence(value: Any) -> float:
@@ -1224,6 +1227,7 @@ class ExperienceService:
             review_horizon=review_horizon,
             market_day_count=market_day_count,
             entry_price_override=buy_fill_price,
+            holding_horizon_days=pm_record.holding_horizon_days if pm_record else None,
         )
 
         return {
@@ -1354,6 +1358,7 @@ class ExperienceService:
         review_horizon: ReviewHorizon = "20d",
         market_day_count: int = 0,
         entry_price_override: float | None = None,
+        holding_horizon_days: int | None = None,
     ) -> Dict[str, Any]:
         """构建决策后行情结果摘要。
 
@@ -1365,14 +1370,22 @@ class ExperienceService:
             review_horizon: 当前选择的复盘周期。
             market_day_count: 决策后可用的日 K 样本数量。
             entry_price_override: 实际买入成交均价；存在时优先作为收益计算入口价。
+            holding_horizon_days: PM 声明的持有或复议天数，按自然日换算到期日。
 
         Returns:
-            包含所选周期收益、各周期收益、回撤和相对收益的行情结果摘要。
+            包含所选周期、PM 持有期和最近 30 根日 K 最新表现的行情结果摘要。
         """
         if not decision_time:
             return {}
 
         snapshot_day = decision_time.date()
+        decision_window_limit = REVIEW_DECISION_WINDOW_ROWS
+        if holding_horizon_days and holding_horizon_days > 0:
+            estimated_holding_rows = int(holding_horizon_days * 5 / 7) + 10
+            decision_window_limit = max(
+                decision_window_limit,
+                min(REVIEW_DECISION_WINDOW_MAX_ROWS, estimated_holding_rows),
+            )
         rows = (
             await db.execute(
                 select(KlineData.date, KlineData.open, KlineData.close, KlineData.high, KlineData.low)
@@ -1382,17 +1395,22 @@ class ExperienceService:
                     KlineData.date >= snapshot_day,
                 )
                 .order_by(KlineData.date.asc())
-                .limit(130)
+                .limit(decision_window_limit)
             )
         ).all()
         if not rows:
             return {}
 
-        closes = [float(item.close) for item in rows if item.close is not None]
-        highs = [float(item.high) for item in rows if item.high is not None]
-        lows = [float(item.low) for item in rows if item.low is not None]
-        entry_price = entry_price_override if entry_price_override and entry_price_override > 0 else (
-            closes[0] if closes else None
+        price_rows = [item for item in rows if item.close is not None]
+        if not price_rows:
+            return {}
+        closes = [float(item.close) for item in price_rows]
+        highs = [float(item.high) for item in price_rows if item.high is not None]
+        lows = [float(item.low) for item in price_rows if item.low is not None]
+        entry_price = (
+            entry_price_override
+            if entry_price_override and entry_price_override > 0
+            else closes[0]
         )
         if not entry_price:
             return {}
@@ -1402,54 +1420,202 @@ class ExperienceService:
             else "decision_day_close"
         )
 
-        def compute_return(index: int) -> float | None:
-            if not closes or len(closes) <= index:
+        def compute_max_drawdown(prices: List[float]) -> float | None:
+            if not prices:
                 return None
-            target = closes[index]
-            return (target / entry_price) - 1 if target is not None else None
-
-        def compute_drawdown(limit: int) -> float | None:
-            if len(closes) <= limit:
-                return None
-            subset = closes[: limit + 1]
-            if not subset:
-                return None
-            peak = subset[0]
+            peak = prices[0]
             max_dd = 0.0
-            for price in subset:
+            for price in prices:
                 if price > peak:
                     peak = price
                 if peak > 0:
                     max_dd = min(max_dd, (price / peak) - 1)
             return max_dd
 
-        index_rows = (
+        def compute_return(index: int) -> float | None:
+            if not closes or len(closes) <= index:
+                return None
+            return (closes[index] / entry_price) - 1
+
+        def compute_drawdown_to(end_index: int) -> float | None:
+            if end_index < 0 or end_index >= len(closes):
+                return None
+            return compute_max_drawdown(closes[: end_index + 1])
+
+        def compute_drawdown(limit: int) -> float | None:
+            if len(closes) <= limit:
+                return None
+            return compute_drawdown_to(limit)
+
+        latest_rows = (
             await db.execute(
-                select(KlineData.close)
+                select(KlineData.date, KlineData.close)
                 .where(
-                    KlineData.stock_code == "000300.SH",
+                    KlineData.stock_code == stock_code,
                     KlineData.freq == "D",
                     KlineData.date >= snapshot_day,
                 )
-                .order_by(KlineData.date.asc())
-                .limit(21)
+                .order_by(KlineData.date.desc())
+                .limit(REVIEW_LATEST_OUTCOME_ROWS)
             )
         ).all()
-        index_closes = [float(item.close) for item in index_rows if item.close is not None]
-        relative_return_vs_index = None
-        if len(index_closes) > 20:
-            index_return_20 = (index_closes[20] / index_closes[0]) - 1
-            stock_return_20 = compute_return(20)
-            if stock_return_20 is not None:
-                relative_return_vs_index = stock_return_20 - index_return_20
+        latest_price_rows = [
+            item for item in reversed(latest_rows) if item.close is not None
+        ]
+        if not latest_price_rows:
+            return {}
+        latest_trade_date = latest_price_rows[-1].date
+        latest_close = float(latest_price_rows[-1].close)
+        latest_return = (latest_close / entry_price) - 1
+        latest_recent_closes = [float(item.close) for item in latest_price_rows]
+        latest_recent_max_drawdown = compute_max_drawdown(latest_recent_closes)
+        latest_recent_peak = max(latest_recent_closes)
+        latest_recent_trough = min(latest_recent_closes)
 
-        relative_return_vs_industry = await self._compute_relative_vs_industry(
+        index_cache: dict[date, tuple[date, float] | None] = {}
+
+        async def index_close_on_or_before(target_day: date) -> tuple[date, float] | None:
+            if target_day in index_cache:
+                return index_cache[target_day]
+            row = (
+                await db.execute(
+                    select(IndexDaily.trade_date, IndexDaily.close)
+                    .where(
+                        IndexDaily.index_code == "000300.SH",
+                        IndexDaily.trade_date <= target_day,
+                    )
+                    .order_by(IndexDaily.trade_date.desc())
+                    .limit(1)
+                )
+            ).first()
+            value = (
+                (row.trade_date, float(row.close))
+                if row is not None and row.close is not None
+                else None
+            )
+            index_cache[target_day] = value
+            return value
+
+        async def compute_relative_return(
+            stock_return: float | None,
+            stock_day: date,
+        ) -> float | None:
+            if stock_return is None:
+                return None
+            base = await index_close_on_or_before(price_rows[0].date)
+            target = await index_close_on_or_before(stock_day)
+            if not base or not target or target[0] <= base[0] or base[1] <= 0:
+                return None
+            index_return = (target[1] / base[1]) - 1
+            return stock_return - index_return
+
+        stock_return_20 = compute_return(20)
+        stock_day_20 = price_rows[20].date if len(price_rows) > 20 else None
+        if stock_day_20:
+            relative_return_vs_index = await compute_relative_return(
+                stock_return_20,
+                stock_day_20,
+            )
+        else:
+            relative_return_vs_index = None
+        latest_relative_return_vs_index = await compute_relative_return(
+            latest_return,
+            latest_trade_date,
+        )
+
+        industry_returns = await self._compute_relative_vs_industry(
             db=db,
             stock_code=stock_code,
             industry=industry,
             snapshot_day=snapshot_day,
-            stock_return=compute_return(20),
+            end_date=latest_trade_date,
+            stock_return=stock_return_20,
+            stock_return_latest=latest_return,
         )
+        relative_return_vs_industry = industry_returns.get("20d")
+        latest_relative_return_vs_industry = industry_returns.get("latest")
+
+        holding_horizon_outcome: Dict[str, Any] | None = None
+        if holding_horizon_days and holding_horizon_days > 0:
+            deadline_date = snapshot_day + timedelta(days=holding_horizon_days)
+            holding_index = next(
+                (
+                    index
+                    for index, item in enumerate(price_rows)
+                    if item.date >= deadline_date
+                ),
+                None,
+            )
+            if holding_index is not None:
+                holding_return = compute_return(holding_index)
+                holding_day = price_rows[holding_index].date
+                holding_horizon_outcome = {
+                    "available": True,
+                    "horizon_days": holding_horizon_days,
+                    "deadline_date": deadline_date.isoformat(),
+                    "trade_date": holding_day.isoformat(),
+                    "close": closes[holding_index],
+                    "trading_days_to_target": holding_index,
+                    "absolute_return": holding_return,
+                    "max_drawdown": compute_drawdown_to(holding_index),
+                    "path_complete": True,
+                    "relative_return_vs_index": await compute_relative_return(
+                        holding_return,
+                        holding_day,
+                    ),
+                }
+            else:
+                holding_row = (
+                    await db.execute(
+                        select(KlineData.date, KlineData.close)
+                        .where(
+                            KlineData.stock_code == stock_code,
+                            KlineData.freq == "D",
+                            KlineData.date >= deadline_date,
+                        )
+                        .order_by(KlineData.date.asc())
+                        .limit(1)
+                    )
+                ).first()
+                if holding_row is not None and holding_row.close is not None:
+                    holding_day = holding_row.date
+                    holding_close = float(holding_row.close)
+                    holding_return = (holding_close / entry_price) - 1
+                    holding_days_to_target = int(
+                        await db.scalar(
+                            select(func.count())
+                            .select_from(KlineData)
+                            .where(
+                                KlineData.stock_code == stock_code,
+                                KlineData.freq == "D",
+                                KlineData.date >= snapshot_day,
+                                KlineData.date <= holding_day,
+                            )
+                        )
+                        or 0
+                    ) - 1
+                    holding_horizon_outcome = {
+                        "available": True,
+                        "horizon_days": holding_horizon_days,
+                        "deadline_date": deadline_date.isoformat(),
+                        "trade_date": holding_day.isoformat(),
+                        "close": holding_close,
+                        "trading_days_to_target": max(0, holding_days_to_target),
+                        "absolute_return": holding_return,
+                        "max_drawdown": None,
+                        "path_complete": False,
+                        "relative_return_vs_index": await compute_relative_return(
+                            holding_return,
+                            holding_day,
+                        ),
+                    }
+                else:
+                    holding_horizon_outcome = {
+                        "available": False,
+                        "horizon_days": holding_horizon_days,
+                        "deadline_date": deadline_date.isoformat(),
+                        "reason": "holding horizon has not been reached in available data",
+                    }
 
         horizon_returns = {
             "5d": {
@@ -1458,8 +1624,8 @@ class ExperienceService:
                 "max_drawdown": compute_drawdown(5),
             },
             "20d": {
-                "available": compute_return(20) is not None,
-                "close_return": compute_return(20),
+                "available": stock_return_20 is not None,
+                "close_return": stock_return_20,
                 "max_drawdown": compute_drawdown(20),
                 "relative_return_vs_index": relative_return_vs_index,
                 "relative_return_vs_industry": relative_return_vs_industry,
@@ -1471,8 +1637,21 @@ class ExperienceService:
             },
         }
         selected = horizon_returns[review_horizon]
+        latest_outcome = {
+            "available": True,
+            "trade_date": latest_trade_date.isoformat(),
+            "close": latest_close,
+            "absolute_return": latest_return,
+            "recent_trading_days": len(latest_recent_closes),
+            "recent_max_drawdown": latest_recent_max_drawdown,
+            "recent_peak_close": latest_recent_peak,
+            "recent_trough_close": latest_recent_trough,
+            "trading_days_since_decision": max(0, market_day_count - 1),
+            "relative_return_vs_index": latest_relative_return_vs_index,
+            "relative_return_vs_industry": latest_relative_return_vs_industry,
+        }
         return {
-            "entry_date": rows[0].date.isoformat() if rows else None,
+            "entry_date": price_rows[0].date.isoformat(),
             "entry_price": entry_price,
             "entry_price_source": entry_price_source,
             "market_day_count": market_day_count,
@@ -1485,8 +1664,10 @@ class ExperienceService:
                 "relative_return_vs_industry": selected.get("relative_return_vs_industry"),
             },
             "horizon_returns": horizon_returns,
+            "holding_horizon_outcome": holding_horizon_outcome,
+            "latest_outcome": latest_outcome,
             "close_5d_return": compute_return(5),
-            "close_20d_return": compute_return(20),
+            "close_20d_return": stock_return_20,
             "close_60d_return": compute_return(60),
             "max_drawdown_20d": compute_drawdown(20),
             "max_drawdown_60d": compute_drawdown(60),
@@ -1503,11 +1684,27 @@ class ExperienceService:
         *,
         stock_code: str,
         industry: str | None,
-        snapshot_day: datetime.date,
+        snapshot_day: date,
+        end_date: date,
         stock_return: float | None,
-    ) -> float | None:
-        if not industry or stock_return is None:
-            return None
+        stock_return_latest: float | None = None,
+    ) -> Dict[str, float | None]:
+        """计算股票相对同行业样本在 20 日和最新交易日的收益差。
+
+        Args:
+            db: 数据库会话。
+            stock_code: 当前股票代码。
+            industry: 当前股票所属行业。
+            snapshot_day: PM 决策日期。
+            end_date: 当前股票最新可用交易日。
+            stock_return: 当前股票的 20 日收益。
+            stock_return_latest: 当前股票截至最新交易日的收益。
+
+        Returns:
+            以 ``20d`` 和 ``latest`` 为键的相对收益字典；数据不足时为 None。
+        """
+        if not industry or (stock_return is None and stock_return_latest is None):
+            return {"20d": None, "latest": None}
 
         peer_codes = [
             code
@@ -1520,7 +1717,7 @@ class ExperienceService:
             ).all()
         ]
         if not peer_codes:
-            return None
+            return {"20d": None, "latest": None}
 
         rows = (
             await db.execute(
@@ -1529,6 +1726,7 @@ class ExperienceService:
                     KlineData.stock_code.in_(peer_codes),
                     KlineData.freq == "D",
                     KlineData.date >= snapshot_day,
+                    KlineData.date <= end_date,
                 )
                 .order_by(KlineData.stock_code.asc(), KlineData.date.asc())
             )
@@ -1537,13 +1735,27 @@ class ExperienceService:
         for peer_code, close in rows:
             if close is not None:
                 buckets[peer_code].append(float(close))
-        peer_returns: List[float] = []
+
+        peer_returns_20: List[float] = []
+        peer_returns_latest: List[float] = []
         for prices in buckets.values():
-            if len(prices) > 20 and prices[0] > 0:
-                peer_returns.append((prices[20] / prices[0]) - 1)
-        if not peer_returns:
-            return None
-        return stock_return - mean(peer_returns)
+            if not prices or prices[0] <= 0:
+                continue
+            if len(prices) > 20:
+                peer_returns_20.append((prices[20] / prices[0]) - 1)
+            peer_returns_latest.append((prices[-1] / prices[0]) - 1)
+
+        relative_20 = (
+            stock_return - mean(peer_returns_20)
+            if stock_return is not None and peer_returns_20
+            else None
+        )
+        relative_latest = (
+            stock_return_latest - mean(peer_returns_latest)
+            if stock_return_latest is not None and peer_returns_latest
+            else None
+        )
+        return {"20d": relative_20, "latest": relative_latest}
 
     def _build_execution_summary(self, orders: List[Order], trades: List[TradeRecord]) -> Dict[str, Any]:
         filled_orders = [item for item in orders if item.status == "filled"]

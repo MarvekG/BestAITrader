@@ -99,6 +99,16 @@ def test_review_system_prompt_keeps_memory_protocol_and_compact_output(monkeypat
     prompt = workflow._build_review_system_prompt("")
 
     assert "只需要完成三项输出" in prompt
+    assert "充分调研是硬性要求" in prompt
+    assert "`selected_horizon_outcome`" in prompt
+    assert "`holding_horizon_outcome`" in prompt
+    assert "`latest_outcome`" in prompt
+    assert "`sync_market_data`" in prompt
+    assert "最新交易日" in prompt
+    assert "以所选复盘周期和 PM 原持有期为主" in prompt
+    assert "不改变所选周期的主判定口径" in prompt
+    assert "`latest_outcome` 只覆盖最近 30 根日 K" in prompt
+    assert "data_age_days" not in prompt
     assert "不要输出记忆文档全文" in prompt
     assert "才调用 `write_memory` 重写整份记忆文档" in prompt
     assert "如果没有新增可复用经验，可以跳过全部记忆写入" in prompt
@@ -126,6 +136,16 @@ def test_review_system_prompt_keeps_memory_protocol_and_compact_output(monkeypat
     english_prompt = workflow._build_review_system_prompt("")
 
     assert "Return only three analytical fields" in english_prompt
+    assert "Thorough research is mandatory" in english_prompt
+    assert "`selected_horizon_outcome`" in english_prompt
+    assert "`holding_horizon_outcome`" in english_prompt
+    assert "`latest_outcome`" in english_prompt
+    assert "`sync_market_data`" in english_prompt
+    assert "latest trading-day" in english_prompt
+    assert "Judge `debate_correctness` mainly on the selected review horizon" in english_prompt
+    assert "must not change the primary verdict" in english_prompt
+    assert "`latest_outcome` covers only the most recent 30 daily bars" in english_prompt
+    assert "data_age_days" not in english_prompt
     assert "do not repeat the timeline or the memory document" in english_prompt
     assert "Only after extracting reusable profitable experience" in english_prompt
     assert "rewrite the whole memory document" in english_prompt
@@ -195,6 +215,40 @@ async def test_review_allows_final_json_without_memory_write(monkeypatch):
         if isinstance(message, HumanMessage)
     ]
     assert not any("你还没有调用 `write_memory`" in content for content in retry_messages)
+
+
+@pytest.mark.asyncio
+async def test_review_allows_final_json_when_latest_snapshot_is_stale(monkeypatch):
+    """最新行情缺失或落后时只由提示词提醒，不再用代码门禁拦截最终 JSON。"""
+    raw_llm = FakeRawLlm(
+        [
+            AIMessage(content=json.dumps(_valid_review_payload(), ensure_ascii=False)),
+        ]
+    )
+    provider = FakeProvider(raw_llm)
+    monkeypatch.setattr(workflow, "get_llm_provider", lambda: provider)
+    monkeypatch.setattr(workflow, "get_all_tools", lambda: [])
+    monkeypatch.setattr(workflow, "build_memory_tools", lambda state: [])
+    monkeypatch.setattr(workflow, "get_skills_loader_tools", lambda: [])
+    monkeypatch.setattr(workflow, "build_skills_catalog_prompt", lambda: "")
+
+    result = await workflow.review_debate_conclusion(
+        {
+            "stock_code": "601888.SH",
+            "stock_name": "中国中免",
+            "style_bucket": "swing",
+            "full_context": {
+                "pm_decision": {"decision": "buy"},
+                "market_outcome_summary": {
+                    "latest_outcome": {"available": True, "trade_date": "2026-09-01"},
+                },
+            },
+        }
+    )
+
+    assert result["errors"] == []
+    assert result["tool_trace"] == []
+    assert len(raw_llm.call_messages) == 1
 
 
 @pytest.mark.asyncio

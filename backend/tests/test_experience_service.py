@@ -8,7 +8,7 @@ from app.ai.experience import service as experience_service_module
 from app.ai.experience.service import experience_service
 from app.ai.llm_engine.roles import AGENT_ROLE_PORTFOLIO_MANAGER
 from app.core.i18n import i18n_service
-from app.models.data_storage import KlineData, StockBasic
+from app.models.data_storage import IndexDaily, KlineData, StockBasic
 from app.models.debate_message import DebateMessage
 from app.models.experience_review_event import ExperienceReviewEvent
 from app.models.pm_decision import PMDecisionRecord
@@ -530,6 +530,101 @@ async def test_build_debate_review_context_falls_back_to_decision_day_close_with
     market_outcome = context["market_outcome_summary"]
     assert market_outcome["entry_price"] == 10.5
     assert market_outcome["entry_price_source"] == "decision_day_close"
+
+
+@pytest.mark.asyncio
+async def test_build_market_outcome_summary_includes_latest_and_holding_horizon(async_db_session):
+    stock_code = "000001.SZ"
+    await _create_stock_and_klines(async_db_session, stock_code=stock_code, count=21)
+
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        market_outcome = await experience_service._build_market_outcome_summary(
+            db,
+            stock_code=stock_code,
+            industry="Bank",
+            decision_time=datetime(2026, 1, 1, 15, 0),
+            review_horizon="20d",
+            market_day_count=21,
+            holding_horizon_days=20,
+        )
+
+    expected_return = (30.5 / 10.5) - 1
+    latest = market_outcome["latest_outcome"]
+    assert latest["trade_date"] == "2026-01-21"
+    assert latest["close"] == pytest.approx(30.5)
+    assert latest["absolute_return"] == pytest.approx(expected_return)
+    assert latest["recent_trading_days"] == 21
+    assert latest["recent_max_drawdown"] == pytest.approx(0.0)
+    assert latest["recent_peak_close"] == pytest.approx(30.5)
+    assert latest["recent_trough_close"] == pytest.approx(10.5)
+    assert latest["trading_days_since_decision"] == 20
+    assert "data_age_days" not in latest
+
+    holding = market_outcome["holding_horizon_outcome"]
+    assert holding["available"] is True
+    assert holding["horizon_days"] == 20
+    assert holding["deadline_date"] == "2026-01-21"
+    assert holding["trade_date"] == "2026-01-21"
+    assert holding["absolute_return"] == pytest.approx(expected_return)
+
+
+@pytest.mark.asyncio
+async def test_build_market_outcome_summary_latest_uses_recent_rows_for_old_decision(async_db_session):
+    stock_code = "000001.SZ"
+    await _create_stock_and_klines(async_db_session, stock_code=stock_code, count=200)
+
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        market_outcome = await experience_service._build_market_outcome_summary(
+            db,
+            stock_code=stock_code,
+            industry="Bank",
+            decision_time=datetime(2026, 1, 1, 15, 0),
+            review_horizon="60d",
+            market_day_count=200,
+        )
+
+    latest = market_outcome["latest_outcome"]
+    assert latest["trade_date"] == "2026-07-19"
+    assert latest["close"] == pytest.approx(209.5)
+    assert latest["absolute_return"] == pytest.approx((209.5 / 10.5) - 1)
+    assert latest["recent_trading_days"] == 30
+    assert latest["recent_peak_close"] == pytest.approx(209.5)
+    assert latest["recent_trough_close"] == pytest.approx(180.5)
+    assert latest["trading_days_since_decision"] == 199
+    assert market_outcome["close_60d_return"] == pytest.approx((70.5 / 10.5) - 1)
+
+
+@pytest.mark.asyncio
+async def test_build_market_outcome_summary_uses_index_daily_for_relative_returns(async_db_session):
+    stock_code = "000001.SZ"
+    await _create_stock_and_klines(async_db_session, stock_code=stock_code, count=21)
+    async_db_session.add_all(
+        [
+            IndexDaily(
+                index_code="000300.SH",
+                trade_date=date(2026, 1, 1) + timedelta(days=index),
+                close=1000 + index * 10,
+            )
+            for index in range(21)
+        ]
+    )
+    await async_db_session.commit()
+
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        market_outcome = await experience_service._build_market_outcome_summary(
+            db,
+            stock_code=stock_code,
+            industry="Bank",
+            decision_time=datetime(2026, 1, 1, 15, 0),
+            review_horizon="20d",
+            market_day_count=21,
+        )
+
+    stock_return = (30.5 / 10.5) - 1
+    index_return = (1200 / 1000) - 1
+    expected_relative = stock_return - index_return
+    assert market_outcome["relative_return_vs_index"] == pytest.approx(expected_relative)
+    assert market_outcome["latest_outcome"]["relative_return_vs_index"] == pytest.approx(expected_relative)
 
 
 @pytest.mark.asyncio
