@@ -379,7 +379,7 @@ async def test_run_due_reviews_invokes_experience_service_for_due_session(
 
 
 @pytest.mark.asyncio
-async def test_run_due_reviews_defers_same_stock_second_session(async_db_session):
+async def test_run_due_reviews_queues_same_stock_second_session(async_db_session):
     user = await _create_user(async_db_session)
     await _create_stock(async_db_session)
     first_session = await _create_completed_session(async_db_session, user)
@@ -394,11 +394,11 @@ async def test_run_due_reviews_defers_same_stock_second_session(async_db_session
 
     result = await scheduler_module.run_due_reviews()
 
-    assert result["launched"] == 1
+    assert result["launched"] == 2
     run_count = await async_db_session.scalar(
         select(func.count()).select_from(ExperienceReviewRun)
     )
-    assert run_count == 1
+    assert run_count == 2
 
 
 def test_analyze_endpoint_returns_queued_response(client, auth_headers, monkeypatch):
@@ -440,6 +440,7 @@ def test_scheduler_config_api_defaults_and_updates(client, auth_headers):
 
     assert response.status_code == 200
     assert response.json()["enabled"] is False
+    assert response.json()["max_concurrent"] == 3
 
     update_response = client.put(
         "/api/v1/experience/scheduler-config",
@@ -451,6 +452,7 @@ def test_scheduler_config_api_defaults_and_updates(client, auth_headers):
             "min_market_days": 30,
             "candidate_lookback": 300,
             "max_runs_per_tick": 3,
+            "max_concurrent": 4,
         },
     )
 
@@ -462,3 +464,4 @@ def test_scheduler_config_api_defaults_and_updates(client, auth_headers):
     assert "min_market_days" not in payload
     assert payload["candidate_lookback"] == 300
     assert payload["max_runs_per_tick"] == 3
+    assert payload["max_concurrent"] == 4

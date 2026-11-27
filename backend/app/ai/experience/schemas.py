@@ -19,6 +19,7 @@ class ExperienceReviewSchedulerConfig(BaseModel):
     schedule_minute: int = Field(30, ge=0, le=59)
     candidate_lookback: int = Field(200, ge=1, le=5000)
     max_runs_per_tick: int = Field(2, ge=1, le=20)
+    max_concurrent: int = Field(3, ge=1, le=20)
 
 
 class ExperienceDebateSessionResponse(BaseModel):

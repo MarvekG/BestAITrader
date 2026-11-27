@@ -134,6 +134,7 @@ export interface ExperienceReviewSchedulerConfig {
   schedule_minute: number;
   candidate_lookback: number;
   max_runs_per_tick: number;
+  max_concurrent: number;
 }
 
 export const experienceApi = {

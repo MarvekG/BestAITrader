@@ -167,6 +167,7 @@ export const ExperiencePage: React.FC = () => {
         schedule_minute: scheduleTime.minute(),
         candidate_lookback: Number(values.candidate_lookback),
         max_runs_per_tick: Number(values.max_runs_per_tick),
+        max_concurrent: Number(values.max_concurrent),
       });
       schedulerForm.setFieldsValue({
         ...config,
@@ -437,9 +438,13 @@ export const ExperiencePage: React.FC = () => {
       message.warning(t('experience.pick_session'));
       return;
     }
-    const targetActiveReviewRun = reviewRuns.find(
-      (item) => item.session_id === targetSessionId && ['queued', 'started', 'running'].includes(item.status),
-    );
+    const targetActiveReviewRun = targetHorizon
+      ? reviewRuns.find(
+        (item) => item.session_id === targetSessionId
+          && item.review_horizon === targetHorizon
+          && ['queued', 'started', 'running'].includes(item.status),
+      )
+      : undefined;
     if (targetActiveReviewRun) {
       message.warning(t('experience.active_review_exists', { review_run_id: targetActiveReviewRun.review_run_id }));
       return;
@@ -643,7 +648,6 @@ export const ExperiencePage: React.FC = () => {
               type="primary"
               icon={<RobotOutlined />}
               loading={loading}
-              disabled={activeReviewRun !== null}
               onClick={() => void handleAnalyze()}
             >
               {t('experience.run_analysis')}
@@ -950,6 +954,7 @@ export const ExperiencePage: React.FC = () => {
             schedule_time: buildScheduleTime(18, 30),
             candidate_lookback: 200,
             max_runs_per_tick: 2,
+            max_concurrent: 3,
           }}
           onFinish={handleSaveSchedulerConfig}
         >
@@ -978,7 +983,19 @@ export const ExperiencePage: React.FC = () => {
             </Col>
           </Row>
           <Row gutter={16}>
-            <Col xs={24} md={12}>
+            <Col xs={24} md={8}>
+              <Form.Item
+                name="max_concurrent"
+                label={schedulerLabel(
+                  'settings.experience_scheduler_max_concurrent',
+                  'settings.experience_scheduler_max_concurrent_tip',
+                )}
+                rules={[{ required: true }]}
+              >
+                <InputNumber min={1} max={20} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={8}>
               <Form.Item
                 name="max_runs_per_tick"
                 label={schedulerLabel(
@@ -990,7 +1007,7 @@ export const ExperiencePage: React.FC = () => {
                 <InputNumber min={1} max={20} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
-            <Col xs={24} md={12}>
+            <Col xs={24} md={8}>
               <Form.Item
                 name="candidate_lookback"
                 label={schedulerLabel(

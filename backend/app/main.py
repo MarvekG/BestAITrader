@@ -150,7 +150,17 @@ async def lifespan(app: Any):
         from app.core.config import settings
         from app.ai.experience.queue import experience_review_queue
         if settings.EXPERIENCE_REVIEW_QUEUE_ENABLED:
-            await experience_review_queue.start()
+            concurrency = settings.EXPERIENCE_REVIEW_MAX_CONCURRENT
+            try:
+                from app.tasks.experience_review_scheduler import (
+                    get_experience_review_scheduler_config,
+                )
+
+                config = await get_experience_review_scheduler_config()
+                concurrency = int(config.get("max_concurrent") or concurrency)
+            except Exception as exc:
+                logger.warning(f"Failed to load experience review concurrency: {exc}")
+            await experience_review_queue.start(concurrency)
     except Exception as e:
         logger.error(f"Failed to start experience review queue: {e}")
 

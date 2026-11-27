@@ -58,7 +58,7 @@ failed
 
 同一个 session 可以分别执行 5D、20D、60D 复盘。20D 是默认优先周期，5D 适合早期纠错，60D 适合中期逻辑验证。每次复盘还必须结合 PM 原持有期和截至最新交易日的 `latest_window`，不得只依据固定窗口下结论；但 `debate_correctness` 仍以所选周期和 PM 持有期为主，`latest_window` 提供最近最多 30 根原始日 K，用于补充后续验证。系统只提供原始行情、订单和成交数据，收益、回撤、相对收益和持有期结果由模型自行计算；入场价规则为有买入成交时用成交价，没有成交时用决策日次日开盘。
 
-复盘 API 挂载在 `/api/v1/experience`。`POST /analyze` 现在只负责校验并入队，返回 `202` 和 `review_run_id`；实际执行由 `experience_review_runs` 队列表和全局 worker 池完成。`EXPERIENCE_REVIEW_MAX_CONCURRENT` 默认 3，同 session 以及同用户同股票在 queued/running 期间互斥。
+复盘 API 挂载在 `/api/v1/experience`。`POST /analyze` 现在只负责校验并入队，返回 `202` 和 `review_run_id`；实际执行由 `experience_review_runs` 队列表和全局 worker 池完成。`EXPERIENCE_REVIEW_MAX_CONCURRENT` 默认 3；同 session + 周期在 queued/running 期间唯一，同用户同股票允许排队但同一时刻只能有一条 running。
 
 - `POST /analyze`
 - `GET /review-candidates`

@@ -16,35 +16,33 @@ class ExperienceReviewRun(Base):
         UUID(as_uuid=True),
         ForeignKey("sessions.session_id", ondelete="CASCADE"),
         nullable=False,
-        index=True,
     )
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     stock_code = Column(String(20), nullable=False)
     review_horizon = Column(String(8), nullable=False)
-    status = Column(String(20), nullable=False, default="queued", index=True)
+    status = Column(String(20), nullable=False, default="queued")
     error_message = Column(Text, nullable=True)
     attempt_count = Column(Integer, nullable=False, default=0)
-    created_at = Column(DateTime, nullable=False, default=datetime.now, index=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.now)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
 
     __table_args__ = (
         Index("ix_experience_review_runs_status_created", "status", "created_at"),
-        Index("ix_experience_review_runs_user_stock_status", "user_id", "stock_code", "status"),
-        Index("ix_experience_review_runs_session_status", "session_id", "status"),
         Index(
-            "uq_experience_review_runs_active_session",
+            "uq_experience_review_runs_active_task",
             "session_id",
+            "review_horizon",
             unique=True,
             postgresql_where=text("status IN ('queued', 'running')"),
             sqlite_where=text("status IN ('queued', 'running')"),
         ),
         Index(
-            "uq_experience_review_runs_active_stock",
+            "uq_experience_review_runs_running_stock",
             "user_id",
             "stock_code",
             unique=True,
-            postgresql_where=text("status IN ('queued', 'running')"),
-            sqlite_where=text("status IN ('queued', 'running')"),
+            postgresql_where=text("status = 'running'"),
+            sqlite_where=text("status = 'running'"),
         ),
     )

@@ -201,10 +201,11 @@ Service 不负责 prompt 编写和工具调用循环，这些在 `workflow.py` �
 
 - `POST /analyze` 只做校验和入队，返回 `202` 与 `review_run_id`，不阻塞等待复盘完成。
 - `experience_review_runs.status` 使用 `queued/running/completed/failed`。
-- `EXPERIENCE_REVIEW_MAX_CONCURRENT` 控制进程内 worker 数量，当前默认 `3`。当前部署按单 backend 实例保证全局 N；多实例部署时每个进程各有 N 个 worker，需要额外的 DB slot/Redis 分布式信号量才能严格全局 N。
+- `EXPERIENCE_REVIEW_MAX_CONCURRENT` 控制进程内 worker 数量，当前默认 `3`；也可在前端“经验分析师 → 定时任务”设置中调整，修改后动态生效。当前部署按单 backend 实例保证全局 N；多实例部署时每个进程各有 N 个 worker，需要额外的 DB slot/Redis 分布式信号量才能严格全局 N。
 - worker 使用 `FOR UPDATE SKIP LOCKED` 按 `created_at` FIFO 领取 queued 任务；超过并发上限的任务只保留在队列中。
-- 同一 `session_id` 以及同一 `user_id + stock_code` 在 queued/running 期间由 partial unique index 保证唯一。
-- 调度器只负责入队，`max_runs_per_tick` 限制每轮入队候选数；同股票已有 queued/running 任务时跳过，留到下一次调度。
+- 同一 `session_id + review_horizon` 在 queued/running 期间唯一；同一 `user_id + stock_code` 只限制同一时刻最多一条 `running`，允许同股票多条 `queued` 排队。
+- worker 领取时跳过已有同股票 `running` 的任务，先去执行其他股票；同股票任务串行执行。
+- 调度器只负责入队，`max_runs_per_tick` 限制每轮入队候选数；同股票任务可以继续入队，由队列串行执行。
 - 启动时 queued 任务继续执行；中断的 running 任务标记 failed。
 
 ### 4.2 Market Outcome
