@@ -136,7 +136,7 @@ LangGraph 内部只有两个节点：
 - `holding_window`：存在 `holding_horizon_days` 时，从决策日到持有期到期后第一个交易日的原始日 K，并给出 `reached`。
 - `benchmark_window`：沪深300（`000300.SH`）原始日 K，只包含上述窗口出现过的相同交易日。
 
-系统不提供收益、回撤、相对收益、入场价、持有期结果或成交聚合值。复盘提示词要求模型基于原始行自行计算，优先使用 `execute_python_sandboxed` 或 `query_and_calculate`。入场价规则：有买入成交时用 `trades` 成交价，没有成交时用决策日次日开盘价。`debate_correctness` 仍以所选周期和 PM 持有期为主，最新窗口只用于补充后续验证、解释涨跌和提炼教训。若数据缺失或明显落后，提示词要求模型先用 `get_current_time` 判断，再按需通过 `sync_market_data` 同步并用 `query_stock_data` 核对。
+系统不提供收益、回撤、相对收益、入场价、持有期结果或成交聚合值。复盘提示词要求模型基于原始行自行计算：需要数据库数据时优先使用 `query_and_calculate`，先 `get_database_schema` 确认字段并传 `columns`/`limit`；禁止把 `review_input` 或数据库数值手工抄进 `execute_python_sandboxed`，后者只用于对工具返回结果做二次纯算术。入场价规则：有买入成交时用 `trades` 成交价，没有成交时用决策日次日开盘价。`debate_correctness` 仍以所选周期和 PM 持有期为主，最新窗口只用于补充后续验证、解释涨跌和提炼教训。若数据缺失或明显落后，提示词要求模型先用 `get_current_time` 判断，再按需通过 `sync_market_data` 同步并用 `query_stock_data` 核对。
 
 ### 3.2 工作流状态
 

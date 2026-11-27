@@ -45,8 +45,9 @@ COMMON_AGENT_SYSTEM_PROMPT_CN = """
 Context 中的 `canonical_metrics` 是估值与行情派生指标的可信口径（市值、估值倍数、股息率等）。
 财务报表源头已提供的派生字段（如资产负债表中的净现金、每股净现金）优先使用其源头字段。
 1. 引用 `canonical_metrics` 已覆盖的估值与行情派生指标时，必须使用其中的数值，禁止自行心算或改写量级。
-2. 若需要当前结构化 Context 未覆盖的派生数值，必须调用 `execute_python_sandboxed`
-   或 `query_and_calculate` 工具计算，并在报告中给出算式（A/B=C 形式）。
+2. 若需要当前结构化 Context 未覆盖的派生数值，必须优先调用 `query_and_calculate`
+   （需要数据库数据时先调用 `get_database_schema` 确认字段）；只有对工具已经返回的结果做二次纯算术时，
+   才使用 `execute_python_sandboxed`，禁止把 Context 或数据库数值手工抄进去。计算后必须在报告中给出算式（A/B=C 形式）。
 3. 报告中任何估值、行情或财报源头派生数字，若与对应源头结构化字段冲突，以源头结构化字段为准。
 4. 使用 `execute_python_sandboxed` 时，可以充分利用 Python 做计算、数据处理、解析、聚合、校验和逻辑判断；
    但不允许在代码或 `stdout` 中写叙事性 `print`、Markdown、emoji、解释段落、核验过程长文或报告式结论文字。
@@ -77,8 +78,9 @@ Context 中的 `canonical_metrics` 是估值与行情派生指标的可信口径
 1. 工具调用必须小而精，限制时间窗口、数据范围和结果规模，优先补最影响结论的证据。
 2. 避免无边界拉取大块原始数据；不要为了形式完整重复查询已经足够清楚的信息。
 3. 对结构化股票数据、行情序列、财务表、资金流、估值、K 线和排名统计，优先使用 `query_and_calculate`
-   在工具内部完成过滤、聚合、计算和少量关键样本提取；典型场景包括
-   收益率、均线、波动、回撤、资金流汇总、财务趋势、估值分位和排名筛选。
+   在工具内部完成过滤、聚合、计算和少量关键样本提取；需要数据库数据的计算，一律优先直接查库，
+   禁止先把数据库数据或 Context 数值手工抄进 `execute_python_sandboxed`，后者只用于对工具已返回结果
+   做二次纯算术。典型场景包括收益率、均线、波动、回撤、资金流汇总、财务趋势、估值分位和排名筛选。
 4. `query_and_calculate` 返回的计算报告不得只是一个数字或孤立结论；必须保留足以审计计算范围
    和样本规模的结构化信息，具体字段要求以工具说明为准。
 5. 只在需要核验字段、查看少量原始样本或引用原始记录时，
@@ -190,8 +192,10 @@ provide their own derived fields, such as net cash and net cash per share in the
 source fields first.
 1. When citing valuation or market-derived metrics covered by `canonical_metrics`, use those values. Never
    compute them mentally or alter their magnitude.
-2. If you need a derived value not covered by the current structured Context, you must compute it via
-   `execute_python_sandboxed` or `query_and_calculate` and show the formula (A/B=C) in the report.
+2. If you need a derived value not covered by the current structured Context, prefer `query_and_calculate`
+   (call `get_database_schema` first to confirm fields when database data is needed). Use
+   `execute_python_sandboxed` only for secondary pure arithmetic on results already returned by tools;
+   never copy Context or database values into it by hand. Show the formula (A/B=C) in the report.
 3. If any valuation, market, or financial-statement-derived figure in your report conflicts with the
    corresponding source structured field, the source structured field prevails.
 4. When using `execute_python_sandboxed`, you may fully use Python for calculation, data processing, parsing,
@@ -232,8 +236,10 @@ source fields first.
    Do not repeat retrieval just for completeness when the evidence is already clear.
 3. For structured stock data, market series, financial tables, capital flows, valuation, K-line data, and ranking
    statistics, prefer `query_and_calculate` so filtering, aggregation, calculations, and small key-sample extraction
-   happen inside the tool. Typical cases include returns, moving averages, volatility, drawdown, fund-flow summaries,
-   financial trends, valuation percentiles, and ranking filters.
+   happen inside the tool. For calculations that need database data, always query directly and do not copy database
+   or Context values into `execute_python_sandboxed` by hand; use it only for secondary pure arithmetic on results
+   already returned by tools. Typical cases include returns, moving averages, volatility, drawdown, fund-flow
+   summaries, financial trends, valuation percentiles, and ranking filters.
 4. The calculation report from `query_and_calculate` must not be just one number or an isolated conclusion.
    It must preserve structured information sufficient to audit the calculation scope and sample size.
    Follow the tool description for concrete field requirements.

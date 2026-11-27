@@ -112,6 +112,8 @@ def test_review_system_prompt_keeps_memory_protocol_and_compact_output(monkeypat
     assert "`latest_window`" in prompt
     assert "`benchmark_window`" in prompt
     assert "`orders`/`trades`" in prompt
+    assert "优先使用 `query_and_calculate`" in prompt
+    assert "`get_database_schema`" in prompt
     assert "data_age_days" not in prompt
     assert "不要输出记忆文档全文" in prompt
     assert "才调用 `write_memory` 重写整份记忆文档" in prompt
@@ -153,6 +155,8 @@ def test_review_system_prompt_keeps_memory_protocol_and_compact_output(monkeypat
     assert "`latest_window`" in english_prompt
     assert "`benchmark_window`" in english_prompt
     assert "`orders`/`trades`" in english_prompt
+    assert "prefer `query_and_calculate`" in english_prompt
+    assert "`get_database_schema`" in english_prompt
     assert "data_age_days" not in english_prompt
     assert "do not repeat the timeline or the memory document" in english_prompt
     assert "Only after extracting reusable profitable experience" in english_prompt
