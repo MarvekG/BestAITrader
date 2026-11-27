@@ -2377,7 +2377,13 @@ class ExperienceService:
             if not content and not result and not stock_code:
                 continue
             items.append(item)
-        return items
+
+        latest_by_stock: Dict[str, Dict[str, Any]] = {}
+        for item in items:
+            stock_code = item.get("stock_code")
+            group_key = stock_code or f"unknown:{len(latest_by_stock)}"
+            latest_by_stock[group_key] = item
+        return list(latest_by_stock.values())
 
     def _normalize_written_memories(
         self,
