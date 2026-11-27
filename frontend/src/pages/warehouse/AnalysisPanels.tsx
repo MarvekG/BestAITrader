@@ -34,9 +34,32 @@ import { DecisionAuditLog } from '../../features/brain/DecisionAuditLog';
 import { useSessionStore } from '../../store/useSessionStore';
 import { getApiErrorMessage } from '../../utils/errorUtils';
 import { useFeedback } from '../../hooks/useFeedback';
+import { useWebSocketSubscription } from '../../hooks/useWebSocketSubscription';
+import { TaskCompletedMessage, WebSocketMessage } from '../../services/websocket';
 
 const STOCK_ANALYSIS_TASK_TYPE = 'stock_analysis';
 const FINISHED_TASK_STATUS = new Set(['completed', 'failed', 'cancelled']);
+
+const mergeTaskRecord = (
+  existing: AsyncTaskRecord | undefined,
+  incoming: AsyncTaskRecord,
+): AsyncTaskRecord => {
+  if (existing && FINISHED_TASK_STATUS.has(existing.status) && !FINISHED_TASK_STATUS.has(incoming.status)) {
+    return existing;
+  }
+  return { ...existing, ...incoming };
+};
+
+const mergeTaskRecords = (
+  existing: Record<string, AsyncTaskRecord>,
+  incoming: AsyncTaskRecord[],
+): Record<string, AsyncTaskRecord> => {
+  const next = { ...existing };
+  for (const task of incoming) {
+    next[task.task_id] = mergeTaskRecord(next[task.task_id], task);
+  }
+  return next;
+};
 const STOCK_ANALYSIS_HISTORY_PAGE_SIZE = 10;
 const DEBATE_SESSIONS_REFRESH_EVENT = 'debate-sessions-refresh';
 const DEBATE_SESSION_AUTO_REFRESH_INTERVAL_OPTIONS = [10, 30, 60, 300] as const;
@@ -454,15 +477,19 @@ export const StockResearchAnalysisPanel: React.FC<StockResearchAnalysisPanelProp
   const [analysisQuestion, setAnalysisQuestion] = useState('');
   const [submittingAnalysis, setSubmittingAnalysis] = useState(false);
   const [loadingLatestAnalysis, setLoadingLatestAnalysis] = useState(false);
-  const [currentAnalysisTask, setCurrentAnalysisTask] = useState<AsyncTaskRecord | null>(null);
+  const [currentAnalysisTaskId, setCurrentAnalysisTaskId] = useState<string | null>(null);
+  const [taskById, setTaskById] = useState<Record<string, AsyncTaskRecord>>({});
   const [analysisHistory, setAnalysisHistory] = useState<AsyncTaskRecord[]>([]);
   const [analysisHistoryTotal, setAnalysisHistoryTotal] = useState(0);
   const [analysisHistoryPage, setAnalysisHistoryPage] = useState(1);
   const [analysisHistoryPageSize, setAnalysisHistoryPageSize] = useState(STOCK_ANALYSIS_HISTORY_PAGE_SIZE);
+  const historyRequestSeqRef = React.useRef(0);
   const { modal } = AntdApp.useApp();
   const message = useFeedback();
 
   const loadAnalysisHistory = useCallback(async (page: number, pageSize: number, preferredTaskId?: string) => {
+    const requestId = historyRequestSeqRef.current + 1;
+    historyRequestSeqRef.current = requestId;
     setLoadingLatestAnalysis(true);
     try {
       const response = await tasksApi.listTasks({
@@ -470,24 +497,30 @@ export const StockResearchAnalysisPanel: React.FC<StockResearchAnalysisPanelProp
         limit: pageSize,
         skip: (page - 1) * pageSize,
       });
+      if (requestId !== historyRequestSeqRef.current) {
+        return;
+      }
       setAnalysisHistory(response.items);
       setAnalysisHistoryTotal(response.total);
       setAnalysisHistoryPage(page);
       setAnalysisHistoryPageSize(pageSize);
-
-      const preferredTask = preferredTaskId
-        ? response.items.find((task) => task.task_id === preferredTaskId)
-        : null;
-      setCurrentAnalysisTask((previousTask) => {
-        if (preferredTask) return preferredTask;
-        if (!previousTask || preferredTaskId === undefined) return response.items[0] || null;
-        return previousTask;
-      });
+      setTaskById((previousTasks) => mergeTaskRecords(previousTasks, response.items));
+      setCurrentAnalysisTaskId((previousTaskId) => (
+        preferredTaskId
+        || previousTaskId
+        || response.items[0]?.task_id
+        || null
+      ));
     } catch (error) {
+      if (requestId !== historyRequestSeqRef.current) {
+        return;
+      }
       const errorMessage = getApiErrorMessage(error, t('session.stock_analysis_load_failed'));
       message.error(errorMessage);
     } finally {
-      setLoadingLatestAnalysis(false);
+      if (requestId === historyRequestSeqRef.current) {
+        setLoadingLatestAnalysis(false);
+      }
     }
   }, [message, t]);
 
@@ -496,25 +529,97 @@ export const StockResearchAnalysisPanel: React.FC<StockResearchAnalysisPanelProp
     void loadAnalysisHistory(1, STOCK_ANALYSIS_HISTORY_PAGE_SIZE);
   }, [isActive, loadAnalysisHistory]);
 
-  useEffect(() => {
-    if (!currentAnalysisTask || FINISHED_TASK_STATUS.has(currentAnalysisTask.status)) return undefined;
+  const pendingTaskIds = useMemo(
+    () => Object.values(taskById)
+      .filter((task) => !FINISHED_TASK_STATUS.has(task.status))
+      .map((task) => task.task_id)
+      .sort(),
+    [taskById],
+  );
+  const pendingTaskKey = pendingTaskIds.join(',');
 
-    const timer = window.setInterval(async () => {
-      try {
-        const task = await tasksApi.getTask(currentAnalysisTask.task_id);
-        setCurrentAnalysisTask(task);
-        setAnalysisHistory((previousTasks) => previousTasks.map((item) => (
-          item.task_id === task.task_id ? task : item
-        )));
-      } catch (error) {
-        const errorMessage = getApiErrorMessage(error, t('session.stock_analysis_load_failed'));
-        message.error(errorMessage);
-        window.clearInterval(timer);
-      }
+  useEffect(() => {
+    if (!isActive || !pendingTaskKey) return undefined;
+
+    const taskIds = pendingTaskKey.split(',');
+    let cancelled = false;
+
+    const pollPendingTasks = async () => {
+      const results = await Promise.allSettled(
+        taskIds.map((taskId) => tasksApi.getTask(taskId)),
+      );
+      if (cancelled) return;
+
+      const updates = results
+        .filter((result): result is PromiseFulfilledResult<AsyncTaskRecord> => result.status === 'fulfilled')
+        .map((result) => result.value);
+      if (updates.length === 0) return;
+
+      setTaskById((previousTasks) => {
+        let nextTasks: Record<string, AsyncTaskRecord> | null = null;
+        for (const task of updates) {
+          const existingTask = previousTasks[task.task_id];
+          if (!existingTask) continue;
+          const mergedTask = mergeTaskRecord(existingTask, task);
+          if (mergedTask !== existingTask) {
+            nextTasks ??= { ...previousTasks };
+            nextTasks[task.task_id] = mergedTask;
+          }
+        }
+        return nextTasks ?? previousTasks;
+      });
+    };
+
+    void pollPendingTasks();
+    const timer = window.setInterval(() => {
+      void pollPendingTasks();
     }, 3000);
 
-    return () => window.clearInterval(timer);
-  }, [currentAnalysisTask, message, t]);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [isActive, pendingTaskKey]);
+
+  useWebSocketSubscription('task_completed', (msg: WebSocketMessage) => {
+    const data = (msg as TaskCompletedMessage).data;
+    const taskId = data?.task_id;
+    if (!taskId) return;
+
+    setTaskById((previousTasks) => {
+      const existingTask = previousTasks[taskId];
+      if (!existingTask) return previousTasks;
+      const updatedTask: AsyncTaskRecord = {
+        ...existingTask,
+        status: data.status || existingTask.status,
+        result: data.result ?? existingTask.result,
+        error_message: data.error_message || data.error || existingTask.error_message,
+      };
+      const mergedTask = mergeTaskRecord(existingTask, updatedTask);
+      if (mergedTask === existingTask) return previousTasks;
+      return { ...previousTasks, [taskId]: mergedTask };
+    });
+  });
+
+  const currentAnalysisTask = useMemo(() => {
+    if (!currentAnalysisTaskId) return null;
+    return taskById[currentAnalysisTaskId]
+      || analysisHistory.find((task) => task.task_id === currentAnalysisTaskId)
+      || null;
+  }, [analysisHistory, currentAnalysisTaskId, taskById]);
+
+  const historyData = useMemo(
+    () => analysisHistory.map((task) => taskById[task.task_id] || task),
+    [analysisHistory, taskById],
+  );
+
+  const selectAnalysisTask = useCallback((task: AsyncTaskRecord) => {
+    setTaskById((previousTasks) => ({
+      ...previousTasks,
+      [task.task_id]: mergeTaskRecord(previousTasks[task.task_id], task),
+    }));
+    setCurrentAnalysisTaskId(task.task_id);
+  }, []);
 
   const searchStocks = useCallback(
     async (keyword: string) => {
@@ -543,20 +648,27 @@ export const StockResearchAnalysisPanel: React.FC<StockResearchAnalysisPanelProp
         stock_code: stockCode || undefined,
         question,
       });
-      const submittedTask = {
+      const submittedTask: AsyncTaskRecord = {
         task_id: response.task_id,
         task_name: response.task_name,
         task_type: STOCK_ANALYSIS_TASK_TYPE,
         status: response.status,
         allow_concurrent: true,
         parameters: { stock_code: stockCode || null, question },
+        created_at: new Date().toISOString(),
       };
-      setCurrentAnalysisTask({
-        ...submittedTask,
-      });
+      setTaskById((previousTasks) => ({
+        ...previousTasks,
+        [submittedTask.task_id]: mergeTaskRecord(previousTasks[submittedTask.task_id], submittedTask),
+      }));
+      setCurrentAnalysisTaskId(submittedTask.task_id);
       setAnalysisQuestion(question);
       await loadAnalysisHistory(1, analysisHistoryPageSize, response.task_id);
-      message.success(t('session.stock_analysis_submitted'));
+      if (response.new_task === false) {
+        message.info(t('session.stock_analysis_already_running', { task_id: response.task_id }));
+      } else {
+        message.success(t('session.stock_analysis_submitted'));
+      }
     } catch (error) {
       const errorMessage = getApiErrorMessage(error, t('session.stock_analysis_submit_failed'));
       message.error(errorMessage);
@@ -576,8 +688,14 @@ export const StockResearchAnalysisPanel: React.FC<StockResearchAnalysisPanelProp
         try {
           await tasksApi.deleteTask(task.task_id);
           message.success(t('session.stock_analysis_deleted_msg'));
-          if (currentAnalysisTask?.task_id === task.task_id) {
-            setCurrentAnalysisTask(null);
+          setTaskById((previousTasks) => {
+            const nextTasks = { ...previousTasks };
+            delete nextTasks[task.task_id];
+            return nextTasks;
+          });
+          setAnalysisHistory((previousTasks) => previousTasks.filter((item) => item.task_id !== task.task_id));
+          if (currentAnalysisTaskId === task.task_id) {
+            setCurrentAnalysisTaskId(null);
           }
           await loadAnalysisHistory(1, analysisHistoryPageSize);
         } catch (error) {
@@ -599,7 +717,10 @@ export const StockResearchAnalysisPanel: React.FC<StockResearchAnalysisPanelProp
         try {
           const response = await tasksApi.clearTasks({ task_type: STOCK_ANALYSIS_TASK_TYPE });
           message.success(t('session.stock_analysis_cleared_msg', { count: response.deleted_count }));
-          setCurrentAnalysisTask(null);
+          setTaskById({});
+          setAnalysisHistory([]);
+          setAnalysisHistoryTotal(0);
+          setCurrentAnalysisTaskId(null);
           await loadAnalysisHistory(1, analysisHistoryPageSize);
         } catch (error) {
           const errorMessage = getApiErrorMessage(error, t('common.error'));
@@ -650,7 +771,7 @@ export const StockResearchAnalysisPanel: React.FC<StockResearchAnalysisPanelProp
       width: 140,
       render: (_: unknown, record: AsyncTaskRecord) => (
         <Space size={4}>
-          <Button size="small" onClick={() => setCurrentAnalysisTask(record)}>
+          <Button size="small" onClick={() => selectAnalysisTask(record)}>
             {t('session.stock_analysis_history_view')}
           </Button>
           <Button
@@ -725,7 +846,7 @@ export const StockResearchAnalysisPanel: React.FC<StockResearchAnalysisPanelProp
             </Button>
             <Button
               icon={<FolderOpenOutlined />}
-              onClick={() => loadAnalysisHistory(analysisHistoryPage, analysisHistoryPageSize, currentAnalysisTask?.task_id)}
+              onClick={() => loadAnalysisHistory(analysisHistoryPage, analysisHistoryPageSize, currentAnalysisTaskId || undefined)}
               loading={loadingLatestAnalysis}
             >
               {t('session.stock_analysis_refresh_history')}
@@ -737,12 +858,12 @@ export const StockResearchAnalysisPanel: React.FC<StockResearchAnalysisPanelProp
           size="small"
           rowKey="task_id"
           columns={historyColumns}
-          dataSource={analysisHistory}
+          dataSource={historyData}
           loading={loadingLatestAnalysis}
           scroll={{ y: 220 }}
-          rowClassName={(record) => (record.task_id === currentAnalysisTask?.task_id ? 'ant-table-row-selected' : '')}
+          rowClassName={(record) => (record.task_id === currentAnalysisTaskId ? 'ant-table-row-selected' : '')}
           onRow={(record) => ({
-            onClick: () => setCurrentAnalysisTask(record),
+            onClick: () => selectAnalysisTask(record),
           })}
           pagination={{
             current: analysisHistoryPage,
@@ -750,7 +871,7 @@ export const StockResearchAnalysisPanel: React.FC<StockResearchAnalysisPanelProp
             total: analysisHistoryTotal,
             showSizeChanger: true,
             pageSizeOptions: ['10', '20', '50'],
-            onChange: (page, pageSize) => loadAnalysisHistory(page, pageSize, currentAnalysisTask?.task_id),
+            onChange: (page, pageSize) => loadAnalysisHistory(page, pageSize, currentAnalysisTaskId || undefined),
           }}
           locale={{ emptyText: t('session.stock_analysis_history_empty') }}
         />

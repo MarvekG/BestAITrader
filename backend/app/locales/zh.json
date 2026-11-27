@@ -1125,6 +1125,7 @@
     "stock_analysis_waiting": "投研分析进行中",
     "stock_analysis_select_stock": "请先选择股票",
     "stock_analysis_submitted": "投研分析任务已提交",
+    "stock_analysis_already_running": "投研分析任务已在运行中，任务ID: {{task_id}}",
     "stock_analysis_submit_failed": "提交投研分析失败",
     "stock_analysis_load_failed": "加载投研分析结果失败",
     "stock_analysis_history": "历史投研分析",
