@@ -1125,6 +1125,7 @@
     "stock_analysis_waiting": "Research analysis is running",
     "stock_analysis_select_stock": "Select a stock first",
     "stock_analysis_submitted": "Research analysis task submitted",
+    "stock_analysis_already_running": "Research analysis task is already running, Task ID: {{task_id}}",
     "stock_analysis_submit_failed": "Failed to submit research analysis",
     "stock_analysis_load_failed": "Failed to load research analysis result",
     "stock_analysis_history": "Research Analysis History",
