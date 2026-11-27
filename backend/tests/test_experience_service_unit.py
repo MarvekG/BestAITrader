@@ -87,6 +87,97 @@ def test_normalize_analysis_payload_falls_back_to_pm_decision_and_trace():
     assert "content" not in result["written_memories"][0]
 
 
+def test_extract_written_memories_collapses_version_conflict_retry():
+    service = ExperienceService()
+    tool_trace = [
+        {
+            "name": "write_memory",
+            "args": {"stock_code": "601899.SH", "content": "first draft"},
+            "result": {
+                "success": False,
+                "status": "failed",
+                "error": (
+                    "memory document version conflict: expected 31, current 32. "
+                    "Merge your changes into the latest content returned here and retry."
+                ),
+                "version": 32,
+                "size_chars": 6844,
+            },
+        },
+        {
+            "name": "write_memory",
+            "args": {"stock_code": "601899.SH", "content": "merged draft"},
+            "result": {
+                "success": True,
+                "status": "success",
+                "version": 33,
+                "size_chars": 5955,
+            },
+        },
+    ]
+
+    items = service._extract_written_memories_from_tool_trace(tool_trace)
+
+    assert len(items) == 1
+    item = items[0]
+    assert item["status"] == "success"
+    assert item["stock_code"] == "601899.SH"
+    assert item["size_chars"] == 5955
+    assert item["version"] == 33
+    assert "error" not in item
+
+
+def test_extract_written_memories_keeps_final_failure():
+    service = ExperienceService()
+    tool_trace = [
+        {
+            "name": "write_memory",
+            "args": {"stock_code": "601899.SH", "content": "first draft"},
+            "result": {
+                "success": False,
+                "status": "failed",
+                "error": "memory document version conflict",
+                "version": 32,
+            },
+        }
+    ]
+
+    items = service._extract_written_memories_from_tool_trace(tool_trace)
+
+    assert len(items) == 1
+    assert items[0]["status"] == "failed"
+    assert items[0]["version"] == 32
+    assert "version conflict" in items[0]["error"]
+
+
+def test_extract_written_memories_keeps_last_attempt_after_success():
+    service = ExperienceService()
+    tool_trace = [
+        {
+            "name": "write_memory",
+            "args": {"stock_code": "601899.SH", "content": "first draft"},
+            "result": {"success": True, "status": "success", "version": 33},
+        },
+        {
+            "name": "write_memory",
+            "args": {"stock_code": "601899.SH", "content": "later draft"},
+            "result": {
+                "success": False,
+                "status": "failed",
+                "error": "memory document version conflict",
+                "version": 33,
+            },
+        },
+    ]
+
+    items = service._extract_written_memories_from_tool_trace(tool_trace)
+
+    assert len(items) == 1
+    assert items[0]["status"] == "failed"
+    assert items[0]["version"] == 33
+    assert "version conflict" in items[0]["error"]
+
+
 def test_completed_event_payload_keeps_tool_trace_separate_from_analysis():
     service = ExperienceService()
     tool_trace = [{"name": "read_memory", "args": {"stock_code": "601328.SH"}}]
