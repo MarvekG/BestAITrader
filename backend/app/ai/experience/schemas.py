@@ -97,6 +97,24 @@ class ExperienceReviewRunResponse(BaseModel):
     updated_at: datetime
 
 
+class ExperienceReviewRunListResponse(BaseModel):
+    items: List[ExperienceReviewRunResponse] = Field(default_factory=list)
+    total: int = 0
+    page: int = 1
+    page_size: int = 20
+    active_count: int = 0
+
+
+class ExperienceReviewRunBatchDeleteRequest(BaseModel):
+    review_run_ids: List[str] = Field(min_length=1, max_length=200)
+
+
+class ExperienceReviewRunBatchDeleteResponse(BaseModel):
+    deleted: int = 0
+    skipped_active: int = 0
+    missing: int = 0
+
+
 class ExperienceReviewCandidateResponse(BaseModel):
     session_id: UUID
     stock_code: str
@@ -121,3 +139,6 @@ class ExperienceReviewCandidateResponse(BaseModel):
 class ExperienceReviewCandidateListResponse(BaseModel):
     items: List[ExperienceReviewCandidateResponse] = Field(default_factory=list)
     summary: Dict[str, int] = Field(default_factory=dict)
+    total: int = 0
+    page: int = 1
+    page_size: int = 20

@@ -28,6 +28,9 @@ export interface ExperienceReviewCandidate {
 export interface ExperienceReviewCandidateListResponse {
   items: ExperienceReviewCandidate[];
   summary: Record<string, number>;
+  total: number;
+  page: number;
+  page_size: number;
 }
 
 export interface ExperienceDebateSession {
@@ -128,6 +131,20 @@ export interface ExperienceReviewRun {
   updated_at: string;
 }
 
+export interface ExperienceReviewRunListResponse {
+  items: ExperienceReviewRun[];
+  total: number;
+  page: number;
+  page_size: number;
+  active_count: number;
+}
+
+export interface ExperienceReviewRunBatchDeleteResponse {
+  deleted: number;
+  skipped_active: number;
+  missing: number;
+}
+
 export interface ExperienceReviewSchedulerConfig {
   enabled: boolean;
   schedule_hour: number;
@@ -150,8 +167,15 @@ export const experienceApi = {
     return apiClient.post<ExperienceReviewQueuedResponse>('/experience/analyze', payload);
   },
 
-  listReviewCandidates: async () => {
-    return apiClient.get<ExperienceReviewCandidateListResponse>('/experience/review-candidates');
+  listReviewCandidates: async (params?: {
+    page?: number;
+    page_size?: number;
+    horizon?: ExperienceReviewHorizon;
+  }) => {
+    return apiClient.get<ExperienceReviewCandidateListResponse>(
+      '/experience/review-candidates',
+      { params },
+    );
   },
 
   listDebateSessions: async () => {
@@ -162,8 +186,15 @@ export const experienceApi = {
     return apiClient.get<ExperienceReviewEvent[]>(`/experience/review-events/${sessionId}`);
   },
 
-  listReviewRuns: async () => {
-    return apiClient.get<ExperienceReviewRun[]>('/experience/review-runs');
+  listReviewRuns: async (params?: { page?: number; page_size?: number; status?: string }) => {
+    return apiClient.get<ExperienceReviewRunListResponse>('/experience/review-runs', { params });
+  },
+
+  batchDeleteReviewRuns: async (payload: { review_run_ids: string[] }) => {
+    return apiClient.post<ExperienceReviewRunBatchDeleteResponse>(
+      '/experience/review-runs/batch-delete',
+      payload,
+    );
   },
 
   listReviewRunEvents: async (reviewRunId: string) => {

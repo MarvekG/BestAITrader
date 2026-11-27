@@ -18,6 +18,12 @@ from app.models.trade_record import TradeRecord
 from app.models.user import User
 
 
+LONG_EXPERIENCE_CONTENT = (
+    "平安银行复盘经验：上涨主因是估值修复和风险预期改善，"
+    "追高前必须先确认基本面改善是否同步验证。"
+)
+
+
 async def _create_user_and_session(async_db_session):
     user = User(
         username=f"experience_{uuid.uuid4().hex[:8]}",
@@ -164,6 +170,369 @@ async def test_cleanup_interrupted_review_runs_marks_active_runs_failed(async_db
 
 
 @pytest.mark.asyncio
+async def test_cleanup_interrupted_review_runs_marks_orphan_running_without_started_event(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    orphan_run_id = str(uuid.uuid4())
+    queued_run_id = str(uuid.uuid4())
+    created_at = datetime(2026, 1, 1, 15, 0)
+
+    async_db_session.add_all(
+        [
+            ExperienceReviewRun(
+                review_run_id=orphan_run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stock_code=session.stock_code,
+                review_horizon="5d",
+                status="running",
+                attempt_count=0,
+                created_at=created_at,
+                started_at=created_at,
+            ),
+            ExperienceReviewRun(
+                review_run_id=queued_run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stock_code=session.stock_code,
+                review_horizon="20d",
+                status="queued",
+                attempt_count=0,
+                created_at=created_at,
+            ),
+            ExperienceReviewEvent(
+                review_run_id=orphan_run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stage="experience_review",
+                status="queued",
+                message_key="experience.live_messages.queued",
+                payload={"review_horizon": "5d"},
+                created_at=created_at,
+            ),
+            ExperienceReviewEvent(
+                review_run_id=queued_run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stage="experience_review",
+                status="queued",
+                message_key="experience.live_messages.queued",
+                payload={"review_horizon": "20d"},
+                created_at=created_at,
+            ),
+        ]
+    )
+    await async_db_session.commit()
+
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        cleaned = await experience_service._cleanup_interrupted_review_runs_in_db(db)
+
+    assert cleaned == 1
+
+    orphan_run = (
+        await async_db_session.execute(
+            select(ExperienceReviewRun).where(ExperienceReviewRun.review_run_id == orphan_run_id)
+        )
+    ).scalar_one()
+    queued_run = (
+        await async_db_session.execute(
+            select(ExperienceReviewRun).where(ExperienceReviewRun.review_run_id == queued_run_id)
+        )
+    ).scalar_one()
+
+    assert orphan_run.status == "failed"
+    assert orphan_run.finished_at is not None
+    assert orphan_run.error_message == i18n_service.t("experience.review_interrupted_by_restart")
+    assert queued_run.status == "queued"
+
+    failed_event = (
+        await async_db_session.execute(
+            select(ExperienceReviewEvent).where(
+                ExperienceReviewEvent.review_run_id == orphan_run_id,
+                ExperienceReviewEvent.status == "failed",
+            )
+        )
+    ).scalar_one()
+    assert failed_event.payload["reason"] == "restart_recovery"
+
+
+@pytest.mark.asyncio
+async def test_cleanup_interrupted_review_runs_marks_fetch_context_orphan_failed(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    orphan_run_id = str(uuid.uuid4())
+    created_at = datetime(2026, 1, 1, 15, 0)
+
+    async_db_session.add(
+        ExperienceReviewRun(
+            review_run_id=orphan_run_id,
+            session_id=session.session_id,
+            user_id=user.id,
+            stock_code=session.stock_code,
+            review_horizon="5d",
+            status="running",
+            attempt_count=0,
+            created_at=created_at,
+            started_at=created_at,
+        )
+    )
+    async_db_session.add_all(
+        [
+            ExperienceReviewEvent(
+                review_run_id=orphan_run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stage="experience_review",
+                status="queued",
+                message_key="experience.live_messages.queued",
+                payload={"review_horizon": "5d"},
+                created_at=created_at,
+            ),
+            ExperienceReviewEvent(
+                review_run_id=orphan_run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stage="experience_review",
+                status="started",
+                message_key="experience.live_messages.started",
+                payload={"review_horizon": "5d"},
+                created_at=created_at + timedelta(seconds=1),
+            ),
+            ExperienceReviewEvent(
+                review_run_id=orphan_run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stage="fetch_context",
+                status="completed",
+                message_key="experience.live_messages.fetch_context_completed",
+                payload={"review_horizon": "5d"},
+                created_at=created_at + timedelta(seconds=2),
+            ),
+        ]
+    )
+    await async_db_session.commit()
+
+    async with experience_service_module.database_module.AsyncSessionLocal() as db:
+        cleaned = await experience_service._cleanup_interrupted_review_runs_in_db(db)
+
+    assert cleaned == 1
+    orphan_run = (
+        await async_db_session.execute(
+            select(ExperienceReviewRun).where(ExperienceReviewRun.review_run_id == orphan_run_id)
+        )
+    ).scalar_one()
+    assert orphan_run.status == "failed"
+    failed_event = (
+        await async_db_session.execute(
+            select(ExperienceReviewEvent).where(
+                ExperienceReviewEvent.review_run_id == orphan_run_id,
+                ExperienceReviewEvent.status == "failed",
+            )
+        )
+    ).scalar_one()
+    assert failed_event.payload["reason"] == "restart_recovery"
+
+
+@pytest.mark.asyncio
+async def test_list_review_runs_paginates_and_reports_active_count(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    run_ids = [str(uuid.uuid4()) for _ in range(4)]
+    enqueue_times = [datetime(2026, 1, 1, 14, index) for index in range(4)]
+    for index, run_id in enumerate(run_ids):
+        async_db_session.add(
+            ExperienceReviewEvent(
+                review_run_id=run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stage="experience_review",
+                status="queued" if index == 3 else "completed",
+                message_key=(
+                    "experience.live_messages.queued"
+                    if index == 3
+                    else "experience.live_messages.completed"
+                ),
+                payload={"review_horizon": "5d"},
+                created_at=enqueue_times[index],
+            )
+        )
+    async_db_session.add(
+        ExperienceReviewEvent(
+            review_run_id=run_ids[3],
+            session_id=session.session_id,
+            user_id=user.id,
+            stage="experience_review",
+            status="started",
+            message_key="experience.live_messages.started",
+            payload={"review_horizon": "5d"},
+            created_at=datetime(2026, 1, 1, 15, 0),
+        )
+    )
+    async_db_session.add(
+        ExperienceReviewRun(
+            review_run_id=run_ids[3],
+            session_id=session.session_id,
+            user_id=user.id,
+            stock_code=session.stock_code,
+            review_horizon="5d",
+            status="running",
+            attempt_count=0,
+            created_at=enqueue_times[3],
+        )
+    )
+    await async_db_session.commit()
+
+    first_page = await experience_service.list_review_runs(
+        user_id=user.id,
+        page=1,
+        page_size=2,
+    )
+
+    assert first_page["total"] == 4
+    assert first_page["page"] == 1
+    assert first_page["page_size"] == 2
+    assert first_page["active_count"] == 1
+    assert [item["review_run_id"] for item in first_page["items"]] == [run_ids[3], run_ids[2]]
+    assert first_page["items"][0]["created_at"] == enqueue_times[3]
+    assert first_page["items"][0]["updated_at"] == datetime(2026, 1, 1, 15, 0)
+
+    second_page = await experience_service.list_review_runs(
+        user_id=user.id,
+        page=2,
+        page_size=2,
+    )
+
+    assert second_page["page"] == 2
+    assert [item["review_run_id"] for item in second_page["items"]] == [run_ids[1], run_ids[0]]
+
+    clamped_page = await experience_service.list_review_runs(
+        user_id=user.id,
+        page=99,
+        page_size=2,
+    )
+    assert clamped_page["page"] == 2
+
+    completed_page = await experience_service.list_review_runs(
+        user_id=user.id,
+        page=1,
+        page_size=2,
+        status_filter="completed",
+    )
+    assert completed_page["total"] == 3
+    assert [item["review_run_id"] for item in completed_page["items"]] == [run_ids[2], run_ids[1]]
+
+    running_page = await experience_service.list_review_runs(
+        user_id=user.id,
+        page=1,
+        page_size=20,
+        status_filter="running",
+    )
+    assert running_page["total"] == 1
+    assert [item["review_run_id"] for item in running_page["items"]] == [run_ids[3]]
+
+
+@pytest.mark.asyncio
+async def test_delete_review_runs_skips_active_and_deletes_others(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    completed_run_id = str(uuid.uuid4())
+    failed_run_id = str(uuid.uuid4())
+    queued_run_id = str(uuid.uuid4())
+    missing_run_id = str(uuid.uuid4())
+    created_at = datetime(2026, 1, 1, 14, 0)
+
+    async_db_session.add_all(
+        [
+            ExperienceReviewRun(
+                review_run_id=completed_run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stock_code=session.stock_code,
+                review_horizon="20d",
+                status="completed",
+                attempt_count=1,
+                created_at=created_at,
+            ),
+            ExperienceReviewRun(
+                review_run_id=failed_run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stock_code=session.stock_code,
+                review_horizon="60d",
+                status="failed",
+                attempt_count=1,
+                created_at=created_at,
+            ),
+            ExperienceReviewRun(
+                review_run_id=queued_run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stock_code=session.stock_code,
+                review_horizon="5d",
+                status="queued",
+                attempt_count=0,
+                created_at=created_at,
+            ),
+            ExperienceReviewEvent(
+                review_run_id=completed_run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stage="experience_review",
+                status="completed",
+                message_key="experience.live_messages.completed",
+                payload={"review_horizon": "20d"},
+                created_at=created_at,
+            ),
+            ExperienceReviewEvent(
+                review_run_id=failed_run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stage="experience_review",
+                status="failed",
+                message_key="experience.live_messages.failed",
+                payload={"review_horizon": "60d"},
+                created_at=created_at,
+            ),
+            ExperienceReviewEvent(
+                review_run_id=queued_run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stage="experience_review",
+                status="queued",
+                message_key="experience.live_messages.queued",
+                payload={"review_horizon": "5d"},
+                created_at=created_at,
+            ),
+        ]
+    )
+    await async_db_session.commit()
+
+    result = await experience_service.delete_review_runs(
+        user_id=user.id,
+        review_run_ids=[
+            completed_run_id,
+            failed_run_id,
+            queued_run_id,
+            missing_run_id,
+        ],
+    )
+
+    assert result == {"deleted": 2, "skipped_active": 1, "missing": 1}
+    remaining_event_run_ids = set(
+        (
+            await async_db_session.execute(
+                select(ExperienceReviewEvent.review_run_id)
+            )
+        ).scalars().all()
+    )
+    remaining_run_ids = set(
+        (
+            await async_db_session.execute(
+                select(ExperienceReviewRun.review_run_id)
+            )
+        ).scalars().all()
+    )
+    assert remaining_event_run_ids == {queued_run_id}
+    assert remaining_run_ids == {queued_run_id}
+
+
+@pytest.mark.asyncio
 async def test_analyze_allows_existing_completed_review_to_run_again(async_db_session, monkeypatch):
     user, session = await _create_user_and_session(async_db_session)
     await _create_stock_and_klines(async_db_session, count=21)
@@ -295,7 +664,7 @@ async def test_get_review_run_result_falls_back_from_completed_event_payload(asy
                 payload={
                     "tool_name": "write_memory",
                     "args": {
-                        "content": "平安银行复盘经验：上涨主因是估值修复和风险预期改善，追高前必须先确认基本面改善是否同步验证。",
+                        "content": LONG_EXPERIENCE_CONTENT,
                         "importance": "high",
                         "stock_code": "000001.SZ",
                     },
@@ -315,7 +684,7 @@ async def test_get_review_run_result_falls_back_from_completed_event_payload(asy
                         {
                             "name": "write_memory",
                             "args": {
-                                "content": "平安银行复盘经验：上涨主因是估值修复和风险预期改善，追高前必须先确认基本面改善是否同步验证。",
+                                "content": LONG_EXPERIENCE_CONTENT,
                                 "importance": "high",
                                 "stock_code": "000001.SZ",
                             },
@@ -344,14 +713,14 @@ async def test_get_review_run_result_falls_back_from_completed_event_payload(asy
             "status": "unknown",
             "stock_code": "000001.SZ",
             "max_chars": experience_service_module.settings.MEMORY_DOC_MAX_CHARS,
-            "size_chars": len("平安银行复盘经验：上涨主因是估值修复和风险预期改善，追高前必须先确认基本面改善是否同步验证。"),
+            "size_chars": len(LONG_EXPERIENCE_CONTENT),
         }
     ]
     assert result["tool_trace"] == [
         {
             "name": "write_memory",
             "args": {
-                "content": "平安银行复盘经验：上涨主因是估值修复和风险预期改善，追高前必须先确认基本面改善是否同步验证。",
+                "content": LONG_EXPERIENCE_CONTENT,
                 "importance": "high",
                 "stock_code": "000001.SZ",
             },
@@ -707,16 +1076,37 @@ async def test_list_review_candidates_hides_completed_horizon_but_keeps_later_re
     user, session = await _create_user_and_session(async_db_session)
     await _create_stock_and_klines(async_db_session, count=61)
     await _create_pm_decision(async_db_session, user, session)
-    async_db_session.add(
-        ExperienceReviewEvent(
-            review_run_id=str(uuid.uuid4()),
-            session_id=session.session_id,
-            user_id=user.id,
-            stage="experience_review",
-            status="completed",
-            message_key="experience.live_messages.completed",
-            payload={"review_horizon": "20d"},
-        )
+    review_run_id = str(uuid.uuid4())
+    async_db_session.add_all(
+        [
+            ExperienceReviewEvent(
+                review_run_id=review_run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stage="experience_review",
+                status="queued",
+                message_key="experience.live_messages.queued",
+                payload={"review_horizon": "20d"},
+            ),
+            ExperienceReviewEvent(
+                review_run_id=review_run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stage="experience_review",
+                status="started",
+                message_key="experience.live_messages.started",
+                payload={"review_horizon": "20d"},
+            ),
+            ExperienceReviewEvent(
+                review_run_id=review_run_id,
+                session_id=session.session_id,
+                user_id=user.id,
+                stage="experience_review",
+                status="completed",
+                message_key="experience.live_messages.completed",
+                payload={"review_horizon": "20d"},
+            ),
+        ]
     )
     await async_db_session.commit()
 
@@ -725,6 +1115,7 @@ async def test_list_review_candidates_hides_completed_horizon_but_keeps_later_re
     item = result["items"][0]
     assert item["eligible_horizons"] == ["5d", "20d", "60d"]
     assert item["latest_completed_horizons"] == ["20d"]
+    assert item["active_horizons"] == []
     assert item["review_status"] == "ready_60d"
 
 
@@ -741,6 +1132,73 @@ async def test_list_review_candidates_marks_not_ready_when_market_data_is_short(
     assert item["review_status"] == "not_ready"
     assert item["next_horizon"] == "5d"
     assert item["days_until_next_horizon"] == 1
+
+
+@pytest.mark.asyncio
+async def test_list_review_candidates_paginates_and_filters_horizon(async_db_session):
+    user, first_session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=21)
+    await _create_pm_decision(async_db_session, user, first_session)
+
+    sessions = [first_session]
+    for _ in range(2):
+        session = DebateSession(
+            user_id=user.id,
+            stock_code="000001.SZ",
+            trading_frequency="swing",
+            trading_strategy="trend",
+            status="completed",
+        )
+        async_db_session.add(session)
+        await async_db_session.commit()
+        await async_db_session.refresh(session)
+        await _create_pm_decision(async_db_session, user, session)
+        sessions.append(session)
+
+    first_page = await experience_service.list_review_candidates(
+        user_id=user.id,
+        page=1,
+        page_size=2,
+    )
+
+    assert first_page["total"] == 3
+    assert first_page["page"] == 1
+    assert first_page["page_size"] == 2
+    assert len(first_page["items"]) == 2
+
+    second_page = await experience_service.list_review_candidates(
+        user_id=user.id,
+        page=2,
+        page_size=2,
+    )
+
+    assert second_page["page"] == 2
+    assert len(second_page["items"]) == 1
+    page_ids = {item["session_id"] for item in first_page["items"] + second_page["items"]}
+    assert page_ids == {session.session_id for session in sessions}
+
+    horizon_page = await experience_service.list_review_candidates(
+        user_id=user.id,
+        page=1,
+        page_size=20,
+        horizon="20d",
+    )
+    assert horizon_page["total"] == 3
+
+    unavailable_horizon_page = await experience_service.list_review_candidates(
+        user_id=user.id,
+        page=1,
+        page_size=20,
+        horizon="60d",
+    )
+    assert unavailable_horizon_page["total"] == 0
+
+    clamped_page = await experience_service.list_review_candidates(
+        user_id=user.id,
+        page=99,
+        page_size=2,
+    )
+    assert clamped_page["page"] == 2
 
 
 @pytest.mark.asyncio

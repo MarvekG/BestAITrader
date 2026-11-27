@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.i18n import i18n_service
 from app.ai.experience.schemas import (
@@ -11,7 +11,9 @@ from app.ai.experience.schemas import (
     ExperienceReviewQueuedResponse,
     ExperienceReviewSchedulerConfig,
     ExperienceReviewEventResponse,
-    ExperienceReviewRunResponse,
+    ExperienceReviewRunBatchDeleteRequest,
+    ExperienceReviewRunBatchDeleteResponse,
+    ExperienceReviewRunListResponse,
 )
 from app.ai.experience.service import ExperienceReviewConflict, experience_service
 from app.models.user import User
@@ -100,17 +102,37 @@ async def analyze_debate_with_experience(
 
 @router.get("/review-candidates", response_model=ExperienceReviewCandidateListResponse)
 async def list_review_candidates(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    horizon: str | None = Query(None),
     current_user: User = Depends(get_current_user),
 ):
-    """列出可手动复盘的已完成辩论会话。
+    """分页列出可手动复盘的已完成辩论会话。
 
     Args:
+        page: 页码，从 1 开始。
+        page_size: 每页数量，最大 100。
+        horizon: 可选复盘周期过滤。
         current_user: 已认证用户依赖。
 
     Returns:
-        带周期可复盘状态元数据的候选会话列表。
+        带周期可复盘状态元数据的分页候选会话列表。
+
+    Raises:
+        HTTPException: 当复盘周期过滤值不受支持时抛出。
     """
-    return await experience_service.list_review_candidates(user_id=current_user.id)
+    try:
+        return await experience_service.list_review_candidates(
+            user_id=current_user.id,
+            page=page,
+            page_size=page_size,
+            horizon=horizon,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get("/debate-sessions", response_model=list[ExperienceDebateSessionResponse])
@@ -148,19 +170,62 @@ async def list_review_events_for_session(
     )
 
 
-@router.get("/review-runs", response_model=list[ExperienceReviewRunResponse])
+@router.get("/review-runs", response_model=ExperienceReviewRunListResponse)
 async def list_review_runs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    status_filter: str | None = Query(None, alias="status"),
     current_user: User = Depends(get_current_user),
 ):
-    """列出当前用户最近的经验复盘运行记录。
+    """分页列出当前用户最近的经验复盘运行记录。
 
     Args:
+        page: 页码，从 1 开始。
+        page_size: 每页数量，最大 100。
+        status_filter: 可选任务状态过滤。
         current_user: 已认证用户依赖。
 
     Returns:
-        按最近更新时间排序的复盘运行摘要。
+        分页后的复盘运行摘要、总数和当前活跃任务数。
+
+    Raises:
+        HTTPException: 当状态过滤值不受支持时抛出。
     """
-    return await experience_service.list_review_runs(user_id=current_user.id)
+    try:
+        return await experience_service.list_review_runs(
+            user_id=current_user.id,
+            page=page,
+            page_size=page_size,
+            status_filter=status_filter,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+
+
+@router.post(
+    "/review-runs/batch-delete",
+    response_model=ExperienceReviewRunBatchDeleteResponse,
+)
+async def delete_review_runs(
+    payload: ExperienceReviewRunBatchDeleteRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """批量删除经验复盘任务。
+
+    Args:
+        payload: 待删除的运行 ID 列表。
+        current_user: 已认证用户依赖。
+
+    Returns:
+        删除、跳过活跃任务和缺失任务的统计结果。
+    """
+    return await experience_service.delete_review_runs(
+        user_id=current_user.id,
+        review_run_ids=payload.review_run_ids,
+    )
 
 
 @router.get("/review-run-events/{review_run_id}", response_model=list[ExperienceReviewEventResponse])
@@ -210,7 +275,10 @@ async def get_review_run_result(
             review_run_id=review_run_id,
         )
         if not exists:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=i18n_service.t("experience.review_run_not_found"))
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=i18n_service.t("experience.review_run_not_found"),
+            )
     return result
 
 
@@ -239,7 +307,10 @@ async def delete_review_run(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not deleted:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=i18n_service.t("experience.review_run_not_found"))
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=i18n_service.t("experience.review_run_not_found"),
+        )
     return {"message": i18n_service.t("experience.delete_run_success")}
 
 

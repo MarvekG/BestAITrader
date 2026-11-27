@@ -136,9 +136,9 @@ class ExperienceService:
             (
                 await db.execute(
                     select(func.count(KlineData.date)).where(
-                KlineData.stock_code == stock_code,
-                KlineData.freq == "D",
-                KlineData.date >= decision_time.date(),
+                        KlineData.stock_code == stock_code,
+                        KlineData.freq == "D",
+                        KlineData.date >= decision_time.date(),
                     )
                 )
             ).scalar()
@@ -208,34 +208,70 @@ class ExperienceService:
                 .order_by(ExperienceReviewEvent.created_at.desc())
             )
         ).scalars().all()
+
+        # 同一个 run 会依次产生 queued/started/completed 事件，必须以终态为准，
+        # 否则已完成的周期会一直停留在 active 中。
+        run_rows: dict[str, list[ExperienceReviewEvent]] = {}
         for row in rows:
-            horizon = self._extract_review_horizon_from_event(row)
+            run_rows.setdefault(row.review_run_id, []).append(row)
+
+        for entries in run_rows.values():
+            horizon = None
+            for entry in entries:
+                horizon = self._extract_review_horizon_from_event(entry)
+                if horizon is not None:
+                    break
             if horizon is None:
                 continue
-            session_bucket = buckets.setdefault(row.session_id, {"completed": [], "active": [], "failed": []})
-            if row.status == "completed" and horizon not in session_bucket["completed"]:
-                session_bucket["completed"].append(horizon)
-            elif row.status in REVIEW_ACTIVE_EVENT_STATUSES and horizon not in session_bucket["active"]:
-                session_bucket["active"].append(horizon)
-            elif row.status == "failed" and horizon not in session_bucket["failed"]:
-                session_bucket["failed"].append(horizon)
+            statuses = {entry.status for entry in entries}
+            session_bucket = buckets.setdefault(
+                entries[0].session_id,
+                {"completed": [], "active": [], "failed": []},
+            )
+            if "completed" in statuses:
+                if horizon not in session_bucket["completed"]:
+                    session_bucket["completed"].append(horizon)
+            elif "failed" in statuses:
+                if horizon not in session_bucket["failed"]:
+                    session_bucket["failed"].append(horizon)
+            elif statuses & REVIEW_ACTIVE_EVENT_STATUSES:
+                if horizon not in session_bucket["active"]:
+                    session_bucket["active"].append(horizon)
         return buckets
 
     async def list_review_candidates(
         self,
         *,
         user_id: int,
-        limit: int = 100,
+        page: int = 1,
+        page_size: int = 20,
+        horizon: str | None = None,
+        limit: int = 200,
     ) -> Dict[str, Any]:
-        """列出当前用户可复盘的会话候选项。
+        """分页列出当前用户可复盘的会话候选项。
 
         Args:
             user_id: 用户 ID。
+            page: 页码，从 1 开始。
+            page_size: 每页数量。
+            horizon: 可选复盘周期过滤，支持 5d/20d/60d。
             limit: 最多扫描的已完成会话数量。
 
         Returns:
-            候选项列表和按展示状态统计的摘要。
+            分页后的候选项、按展示状态统计的摘要、总数和分页信息。
+
+        Raises:
+            ValueError: 当复盘周期过滤值不受支持时抛出。
         """
+        page_size = max(1, min(100, page_size))
+        requested_page = max(1, page)
+        normalized_horizon = (horizon or "").strip().lower() or None
+        if normalized_horizon == "all":
+            normalized_horizon = None
+        if normalized_horizon is not None and normalized_horizon not in REVIEW_HORIZONS:
+            raise ValueError(f"Unsupported review horizon filter: {horizon}")
+        limit = max(1, min(1000, limit))
+
         async with database_module.AsyncSessionLocal() as db:
             sessions = (
                 await db.execute(
@@ -250,7 +286,13 @@ class ExperienceService:
                 )
             ).scalars().all()
             if not sessions:
-                return {"items": [], "summary": {}}
+                return {
+                    "items": [],
+                    "summary": {},
+                    "total": 0,
+                    "page": 1,
+                    "page_size": page_size,
+                }
 
             session_ids = [item.session_id for item in sessions]
             stock_codes = list({item.stock_code for item in sessions})
@@ -266,32 +308,11 @@ class ExperienceService:
             for row in pm_rows:
                 latest_pm_by_session.setdefault(row.session_id, row)
 
-            horizon_buckets: dict[UUID, dict[str, list[ReviewHorizon]]] = {
-                session_id: {"completed": [], "active": [], "failed": []}
-                for session_id in session_ids
-            }
-            event_rows = (
-                await db.execute(
-                    select(ExperienceReviewEvent)
-                    .where(
-                        ExperienceReviewEvent.user_id == user_id,
-                        ExperienceReviewEvent.session_id.in_(session_ids),
-                        ExperienceReviewEvent.stage == "experience_review",
-                    )
-                    .order_by(ExperienceReviewEvent.created_at.desc())
-                )
-            ).scalars().all()
-            for row in event_rows:
-                horizon = self._extract_review_horizon_from_event(row)
-                if horizon is None:
-                    continue
-                session_bucket = horizon_buckets.setdefault(row.session_id, {"completed": [], "active": [], "failed": []})
-                if row.status == "completed" and horizon not in session_bucket["completed"]:
-                    session_bucket["completed"].append(horizon)
-                elif row.status in REVIEW_ACTIVE_EVENT_STATUSES and horizon not in session_bucket["active"]:
-                    session_bucket["active"].append(horizon)
-                elif row.status == "failed" and horizon not in session_bucket["failed"]:
-                    session_bucket["failed"].append(horizon)
+            horizon_buckets = await self._review_horizon_buckets(
+                db,
+                user_id=user_id,
+                session_ids=session_ids,
+            )
 
             market_day_counts: dict[tuple[str, datetime], int] = {}
             for session_obj in sessions:
@@ -349,7 +370,32 @@ class ExperienceService:
                 }
                 items.append(item)
                 summary[review_status] += 1
-            return {"items": items, "summary": dict(summary)}
+
+            if normalized_horizon is not None:
+                filtered_items = [
+                    item for item in items
+                    if normalized_horizon in item["eligible_horizons"]
+                    or normalized_horizon in item["latest_completed_horizons"]
+                    or normalized_horizon in item["active_horizons"]
+                    or normalized_horizon in item["failed_horizons"]
+                ]
+            else:
+                filtered_items = items
+
+            total = len(filtered_items)
+            page = (
+                min(requested_page, max(1, (total + page_size - 1) // page_size))
+                if total
+                else 1
+            )
+            offset = (page - 1) * page_size
+            return {
+                "items": filtered_items[offset:offset + page_size],
+                "summary": dict(summary),
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+            }
 
     async def _mark_review_runs_failed(
         self,
@@ -388,6 +434,45 @@ class ExperienceService:
             await db.commit()
         return len(failed_runs)
 
+    def _collect_interrupted_review_runs_from_events(
+        self,
+        rows: list[Any],
+    ) -> list[tuple[str, UUID, int, str | None]]:
+        """从事件快照中收集最近状态为 started/running 的运行。"""
+        seen_run_ids: set[str] = set()
+        interrupted_runs: list[tuple[str, UUID, int, str | None]] = []
+        for review_run_id, session_id, user_id, stage, status in rows:
+            if review_run_id in seen_run_ids:
+                continue
+            seen_run_ids.add(review_run_id)
+            if status in ACTIVE_REVIEW_STATUSES:
+                interrupted_runs.append((review_run_id, session_id, user_id, stage))
+        return interrupted_runs
+
+    def _classify_running_review_runs(
+        self,
+        running_rows: list[Any],
+        terminal_status_by_run: dict[str, str],
+        interrupted_ids: set[str],
+    ) -> tuple[list[tuple[str, UUID, int, str | None]], list[str], list[str]]:
+        """分类运行表里残留的 running 任务。"""
+        interrupted_runs: list[tuple[str, UUID, int, str | None]] = []
+        completed_ids: list[str] = []
+        failed_ids: list[str] = []
+        for review_run_id, session_id, user_id in running_rows:
+            if review_run_id in interrupted_ids:
+                continue
+            terminal_status = terminal_status_by_run.get(review_run_id)
+            if terminal_status == "completed":
+                completed_ids.append(review_run_id)
+                continue
+            if terminal_status == "failed":
+                failed_ids.append(review_run_id)
+                continue
+            interrupted_ids.add(review_run_id)
+            interrupted_runs.append((review_run_id, session_id, user_id, "experience_review"))
+        return interrupted_runs, completed_ids, failed_ids
+
     async def _cleanup_interrupted_review_runs_in_db(self, db: AsyncSession) -> int:
         rows = (
             await db.execute(
@@ -400,20 +485,95 @@ class ExperienceService:
                 ).order_by(ExperienceReviewEvent.created_at.desc())
             )
         ).all()
-        seen_run_ids: set[str] = set()
-        interrupted_runs: list[tuple[str, UUID, int, str | None]] = []
-        for review_run_id, session_id, user_id, stage, status in rows:
-            if review_run_id in seen_run_ids:
-                continue
-            seen_run_ids.add(review_run_id)
-            if status in ACTIVE_REVIEW_STATUSES:
-                interrupted_runs.append((review_run_id, session_id, user_id, stage))
+        interrupted_runs = self._collect_interrupted_review_runs_from_events(rows)
+
+        failure_message = i18n_service.t("experience.review_interrupted_by_restart")
+        interrupted_ids = {item[0] for item in interrupted_runs}
+
+        # 启动时 run 表里仍为 running 的任务都不可能有进程在跑。
+        # 除了已写 started 事件的任务外，还要覆盖：
+        # 1. 只写了 fetch_context completed 的任务；
+        # 2. 刚被 worker 领取、还没写 started 事件的任务。
+        running_rows = (
+            await db.execute(
+                select(
+                    ExperienceReviewRun.review_run_id,
+                    ExperienceReviewRun.session_id,
+                    ExperienceReviewRun.user_id,
+                ).where(ExperienceReviewRun.status == "running")
+            )
+        ).all()
+        running_ids = [row[0] for row in running_rows]
+        terminal_status_by_run: dict[str, str] = {}
+        if running_ids:
+            terminal_rows = (
+                await db.execute(
+                    select(
+                        ExperienceReviewEvent.review_run_id,
+                        ExperienceReviewEvent.status,
+                    )
+                    .where(
+                        ExperienceReviewEvent.review_run_id.in_(running_ids),
+                        ExperienceReviewEvent.stage == "experience_review",
+                        ExperienceReviewEvent.status.in_(("completed", "failed")),
+                    )
+                    .order_by(ExperienceReviewEvent.created_at.desc())
+                )
+            ).all()
+            for review_run_id, terminal_status in terminal_rows:
+                terminal_status_by_run.setdefault(review_run_id, terminal_status)
+
+        new_interrupted_runs, completed_ids, failed_ids = self._classify_running_review_runs(
+            running_rows,
+            terminal_status_by_run,
+            interrupted_ids,
+        )
+        interrupted_runs.extend(new_interrupted_runs)
+        for review_run_id, session_id, _user_id, _stage in new_interrupted_runs:
+            logger.warning(
+                "experience restart cleanup: running run without terminal review event: "
+                "review_run_id=%s session_id=%s -> failed",
+                review_run_id,
+                session_id,
+            )
+
+        now = datetime.now()
+        if completed_ids:
+            await db.execute(
+                update(ExperienceReviewRun)
+                .where(
+                    ExperienceReviewRun.review_run_id.in_(completed_ids),
+                    ExperienceReviewRun.status == "running",
+                )
+                .values(status="completed", finished_at=now)
+            )
+            logger.warning(
+                "experience restart cleanup: reconciled_completed_runs=%s",
+                len(completed_ids),
+            )
+        if failed_ids:
+            await db.execute(
+                update(ExperienceReviewRun)
+                .where(
+                    ExperienceReviewRun.review_run_id.in_(failed_ids),
+                    ExperienceReviewRun.status == "running",
+                )
+                .values(
+                    status="failed",
+                    finished_at=now,
+                    error_message=failure_message,
+                )
+            )
+            logger.warning(
+                "experience restart cleanup: reconciled_failed_runs=%s",
+                len(failed_ids),
+            )
 
         if not interrupted_runs:
+            await db.commit()
             logger.info("experience restart cleanup: no interrupted review runs found")
             return 0
 
-        failure_message = i18n_service.t("experience.review_interrupted_by_restart")
         logger.warning("experience restart cleanup: interrupted_runs=%s", len(interrupted_runs))
         for review_run_id, session_id, _user_id, stage in interrupted_runs:
             logger.warning(
@@ -806,14 +966,36 @@ class ExperienceService:
             ValueError: 当会话不存在、复盘正在运行、周期不可用或复盘上下文不足时抛出。
         """
         review_run_id = str(uuid.uuid4())
-        selected_review_horizon: ReviewHorizon | None = None
-        market_day_count = 0
         return await self._analyze(
             user_id=user_id,
             session_id=session_id,
             review_horizon=review_horizon,
             review_run_id=review_run_id,
         )
+
+    async def _ensure_no_active_review(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        session_id: UUID,
+        skip_active_check: bool,
+    ) -> None:
+        """检查会话是否已有运行中的复盘任务。"""
+        if skip_active_check:
+            return
+        await self._cleanup_stale_review_runs(db, user_id=user_id, session_id=session_id)
+        active_review_run_id = await self._get_active_review_run_id(
+            db,
+            user_id=user_id,
+            session_id=session_id,
+            cleanup_stale=False,
+        )
+        if active_review_run_id:
+            raise ValueError(
+                f"Experience review is already running for session {session_id} "
+                f"(run {active_review_run_id})"
+            )
 
     async def _analyze(
         self,
@@ -839,19 +1021,12 @@ class ExperienceService:
                 if not session_obj:
                     raise ValueError(f"Session {session_id} not found")
 
-                if not skip_active_check:
-                    await self._cleanup_stale_review_runs(db, user_id=user_id, session_id=session_id)
-                    active_review_run_id = await self._get_active_review_run_id(
-                        db,
-                        user_id=user_id,
-                        session_id=session_id,
-                        cleanup_stale=False,
-                    )
-                    if active_review_run_id:
-                        raise ValueError(
-                            f"Experience review is already running for session {session_id} "
-                            f"(run {active_review_run_id})"
-                        )
+                await self._ensure_no_active_review(
+                    db,
+                    user_id=user_id,
+                    session_id=session_id,
+                    skip_active_check=skip_active_check,
+                )
 
                 stock = (
                     await db.execute(select(StockBasic).where(StockBasic.stock_code == session_obj.stock_code))
@@ -1094,7 +1269,11 @@ class ExperienceService:
 
             stock_codes = list({item.stock_code for item in sessions})
             basics = (
-                await db.execute(select(StockBasic.stock_code, StockBasic.name).where(StockBasic.stock_code.in_(stock_codes)))
+                await db.execute(
+                    select(StockBasic.stock_code, StockBasic.name).where(
+                        StockBasic.stock_code.in_(stock_codes)
+                    )
+                )
             ).all()
             stock_name_map = {code: name for code, name in basics}
 
@@ -1192,42 +1371,133 @@ class ExperienceService:
         self,
         *,
         user_id: int,
-        limit: int = 50,
-    ) -> List[Dict[str, Any]]:
-        """列出当前用户最近的经验复盘运行摘要。
+        page: int = 1,
+        page_size: int = 20,
+        status_filter: str | None = None,
+    ) -> Dict[str, Any]:
+        """分页列出当前用户最近的经验复盘运行摘要。
 
         Args:
             user_id: 用户 ID。
-            limit: 返回运行摘要的最大数量。
+            page: 页码，从 1 开始。
+            page_size: 每页数量。
+            status_filter: 可选任务状态过滤，支持 queued/running/completed/failed。
 
         Returns:
-            按更新时间倒序排列的复盘运行摘要列表。
+            包含分页后的运行摘要、总数、当前页和活跃任务数的字典。
+
+        Raises:
+            ValueError: 当状态过滤值不受支持时抛出。
         """
+        page_size = max(1, min(100, page_size))
+        requested_page = max(1, page)
+        normalized_status = (status_filter or "").strip().lower() or None
+        if normalized_status not in {None, "queued", "running", "completed", "failed"}:
+            raise ValueError(f"Unsupported review run status filter: {status_filter}")
+
         async with database_module.AsyncSessionLocal() as db:
+            active_count = int(
+                await db.scalar(
+                    select(func.count())
+                    .select_from(ExperienceReviewRun)
+                    .where(
+                        ExperienceReviewRun.user_id == user_id,
+                        ExperienceReviewRun.status.in_(RUN_ACTIVE_STATUSES),
+                    )
+                )
+                or 0
+            )
+            latest_event_rows = (
+                select(
+                    ExperienceReviewEvent.event_id.label("event_id"),
+                    ExperienceReviewEvent.review_run_id.label("review_run_id"),
+                    ExperienceReviewEvent.status.label("status"),
+                    ExperienceReviewEvent.created_at.label("created_at"),
+                    func.row_number()
+                    .over(
+                        partition_by=ExperienceReviewEvent.review_run_id,
+                        order_by=ExperienceReviewEvent.created_at.desc(),
+                    )
+                    .label("row_number"),
+                )
+                .where(ExperienceReviewEvent.user_id == user_id)
+                .subquery()
+            )
+            latest_conditions = [latest_event_rows.c.row_number == 1]
+            if normalized_status == "running":
+                latest_conditions.append(
+                    latest_event_rows.c.status.in_(("running", "started"))
+                )
+            elif normalized_status is not None:
+                latest_conditions.append(
+                    latest_event_rows.c.status == normalized_status
+                )
+
+            total = int(
+                await db.scalar(
+                    select(func.count())
+                    .select_from(latest_event_rows)
+                    .where(*latest_conditions)
+                )
+                or 0
+            )
+            if total == 0:
+                return {
+                    "items": [],
+                    "total": 0,
+                    "page": 1,
+                    "page_size": page_size,
+                    "active_count": active_count,
+                }
+
+            page = min(requested_page, max(1, (total + page_size - 1) // page_size))
+            offset = (page - 1) * page_size
+
+            run_times = (
+                select(
+                    ExperienceReviewEvent.review_run_id.label("review_run_id"),
+                    func.min(ExperienceReviewEvent.created_at).label("enqueued_at"),
+                )
+                .where(ExperienceReviewEvent.user_id == user_id)
+                .group_by(ExperienceReviewEvent.review_run_id)
+                .subquery()
+            )
             rows = (
                 await db.execute(
-                    select(ExperienceReviewEvent)
-                    .where(ExperienceReviewEvent.user_id == user_id)
-                    .order_by(ExperienceReviewEvent.created_at.desc())
+                    select(ExperienceReviewEvent, run_times.c.enqueued_at)
+                    .join(
+                        latest_event_rows,
+                        ExperienceReviewEvent.event_id == latest_event_rows.c.event_id,
+                    )
+                    .join(
+                        run_times,
+                        ExperienceReviewEvent.review_run_id == run_times.c.review_run_id,
+                    )
+                    .where(*latest_conditions)
+                    .order_by(
+                        run_times.c.enqueued_at.desc(),
+                        ExperienceReviewEvent.created_at.desc(),
+                    )
+                    .offset(offset)
+                    .limit(page_size)
                 )
-            ).scalars().all()
+            ).all()
             if not rows:
-                return []
+                return {
+                    "items": [],
+                    "total": total,
+                    "page": page,
+                    "page_size": page_size,
+                    "active_count": active_count,
+                }
 
-            latest_by_run: Dict[str, ExperienceReviewEvent] = {}
-            earliest_by_run: Dict[str, datetime] = {}
-            session_ids: set[UUID] = set()
-            for row in rows:
-                if row.review_run_id not in latest_by_run:
-                    latest_by_run[row.review_run_id] = row
-                earliest_by_run[row.review_run_id] = min(
-                    row.created_at,
-                    earliest_by_run.get(row.review_run_id, row.created_at),
-                )
-                session_ids.add(row.session_id)
-                if len(latest_by_run) >= limit and row.review_run_id in latest_by_run:
-                    continue
+            latest_events = [row[0] for row in rows]
+            enqueued_by_run = {
+                row[0].review_run_id: row[1]
+                for row in rows
+            }
 
+            session_ids = {item.session_id for item in latest_events}
             sessions = (
                 await db.execute(
                     select(DebateSession).where(
@@ -1240,19 +1510,23 @@ class ExperienceService:
 
             stock_codes = list({item.stock_code for item in sessions})
             basics = (
-                await db.execute(select(StockBasic.stock_code, StockBasic.name).where(StockBasic.stock_code.in_(stock_codes)))
+                await db.execute(
+                    select(StockBasic.stock_code, StockBasic.name).where(
+                        StockBasic.stock_code.in_(stock_codes)
+                    )
+                )
             ).all()
             stock_name_map = {code: name for code, name in basics}
 
             items: List[Dict[str, Any]] = []
-            for review_run_id, latest in list(latest_by_run.items())[:limit]:
+            for latest in latest_events:
                 session_obj = session_map.get(latest.session_id)
                 if not session_obj:
                     continue
                 payload = latest.payload or {}
                 items.append(
                     {
-                        "review_run_id": review_run_id,
+                        "review_run_id": latest.review_run_id,
                         "review_horizon": payload.get("review_horizon") or "20d",
                         "market_day_count": payload.get("market_day_count"),
                         "session_id": latest.session_id,
@@ -1266,12 +1540,17 @@ class ExperienceService:
                         "message_params": latest.message_params or {},
                         "recommended_action": payload.get("recommended_action"),
                         "debate_correctness": payload.get("debate_correctness"),
-                        "created_at": earliest_by_run.get(review_run_id, latest.created_at),
+                        "created_at": enqueued_by_run.get(latest.review_run_id, latest.created_at),
                         "updated_at": latest.created_at,
                     }
                 )
-            items.sort(key=lambda item: item["updated_at"], reverse=True)
-            return items[:limit]
+            return {
+                "items": items,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "active_count": active_count,
+            }
 
     async def list_review_events_by_run(
         self,
@@ -1411,6 +1690,103 @@ class ExperienceService:
             )
             await db.commit()
             return True
+
+    async def delete_review_runs(
+        self,
+        *,
+        user_id: int,
+        review_run_ids: list[str],
+    ) -> Dict[str, int]:
+        """批量删除经验复盘任务。
+
+        排队中或运行中的任务会跳过，不会中断正在执行的 worker；不存在或已删除的
+        任务计入 missing。
+
+        Args:
+            user_id: 用户 ID。
+            review_run_ids: 待删除的运行 ID 列表。
+
+        Returns:
+            包含 deleted、skipped_active 和 missing 的统计结果。
+        """
+        unique_ids = list(dict.fromkeys(review_run_ids))
+        if not unique_ids:
+            return {"deleted": 0, "skipped_active": 0, "missing": 0}
+
+        async with database_module.AsyncSessionLocal() as db:
+            run_rows = (
+                await db.execute(
+                    select(
+                        ExperienceReviewRun.review_run_id,
+                        ExperienceReviewRun.status,
+                    ).where(
+                        ExperienceReviewRun.user_id == user_id,
+                        ExperienceReviewRun.review_run_id.in_(unique_ids),
+                    )
+                )
+            ).all()
+            run_status_by_id = {
+                review_run_id: run_status
+                for review_run_id, run_status in run_rows
+            }
+
+            event_rows = (
+                await db.execute(
+                    select(
+                        ExperienceReviewEvent.review_run_id,
+                        ExperienceReviewEvent.status,
+                    )
+                    .where(
+                        ExperienceReviewEvent.user_id == user_id,
+                        ExperienceReviewEvent.review_run_id.in_(unique_ids),
+                    )
+                    .order_by(ExperienceReviewEvent.created_at.desc())
+                )
+            ).all()
+            latest_event_status_by_id: dict[str, str] = {}
+            for review_run_id, event_status in event_rows:
+                latest_event_status_by_id.setdefault(review_run_id, event_status)
+
+            deletable_ids: list[str] = []
+            skipped_active = 0
+            missing = 0
+            for review_run_id in unique_ids:
+                run_status = run_status_by_id.get(review_run_id)
+                if run_status is not None:
+                    if run_status in RUN_ACTIVE_STATUSES:
+                        skipped_active += 1
+                    else:
+                        deletable_ids.append(review_run_id)
+                    continue
+
+                event_status = latest_event_status_by_id.get(review_run_id)
+                if event_status is None:
+                    missing += 1
+                elif event_status in REVIEW_ACTIVE_EVENT_STATUSES:
+                    skipped_active += 1
+                else:
+                    deletable_ids.append(review_run_id)
+
+            if deletable_ids:
+                await db.execute(
+                    delete(ExperienceReviewEvent).where(
+                        ExperienceReviewEvent.user_id == user_id,
+                        ExperienceReviewEvent.review_run_id.in_(deletable_ids),
+                    )
+                )
+                await db.execute(
+                    delete(ExperienceReviewRun).where(
+                        ExperienceReviewRun.user_id == user_id,
+                        ExperienceReviewRun.review_run_id.in_(deletable_ids),
+                    )
+                )
+                await db.commit()
+
+            return {
+                "deleted": len(deletable_ids),
+                "skipped_active": skipped_active,
+                "missing": missing,
+            }
 
     async def delete_all_review_runs(
         self,
