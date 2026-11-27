@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     DEBATE_AGENT_MIN_ITERATIONS: int = 5
     ENABLE_AUTO_TRADE: bool = True
     ASYNC_TASK_MAX_CONCURRENT: int = 8
+    EXPERIENCE_REVIEW_MAX_CONCURRENT: int = 3
+    EXPERIENCE_REVIEW_QUEUE_ENABLED: bool = True
     PY_SANDBOX_ENABLED: bool = True
     PY_SANDBOX_BASE_URL: str = "http://sandbox:8030"
     PY_SANDBOX_HTTP_TIMEOUT_SECONDS: float = 35.0

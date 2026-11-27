@@ -35,6 +35,18 @@ class ExperienceDebateSessionResponse(BaseModel):
     has_experience_review: bool = False
 
 
+class ExperienceReviewQueuedResponse(BaseModel):
+    review_run_id: str
+    status: str
+    queue_position: int
+    session_id: UUID
+    stock_code: str
+    stock_name: Optional[str] = None
+    review_horizon: ReviewHorizonValue
+    market_day_count: int
+    created_at: datetime
+
+
 class ExperienceAnalyzeResponse(BaseModel):
     review_run_id: Optional[str] = None
     review_horizon: Optional[ReviewHorizonValue] = None

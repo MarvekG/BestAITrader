@@ -5,12 +5,13 @@ import pytest
 from sqlalchemy import func, select
 
 from app.ai.experience import service as experience_service_module
-from app.ai.experience.service import experience_service
+from app.ai.experience.service import ExperienceReviewConflict, experience_service
 from app.ai.llm_engine.roles import AGENT_ROLE_PORTFOLIO_MANAGER
 from app.core.i18n import i18n_service
 from app.models.data_storage import IndexDaily, KlineData, StockBasic
 from app.models.debate_message import DebateMessage
 from app.models.experience_review_event import ExperienceReviewEvent
+from app.models.experience_review_run import ExperienceReviewRun
 from app.models.pm_decision import PMDecisionRecord
 from app.models.session import Session as DebateSession
 from app.models.trade_record import TradeRecord
@@ -740,6 +741,173 @@ async def test_list_review_candidates_marks_not_ready_when_market_data_is_short(
     assert item["review_status"] == "not_ready"
     assert item["next_horizon"] == "5d"
     assert item["days_until_next_horizon"] == 1
+
+
+@pytest.mark.asyncio
+async def test_enqueue_review_creates_queued_run(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=6)
+    await _create_pm_decision(async_db_session, user, session)
+
+    result = await experience_service.enqueue_review(
+        user_id=user.id,
+        session_id=session.session_id,
+        review_horizon="5d",
+    )
+
+    assert result["status"] == "queued"
+    assert result["queue_position"] == 1
+    run = (
+        await async_db_session.execute(
+            select(ExperienceReviewRun).where(
+                ExperienceReviewRun.review_run_id == result["review_run_id"]
+            )
+        )
+    ).scalar_one()
+    assert run.status == "queued"
+    assert run.review_horizon == "5d"
+    assert run.stock_code == session.stock_code
+    queued_event = (
+        await async_db_session.execute(
+            select(ExperienceReviewEvent).where(
+                ExperienceReviewEvent.review_run_id == result["review_run_id"],
+                ExperienceReviewEvent.status == "queued",
+            )
+        )
+    ).scalar_one()
+    assert queued_event.message_key == "experience.live_messages.queued"
+
+
+@pytest.mark.asyncio
+async def test_delete_review_run_rejects_queued_run(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=6)
+    await _create_pm_decision(async_db_session, user, session)
+    queued = await experience_service.enqueue_review(
+        user_id=user.id,
+        session_id=session.session_id,
+        review_horizon="5d",
+    )
+
+    with pytest.raises(ValueError):
+        await experience_service.delete_review_run(
+            user_id=user.id,
+            review_run_id=queued["review_run_id"],
+        )
+
+
+@pytest.mark.asyncio
+async def test_enqueue_review_rejects_active_session(async_db_session):
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=6)
+    await _create_pm_decision(async_db_session, user, session)
+    first = await experience_service.enqueue_review(
+        user_id=user.id,
+        session_id=session.session_id,
+        review_horizon="5d",
+    )
+
+    with pytest.raises(ExperienceReviewConflict) as exc_info:
+        await experience_service.enqueue_review(
+            user_id=user.id,
+            session_id=session.session_id,
+            review_horizon="5d",
+        )
+
+    assert exc_info.value.review_run_id == first["review_run_id"]
+
+
+@pytest.mark.asyncio
+async def test_enqueue_review_rejects_same_stock_in_another_session(async_db_session):
+    user, first_session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=6)
+    await _create_pm_decision(async_db_session, user, first_session)
+
+    second_session = DebateSession(
+        user_id=user.id,
+        stock_code=first_session.stock_code,
+        trading_frequency="swing",
+        trading_strategy="trend",
+        status="completed",
+    )
+    async_db_session.add(second_session)
+    await async_db_session.commit()
+    await async_db_session.refresh(second_session)
+    await _create_pm_decision(async_db_session, user, second_session)
+
+    first = await experience_service.enqueue_review(
+        user_id=user.id,
+        session_id=first_session.session_id,
+        review_horizon="5d",
+    )
+
+    with pytest.raises(ExperienceReviewConflict) as exc_info:
+        await experience_service.enqueue_review(
+            user_id=user.id,
+            session_id=second_session.session_id,
+            review_horizon="5d",
+        )
+
+    assert exc_info.value.review_run_id == first["review_run_id"]
+
+
+@pytest.mark.asyncio
+async def test_claim_and_execute_queued_review(async_db_session, monkeypatch):
+    from app.ai.experience.queue import claim_next_queued_review_run
+
+    user, session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=6)
+    await _create_pm_decision(async_db_session, user, session)
+    queued = await experience_service.enqueue_review(
+        user_id=user.id,
+        session_id=session.session_id,
+        review_horizon="5d",
+    )
+
+    class FakeWorkflow:
+        async def ainvoke(self, state):
+            return {
+                "errors": [],
+                "full_context": {},
+                "analysis_payload": {
+                    "original_pm_decision": "buy",
+                    "debate_correctness": "correct",
+                    "correctness_reasoning": "ok",
+                    "written_memories": [],
+                },
+                "tool_trace": [],
+            }
+
+    monkeypatch.setattr(
+        experience_service_module,
+        "create_experience_workflow",
+        lambda: FakeWorkflow(),
+    )
+
+    claimed_run_id = await claim_next_queued_review_run()
+    assert claimed_run_id == queued["review_run_id"]
+    assert await claim_next_queued_review_run() is None
+
+    result = await experience_service.execute_queued_review(claimed_run_id)
+
+    assert result["review_run_id"] == queued["review_run_id"]
+    run = (
+        await async_db_session.execute(
+            select(ExperienceReviewRun).where(
+                ExperienceReviewRun.review_run_id == queued["review_run_id"]
+            )
+        )
+    ).scalar_one()
+    assert run.status == "completed"
+    completed_event = (
+        await async_db_session.execute(
+            select(ExperienceReviewEvent).where(
+                ExperienceReviewEvent.review_run_id == queued["review_run_id"],
+                ExperienceReviewEvent.status == "completed",
+            )
+        )
+    ).scalar_one()
+    assert completed_event.payload["review_horizon"] == "5d"
 
 
 @pytest.mark.asyncio

@@ -66,6 +66,18 @@ export interface ExperienceToolTraceItem extends Record<string, unknown> {
   result?: unknown;
 }
 
+export interface ExperienceReviewQueuedResponse {
+  review_run_id: string;
+  status: string;
+  queue_position: number;
+  session_id: string;
+  stock_code: string;
+  stock_name?: string | null;
+  review_horizon: ExperienceReviewHorizon;
+  market_day_count: number;
+  created_at: string;
+}
+
 export interface ExperienceAnalyzeResponse {
   review_run_id?: string | null;
   review_horizon?: ExperienceReviewHorizon | null;
@@ -134,7 +146,7 @@ export const experienceApi = {
   },
 
   analyze: async (payload: { session_id: string; review_horizon?: ExperienceReviewHorizon }) => {
-    return apiClient.post<ExperienceAnalyzeResponse>('/experience/analyze', payload);
+    return apiClient.post<ExperienceReviewQueuedResponse>('/experience/analyze', payload);
   },
 
   listReviewCandidates: async () => {

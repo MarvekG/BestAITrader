@@ -16,6 +16,7 @@ from sqlalchemy.pool import StaticPool
 # 必须在导入 app 任何模块之前设置，避免 Settings 校验失败。
 os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest")
 os.environ.setdefault("FIRST_SUPERUSER_PASSWORD", "test-password-for-pytest")
+os.environ.setdefault("EXPERIENCE_REVIEW_QUEUE_ENABLED", "false")
 
 
 _ORIGINAL_PSYCOPG2_CONNECT = psycopg2.connect
@@ -138,6 +139,7 @@ def _sqlite_test_tables():
     )
     from app.models.debate_message import DebateMessage
     from app.models.experience_review_event import ExperienceReviewEvent
+    from app.models.experience_review_run import ExperienceReviewRun
     from app.models.llm_usage_log import LLMUsageLog
     from app.models.market_watch import MarketWatchEvent
     from app.models.memory_document import MemoryDocument
@@ -166,6 +168,7 @@ def _sqlite_test_tables():
         MarketWatchEvent.__table__,
         DebateMessage.__table__,
         ExperienceReviewEvent.__table__,
+        ExperienceReviewRun.__table__,
         MemoryDocument.__table__,
         LLMUsageLog.__table__,
         StockBasic.__table__,

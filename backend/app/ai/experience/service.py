@@ -7,7 +7,8 @@ from typing import Any, Dict, List
 from uuid import UUID
 import uuid
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.experience.horizons import (
@@ -28,6 +29,7 @@ from app.ai.experience.workflow import create_experience_workflow
 from app.models.data_storage import IndexDaily, KlineData, StockBasic
 from app.models.debate_message import DebateMessage
 from app.models.experience_review_event import ExperienceReviewEvent
+from app.models.experience_review_run import ExperienceReviewRun
 from app.models.order import Order
 from app.models.pm_decision import PMDecisionRecord
 from app.models.session import Session as DebateSession
@@ -37,10 +39,21 @@ from app.websocket.manager import ws_manager
 
 logger = get_logger(__name__)
 
+
+class ExperienceReviewConflict(ValueError):
+    """经验复盘与现有排队/运行任务冲突。"""
+
+    def __init__(self, message: str, *, review_run_id: str | None = None) -> None:
+        super().__init__(message)
+        self.review_run_id = review_run_id
+
+
 VALID_STYLE_BUCKETS = {"short_term", "swing", "position", "long_term"}
 VALID_ACTIONS = {"avoid", "watch", "buy", "add", "hold", "reduce", "sell"}
 CORRECTNESS_BUCKETS = {"correct", "partially_correct", "incorrect", "inconclusive"}
 ACTIVE_REVIEW_STATUSES = {"started", "running"}
+REVIEW_ACTIVE_EVENT_STATUSES = {"queued", "started", "running"}
+RUN_ACTIVE_STATUSES = {"queued", "running"}
 STALE_REVIEW_TIMEOUT = timedelta(hours=2)
 PM_AGENT_ROLE = "portfolio_manager"
 REVIEW_DECISION_WINDOW_MAX_ROWS = 130
@@ -202,7 +215,7 @@ class ExperienceService:
             session_bucket = buckets.setdefault(row.session_id, {"completed": [], "active": [], "failed": []})
             if row.status == "completed" and horizon not in session_bucket["completed"]:
                 session_bucket["completed"].append(horizon)
-            elif row.status in ACTIVE_REVIEW_STATUSES and horizon not in session_bucket["active"]:
+            elif row.status in REVIEW_ACTIVE_EVENT_STATUSES and horizon not in session_bucket["active"]:
                 session_bucket["active"].append(horizon)
             elif row.status == "failed" and horizon not in session_bucket["failed"]:
                 session_bucket["failed"].append(horizon)
@@ -275,7 +288,7 @@ class ExperienceService:
                 session_bucket = horizon_buckets.setdefault(row.session_id, {"completed": [], "active": [], "failed": []})
                 if row.status == "completed" and horizon not in session_bucket["completed"]:
                     session_bucket["completed"].append(horizon)
-                elif row.status in ACTIVE_REVIEW_STATUSES and horizon not in session_bucket["active"]:
+                elif row.status in REVIEW_ACTIVE_EVENT_STATUSES and horizon not in session_bucket["active"]:
                     session_bucket["active"].append(horizon)
                 elif row.status == "failed" and horizon not in session_bucket["failed"]:
                     session_bucket["failed"].append(horizon)
@@ -358,6 +371,21 @@ class ExperienceService:
                 message_params={"error": failure_message},
                 payload={"error": failure_message, "reason": reason},
             )
+        run_ids = [item[0] for item in failed_runs]
+        if run_ids:
+            await db.execute(
+                update(ExperienceReviewRun)
+                .where(
+                    ExperienceReviewRun.review_run_id.in_(run_ids),
+                    ExperienceReviewRun.status == "running",
+                )
+                .values(
+                    status="failed",
+                    finished_at=datetime.now(),
+                    error_message=failure_message,
+                )
+            )
+            await db.commit()
         return len(failed_runs)
 
     async def _cleanup_interrupted_review_runs_in_db(self, db: AsyncSession) -> int:
@@ -407,6 +435,20 @@ class ExperienceService:
                     message_key="experience.live_messages.failed",
                     message_params={"error": failure_message},
                     payload={"error": failure_message, "reason": "restart_recovery"},
+                )
+            )
+        run_ids = [item[0] for item in interrupted_runs]
+        if run_ids:
+            await db.execute(
+                update(ExperienceReviewRun)
+                .where(
+                    ExperienceReviewRun.review_run_id.in_(run_ids),
+                    ExperienceReviewRun.status == "running",
+                )
+                .values(
+                    status="failed",
+                    finished_at=datetime.now(),
+                    error_message=failure_message,
                 )
             )
         await db.commit()
@@ -481,9 +523,283 @@ class ExperienceService:
             if review_run_id in seen_run_ids:
                 continue
             seen_run_ids.add(review_run_id)
-            if status in ACTIVE_REVIEW_STATUSES:
+            if status in REVIEW_ACTIVE_EVENT_STATUSES:
                 return review_run_id
         return None
+
+    async def _find_active_run(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        session_id: UUID | None = None,
+        stock_code: str | None = None,
+    ) -> ExperienceReviewRun | None:
+        query = select(ExperienceReviewRun).where(
+            ExperienceReviewRun.user_id == user_id,
+            ExperienceReviewRun.status.in_(RUN_ACTIVE_STATUSES),
+        )
+        if session_id is not None:
+            query = query.where(ExperienceReviewRun.session_id == session_id)
+        if stock_code is not None:
+            query = query.where(ExperienceReviewRun.stock_code == stock_code)
+        return (
+            await db.execute(query.order_by(ExperienceReviewRun.created_at.asc()).limit(1))
+        ).scalars().first()
+
+    async def _update_run_status(
+        self,
+        *,
+        review_run_id: str,
+        status: str,
+        error_message: str | None = None,
+    ) -> None:
+        async with database_module.AsyncSessionLocal() as db:
+            values: Dict[str, Any] = {
+                "status": status,
+                "finished_at": datetime.now() if status in {"completed", "failed", "cancelled"} else None,
+            }
+            if error_message is not None:
+                values["error_message"] = error_message
+            await db.execute(
+                update(ExperienceReviewRun)
+                .where(ExperienceReviewRun.review_run_id == review_run_id)
+                .values(**values)
+            )
+            await db.commit()
+
+    async def enqueue_review(
+        self,
+        *,
+        user_id: int,
+        session_id: UUID,
+        review_horizon: str | None = None,
+    ) -> Dict[str, Any]:
+        """校验并创建排队中的经验复盘运行。
+
+        Args:
+            user_id: 用户 ID。
+            session_id: 需要复盘的辩论会话 ID。
+            review_horizon: 可选复盘周期；未提供时使用当前最高可用周期。
+
+        Returns:
+            包含 review_run_id、队列状态和队列位置的字典。
+
+        Raises:
+            ExperienceReviewConflict: 同会话或同用户同股票已有排队/运行任务。
+            ValueError: 会话不存在、周期不可用或行情数据不足。
+        """
+        review_run_id = str(uuid.uuid4())
+        async with database_module.AsyncSessionLocal() as db:
+            session_obj = (
+                await db.execute(
+                    select(DebateSession).where(
+                        DebateSession.session_id == session_id,
+                        DebateSession.user_id == user_id,
+                    )
+                )
+            ).scalars().first()
+            if not session_obj:
+                raise ValueError(f"Session {session_id} not found")
+            if not session_obj.stock_code:
+                raise ValueError(f"Session {session_id} has no stock code")
+
+            active_session_run = await self._find_active_run(
+                db,
+                user_id=user_id,
+                session_id=session_id,
+            )
+            if active_session_run is not None:
+                raise ExperienceReviewConflict(
+                    f"Experience review is already queued or running for session {session_id} "
+                    f"(run {active_session_run.review_run_id})",
+                    review_run_id=active_session_run.review_run_id,
+                )
+
+            active_stock_run = await self._find_active_run(
+                db,
+                user_id=user_id,
+                stock_code=session_obj.stock_code,
+            )
+            if active_stock_run is not None:
+                raise ExperienceReviewConflict(
+                    f"Experience review is already queued or running for stock {session_obj.stock_code} "
+                    f"(run {active_stock_run.review_run_id})",
+                    review_run_id=active_stock_run.review_run_id,
+                )
+
+            stock = (
+                await db.execute(select(StockBasic).where(StockBasic.stock_code == session_obj.stock_code))
+            ).scalars().first()
+            stock_name = stock.name if stock else session_obj.stock_code
+            debate_messages = (
+                await db.execute(
+                    select(DebateMessage)
+                    .where(DebateMessage.session_id == session_id)
+                    .order_by(DebateMessage.created_at.asc())
+                )
+            ).scalars().all()
+            if not debate_messages:
+                raise ValueError(f"Session {session_id} has no debate messages")
+            pm_message = self._get_latest_pm_message(debate_messages)
+            if not pm_message:
+                raise ValueError(f"Session {session_id} has no PM decision")
+
+            market_day_count = await self._get_market_day_count(
+                db,
+                stock_code=session_obj.stock_code,
+                decision_time=pm_message.created_at,
+            )
+            available_horizons = eligible_horizons(market_day_count)
+            selected_review_horizon = normalize_review_horizon(review_horizon)
+            if selected_review_horizon is None:
+                selected_review_horizon = self._default_review_horizon(available_horizons)
+            if selected_review_horizon is None:
+                raise ValueError(
+                    "Market outcome summary is unavailable for this session; "
+                    "experience analysis requires post-decision market data."
+                )
+            required_days = HORIZON_REQUIRED_MARKET_DAYS[selected_review_horizon]
+            if market_day_count < required_days:
+                raise ValueError(
+                    f"Review horizon {selected_review_horizon} requires {required_days} market days; "
+                    f"only {market_day_count} are available."
+                )
+
+            queued_session_id = session_obj.session_id
+            queued_stock_code = session_obj.stock_code
+            queued_stock_name = stock_name
+            queued_market_day_count = market_day_count
+            queued_created_at = datetime.now()
+            run = ExperienceReviewRun(
+                review_run_id=review_run_id,
+                session_id=queued_session_id,
+                user_id=user_id,
+                stock_code=queued_stock_code,
+                review_horizon=selected_review_horizon,
+                status="queued",
+                attempt_count=0,
+                created_at=queued_created_at,
+            )
+            db.add(run)
+            try:
+                await db.commit()
+            except IntegrityError:
+                await db.rollback()
+                conflict = await self._find_active_run(
+                    db,
+                    user_id=user_id,
+                    session_id=session_id,
+                ) or await self._find_active_run(
+                    db,
+                    user_id=user_id,
+                    stock_code=queued_stock_code,
+                )
+                raise ExperienceReviewConflict(
+                    f"Experience review is already queued or running for session {session_id}",
+                    review_run_id=conflict.review_run_id if conflict else None,
+                )
+
+            await self._persist_review_event(
+                db,
+                review_run_id=review_run_id,
+                session_id=queued_session_id,
+                user_id=user_id,
+                stage="experience_review",
+                status="queued",
+                message_key="experience.live_messages.queued",
+                payload={
+                    "stock_code": queued_stock_code,
+                    "stock_name": queued_stock_name,
+                    "review_horizon": selected_review_horizon,
+                    "market_day_count": queued_market_day_count,
+                },
+            )
+            queue_position = int(
+                await db.scalar(
+                    select(func.count())
+                    .select_from(ExperienceReviewRun)
+                    .where(
+                        ExperienceReviewRun.status == "queued",
+                        ExperienceReviewRun.created_at <= queued_created_at,
+                    )
+                )
+                or 0
+            )
+
+        await self._push_review_update(
+            debate_session_id=str(queued_session_id),
+            review_run_id=review_run_id,
+            stage="experience_review",
+            status="queued",
+            message_key="experience.live_messages.queued",
+            payload={
+                "stock_code": queued_stock_code,
+                "stock_name": queued_stock_name,
+                "review_horizon": selected_review_horizon,
+                "market_day_count": queued_market_day_count,
+            },
+        )
+        from app.ai.experience.queue import experience_review_queue
+
+        experience_review_queue.notify()
+        return {
+            "review_run_id": review_run_id,
+            "status": "queued",
+            "queue_position": queue_position,
+            "session_id": queued_session_id,
+            "stock_code": queued_stock_code,
+            "stock_name": queued_stock_name,
+            "review_horizon": selected_review_horizon,
+            "market_day_count": queued_market_day_count,
+            "created_at": queued_created_at,
+        }
+
+    async def execute_queued_review(self, review_run_id: str) -> Dict[str, Any]:
+        """执行已由 worker 领取的经验复盘任务。
+
+        Args:
+            review_run_id: 排队运行 ID。
+
+        Returns:
+            复盘结果字典。
+        """
+        async with database_module.AsyncSessionLocal() as db:
+            run = (
+                await db.execute(
+                    select(ExperienceReviewRun).where(
+                        ExperienceReviewRun.review_run_id == review_run_id
+                    )
+                )
+            ).scalars().first()
+            if run is None:
+                raise ValueError(f"Experience review run {review_run_id} not found")
+            user_id = run.user_id
+            session_id = run.session_id
+            review_horizon = run.review_horizon
+            if run.status not in RUN_ACTIVE_STATUSES:
+                raise ValueError(
+                    f"Experience review run {review_run_id} is not active: {run.status}"
+                )
+
+        try:
+            result = await self._analyze(
+                user_id=user_id,
+                session_id=session_id,
+                review_horizon=review_horizon,
+                review_run_id=review_run_id,
+                skip_active_check=True,
+            )
+        except Exception as exc:
+            await self._update_run_status(
+                review_run_id=review_run_id,
+                status="failed",
+                error_message=str(exc),
+            )
+            raise
+
+        await self._update_run_status(review_run_id=review_run_id, status="completed")
+        return result
 
     async def analyze(
         self,
@@ -492,7 +808,10 @@ class ExperienceService:
         session_id: UUID,
         review_horizon: str | None = None,
     ) -> Dict[str, Any]:
-        """运行单个辩论会话的经验复盘。
+        """同步运行单个辩论会话的经验复盘（内部/测试用）。
+
+        生产 API 和调度器使用 ``enqueue_review`` 进入全局队列；本方法保留为
+        同步执行入口，便于测试和内部工具直接等待结果。
 
         Args:
             user_id: 用户 ID。
@@ -522,6 +841,7 @@ class ExperienceService:
         session_id: UUID,
         review_horizon: str | None,
         review_run_id: str,
+        skip_active_check: bool = False,
     ) -> Dict[str, Any]:
         selected_review_horizon: ReviewHorizon | None = None
         market_day_count = 0
@@ -538,17 +858,19 @@ class ExperienceService:
                 if not session_obj:
                     raise ValueError(f"Session {session_id} not found")
 
-                await self._cleanup_stale_review_runs(db, user_id=user_id, session_id=session_id)
-                active_review_run_id = await self._get_active_review_run_id(
-                    db,
-                    user_id=user_id,
-                    session_id=session_id,
-                    cleanup_stale=False,
-                )
-                if active_review_run_id:
-                    raise ValueError(
-                        f"Experience review is already running for session {session_id} (run {active_review_run_id})"
+                if not skip_active_check:
+                    await self._cleanup_stale_review_runs(db, user_id=user_id, session_id=session_id)
+                    active_review_run_id = await self._get_active_review_run_id(
+                        db,
+                        user_id=user_id,
+                        session_id=session_id,
+                        cleanup_stale=False,
                     )
+                    if active_review_run_id:
+                        raise ValueError(
+                            f"Experience review is already running for session {session_id} "
+                            f"(run {active_review_run_id})"
+                        )
 
                 stock = (
                     await db.execute(select(StockBasic).where(StockBasic.stock_code == session_obj.stock_code))
@@ -1069,6 +1391,14 @@ class ExperienceService:
         review_run_id: str,
     ) -> bool:
         async with database_module.AsyncSessionLocal() as db:
+            run = (
+                await db.execute(
+                    select(ExperienceReviewRun).where(
+                        ExperienceReviewRun.user_id == user_id,
+                        ExperienceReviewRun.review_run_id == review_run_id,
+                    )
+                )
+            ).scalars().first()
             rows = (
                 await db.execute(
                     select(ExperienceReviewEvent)
@@ -1079,15 +1409,23 @@ class ExperienceService:
                     .order_by(ExperienceReviewEvent.created_at.desc())
                 )
             ).scalars().all()
-            if not rows:
+            if run is None and not rows:
                 return False
-            if rows[0].status in ACTIVE_REVIEW_STATUSES:
+            if run is not None and run.status in RUN_ACTIVE_STATUSES:
+                raise ValueError(i18n_service.t("experience.active_review_delete_forbidden"))
+            if run is None and rows and rows[0].status in REVIEW_ACTIVE_EVENT_STATUSES:
                 raise ValueError(i18n_service.t("experience.active_review_delete_forbidden"))
 
             await db.execute(
                 delete(ExperienceReviewEvent).where(
                     ExperienceReviewEvent.user_id == user_id,
                     ExperienceReviewEvent.review_run_id == review_run_id,
+                )
+            )
+            await db.execute(
+                delete(ExperienceReviewRun).where(
+                    ExperienceReviewRun.user_id == user_id,
+                    ExperienceReviewRun.review_run_id == review_run_id,
                 )
             )
             await db.commit()
@@ -1099,6 +1437,12 @@ class ExperienceService:
         user_id: int,
     ) -> int:
         async with database_module.AsyncSessionLocal() as db:
+            runs = (
+                await db.execute(
+                    select(ExperienceReviewRun.review_run_id, ExperienceReviewRun.status)
+                    .where(ExperienceReviewRun.user_id == user_id)
+                )
+            ).all()
             rows = (
                 await db.execute(
                     select(ExperienceReviewEvent.review_run_id, ExperienceReviewEvent.status)
@@ -1106,24 +1450,27 @@ class ExperienceService:
                     .order_by(ExperienceReviewEvent.created_at.desc())
                 )
             ).all()
-            if not rows:
+            if not runs and not rows:
                 return 0
 
-            seen_run_ids: set[str] = set()
-            active_run_ids: list[str] = []
-            run_ids: list[str] = []
+            run_ids: set[str] = {review_run_id for review_run_id, _ in runs}
+            active_run_ids: set[str] = {
+                review_run_id for review_run_id, status in runs if status in RUN_ACTIVE_STATUSES
+            }
+            seen_event_run_ids: set[str] = set()
             for review_run_id, status in rows:
-                if review_run_id in seen_run_ids:
+                if review_run_id in seen_event_run_ids:
                     continue
-                seen_run_ids.add(review_run_id)
-                run_ids.append(review_run_id)
-                if status in ACTIVE_REVIEW_STATUSES:
-                    active_run_ids.append(review_run_id)
+                seen_event_run_ids.add(review_run_id)
+                run_ids.add(review_run_id)
+                if status in REVIEW_ACTIVE_EVENT_STATUSES:
+                    active_run_ids.add(review_run_id)
 
             if active_run_ids:
                 raise ValueError(i18n_service.t("experience.active_review_clear_forbidden"))
 
             await db.execute(delete(ExperienceReviewEvent).where(ExperienceReviewEvent.user_id == user_id))
+            await db.execute(delete(ExperienceReviewRun).where(ExperienceReviewRun.user_id == user_id))
             await db.commit()
             return len(run_ids)
 
