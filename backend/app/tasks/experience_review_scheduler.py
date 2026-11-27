@@ -32,6 +32,7 @@ EXPERIENCE_REVIEW_SCHEDULE_MINUTE = 30
 EXPERIENCE_REVIEW_MIN_MARKET_DAYS = 6
 EXPERIENCE_REVIEW_CANDIDATE_LOOKBACK = 200
 EXPERIENCE_REVIEW_MAX_RUNS_PER_TICK = 2
+EXPERIENCE_REVIEW_MAX_CONCURRENT = 3
 EXPERIENCE_REVIEW_CONFIG_KEY = "experience_review_scheduler_config"
 EXPERIENCE_REVIEW_TIMEZONE = ZoneInfo("Asia/Shanghai")
 EXPERIENCE_REVIEW_BLOCKING_STATUSES = {"queued", "started", "running", "completed", "failed"}
@@ -43,6 +44,7 @@ DEFAULT_EXPERIENCE_REVIEW_CONFIG: dict[str, Any] = {
     "schedule_minute": EXPERIENCE_REVIEW_SCHEDULE_MINUTE,
     "candidate_lookback": EXPERIENCE_REVIEW_CANDIDATE_LOOKBACK,
     "max_runs_per_tick": EXPERIENCE_REVIEW_MAX_RUNS_PER_TICK,
+    "max_concurrent": EXPERIENCE_REVIEW_MAX_CONCURRENT,
 }
 
 
@@ -122,6 +124,12 @@ def normalize_experience_review_config(value: Any) -> dict[str, Any]:
             min_value=1,
             max_value=20,
         ),
+        "max_concurrent": _coerce_int(
+            raw.get("max_concurrent"),
+            default=DEFAULT_EXPERIENCE_REVIEW_CONFIG["max_concurrent"],
+            min_value=1,
+            max_value=20,
+        ),
     }
 
 
@@ -154,6 +162,12 @@ async def update_experience_review_scheduler_config(value: dict[str, Any]) -> di
         normalized,
         description="Experience review scheduler configuration",
     )
+    try:
+        from app.ai.experience.queue import experience_review_queue
+
+        await experience_review_queue.set_concurrency(normalized["max_concurrent"])
+    except Exception as exc:
+        logger.warning("Failed to apply experience review concurrency: %s", exc)
     return normalized
 
 
@@ -387,7 +401,7 @@ async def _enqueue_review(candidate: ExperienceReviewCandidate) -> dict[str, Any
         }
     except ExperienceReviewConflict as exc:
         logger.info(
-            "Scheduled experience review deferred: session=%s stock=%s run=%s reason=%s",
+            "Scheduled experience review skipped duplicate: session=%s stock=%s run=%s reason=%s",
             candidate.session_id,
             candidate.stock_code,
             exc.review_run_id,

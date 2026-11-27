@@ -2,7 +2,7 @@ from datetime import date, datetime, timedelta
 import uuid
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.ai.experience import service as experience_service_module
 from app.ai.experience.service import ExperienceReviewConflict, experience_service
@@ -818,7 +818,7 @@ async def test_enqueue_review_rejects_active_session(async_db_session):
 
 
 @pytest.mark.asyncio
-async def test_enqueue_review_rejects_same_stock_in_another_session(async_db_session):
+async def test_enqueue_review_queues_same_stock_in_another_session(async_db_session):
     user, first_session = await _create_user_and_session(async_db_session)
     await _create_stock_and_klines(async_db_session, count=6)
     await _create_pm_decision(async_db_session, user, first_session)
@@ -840,15 +840,19 @@ async def test_enqueue_review_rejects_same_stock_in_another_session(async_db_ses
         session_id=first_session.session_id,
         review_horizon="5d",
     )
+    second = await experience_service.enqueue_review(
+        user_id=user.id,
+        session_id=second_session.session_id,
+        review_horizon="5d",
+    )
 
-    with pytest.raises(ExperienceReviewConflict) as exc_info:
-        await experience_service.enqueue_review(
-            user_id=user.id,
-            session_id=second_session.session_id,
-            review_horizon="5d",
-        )
-
-    assert exc_info.value.review_run_id == first["review_run_id"]
+    assert first["status"] == "queued"
+    assert second["status"] == "queued"
+    assert first["review_run_id"] != second["review_run_id"]
+    run_count = await async_db_session.scalar(
+        select(func.count()).select_from(ExperienceReviewRun)
+    )
+    assert run_count == 2
 
 
 @pytest.mark.asyncio
@@ -908,6 +912,56 @@ async def test_claim_and_execute_queued_review(async_db_session, monkeypatch):
         )
     ).scalar_one()
     assert completed_event.payload["review_horizon"] == "5d"
+
+
+@pytest.mark.asyncio
+async def test_claim_next_skips_queued_same_stock_while_running(async_db_session):
+    from app.ai.experience.queue import claim_next_queued_review_run
+
+    user, first_session = await _create_user_and_session(async_db_session)
+    await _create_stock_and_klines(async_db_session, count=6)
+    await _create_pm_decision(async_db_session, user, first_session)
+
+    second_session = DebateSession(
+        user_id=user.id,
+        stock_code=first_session.stock_code,
+        trading_frequency="swing",
+        trading_strategy="trend",
+        status="completed",
+    )
+    async_db_session.add(second_session)
+    await async_db_session.commit()
+    await async_db_session.refresh(second_session)
+    await _create_pm_decision(async_db_session, user, second_session)
+
+    first = await experience_service.enqueue_review(
+        user_id=user.id,
+        session_id=first_session.session_id,
+        review_horizon="5d",
+    )
+    second = await experience_service.enqueue_review(
+        user_id=user.id,
+        session_id=second_session.session_id,
+        review_horizon="5d",
+    )
+
+    claimed = await claim_next_queued_review_run()
+    assert claimed in {first["review_run_id"], second["review_run_id"]}
+    assert await claim_next_queued_review_run() is None
+
+    await async_db_session.execute(
+        update(ExperienceReviewRun)
+        .where(ExperienceReviewRun.review_run_id == claimed)
+        .values(status="completed")
+    )
+    await async_db_session.commit()
+
+    next_claimed = await claim_next_queued_review_run()
+    assert next_claimed == (
+        second["review_run_id"]
+        if claimed == first["review_run_id"]
+        else first["review_run_id"]
+    )
 
 
 @pytest.mark.asyncio

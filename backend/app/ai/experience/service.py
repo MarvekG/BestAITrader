@@ -527,26 +527,6 @@ class ExperienceService:
                 return review_run_id
         return None
 
-    async def _find_active_run(
-        self,
-        db: AsyncSession,
-        *,
-        user_id: int,
-        session_id: UUID | None = None,
-        stock_code: str | None = None,
-    ) -> ExperienceReviewRun | None:
-        query = select(ExperienceReviewRun).where(
-            ExperienceReviewRun.user_id == user_id,
-            ExperienceReviewRun.status.in_(RUN_ACTIVE_STATUSES),
-        )
-        if session_id is not None:
-            query = query.where(ExperienceReviewRun.session_id == session_id)
-        if stock_code is not None:
-            query = query.where(ExperienceReviewRun.stock_code == stock_code)
-        return (
-            await db.execute(query.order_by(ExperienceReviewRun.created_at.asc()).limit(1))
-        ).scalars().first()
-
     async def _update_run_status(
         self,
         *,
@@ -604,30 +584,6 @@ class ExperienceService:
             if not session_obj.stock_code:
                 raise ValueError(f"Session {session_id} has no stock code")
 
-            active_session_run = await self._find_active_run(
-                db,
-                user_id=user_id,
-                session_id=session_id,
-            )
-            if active_session_run is not None:
-                raise ExperienceReviewConflict(
-                    f"Experience review is already queued or running for session {session_id} "
-                    f"(run {active_session_run.review_run_id})",
-                    review_run_id=active_session_run.review_run_id,
-                )
-
-            active_stock_run = await self._find_active_run(
-                db,
-                user_id=user_id,
-                stock_code=session_obj.stock_code,
-            )
-            if active_stock_run is not None:
-                raise ExperienceReviewConflict(
-                    f"Experience review is already queued or running for stock {session_obj.stock_code} "
-                    f"(run {active_stock_run.review_run_id})",
-                    review_run_id=active_stock_run.review_run_id,
-                )
-
             stock = (
                 await db.execute(select(StockBasic).where(StockBasic.stock_code == session_obj.stock_code))
             ).scalars().first()
@@ -666,6 +622,26 @@ class ExperienceService:
                     f"only {market_day_count} are available."
                 )
 
+            active_same_task = (
+                await db.execute(
+                    select(ExperienceReviewRun)
+                    .where(
+                        ExperienceReviewRun.user_id == user_id,
+                        ExperienceReviewRun.session_id == session_id,
+                        ExperienceReviewRun.review_horizon == selected_review_horizon,
+                        ExperienceReviewRun.status.in_(RUN_ACTIVE_STATUSES),
+                    )
+                    .order_by(ExperienceReviewRun.created_at.asc())
+                    .limit(1)
+                )
+            ).scalars().first()
+            if active_same_task is not None:
+                raise ExperienceReviewConflict(
+                    f"Experience review is already queued or running for session {session_id} "
+                    f"and horizon {selected_review_horizon} (run {active_same_task.review_run_id})",
+                    review_run_id=active_same_task.review_run_id,
+                )
+
             queued_session_id = session_obj.session_id
             queued_stock_code = session_obj.stock_code
             queued_stock_name = stock_name
@@ -686,17 +662,22 @@ class ExperienceService:
                 await db.commit()
             except IntegrityError:
                 await db.rollback()
-                conflict = await self._find_active_run(
-                    db,
-                    user_id=user_id,
-                    session_id=session_id,
-                ) or await self._find_active_run(
-                    db,
-                    user_id=user_id,
-                    stock_code=queued_stock_code,
-                )
+                conflict = (
+                    await db.execute(
+                        select(ExperienceReviewRun)
+                        .where(
+                            ExperienceReviewRun.user_id == user_id,
+                            ExperienceReviewRun.session_id == session_id,
+                            ExperienceReviewRun.review_horizon == selected_review_horizon,
+                            ExperienceReviewRun.status.in_(RUN_ACTIVE_STATUSES),
+                        )
+                        .order_by(ExperienceReviewRun.created_at.asc())
+                        .limit(1)
+                    )
+                ).scalars().first()
                 raise ExperienceReviewConflict(
-                    f"Experience review is already queued or running for session {session_id}",
+                    f"Experience review is already queued or running for session {session_id} "
+                    f"and horizon {selected_review_horizon}",
                     review_run_id=conflict.review_run_id if conflict else None,
                 )
 
